@@ -321,8 +321,108 @@ mod tests {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
+    /// FIG-7706: a local's declared type (`let cursor: string | null`) is
+    /// source evidence beside the callable, keyed by its binding: a shadowing
+    /// `cursor` of another type keeps its own. The printed callable reads back
+    /// exactly, with no forwarding call the annotation's absence would add,
+    /// as captured and after its value is stored and carried; without the
+    /// evidence it is unprintable.
+    #[test]
+    fn declared_local_types_print_from_their_evidence() {
+        let source = r#"try {
+const created=await workflows.create({space_id:'01a1b3dd-b832-74e9-b62c-180a67f6a34f',name:'signup-counts-report',description:'Posts the current three weekly signup counts to the Signup counts room. No schedule is configured.',run:async ():Promise<unknown>=>{
+ let cursor:string|null=null;
+ { const cursor:number=1; if(cursor<0) throw new Error('never'); }
+ let text='';
+ let citation='';
+ do {
+  const result=await cenote.readDocument({document:{doc_id:'01a1b3dd-b9cd-73d4-892f-2d0d287a2fe6'},cursor,limit:100});
+  if(!result.ok) throw new Error('Page read failed');
+  if(!citation && result.data.citation) citation=result.data.citation.uri;
+  for(const item of result.data.items) { if('text' in item) text+=item.text+'\n'; }
+  cursor=result.data.next_cursor;
+ } while(cursor);
+ const matches=text.match(/Week\s*[123]\s*:\s*\d+/gi);
+ if(!matches || matches.length!==3 || !citation) throw new Error('Expected three weekly signup counts and a citation');
+ for(const n of ['1','2','3']) { const found=matches.filter((s:string):boolean=>new RegExp('Week\\s*'+n+'\\s*:','i').test(s)); if(found.length!==1) throw new Error('Expected exactly one count per week'); }
+ const body='Signup counts: '+matches.join('; ')+'. [Signup counts]('+citation+')';
+ await cenote.discuss({action:'start',subject:{type:'space',space_id:'01a1b3dd-b832-74e9-b62c-180a67f6a34f'},visibility:'everyone',body});
+ return {posted:true};
+}});
+console.log(JSON.stringify(created));
+} catch(e) { console.log(JSON.stringify(e)); }"#;
+        let library = crate::tests::library();
+        let (_, namespaces) = corpus_namespaces();
+        let environment = Environment::new(library, &namespaces);
+        let lowered = crate::lower(
+            source,
+            &environment,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        )
+        .unwrap();
+        // The printer proves structural readback; the printed module lowers
+        // and prints again to the same source.
+        let reads_back = |opened: &lash_kernel_package::MaterializedWorkflow| {
+            let printed = print(
+                &opened.document,
+                Some(&opened.captions),
+                library,
+                Default::default(),
+            )?;
+            let read = crate::lower(
+                &printed.source,
+                &environment,
+                lash_kernel_dialect::Mode::Module,
+            )
+            .unwrap();
+            let reprinted = print(
+                &read.document,
+                Some(&read.captions),
+                library,
+                Default::default(),
+            )
+            .unwrap();
+            assert_eq!(reprinted.source, printed.source);
+            Ok::<_, PrintError>(())
+        };
+        reads_back(&materialize_callable(&lowered)).unwrap();
+        let carried = materialize_callable_as(&lowered, |function| {
+            let stored: k::FunctionValue = lash_kernel_value::tokens::decode_body(
+                &lash_kernel_value::tokens::encode_body(&function),
+            )
+            .unwrap();
+            assert_eq!(stored, function);
+            k::FunctionValue::from_transport_json(
+                &stored.transport_json().unwrap(),
+                &k::FunctionRegistry::default(),
+                Default::default(),
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
+            )
+            .unwrap()
+        });
+        reads_back(&carried).unwrap();
+        let bare = materialize_callable_as(&lowered, |mut function| {
+            assert!(!function.declared_locals.is_empty());
+            function.declared_locals.clear();
+            function
+        });
+        let refused = reads_back(&bare);
+        assert!(
+            matches!(refused, Err(PrintError::Unprintable { .. })),
+            "{refused:?}"
+        );
+    }
+
     fn materialize_callable(
         lowered: &lash_kernel_dialect::Lowered,
+    ) -> lash_kernel_package::MaterializedWorkflow {
+        materialize_callable_as(lowered, |function| function)
+    }
+
+    /// Materializes the callable of `lowered` as `saved` leaves its value.
+    fn materialize_callable_as(
+        lowered: &lash_kernel_dialect::Lowered,
+        saved: impl FnOnce(k::FunctionValue) -> k::FunctionValue,
     ) -> lash_kernel_package::MaterializedWorkflow {
         let (site, written, closure) = lowered
             .written
@@ -375,9 +475,11 @@ mod tests {
             }),
             signature_origin: written.signature_origin.clone(),
             implicit_text_conversions: written.implicit_text_conversions.clone(),
+            declared_locals: written.declared_locals.clone(),
             captions: lowered.captions.clone(),
             creation: Some(site.clone()),
         };
+        let function = saved(function);
         let content = lash_kernel_package::LinkedContent {
             documents: [(
                 lowered.document.identity(),
@@ -397,24 +499,11 @@ mod tests {
         .unwrap()
     }
 
-    /// FIG-7474: helpers and const-bound arrows must print without losing
-    /// authored function names or changing the complete lowered document.
-    #[test]
-    fn authored_corpus_prints_and_relowers_identically() {
-        #[derive(serde::Deserialize)]
-        struct Case {
-            name: String,
-            source: String,
-            #[serde(default)]
-            cell: bool,
-            #[serde(default)]
-            materialize: bool,
-            #[serde(default)]
-            processes: bool,
-            #[serde(default)]
-            names: Vec<String>,
-        }
-        let library = crate::tests::library();
+    /// The packages the authored corpus calls, with and without `processes`.
+    fn corpus_namespaces() -> (
+        lash_kernel_dialect::Namespaces,
+        lash_kernel_dialect::Namespaces,
+    ) {
         let mut packages = BTreeMap::new();
         for (package, member) in [
             ("people", "lookup"),
@@ -474,6 +563,28 @@ mod tests {
         packages.remove(&lash_kernel_value::PackagePath::parse("processes").unwrap());
         let namespaces =
             lash_kernel_dialect::Namespaces::new(packages, Default::default(), &|_| false).unwrap();
+        (process_namespaces, namespaces)
+    }
+
+    /// FIG-7474: helpers and const-bound arrows must print without losing
+    /// authored function names or changing the complete lowered document.
+    #[test]
+    fn authored_corpus_prints_and_relowers_identically() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            source: String,
+            #[serde(default)]
+            cell: bool,
+            #[serde(default)]
+            materialize: bool,
+            #[serde(default)]
+            processes: bool,
+            #[serde(default)]
+            names: Vec<String>,
+        }
+        let library = crate::tests::library();
+        let (process_namespaces, namespaces) = corpus_namespaces();
         let mut cases: Vec<Case> = serde_json::from_str(include_str!("corpus.json")).unwrap();
         let mut expressions = vec![
             (

@@ -428,6 +428,7 @@ fn callable_start_installs_the_captured_environment() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: link_id,
             function,

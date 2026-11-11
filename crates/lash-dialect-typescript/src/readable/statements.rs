@@ -11,14 +11,34 @@ use super::source::{self, Arm, Expr, StmtKind};
 impl Lifter<'_> {
     pub(super) fn statement(&mut self, statement: &k::Stmt, site: &Site) -> Lift<StmtKind> {
         Ok(match statement {
-            k::Stmt::Let { name, value } => {
-                let name = self.binding(name)?;
+            k::Stmt::Let {
+                name: kernel,
+                value,
+            } => {
+                let name = self.binding(kernel)?;
                 if let k::Rhs::Expr(value) = value
                     && let Some(function) = self.closure(value)?
                 {
                     return Ok(StmtKind::Const(name, Expr::arrow(function)));
                 }
                 let value = self.rhs(value)?;
+                // A local's declared type is spelled again where its source
+                // evidence names one an annotation writes; readback proves
+                // it lowers alike.
+                if let Some(ty) = self.evidence.and_then(|evidence| evidence.declared(kernel))
+                    && let Ok(ty) = self.ts_type(None, ty, &k::FieldRoot::Result, &mut Vec::new())
+                {
+                    let constant = !self.reassigned(&name);
+                    return Ok(StmtKind::Declared {
+                        constant,
+                        name,
+                        ty,
+                        value: match value {
+                            Expr::Undefined if !constant => None,
+                            value => Some(value),
+                        },
+                    });
+                }
                 if self.reassigned(&name) {
                     match value {
                         Expr::Undefined => StmtKind::Let(name, None),

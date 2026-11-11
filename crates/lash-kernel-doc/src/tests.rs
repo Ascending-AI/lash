@@ -559,6 +559,7 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
         token: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
     };
     value.check_definition(&document, &helpers).unwrap();
     document.library.0.clear();

@@ -28,6 +28,7 @@ fn fixture() -> (LinkedContent, FunctionValue) {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: vec![],
+        declared_locals: Vec::new(),
         captures: [(Name::new("value"), CaptureValue::Data(Datum::Null))].into(),
         captions: Captions::empty(document.identity()),
     };

@@ -53,6 +53,11 @@ pub struct FunctionValue {
     pub signature_origin: Option<lash_kernel_value::SignatureOrigin>,
     /// Source evidence used when this callable becomes a saved workflow.
     pub implicit_text_conversions: Vec<crate::ImplicitTextConversion>,
+    /// The declared types of the locals of the callable's code, which a
+    /// printed workflow spells again. Evidence only, as
+    /// [`crate::SourceEvidence`]; a value from before it existed has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_locals: Vec<crate::DeclaredLocal>,
     pub callable: lash_kernel_value::names::CallableId,
     pub captures: std::collections::BTreeMap<Name, crate::CaptureValue>,
     pub signature: Signature,

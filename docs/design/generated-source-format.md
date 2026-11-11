@@ -110,6 +110,21 @@ A print map names the materialized document, not the original cell. Imports
 answer a new map and sidecar for the source actually compiled. Hosts own their
 versions, layout and any historical relationship between A and B.
 
+Source evidence is a second sidecar, also outside executable identity: a
+document compares equal exactly when its canonical bytes do. Besides a
+function's admitted implicit text conversions, it holds the declared types of
+its locals (`let cursor: string | null`), keyed by the binding's kernel name.
+That name is unique along a lexical scope chain, so a shadowing `cursor` keeps
+its own type, and a name that two bindings of a function and the functions it
+contains declare differently records none. Lowering records it in the written
+notes. A captured function value carries it (as an optional last field, so
+values without evidence keep their encoding), and materialization attaches it
+to each copied function. A printer spells the declaration's annotation from it
+only when the printed source still lowers to the same document. Evidence
+proves no construction, and a printer never guesses missing evidence from a
+current value: without evidence, a local whose type decided its lowering
+refuses to print.
+
 GeneratedSourceLimits independently bounds source bytes and node depth.
 Printing refuses oversized or unrepresentable content with typed errors and
 never returns truncated source. Optional SourceMaps describe final UTF-8 spans

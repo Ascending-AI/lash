@@ -74,6 +74,10 @@ pub struct SiteLayers {
     /// site.
     pub written: BTreeMap<Site, Written>,
     pub captions: Captions,
+    /// The declared types of locals, for each function a written function
+    /// is or contains: the outermost written function's, as a function
+    /// value's are for all the code it copies.
+    pub source_evidence: BTreeMap<lash_kernel_value::FunctionId, lash_kernel_doc::SourceEvidence>,
 }
 
 /// A front end's notes that name no node, or a span outside its source.
@@ -83,6 +87,54 @@ pub enum SiteLayersRefusal {
     SourceMap(#[from] SourceMapRefusal),
     #[error(transparent)]
     Captions(#[from] CaptionsRefusal),
+}
+
+/// Each function a written function with declared locals is or contains,
+/// with those locals. A function two written functions reach takes the
+/// locals of the one that reaches more: the outer one.
+fn declared_evidence(
+    document: &lash_kernel_doc::Document,
+    written: &BTreeMap<Site, Written>,
+) -> BTreeMap<lash_kernel_value::FunctionId, lash_kernel_doc::SourceEvidence> {
+    let mut reaches: Vec<_> = written
+        .iter()
+        .filter(|(_, written)| !written.declared_locals.is_empty())
+        .filter_map(|(site, written)| {
+            let root = match document.node(site) {
+                Some(Node::Expr(lash_kernel_doc::Expr::Closure(closure))) => closure.function,
+                _ => match site.unit {
+                    Unit::Library(function) if site.path.is_empty() => function,
+                    _ => return None,
+                },
+            };
+            let mut reached = std::collections::BTreeSet::new();
+            let mut pending = vec![root];
+            while let Some(function) = pending.pop() {
+                if let Some(body) = document
+                    .functions
+                    .get(&function)
+                    .and_then(|definition| definition.body())
+                    && reached.insert(function)
+                {
+                    pending.extend(Node::Block(&body.block).functions_within());
+                }
+            }
+            Some((reached, &written.declared_locals))
+        })
+        .collect();
+    reaches.sort_by_key(|(reached, _)| std::cmp::Reverse(reached.len()));
+    let mut evidence = BTreeMap::new();
+    for (reached, declared) in reaches {
+        for function in reached {
+            evidence
+                .entry(function)
+                .or_insert_with(|| lash_kernel_doc::SourceEvidence {
+                    implicit_text_conversions: Vec::new(),
+                    declared_locals: declared.clone(),
+                });
+        }
+    }
+    evidence
 }
 
 /// The source map of `document`, lowered from `source`, what the source
@@ -193,10 +245,12 @@ pub fn site_layers(
             entry.target.site().is_some_and(|site| matches!(&site.unit, Unit::Library(function) if functions.contains(function)))
         }).cloned().collect();
     }
+    let source_evidence = declared_evidence(document, &layers.written);
     Ok(SiteLayers {
         source_map,
         written: layers.written,
         captions,
+        source_evidence,
     })
 }
 

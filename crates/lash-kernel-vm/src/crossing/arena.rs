@@ -355,6 +355,7 @@ impl Graph {
         let mut signature_origin = None;
         let mut written_signature = None;
         let mut implicit_text_conversions = Vec::new();
+        let mut declared_locals = Vec::new();
         let mut token = None;
         if let Value::Closure(handle) = root {
             let (identity, cells, _) = arena.closure(handle)?;
@@ -373,6 +374,7 @@ impl Graph {
                 });
                 signature_origin = written.signature_origin;
                 implicit_text_conversions = written.implicit_text_conversions;
+                declared_locals = written.declared_locals;
             }
             let start = lash_kernel_doc::snapshot::closure_at(document, site, run.helpers)
                 .and_then(|closure| closure.presentation.as_ref())
@@ -467,6 +469,7 @@ impl Graph {
             written_signature,
             signature_origin,
             implicit_text_conversions,
+            declared_locals,
             callable,
             captures,
             signature,

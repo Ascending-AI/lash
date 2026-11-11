@@ -54,6 +54,8 @@ pub mod function;
 mod function_capture;
 mod implicit_text;
 pub use implicit_text::{ImplicitTextConversion, SourceOperandType};
+mod source_evidence;
+pub use source_evidence::{DeclaredLocal, SourceEvidence};
 pub mod function_value;
 pub use function_capture::CaptureValue;
 mod graph_codec;

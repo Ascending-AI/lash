@@ -705,6 +705,7 @@ fn explicit_helper_upgrade_runs_new_body_and_refuses_a_changed_contract() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: vec![],
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: old_link,
             function: selected,

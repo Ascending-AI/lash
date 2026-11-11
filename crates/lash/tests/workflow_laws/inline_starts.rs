@@ -40,6 +40,7 @@ async fn function(
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash::package::CallableId {
             link: publication.start.link,
             function: definition.identity(),

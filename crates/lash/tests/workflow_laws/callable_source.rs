@@ -107,6 +107,7 @@ async fn saved_source(
             }),
             signature_origin: written.signature_origin.clone(),
             implicit_text_conversions: written.implicit_text_conversions.clone(),
+            declared_locals: written.declared_locals.clone(),
             callable: lash::package::CallableId {
                 link: start.link,
                 function: closure.function,

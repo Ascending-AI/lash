@@ -48,12 +48,12 @@ impl LibraryDependencies {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
     /// Retained source facts for copied authored functions. Not executable content.
     #[serde(skip)]
-    pub source_evidence: BTreeMap<FunctionId, Vec<crate::ImplicitTextConversion>>,
+    pub source_evidence: BTreeMap<FunctionId, crate::SourceEvidence>,
     #[serde(default)]
     pub library: LibraryDependencies,
     pub imports: BTreeMap<ImportSlot, Import>,
@@ -582,6 +582,34 @@ impl Document {
         Ok(done)
     }
 }
+/// Two documents are equal when their executable content is, as their
+/// canonical bytes are (`K-ID-003`): source evidence beside it is not compared.
+impl PartialEq for Document {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            source_evidence: _,
+            library,
+            imports,
+            exports,
+            main,
+            functions,
+            requires,
+            numbers,
+            private_bindings,
+        } = self;
+        *library == other.library
+            && *imports == other.imports
+            && *exports == other.exports
+            && *main == other.main
+            && *functions == other.functions
+            && *requires == other.requires
+            && *numbers == other.numbers
+            && *private_bindings == other.private_bindings
+    }
+}
+
+impl Eq for Document {}
+
 impl Document {
     /// The singleton kernel version; structural validation establishes this invariant.
     pub fn kernel(&self) -> u32 {

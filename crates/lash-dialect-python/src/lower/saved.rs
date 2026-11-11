@@ -99,6 +99,7 @@ impl Lowerer<'_> {
         }
         Written {
             implicit_text_conversions: Vec::new(),
+            declared_locals: Vec::new(),
             captions: Vec::new(),
             language: SourceLanguage::Python,
             signature: text,

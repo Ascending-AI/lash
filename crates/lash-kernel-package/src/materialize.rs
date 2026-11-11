@@ -304,9 +304,13 @@ pub fn materialize_workflow(
                 Site::new(Unit::Library(*new), []),
             );
             document.functions.insert(*new, definition);
-            document
-                .source_evidence
-                .insert(*new, node.implicit_text_conversions.clone());
+            document.source_evidence.insert(
+                *new,
+                lash_kernel_doc::SourceEvidence {
+                    implicit_text_conversions: node.implicit_text_conversions.clone(),
+                    declared_locals: node.declared_locals.clone(),
+                },
+            );
         }
         let raw = ids.get(&node.callable.function).map_or_else(
             || Expr::Literal(Literal::Function(node.callable.function)),

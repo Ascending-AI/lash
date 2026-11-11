@@ -605,6 +605,23 @@
         }
       ]
     },
+    "DeclaredLocal": {
+      "additionalProperties": false,
+      "description": "A local binding's declared type (`let cursor: string | null`), keyed by\nthe binding's kernel name. A front end gives no two bindings of one\nlexical scope chain a name in common, and records no type for a name two\nbindings of a function and the functions it contains declare differently.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "ty": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
     "DocumentId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -823,6 +840,13 @@
               "type": "null"
             }
           ]
+        },
+        "declared_locals": {
+          "description": "The declared types of the locals of the callable's code, which a\nprinted workflow spells again. Evidence only, as\n[`crate::SourceEvidence`]; a value from before it existed has none.",
+          "items": {
+            "$ref": "#/$defs/DeclaredLocal"
+          },
+          "type": "array"
         },
         "implicit_text_conversions": {
           "description": "Source evidence used when this callable becomes a saved workflow.",

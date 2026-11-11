@@ -52,12 +52,21 @@ impl Lowerer<'_> {
         for statement in statements {
             match statement.unspanned() {
                 ast::Stmt::Var { kind, declarations } if *kind != VarKind::Var => {
-                    let mut names = Vec::new();
                     for declaration in declarations {
+                        if let ast::Pattern::Ident(name, Some(annotation)) = &declaration.pattern {
+                            let ty = self
+                                .facts
+                                .entry_annotation(annotation, true)
+                                .ok()
+                                .filter(|ty| *ty != lash_kernel_value::Type::Any);
+                            self.declare_typed(name, kind_of(*kind), ty);
+                            continue;
+                        }
+                        let mut names = Vec::new();
                         walk::pattern_names(&declaration.pattern, &mut names);
-                    }
-                    for name in names {
-                        self.declare(&name, kind_of(*kind));
+                        for name in names {
+                            self.declare(&name, kind_of(*kind));
+                        }
                     }
                 }
                 ast::Stmt::Function { name, function } => {

@@ -1071,6 +1071,7 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
         }),
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: vec![],
+        declared_locals: Vec::new(),
         captions: lowered.captions.clone(),
         creation: Some(site.clone()),
     };

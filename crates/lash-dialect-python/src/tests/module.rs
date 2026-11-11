@@ -373,6 +373,7 @@ fn saved_handle(
         token: None,
         signature_origin: lowered.written[site].signature_origin.clone(),
         implicit_text_conversions: lowered.written[site].implicit_text_conversions.clone(),
+        declared_locals: lowered.written[site].declared_locals.clone(),
     };
     let wire = serde_json::to_string(&value).unwrap();
     let value: lash_kernel_doc::FunctionValue = serde_json::from_str(&wire).unwrap();
@@ -977,6 +978,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash_kernel_value::CallableId {
             link: link.identity(),
             function: closure.function,

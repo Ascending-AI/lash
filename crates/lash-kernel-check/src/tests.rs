@@ -72,6 +72,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function,
@@ -164,6 +165,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: id,
@@ -233,6 +235,7 @@ fn a_captured_view_does_not_grant_retired_helper_authority() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: vec![],
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: root_id,

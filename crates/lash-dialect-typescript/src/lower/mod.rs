@@ -215,6 +215,10 @@ enum Control {
 struct FunctionFrame {
     bigint_result: Option<Expr>,
     implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
+    /// Every binding the function and the functions it contains declare, by
+    /// kernel name, with the type it was declared with. A name declared
+    /// without a type, or by two bindings with different ones, has none.
+    declared: BTreeMap<Name, Option<lash_kernel_value::Type>>,
     arrow: bool,
     async_body: bool,
     this: Option<Name>,
@@ -381,6 +385,7 @@ fn lower_beside_result(
         functions: vec![FunctionFrame {
             bigint_result: None,
             implicit_text_conversions: Vec::new(),
+            declared: BTreeMap::new(),
             arrow: false,
             async_body: false,
             this: None,
@@ -523,7 +528,7 @@ fn lower_beside_result(
     )
     .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
     Ok(Lowered {
-        document,
+        document: document.with_source_evidence(layers.source_evidence),
         source_map: Some(layers.source_map),
         written: layers.written,
         captions: layers.captions,
@@ -619,6 +624,17 @@ impl Lowerer<'_> {
     /// Declares a source binding in the innermost scope and gives the kernel
     /// name it is lowered to.
     pub(crate) fn declare(&mut self, name: &str, kind: BindingKind) -> Name {
+        self.declare_typed(name, kind, None)
+    }
+
+    /// [`Self::declare`], recording the type a `let` or `const` declares the
+    /// binding with as source evidence for every enclosing function.
+    pub(crate) fn declare_typed(
+        &mut self,
+        name: &str,
+        kind: BindingKind,
+        ty: Option<lash_kernel_value::Type>,
+    ) -> Name {
         if let Some(existing) = self
             .scopes
             .last()
@@ -640,6 +656,17 @@ impl Lowerer<'_> {
         } else {
             self.fresh(&format!("{name}_"))
         };
+        for frame in &mut self.functions {
+            frame
+                .declared
+                .entry(kernel.clone())
+                .and_modify(|declared| {
+                    if *declared != ty {
+                        *declared = None;
+                    }
+                })
+                .or_insert_with(|| ty.clone());
+        }
         let function = self.functions.len() - 1;
         let Some(scope) = self.scopes.last_mut() else {
             unreachable!("a scope is open");

@@ -176,6 +176,8 @@ pub(super) struct Lifter<'a> {
     pub(super) labels: BTreeMap<Name, super::labels::Exit>,
     /// The label a loop body's exit handler gave the loop being lifted.
     pub(super) loop_label: Option<String>,
+    /// The unit's source evidence: the declared types of its locals.
+    pub(super) evidence: Option<&'a k::SourceEvidence>,
 }
 
 impl<'a> Lifter<'a> {
@@ -290,6 +292,10 @@ impl<'a> Lifter<'a> {
             process_awaits: BTreeSet::new(),
             labels: BTreeMap::new(),
             loop_label: None,
+            evidence: match &unit {
+                Unit::Library(id) => document.source_evidence.get(id),
+                _ => None,
+            },
         };
         if let Some(body) = body {
             lifter.labels = lifter.label_tokens(body);

@@ -1839,6 +1839,7 @@ async fn publishing_a_cell_callable_applies_the_hosts_implicit_text_policy() {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash::package::CallableId {
             link: start.link,
             function: closure.function,
@@ -1935,6 +1936,7 @@ async fn materialized_draft_retains_implicit_text_policy() {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash::package::CallableId {
             link: start.link,
             function: closure.function,

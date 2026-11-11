@@ -629,6 +629,7 @@ async fn a_parked_callable_start_keeps_its_frozen_captures_across_a_release_on_s
         }),
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash_kernel_value::CallableId {
             link,
             function: closure.function,

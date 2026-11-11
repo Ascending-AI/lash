@@ -28,8 +28,7 @@ pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentBytes {
     source_language: Option<crate::SourceLanguage>,
-    source_evidence:
-        std::collections::BTreeMap<crate::FunctionId, Vec<crate::ImplicitTextConversion>>,
+    source_evidence: std::collections::BTreeMap<crate::FunctionId, crate::SourceEvidence>,
     grammar_version: u32,
     id: DocumentId,
     body: Arc<[u8]>,
@@ -65,7 +64,9 @@ impl DocumentBytes {
 
     /// Source facts retained by typed authoring, outside executable identity.
     pub fn source_evidence(&self) -> impl Iterator<Item = &crate::ImplicitTextConversion> {
-        self.source_evidence.values().flatten()
+        self.source_evidence
+            .values()
+            .flat_map(|evidence| &evidence.implicit_text_conversions)
     }
 
     #[must_use]

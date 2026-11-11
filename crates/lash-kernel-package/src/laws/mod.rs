@@ -642,6 +642,7 @@ fn materialize_values_exposes_frozen_initializers() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: vec![],
+        declared_locals: Vec::new(),
         captions: Captions::empty(doc.identity()),
     };
     let reference = WorkflowReference::Callable(function.callable);

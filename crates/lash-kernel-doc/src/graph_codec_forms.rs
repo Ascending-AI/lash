@@ -16,9 +16,9 @@ use lash_kernel_value::names::Name;
 use lash_kernel_value::types::Signature;
 use lash_kernel_value::types::Type;
 use {
-    lash_kernel_value::tokens::CodecVariant, lash_kernel_value::tokens::TokenCodec,
-    lash_kernel_value::tokens::TokenError, lash_kernel_value::tokens::TokenReader,
-    lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::CanonicalFault, lash_kernel_value::tokens::CodecVariant,
+    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
+    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
 };
 
 use crate::{
@@ -470,10 +470,16 @@ impl TokenCodec for StartConvention {
     }
 }
 
-/// A function value: its document and its entry's name.
+/// A function value: its document and its entry's name. Declared locals are
+/// a twelfth field only when there are some, so every value without them
+/// keeps the eleven-field encoding it had before they existed.
 impl TokenCodec for FunctionValue {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(11);
+        out.seq(if self.declared_locals.is_empty() {
+            11
+        } else {
+            12
+        });
         self.callable.encode(out);
         self.captures.encode(out);
         self.signature.encode(out);
@@ -485,10 +491,20 @@ impl TokenCodec for FunctionValue {
         self.signature_origin.encode(out);
         self.implicit_text_conversions.encode(out);
         self.written_signature.encode(out);
+        if !self.declared_locals.is_empty() {
+            self.declared_locals.encode(out);
+        }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(11)?;
-        Ok(Self {
+        let fields = input.seq()?;
+        if !matches!(fields, 11 | 12) {
+            return Err(CanonicalFault::FieldCount {
+                expected: 11,
+                found: fields,
+            }
+            .into());
+        }
+        let mut value = Self {
             callable: lash_kernel_value::CallableId::decode(input)?,
             captures: BTreeMap::decode(input)?,
             signature: Signature::decode(input)?,
@@ -500,7 +516,20 @@ impl TokenCodec for FunctionValue {
             signature_origin: Option::decode(input)?,
             implicit_text_conversions: Vec::decode(input)?,
             written_signature: Option::decode(input)?,
-        })
+            declared_locals: Vec::new(),
+        };
+        if fields == 12 {
+            value.declared_locals = Vec::decode(input)?;
+            // The empty list has the eleven-field encoding only.
+            if value.declared_locals.is_empty() {
+                return Err(CanonicalFault::FieldCount {
+                    expected: 11,
+                    found: 12,
+                }
+                .into());
+            }
+        }
+        Ok(value)
     }
 }
 

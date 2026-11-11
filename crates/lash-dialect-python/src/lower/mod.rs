@@ -418,6 +418,7 @@ pub(crate) fn lower(
         source_map,
         written,
         captions,
+        source_evidence,
     } = lash_kernel_dialect::site_layers(
         &document,
         source,
@@ -428,7 +429,7 @@ pub(crate) fn lower(
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
     Ok(Lowered {
-        document,
+        document: document.with_source_evidence(source_evidence),
         source_map: Some(source_map),
         written,
         captions,

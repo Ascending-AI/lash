@@ -117,6 +117,13 @@ pub(super) enum StmtKind {
     Pattern(Pattern, Expr),
     Const(String, Expr),
     Let(String, Option<Expr>),
+    /// `const name: ty = value`, or `let` for a binding something assigns.
+    Declared {
+        constant: bool,
+        name: String,
+        ty: Type,
+        value: Option<Expr>,
+    },
     /// `place op value`: `=`, or a compound operator.
     Assign(Expr, &'static str, Expr),
     Expr(Expr),
@@ -499,6 +506,22 @@ impl Writer {
             StmtKind::Let(name, value) => {
                 self.out.push_str("let ");
                 self.out.push_str(name);
+                if let Some(value) = value {
+                    self.out.push_str(" = ");
+                    self.expr(value, ASSIGN);
+                }
+                self.out.push(';');
+            }
+            StmtKind::Declared {
+                constant,
+                name,
+                ty,
+                value,
+            } => {
+                self.out.push_str(if *constant { "const " } else { "let " });
+                self.out.push_str(name);
+                self.out.push_str(": ");
+                self.ty(ty);
                 if let Some(value) = value {
                     self.out.push_str(" = ");
                     self.expr(value, ASSIGN);
