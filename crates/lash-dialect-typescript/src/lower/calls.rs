@@ -1195,8 +1195,13 @@ impl Lowerer<'_> {
         let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
         let place = Place::Variable(super::statements::variable_of(&result));
         let direct = self.block(|this| {
-            let passed = this.arguments(args)?;
-            let value = this.invoke(function, &[object.clone(), passed], Ty::Unknown)?;
+            let value = match plain_arguments(args) {
+                Some(values) => this.map_method(object, name, &values)?,
+                None => {
+                    let passed = this.arguments(args)?;
+                    this.invoke(function, &[object.clone(), passed], Ty::Unknown)?
+                }
+            };
             this.store(place.clone(), value);
             Ok(())
         })?;
@@ -1210,6 +1215,64 @@ impl Lowerer<'_> {
         })?;
         self.emit_if(test, direct, fallback);
         Ok(Some(result))
+    }
+
+    /// `get`, `set` or `has` on a value already tested to be a map, with
+    /// plain arguments: the helper's body (`ts.map.get`, `ts.map.set`,
+    /// `ts.map.has`) in place, over its arguments without the list. A key
+    /// the lowerer knows is a text is its own key (`K-COL-017`); any other
+    /// key is `ts.map.key`'s.
+    fn map_method(
+        &mut self,
+        object: &Operand,
+        name: &str,
+        args: &[&ast::Expr],
+    ) -> Lowering<Operand> {
+        let arity = if name == "set" { 2 } else { 1 };
+        let mut passed = self.positional_arguments(args, arity)?;
+        passed.resize_with(arity, Operand::undefined);
+        // Every argument is taken, in order, before the key is made.
+        let passed: Vec<Operand> = passed.into_iter().map(|value| self.pin(value)).collect();
+        let key = passed[0].clone();
+        let key = if key.ty == Ty::Text {
+            key
+        } else {
+            self.invoke("ts.map.key", &[key], Ty::Unknown)?
+        };
+        match name {
+            "set" => {
+                self.emit(Stmt::Assign {
+                    place: Place::Member(Member::Index {
+                        target: object.expr(),
+                        index: key.expr(),
+                    }),
+                    value: lash_kernel_doc::Rhs::Expr(passed[1].expr()),
+                    order: AssignOrder::PlaceFirst,
+                });
+                Ok(object.clone())
+            }
+            "has" => {
+                let found = self.native("map.contains", vec![object.expr(), key.expr()])?;
+                Ok(self.inline(found, Ty::Bool))
+            }
+            _ => {
+                let found = self.native("map.contains", vec![object.expr(), key.expr()])?;
+                let value = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+                let place = Place::Variable(super::statements::variable_of(&value));
+                let read = Expr::Member(Box::new(Member::Index {
+                    target: object.expr(),
+                    index: key.expr(),
+                }));
+                let hit = self.block(|this| {
+                    let entry = this.inline(read, Ty::Unknown);
+                    this.store(place, entry);
+                    Ok(())
+                })?;
+                let miss = self.block(|_| Ok(()))?;
+                self.emit_if(found, hit, miss);
+                Ok(value)
+            }
+        }
     }
 
     /// `object.name(args)` where the object's type is one built-in kind
