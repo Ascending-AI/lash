@@ -13,6 +13,11 @@ use crate::raised;
 /// Converts an integer to the nearest binary64, ties to even. A result
 /// that rounds to infinity raises `number_range` (`K-NUM-003`).
 pub fn integer_to_float(value: &Integer) -> Result<Float, NativeError> {
+    // Rust's integer-to-float `as` rounds to nearest, ties to even, and
+    // every word is finite as a binary64.
+    if let Some(word) = value.word() {
+        return Ok(Float::new(word as f64));
+    }
     ratio_to_float(&value.as_bigint(), &BigInt::one()).map(Float::new)
 }
 

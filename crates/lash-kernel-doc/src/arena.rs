@@ -113,15 +113,28 @@ impl ShortText {
         }
     }
 
+    /// Counts the digits first, so each digit is written once, in place.
     #[inline(always)]
     fn spell(word: i64, radix: u32) -> Option<Self> {
         const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        if !(2..=36).contains(&radix) {
+            return None;
+        }
+        let mut rest = word.unsigned_abs();
+        let places = if radix == 10 {
+            rest.checked_ilog10()
+        } else {
+            rest.checked_ilog(u64::from(radix))
+        };
+        let len = places.map_or(1, |places| places as usize + 1) + usize::from(word < 0);
+        if len > Self::MAX {
+            return None;
+        }
         let radix = u64::from(radix);
         let mut bytes = [0u8; Self::MAX];
-        let mut at = bytes.len();
-        let mut rest = word.unsigned_abs();
+        let mut at = len;
         loop {
-            at = at.checked_sub(1)?;
+            at -= 1;
             bytes[at] = *DIGITS.get(usize::try_from(rest % radix).ok()?)?;
             rest /= radix;
             if rest == 0 {
@@ -129,10 +142,12 @@ impl ShortText {
             }
         }
         if word < 0 {
-            at = at.checked_sub(1)?;
-            bytes[at] = b'-';
+            bytes[0] = b'-';
         }
-        Self::ascii(&bytes[at..])
+        Some(Self {
+            len: len as u8,
+            bytes,
+        })
     }
 
     /// ASCII bytes inline, when they are ASCII and short enough.
