@@ -222,17 +222,21 @@ impl<'call> Args<'call> {
     pub fn text(&self, value: &'call Value) -> Result<Option<TextView<'call>>, NativeError> {
         match value {
             Value::Text(short) => Ok(Some(TextView::Short(short))),
-            Value::LongText(object) => match self.body(*object)? {
-                Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
-                    "a text whose storage moved was read",
-                )),
-                Body::LongText(text) => Ok(Some(TextView::Long {
-                    object: *object,
-                    text,
-                })),
-                _ => Err(NativeError::Malformed("a text handle names another body")),
-            },
+            Value::LongText(object) => self.long_text(*object).map(Some),
             _ => Ok(None),
+        }
+    }
+
+    /// The long text `object` names, borrowed for the whole call however
+    /// briefly the value naming it is held.
+    #[inline]
+    pub fn long_text(&self, object: ArenaHandle) -> Result<TextView<'call>, NativeError> {
+        match self.body(object)? {
+            Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
+                "a text whose storage moved was read",
+            )),
+            Body::LongText(text) => Ok(TextView::Long { object, text }),
+            _ => Err(NativeError::Malformed("a text handle names another body")),
         }
     }
 

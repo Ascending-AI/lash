@@ -1,5 +1,6 @@
 //! One JSON traversal over borrowed live values or copied-out data.
 use super::*;
+use lash_kernel_doc::arena::ShortText;
 use std::borrow::Cow;
 
 /// The only difference between TS host transport and TS JSON text is functions:
@@ -38,13 +39,37 @@ pub(super) enum Numeric {
     Token(NumberToken),
 }
 
+/// A text as the encoder reads it: a short text copied out of its value,
+/// or the source's own bytes for `'k` when it holds them whole.
+pub(super) enum Str<'k> {
+    Inline(ShortText),
+    Held(Cow<'k, str>),
+}
+impl std::ops::Deref for Str<'_> {
+    type Target = str;
+    fn deref(&self) -> &str {
+        match self {
+            Str::Inline(short) => short.as_str(),
+            Str::Held(text) => text,
+        }
+    }
+}
+impl<'k> Str<'k> {
+    fn into_cow(self) -> Cow<'k, str> {
+        match self {
+            Str::Inline(short) => Cow::Owned(short.as_str().to_owned()),
+            Str::Held(text) => text,
+        }
+    }
+}
+
 /// A value as the encoder walks it. Object keys borrow from the source
 /// for `'k` when it holds them whole.
 pub(super) enum View<'k, V> {
     Null,
     Bool(bool),
     Number(Numeric),
-    Text(String),
+    Text(Str<'k>),
     Absent,
     Sequence(Vec<V>, &'static str),
     Mapping(Vec<(V, V)>),
@@ -97,13 +122,14 @@ impl<'call> Source<'call> for Live<'call> {
                     .into_owned(),
             )),
             Value::Float(value) => View::Number(Numeric::Float(*value)),
-            Value::Text(_) | Value::LongText(_) => {
-                let text = self
-                    .0
-                    .text(value)?
-                    .ok_or(NativeError::Malformed("JSON text body"))?;
+            Value::Text(short) => {
+                output.read_whole(short.as_bytes().len() as u64)?;
+                View::Text(Str::Inline(*short))
+            }
+            Value::LongText(object) => {
+                let text = self.0.long_text(*object)?;
                 output.read_whole(text.len())?;
-                View::Text(text.whole()?.into_owned())
+                View::Text(Str::Held(text.whole()?))
             }
             Value::List(_) | Value::Tuple(_) => View::Sequence(
                 super::super::sequence_values(&self.0, value)?,
@@ -118,13 +144,38 @@ impl<'call> Source<'call> for Live<'call> {
                     .0
                     .table(value)?
                     .ok_or(NativeError::Malformed("JSON map body"))?;
-                let mut fields = Vec::with_capacity(table.len() as usize);
+                let mut text_keys = true;
                 for chunk in table.chunks() {
-                    for pair in chunk?.as_chunks::<2>().0 {
-                        fields.push((pair[0], pair[1]));
-                    }
+                    text_keys &= chunk?
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .all(|pair| matches!(pair[0], Value::Text(_) | Value::LongText(_)));
                 }
-                View::Mapping(fields)
+                if text_keys {
+                    // Every key is text: the object `normalize` would make,
+                    // its keys read in the same order, without the pairs.
+                    let mut fields = Vec::with_capacity(table.len() as usize);
+                    for chunk in table.chunks() {
+                        for pair in chunk?.as_chunks::<2>().0 {
+                            let key = self
+                                .0
+                                .text(&pair[0])?
+                                .ok_or(NativeError::Malformed("JSON map key body"))?;
+                            output.read_whole(key.len())?;
+                            fields.push((key.whole()?, pair[1]));
+                        }
+                    }
+                    View::Object(fields, "map")
+                } else {
+                    let mut fields = Vec::with_capacity(table.len() as usize);
+                    for chunk in table.chunks() {
+                        for pair in chunk?.as_chunks::<2>().0 {
+                            fields.push((pair[0], pair[1]));
+                        }
+                    }
+                    View::Mapping(fields)
+                }
             }
             Value::Record(_) => {
                 let table = self
@@ -213,6 +264,7 @@ impl<'a> Source<'a> for Data<'a> {
         value: &&'a Datum,
         _: &mut impl Output,
     ) -> Result<View<'a, &'a Datum>, NativeError> {
+        let value: &'a Datum = value;
         Ok(match value {
             Datum::Null => View::Null,
             Datum::Absent => View::Absent,
@@ -220,7 +272,7 @@ impl<'a> Source<'a> for Data<'a> {
             Datum::Int(value) => View::Number(Numeric::Int(value.clone())),
             Datum::Float(value) => View::Number(Numeric::Float(*value)),
             Datum::Number(value) => View::Number(Numeric::Token(value.clone())),
-            Datum::Text(value) => View::Text(value.clone()),
+            Datum::Text(value) => View::Text(Str::Held(Cow::Borrowed(value))),
             Datum::List(values) | Datum::Tuple(values) => View::Sequence(
                 values.iter().collect(),
                 if matches!(value, Datum::List(_)) {
@@ -332,7 +384,7 @@ fn text<'k, A: Source<'k>>(
     source: &A,
     value: &A::Value,
     output: &mut impl Output,
-) -> Result<Option<String>, NativeError> {
+) -> Result<Option<Str<'k>>, NativeError> {
     Ok(match source.view(value, output)? {
         View::Text(text) => Some(text),
         _ => None,
@@ -354,7 +406,7 @@ fn normalize<'k, A: Source<'k>>(
         for (key, value) in fields {
             let view = source.view(&key, &mut out.output)?;
             let name = match view {
-                View::Text(text) => text,
+                View::Text(text) => text.into_cow(),
                 View::Number(_) | View::Bool(_) | View::Null if out.encoding.is_some() => {
                     let mut key_out = Out {
                         output: StringOutput(String::new()),
@@ -378,7 +430,7 @@ fn normalize<'k, A: Source<'k>>(
                     .walk(key, view, 0, true, policy.path)?;
                     let rendered = key_out.output.0;
                     out.output.reserve(rendered.len() as u64)?;
-                    rendered
+                    Cow::Owned(rendered)
                 }
                 _ if out.encoding.as_ref().is_some_and(|style| style.skipkeys) => continue,
                 _ => {
@@ -388,7 +440,7 @@ fn normalize<'k, A: Source<'k>>(
                     ));
                 }
             };
-            named.push((Cow::Owned(name), value));
+            named.push((name, value));
         }
         view = View::Object(named, "map");
     }
@@ -411,7 +463,7 @@ fn normalize<'k, A: Source<'k>>(
                     view = match prototype.as_deref() {
                         Some("Date.prototype") => View::Null,
                         Some("Array.prototype") => View::Sequence(Vec::new(), "list"),
-                        Some("String.prototype") => View::Text(String::new()),
+                        Some("String.prototype") => View::Text(Str::Held(Cow::Borrowed(""))),
                         Some("Number.prototype") => View::Number(Numeric::Float(Float::new(0.0))),
                         Some("Boolean.prototype") => View::Bool(false),
                         _ => View::Object(Vec::new(), "record"),

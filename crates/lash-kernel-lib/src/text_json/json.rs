@@ -550,9 +550,18 @@ impl<S: Output> Out<'_, '_, S> {
         }
     }
 
-    fn integer_digits(&mut self, number: &Integer) -> Result<String, NativeError> {
+    /// A word's digits are spelled inline; only a big integer allocates.
+    fn integer_digits(&mut self, number: &Integer) -> Result<encoder::Str<'static>, NativeError> {
         self.output.read_whole(number.bits().div_ceil(8))?;
-        Ok(number.to_string())
+        Ok(
+            match number
+                .word()
+                .and_then(|word| lash_kernel_doc::arena::ShortText::digits(word, 10))
+            {
+                Some(short) => encoder::Str::Inline(short),
+                None => encoder::Str::Held(Cow::Owned(number.to_string())),
+            },
+        )
     }
 
     fn text_held<'call>(
