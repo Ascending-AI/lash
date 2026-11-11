@@ -448,7 +448,7 @@ impl CoreMachine {
         let (heap, session) = match start.session.as_ref().map(SessionRoot::run_page) {
             None => (
                 SlotHeap::durable(
-                    bounds.memory,
+                    heap_bound(&bounds),
                     crate::heap::open::Durable {
                         directory: lash_kernel_state::paged::run::directory::Directory::new(source),
                         high_water: lash_kernel_state::paged::run::ids::HighWater(0),
@@ -464,7 +464,7 @@ impl CoreMachine {
             Some(Some(page)) => {
                 let (session, directory) =
                     lash_kernel_state::paged::run::session::open(source, page)?;
-                let (heap, values) = SlotHeap::open(bounds.memory, &session.heap, directory)
+                let (heap, values) = SlotHeap::open(heap_bound(&bounds), &session.heap, directory)
                     .map_err(|error| StartError::Bindings {
                         problem: format!("the session's heap does not open: {error:?}"),
                     })?;
@@ -666,7 +666,7 @@ impl Machine for CoreMachine {
         }
         header.host = root.host.clone();
         header.start = record.start.clone();
-        let (heap, values) = SlotHeap::open(bounds.memory, &record.heap, directory)
+        let (heap, values) = SlotHeap::open(heap_bound(&bounds), &record.heap, directory)
             .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
         let modes = record
             .reads
@@ -921,9 +921,21 @@ impl Machine for CoreMachine {
             // A refused run reports the charge its refused event would
             // have made.
             charged: (!self.vm.off()).then(|| self.vm.refused.unwrap_or(self.vm.charged())),
-            memory: self.vm.heap.held(),
+            memory: match self.header.bounds.memory_meter {
+                crate::MemoryMeter::On => self.vm.heap.held(),
+                crate::MemoryMeter::Off => 0,
+            },
             live_tasks: self.vm.tasks.live,
         }
+    }
+}
+
+/// What the run's heap is bounded by: its memory bound, or nothing under
+/// `MemoryMeter::Off`, which keeps no bound to refuse at (FIG-6731).
+fn heap_bound(bounds: &Bounds) -> u64 {
+    match bounds.memory_meter {
+        crate::MemoryMeter::On => bounds.memory,
+        crate::MemoryMeter::Off => u64::MAX,
     }
 }
 
