@@ -490,9 +490,7 @@ async fn write(
     if roots != held {
         return Err(corrupt("process history", "the rows moved while packing"));
     }
-    super::peel(tx, roots)
-        .await
-        .map_err(|refusal| DurableError::Graph(refusal))?;
+    super::peel(tx, roots).await.map_err(DurableError::Graph)?;
     Ok(())
 }
 

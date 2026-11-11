@@ -653,7 +653,7 @@ fn same(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>, whe
 async fn a_packed_history_reads_as_its_rows(tier: Tier) {
     let (stores, raw, _keep) = raw_stores(tier).await;
     let (backend, core) = core_over(stores, 400);
-    let process = run_one(&core, 2).await;
+    let process = Box::pin(run_one(&core, 2)).await;
     let durable = Arc::clone(backend.durable());
     let model_keys = raw.model_keys(&process).await;
     let before = answers(durable.as_ref(), &process, &model_keys).await;
@@ -766,7 +766,7 @@ async fn a_history_over_the_cap_keeps_its_rows(tier: Tier) {
     // Six reads of 50 KiB: each stays inline in history (64 KiB), together
     // over the cap.
     let (backend, core) = core_over(stores, 50 * 1024);
-    let process = run_one(&core, 6).await;
+    let process = Box::pin(run_one(&core, 6)).await;
     let durable = Arc::clone(backend.durable());
     let model_keys = raw.model_keys(&process).await;
     let before = answers(durable.as_ref(), &process, &model_keys).await;

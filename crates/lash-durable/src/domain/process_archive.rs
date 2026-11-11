@@ -138,7 +138,7 @@ impl ArchiveContents {
     /// [`Unpackable`] for an oversize or unsupported history.
     pub fn encode(&self) -> Result<Vec<u8>, Unpackable> {
         let mut order: Vec<&ArchivedNode> = self.nodes.iter().collect();
-        order.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        order.sort_by_key(|node| node.id.0);
         if order.windows(2).any(|pair| pair[0].id == pair[1].id) {
             return Err(Unpackable::Unsupported("a node appears twice"));
         }
