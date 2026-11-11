@@ -420,6 +420,8 @@ fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperatio
         InlineOperation::Kind
         | InlineOperation::Not
         | InlineOperation::FloatIdentity
+        | InlineOperation::FloatUnary(_)
+        | InlineOperation::ToFloat
         | InlineOperation::Length(_)
         | InlineOperation::IntegerText(
             IntegerTextDomain::Decimal | IntegerTextDomain::WholeFloat,

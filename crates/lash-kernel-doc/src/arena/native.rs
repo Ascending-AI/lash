@@ -1082,6 +1082,12 @@ pub enum InlineOperation {
     Not,
     /// One float, which answers itself: a numeric conversion of a number.
     FloatIdentity,
+    /// One float, through the declared IEEE 754 function. A word or any
+    /// other operand runs normally.
+    FloatUnary(FloatUnary),
+    /// One word integer, rounded to the nearest float with ties to even, or
+    /// one float, which answers itself. Any other operand runs normally.
+    ToFloat,
     /// One collection of the declared kind, read through the native views.
     /// Cold reads and lengths that cannot be answered inline run normally.
     Length(crate::plan::Collection),
@@ -1139,7 +1145,8 @@ impl InlineOperation {
             (Self::Kind, [_]) => true,
             (Self::Same, [left, right]) => shallow_same(left, right).is_some(),
             (Self::Not, [Value::Bool(_)]) => true,
-            (Self::FloatIdentity, [Value::Float(_)]) => true,
+            (Self::FloatIdentity | Self::FloatUnary(_), [Value::Float(_)]) => true,
+            (Self::ToFloat, [Value::Int(_) | Value::Float(_)]) => true,
             (Self::Length(kind), [value]) => matches!(
                 (kind, value),
                 (crate::plan::Collection::List, Value::List(_))
@@ -1185,7 +1192,15 @@ impl InlineOperation {
             (Self::Kind, [value]) => KIND_TEXTS[value.kind() as usize].map(Value::Text),
             (Self::Same, [left, right]) => shallow_same(left, right).map(Value::Bool),
             (Self::Not, [Value::Bool(value)]) => Some(Value::Bool(!value)),
-            (Self::FloatIdentity, [value @ Value::Float(_)]) => Some(*value),
+            (Self::FloatIdentity | Self::ToFloat, [value @ Value::Float(_)]) => Some(*value),
+            (Self::FloatUnary(operation), [Value::Float(number)]) => Some(Value::Float(
+                crate::Float::new(operation.apply(number.get())),
+            )),
+            // Every word is finite as a binary64, and `as` rounds to nearest
+            // with ties to even.
+            (Self::ToFloat, [Value::Int(word)]) => {
+                Some(Value::Float(crate::Float::new(*word as f64)))
+            }
             (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(word)]) => {
                 ShortText::digits(*word, 10).map(Value::Text)
             }
@@ -1312,6 +1327,30 @@ pub enum IntegerTextDomain {
 #[inline(never)]
 fn whole_float(number: f64) -> Option<i64> {
     (number.abs() < 9_007_199_254_740_992.0 && number.floor() == number).then_some(number as i64)
+}
+
+/// A one-float function whose answer is a float: negation, magnitude and
+/// rounding toward negative infinity, positive infinity or zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloatUnary {
+    Neg,
+    Abs,
+    Floor,
+    Ceil,
+    Trunc,
+}
+
+impl FloatUnary {
+    #[inline]
+    pub fn apply(self, value: f64) -> f64 {
+        match self {
+            Self::Neg => -value,
+            Self::Abs => value.abs(),
+            Self::Floor => value.floor(),
+            Self::Ceil => value.ceil(),
+            Self::Trunc => value.trunc(),
+        }
+    }
 }
 
 /// A read that neither allocates nor mutates its resident operands.

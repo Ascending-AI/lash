@@ -14,10 +14,26 @@ pub(super) fn inline(
     domain: Domain,
 ) -> Option<lash_kernel_doc::arena::native::InlineNative> {
     use lash_kernel_doc::arena::native::{
-        InlineNative, InlineOperation, IntegerTextDomain, ScalarDomain,
+        FloatUnary, InlineNative, InlineOperation, IntegerTextDomain, ScalarDomain,
+    };
+    // A float operand answers by `arithmetic::scalar_unary`'s own float
+    // function wherever the domain admits a float.
+    let float_unary = |unary| match unary {
+        Unary::Neg => Some(FloatUnary::Neg),
+        Unary::Abs => Some(FloatUnary::Abs),
+        Unary::Floor => Some(FloatUnary::Floor),
+        Unary::Ceil => Some(FloatUnary::Ceil),
+        Unary::Trunc => Some(FloatUnary::Trunc),
+        _ => None,
     };
     let operation = match operation {
         Operation::Kind if matches!(domain, Domain::Any) => InlineOperation::Kind,
+        Operation::Unary(unary) if !matches!(domain, Domain::Int) => {
+            InlineOperation::FloatUnary(float_unary(unary)?)
+        }
+        Operation::ToFloat if matches!(domain, Domain::Any | Domain::Number) => {
+            InlineOperation::ToFloat
+        }
         Operation::Same if matches!(domain, Domain::Any) => InlineOperation::Same,
         Operation::ToText if matches!(domain, Domain::Number) => {
             InlineOperation::IntegerText(IntegerTextDomain::Decimal)

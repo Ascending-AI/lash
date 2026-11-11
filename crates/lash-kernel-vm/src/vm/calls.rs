@@ -439,6 +439,8 @@ impl<H: Heap> Vm<H> {
             InlineOperation::Kind
             | InlineOperation::Not
             | InlineOperation::FloatIdentity
+            | InlineOperation::FloatUnary(_)
+            | InlineOperation::ToFloat
             | InlineOperation::Length(_)
             | InlineOperation::Membership(_)
             | InlineOperation::IntegerText(_) => self.formula(entry.charge, args, Some(&value)),
@@ -473,6 +475,8 @@ impl<H: Heap> Vm<H> {
             InlineOperation::Kind
             | InlineOperation::Not
             | InlineOperation::FloatIdentity
+            | InlineOperation::FloatUnary(_)
+            | InlineOperation::ToFloat
             | InlineOperation::IntegerText(
                 IntegerTextDomain::Decimal | IntegerTextDomain::WholeFloat,
             ) if args.len() == 1 => inline.answer(args),

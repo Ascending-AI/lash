@@ -1220,6 +1220,8 @@ impl<'a> Compiler<'a> {
                 | InlineOperation::Same
                 | InlineOperation::Not
                 | InlineOperation::FloatIdentity
+                | InlineOperation::FloatUnary(_)
+                | InlineOperation::ToFloat
                 | InlineOperation::Length(_)
                 | InlineOperation::Membership(_)
                 | InlineOperation::IntegerText(_),

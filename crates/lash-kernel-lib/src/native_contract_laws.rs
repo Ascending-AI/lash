@@ -589,7 +589,7 @@ fn known_answers_use_their_kernel_and_reject_disagreement() {
             continue;
         };
         let version = definition.native_version;
-        for args in [
+        let pairs = [
             [Value::Int(3), Value::Int(4)],
             [Value::Int(i64::MAX), Value::Int(1)],
             [Value::Int(i64::MIN), Value::Int(-1)],
@@ -597,18 +597,38 @@ fn known_answers_use_their_kernel_and_reject_disagreement() {
             [float(-0.0), float(0.0)],
             [float(f64::INFINITY), float(f64::NEG_INFINITY)],
             [float(f64::NAN), float(2.0)],
-        ] {
-            let Some(answer) = inline.scalar_answer(version, &args) else {
+        ];
+        // One operand: a word to float rounds above 2^53, and rounding a
+        // float keeps its sign at zero and its non-finite values.
+        let singles = [
+            [Value::Int(-7)],
+            [Value::Int(i64::MAX)],
+            [Value::Int(i64::MIN)],
+            [Value::Int((1 << 53) + 1)],
+            [float(-2.5)],
+            [float(2.5)],
+            [float(-0.5)],
+            [float(-0.0)],
+            [float(f64::NEG_INFINITY)],
+            [float(f64::NAN)],
+            [float(9_007_199_254_740_993.0)],
+        ];
+        let cases = pairs
+            .iter()
+            .map(|args| &args[..])
+            .chain(singles.iter().map(|args| &args[..]));
+        for args in cases {
+            let Some(answer) = inline.scalar_answer(version, args) else {
                 continue;
             };
             let mut bench = heap();
             let mut counter = lash_kernel_doc::WorkCounter::new(Some(0));
-            let called = bench.call(&*native, &args, u64::MAX, &mut counter);
+            let called = bench.call(&*native, args, u64::MAX, &mut counter);
             let ordinary = called.answer.unwrap();
             assert!(answer.same(&ordinary), "{} {args:?}", definition.name);
             assert_eq!(counter.spent(), 0);
             assert_eq!(called.usage.objects, 0);
-            assert!(inline.scalar_answer(version + 1, &args).is_none());
+            assert!(inline.scalar_answer(version + 1, args).is_none());
         }
     }
     let add = crate::native("int.add").unwrap();
