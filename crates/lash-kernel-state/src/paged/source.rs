@@ -31,25 +31,11 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/root.rs",
-///         KeyedRoot, SequenceRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
-///         CheckpointRoot, JoinerRecord, TaskStateRecord, IncomingRecord, EndedTask, BindingRecord,
-///         FunctionRecord, BoundRecord, LoopRecord, HeaderRecord, CursorRecord, CursorKind,
-///         GuardRecord, FinallyRecord, EnteredRecord, WaitRecord, WaitKindRecord, WaitPhase,
-///         CommittedOutcomeRecord, ListJoinRecord,
+///         KeyedRoot, SequenceRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind, CheckpointRoot,
 ///     ),
-///     items(path = "crates/lash-kernel-state/src/paged/census.rs", AccountingMetric, AccountingCertificate),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/family.rs",
-///         FrozenSummary, FrozenRef, MembershipRun, FamilyRecord, SessionRoot, DataOnlyCertificate,
-///     ),
-///     items(
-///         path = "crates/lash-kernel-state/src/paged/directory.rs",
-///         Body, ObjectHead, Entry, Ordinal, IteratedRecord, FrameRecord, TaskRecord, OccurrenceOwner, OccurrenceRecord, encode, decode,
-///     ),
-///     items(
-///         path = "crates/lash-kernel-state/src/paged/directory/continuation.rs",
-///         ROLE_FLAT, ROLE_CHUNK, ContinuationRecord, RolesRecord, ContinuationPhase, RoleRecord, RoleChunk,
-///         decode_cell, encode_roles, encode, decode,
+///         FrozenSummary, FrozenRef, SessionRoot,
 ///     ),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/key.rs", Key),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, load_shared, seal, encode, decode),
@@ -72,10 +58,6 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/metadata.rs",
 ///         NameRef, UnitRef, SiteRef, TaskIdentityRef, SpawnNode, encode, decode,
-///     ),
-///     items(
-///         path = "crates/lash-kernel-state/src/paged/family_impl/mod.rs",
-///         RelativeValue, RelativeEntry, FrozenHeader, encode, decode,
 ///     ),
 ///     file(path = "crates/lash-kernel-state/src/paged/run/ids.rs", cover("impl TokenCodec for ObjectId", "impl TokenCodec for HighWater")),
 ///     file(

@@ -72,9 +72,11 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 ///     roots(path = "crates/lash-vm-runtime/src/process/state.rs", KernelEngineState),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/root.rs",
-///         CheckpointRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
+///         CheckpointRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
 ///     ),
-///     file(path = "crates/lash-kernel-state/src/paged/codec.rs", cover("record!(CheckpointRoot", "record!(HeapRoot")),
+///     items(path = "crates/lash-kernel-state/src/paged/run/root.rs", HeapRoot),
+///     file(path = "crates/lash-kernel-state/src/paged/codec.rs", cover("record!(CheckpointRoot")),
+///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
 ///     items(path = "crates/lash-kernel-state/src/paged/source.rs", PAGE_FORMAT),
 ///     file(path = "crates/lash-kernel-vm/src/bytecode/site_tables.rs"),
 ///     file(path = "crates/lash-kernel-vm/src/bytecode/charge_tables.rs"),
