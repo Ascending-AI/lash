@@ -1045,6 +1045,40 @@ main { do call descend(&descend) }"#;
     assert!(limited.document.node(&site).is_some());
 }
 
+/// K-BND-002: the call depth test reads a fixed number of frames per call,
+/// so recursion through a function value up to the bound does work linear
+/// in the bound. Four times the bound may read at most about four times the
+/// frames; a recount of the stack at each call near the bound reads sixteen
+/// times as many.
+#[test]
+fn recursion_to_the_depth_bound_tests_depth_in_linear_work() {
+    let source = r#"definition "function descend(self: Any) -> Any\nkernel 1\nmetering statements\nbody { do apply self(self) }"
+main { do call descend(&descend) }"#;
+    let reads = |call_depth: u32| {
+        let mut embedder = Embedder::with(
+            source,
+            Setup {
+                bounds: Bounds {
+                    call_depth,
+                    ..ROOMY
+                },
+                ..Setup::default()
+            },
+        );
+        let before = crate::vm::depth_reads();
+        let End::Error(RunError::Bound(exceeded)) = embedder.run_to_end(&[]) else {
+            panic!("the recursion is refused at depth {call_depth}");
+        };
+        assert_eq!(exceeded.bound, Bound::CallDepth);
+        crate::vm::depth_reads() - before
+    };
+    let (small, large) = (reads(1000), reads(4000));
+    assert!(
+        large <= 5 * small,
+        "depth reads grow faster than the bound: {small} at 1000, {large} at 4000"
+    );
+}
+
 /// How a bytecode-core run of `body` under memory bound `memory` ended,
 /// with what it held when it ended.
 fn core_end(body: &str, memory: u64) -> (End, u64) {

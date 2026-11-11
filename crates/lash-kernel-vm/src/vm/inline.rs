@@ -241,6 +241,7 @@ impl<H: Heap> Vm<H> {
         self.jump(resume);
         let link = self.link_of(activation.callee, self.running_link());
         self.prepare(activation.callee, link)?;
+        let depth = self.cx.depth() + u32::from(self.program.unit(activation.callee).call);
         self.cx.frames.push(Frame {
             unit: activation.callee,
             pc: to,
@@ -248,6 +249,7 @@ impl<H: Heap> Vm<H> {
             closure: None,
             bill: activation.bill,
             link,
+            depth,
         });
         Ok(())
     }

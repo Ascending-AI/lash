@@ -26,6 +26,10 @@ pub(crate) struct Frame {
     /// The completion formula the frame's call bills when it returns or
     /// raises (an outermost uncovered library call, `K-CHG-003`).
     pub bill: Option<Bill>,
+    /// The active calls at and below this frame (`K-BND-002`): its
+    /// parent's, plus one when its unit is a call, so not for `main`'s
+    /// body, a spawn's stub or a function value's trampoline.
+    pub depth: u32,
 }
 
 /// A completion formula owed by a frame. The arguments it measures are
@@ -75,6 +79,12 @@ pub(crate) struct Context {
 }
 
 impl Context {
+    /// The active calls the context's frames hold (`K-BND-002`).
+    #[inline(always)]
+    pub fn depth(&self) -> u32 {
+        self.frames.last().map_or(0, |frame| frame.depth)
+    }
+
     /// Every value the context holds, for the collector.
     pub(crate) fn roots(&self, visit: &mut dyn FnMut(&Value)) {
         self.stack.iter().for_each(&mut *visit);

@@ -39,6 +39,18 @@ use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
 
 use self::digests::Digests;
+
+#[cfg(test)]
+thread_local! {
+    /// The frames the call depth test has read on this thread (`K-BND-002`).
+    static DEPTH_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The frames the call depth test has read on this thread so far.
+#[cfg(test)]
+pub(crate) fn depth_reads() -> u64 {
+    DEPTH_READS.with(std::cell::Cell::get)
+}
 use self::library::LibraryPlaced;
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
@@ -918,25 +930,12 @@ impl<H: Heap> Vm<H> {
     // --- Frames.
 
     /// Whether the running task's active calls fill the call depth bound
-    /// (`K-BND-002`): a frame counts when its unit is a call, so not
-    /// `main`'s body, a spawn's stub or a function value's trampoline. The
-    /// frame count bounds the calls from above, so the frames are counted
-    /// only once it reaches the bound.
+    /// (`K-BND-002`): the top frame's [`Frame::depth`], read once.
     #[inline(always)]
     pub(crate) fn depth_full(&self) -> bool {
-        self.cx.frames.len() >= self.call_depth as usize && self.calls_fill_depth()
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn calls_fill_depth(&self) -> bool {
-        let calls = self
-            .cx
-            .frames
-            .iter()
-            .filter(|frame| self.program.unit(frame.unit).call)
-            .count();
-        calls >= self.call_depth as usize
+        #[cfg(test)]
+        DEPTH_READS.with(|reads| reads.set(reads.get() + 1));
+        self.cx.depth() >= self.call_depth
     }
 
     /// Pushes a frame of `unit` whose `argc` arguments are the top of the
@@ -970,6 +969,7 @@ impl<H: Heap> Vm<H> {
         if boxes {
             self.box_locals(unit, base)?;
         }
+        let depth = self.cx.depth() + u32::from(code.call);
         self.cx.frames.push(Frame {
             unit,
             pc: 0,
@@ -977,6 +977,7 @@ impl<H: Heap> Vm<H> {
             closure,
             bill,
             link,
+            depth,
         });
         Ok(())
     }

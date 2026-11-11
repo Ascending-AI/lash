@@ -919,6 +919,7 @@ fn open_frame(
             from: bill.from,
         }),
     };
+    let depth = cx.depth() + u32::from(unit.call);
     cx.frames.push(Frame {
         unit: id,
         pc: entry.resume.pc,
@@ -926,6 +927,7 @@ fn open_frame(
         closure,
         bill,
         link,
+        depth,
     });
     Ok(())
 }
