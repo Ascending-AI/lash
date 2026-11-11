@@ -164,8 +164,8 @@ impl Unit {
                 "the boxed locals are not distinct locals in order".into(),
             ));
         }
-        if self.covered && self.step.iter().any(|&step| step) {
-            return Err(whole("covered code makes a step".into()));
+        if !self.marked() && self.step.iter().any(|&step| step) {
+            return Err(whole("unmarked code makes a step".into()));
         }
         self.check_blocks(id)?;
         self.check_inlines(program, id)?;
@@ -372,6 +372,17 @@ impl Unit {
                     .any(|(pc, _)| (entry..end).contains(&(*pc as usize)))
             {
                 return Err(whole(format!("inline site {n}'s region steps or is seen")));
+            }
+            let steps = program.get_unit(site.callee).is_some_and(|body| body.steps);
+            if site.steps != steps
+                || (steps
+                    && self.event[entry..end]
+                        .iter()
+                        .any(|event| event.total() != 0))
+            {
+                return Err(whole(format!(
+                    "inline site {n}'s region bills where its body steps, or names its steps wrongly"
+                )));
             }
             next = site.end;
         }
@@ -801,6 +812,7 @@ mod tests {
             call: false,
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             covered: false,
+            steps: true,
             params: 0,
             locals: 0,
             captures: 0,

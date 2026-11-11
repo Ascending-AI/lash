@@ -566,6 +566,8 @@ pub(crate) struct Embedder {
     pub(crate) slice: u64,
     pub(crate) bounds: Bounds,
     probes: Option<Probes>,
+    /// The image the run started on, which a reopen opens it on again.
+    prepared: Option<PreparedLibrary>,
     pub(crate) source: Source,
 }
 
@@ -662,7 +664,9 @@ impl Embedder {
         let document = Arc::new(document);
         let program = crate::laws::embedder::program(
             Arc::clone(&document),
-            prepared.unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
+            prepared
+                .clone()
+                .unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
         );
         let source = Source::default();
         let mut start = setup.start;
@@ -719,17 +723,21 @@ impl Embedder {
             slice: setup.slice,
             bounds: setup.bounds,
             probes: setup.probes,
+            prepared,
             source,
         })
     }
 
     /// The run's document with a registry built afresh, in which
-    /// `pair.twice` runs natively or not.
+    /// `pair.twice` runs natively or not; a run started on its own image
+    /// opens on that image again.
     pub(crate) fn program(&self, native_twice: bool) -> (Program, Library) {
         let library = library_with(native_twice, self.probes);
         let program = crate::laws::embedder::program(
             Arc::clone(&self.document),
-            PreparedLibrary::new(Arc::clone(&library.registry)),
+            self.prepared
+                .clone()
+                .unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
         );
         (program, library)
     }

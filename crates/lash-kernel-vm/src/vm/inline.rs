@@ -41,6 +41,16 @@ impl<H: Heap> Vm<H> {
         Ok(self.lay_out(unit, n, charge, argc))
     }
 
+    /// Enters inline site `n` of `unit`, whose body steps, as the body's
+    /// own frame: its region bills nothing, so a slice due in it is due
+    /// at the call, and the slice lands at the body's first statement.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn enter_stepped(&mut self, unit: &Unit, n: u32) -> Run<()> {
+        self.inline(unit, n)?;
+        self.deopt(unit, 0)
+    }
+
     /// Enters inline site `n` of `unit` as [`Vm::inline`] does, and runs
     /// the region's folds `folds`, its guard paths, until one holds: at
     /// most one does, for no two paths take the same branch both ways. A

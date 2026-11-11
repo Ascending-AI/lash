@@ -253,8 +253,16 @@ fn setup(bounds: Bounds, slice: u64) -> Setup {
 }
 
 /// What a law compares of a run: its end, what it printed, the labels of
-/// what it requested, and its charge.
-type Observed = (End, Vec<Datum>, Vec<String>, u64);
+/// what it requested, its charge, and the session it carried as its
+/// object graph: ids depend on seal history and are not compared
+/// (contract §6, ObjectIds).
+type Observed = (
+    End,
+    Vec<Datum>,
+    Vec<String>,
+    u64,
+    Option<lash_kernel_state::semantic::Checkpoint>,
+);
 
 /// Runs `program` in slices of `slice`, answering each request oldest
 /// first, with `at_slice` called at each slice return. Gives what the run
@@ -280,7 +288,18 @@ fn observe(
         .charged
         .expect("exact charge");
     let asked = embedder.asked();
-    ((end, embedder.world.printed, asked, charged), slices)
+    let mut end = end;
+    let carried = match &mut end {
+        End::Finished(finished) => finished.carry.take().map(|root| {
+            lash_kernel_state::semantic::session(&root, Box::new(embedder.source.clone()))
+                .expect("the carry reads back")
+        }),
+        _ => None,
+    };
+    (
+        (end, embedder.world.printed, asked, charged, carried),
+        slices,
+    )
 }
 
 fn pair(tag: &str, i: i64) -> Datum {

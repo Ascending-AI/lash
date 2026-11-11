@@ -1586,16 +1586,33 @@ impl<'a> Compiler<'a> {
                 charge,
             });
         }
-        // A loop's back edge starts a step (`K-MACH-002`).
+        // A step is a statement of guest code, a closure or a body-only
+        // library body; a native's Decline and entry into its alternative
+        // body create none (`K-MACH-002`). A library body marks its
+        // statements either way: whether it steps follows the image, and
+        // a frame saved at one under an image where it steps opens there
+        // under one where it does not.
+        let (marked, steps) = match kind {
+            _ if !covered => (true, true),
+            UnitKind::Body(id) | UnitKind::Declared(id) => (
+                true,
+                self.registry
+                    .get(&id)
+                    .and_then(|registered| registered.native())
+                    .is_none(),
+            ),
+            _ => (false, false),
+        };
+        // A loop's back edge starts a step.
         for (at, op) in ops.iter().enumerate() {
             if let Op::Jump(to) = op
                 && (*to as usize) < at
-                && !covered
+                && marked
             {
                 step[at] = true;
             }
         }
-        if covered {
+        if !marked {
             step.iter_mut().for_each(|flag| *flag = false);
         }
         let mut boxed: Vec<u16> = boxed
@@ -1608,6 +1625,7 @@ impl<'a> Compiler<'a> {
             kind,
             link: self.link,
             covered,
+            steps,
             params,
             locals: locals.max(params),
             captures: capture_names.len() as u16,

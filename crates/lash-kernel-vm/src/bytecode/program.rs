@@ -129,8 +129,13 @@ pub struct Unit {
     /// operation fills are that Link's.
     pub link: LinkId,
     /// The unit runs inside a covered library extent (`K-CHG-007`): its
-    /// event table holds only what charges there, and it creates no step.
+    /// event table holds only what charges there.
     pub covered: bool,
+    /// Its statements are steps (`K-MACH-002`): guest code, a closure
+    /// of it, or a body-only library body, covered or not. A native's
+    /// alternative body, entered by Decline, and the other covered units
+    /// make none.
+    pub steps: bool,
     pub params: u16,
     /// Locals, parameters first.
     pub locals: u16,
@@ -143,8 +148,8 @@ pub struct Unit {
     pub ops: Vec<Op>,
     /// Each op's fixed charge under `Charge::Exact`.
     pub event: Vec<Event>,
-    /// Whether the slice is tested before the op (`K-MACH-002`): a
-    /// statement's start or a loop's back edge.
+    /// A statement's start or a loop's back edge: where the slice is
+    /// tested before the op when the unit steps (`K-MACH-002`).
     pub step: Vec<bool>,
     /// For each op, the fixed charge its block's ops bill up to and
     /// including it: `rest(o) = cost - through[o]` (contract §3). `None`
@@ -209,13 +214,26 @@ impl Unit {
     /// at a step's start, and where a stepped frame's last statement ends
     /// by falling off its body. The resume table saves a point at each.
     pub fn slices(&self, pc: usize) -> bool {
-        self.step[pc] || (matches!(self.ops[pc], Op::Fall) && !self.covered)
+        (self.step[pc] || matches!(self.ops[pc], Op::Fall)) && self.steps
+    }
+
+    /// Whether `pc` starts a statement or a loop's pass that a frame can
+    /// stand at, stepping or not: a library body's are its points under
+    /// every image.
+    fn marks(&self, pc: usize) -> bool {
+        self.step[pc] || (matches!(self.ops[pc], Op::Fall) && self.marked())
+    }
+
+    /// Whether its statements are marked: code that steps, and a library
+    /// body that may step under another image.
+    pub fn marked(&self) -> bool {
+        self.steps || matches!(self.kind, UnitKind::Body(_) | UnitKind::Declared(_))
     }
 
     /// Whether a frame is saved standing before `pc`'s op: at a step, or
     /// at the unit's head, before it has begun (a fresh run or task).
     pub fn stands(&self, pc: usize) -> bool {
-        pc == 0 || self.slices(pc)
+        pc == 0 || self.marks(pc)
     }
 
     /// The statement op `pc` runs in, where the origin table covers it.
@@ -259,6 +277,10 @@ pub struct InlineSite {
     pub at: u32,
     pub entry: u32,
     pub end: u32,
+    /// The body makes steps: its region bills nothing (validated), so a
+    /// slice falls due in it only where it is due at the region's entry,
+    /// and there the body runs as its own frame instead.
+    pub steps: bool,
     /// Its guard paths' folds (`fold`): where they start in the unit's
     /// folds and where they end, an empty span when no path folds.
     pub folds: (u32, u32),

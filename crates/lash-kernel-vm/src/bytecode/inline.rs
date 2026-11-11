@@ -294,6 +294,7 @@ fn expand(
         }
     }
     let end = entry + ops.len() as u32;
+    let steps = program.unit(callee).steps;
     #[cfg(test)]
     ADDED.with(|added| added.set(added.get() + ops.len() as u64));
     let caller = &mut program.units[at];
@@ -329,6 +330,7 @@ fn expand(
         at: pc as u32,
         entry,
         end,
+        steps,
         folds: (0, 0),
     });
     Some(())

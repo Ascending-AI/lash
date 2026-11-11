@@ -1128,7 +1128,7 @@ impl<H: Heap> Vm<H> {
             loop {
                 let mut op = ops[pc];
                 #[cfg(test)]
-                if !retrying && unit.step[pc] {
+                if !retrying && unit.steps && unit.step[pc] {
                     crate::perf_witness::record(|work| work.vm_steps += 1);
                     self.chill();
                 }
@@ -1253,6 +1253,10 @@ impl<H: Heap> Vm<H> {
                         enter!(call, pc, rerun);
                         if let Some(checked) = &call.checked {
                             self.check_arguments(checked, usize::from(call.argc))?;
+                        }
+                        if site.steps && self.meter.spent() {
+                            self.enter_stepped(unit, n)?;
+                            continue 'frames;
                         }
                         // A fold that holds completes the activation at
                         // the region's leave, and the caller runs on after
