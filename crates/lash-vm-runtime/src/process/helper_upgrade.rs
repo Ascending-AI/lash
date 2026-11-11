@@ -34,13 +34,25 @@ pub(super) fn plan(
         .ok_or_else(|| invalid("empty helper ledger"))?
         .library
         .identity;
-    plan_at(content, root, archive, release)
+    plan_at(content, root, archive, &validated(archive)?, release)
+}
+
+/// The archive's authenticated definitions, which [`plan_at`] plans over.
+pub(super) fn validated(
+    archive: &lash_kernel_releases::archive::Archive,
+) -> Result<lash_kernel_releases::archive::Definitions, HelperUpgradeRefusal> {
+    archive
+        .validate()
+        .map_err(|error| HelperUpgradeRefusal::Archive {
+            message: error.to_string(),
+        })
 }
 
 pub(super) fn plan_at(
     content: &LinkedContent,
     root: LinkId,
     archive: &lash_kernel_releases::archive::Archive,
+    definitions: &lash_kernel_releases::archive::Definitions,
     release: lash_kernel_value::HelperLibraryId,
 ) -> Result<PlannedHelperUpgrade, HelperUpgradeRefusal> {
     let reached = content
@@ -48,7 +60,7 @@ pub(super) fn plan_at(
         .values()
         .flat_map(|doc| doc.library.iter().copied())
         .collect();
-    let upgrade = archive.upgrade_to(&reached, release)?;
+    let upgrade = archive.upgrade_within(definitions, &reached, release)?;
     let mut planned = PlannedHelperUpgrade {
         content: LinkedContent::default(),
         links: BTreeMap::new(),

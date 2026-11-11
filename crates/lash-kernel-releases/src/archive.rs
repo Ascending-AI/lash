@@ -125,7 +125,8 @@ pub enum ArchiveError {
     Rewritten,
 }
 
-type Definitions = BTreeMap<FunctionId, FunctionDefinition>;
+/// The helper definitions an authenticated archive holds, by identity.
+pub type Definitions = BTreeMap<FunctionId, FunctionDefinition>;
 
 fn reach(roots: &BTreeSet<FunctionId>, definitions: &Definitions) -> Option<BTreeSet<FunctionId>> {
     let mut seen = BTreeSet::new();
@@ -634,11 +635,25 @@ impl Archive {
         reached: &BTreeSet<FunctionId>,
         release: HelperLibraryId,
     ) -> Result<lash_kernel_doc::HelperUpgrade, lash_kernel_doc::HelperUpgradeRefusal> {
+        let definitions =
+            self.validate()
+                .map_err(|error| lash_kernel_doc::HelperUpgradeRefusal::Archive {
+                    message: error.to_string(),
+                })?;
+        self.upgrade_within(&definitions, reached, release)
+    }
+
+    /// As [`Self::upgrade_to`], over the definitions this archive's
+    /// [`Self::validate`] answered, so a search over several targets
+    /// authenticates the history once.
+    pub fn upgrade_within(
+        &self,
+        definitions: &Definitions,
+        reached: &BTreeSet<FunctionId>,
+        release: HelperLibraryId,
+    ) -> Result<lash_kernel_doc::HelperUpgrade, lash_kernel_doc::HelperUpgradeRefusal> {
         use lash_kernel_doc::{HelperChange, HelperUpgrade, HelperUpgradeRefusal as Refusal};
-        let definitions = self.validate().map_err(|error| Refusal::Archive {
-            message: error.to_string(),
-        })?;
-        let reached = reach(reached, &definitions).ok_or_else(|| Refusal::Archive {
+        let reached = reach(reached, definitions).ok_or_else(|| Refusal::Archive {
             message: "reached helper is absent".into(),
         })?;
         let sequence = self
@@ -708,7 +723,7 @@ impl Archive {
                 });
             }
             let old_reach =
-                reach(&[*function].into(), &definitions).ok_or(Refusal::HelperUnpaired {
+                reach(&[*function].into(), definitions).ok_or(Refusal::HelperUnpaired {
                     function: *function,
                 })?;
             covered.extend(&old_reach);
@@ -716,7 +731,7 @@ impl Archive {
                 continue;
             }
             let new_reach =
-                reach(&[target.function].into(), &definitions).ok_or(Refusal::HelperUnpaired {
+                reach(&[target.function].into(), definitions).ok_or(Refusal::HelperUnpaired {
                     function: target.function,
                 })?;
             result

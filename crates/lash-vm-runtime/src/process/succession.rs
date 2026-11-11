@@ -160,13 +160,21 @@ impl EngineSuccession for KernelSuccession {
                     .map_err(|e| SuccessionError::Unavailable(e.to_string()))?;
                 let mut selected = None;
                 let mut refusal = None;
+                // The history is authenticated once for the whole search.
+                let definitions = super::helper_upgrade::validated(&archive);
                 for release in archive.releases.iter().rev() {
-                    match super::helper_upgrade::plan_at(
-                        &source,
-                        context.from.link,
-                        &archive,
-                        release.library.identity,
-                    ) {
+                    match definitions
+                        .as_ref()
+                        .map_err(Clone::clone)
+                        .and_then(|definitions| {
+                            super::helper_upgrade::plan_at(
+                                &source,
+                                context.from.link,
+                                &archive,
+                                definitions,
+                                release.library.identity,
+                            )
+                        }) {
                         Ok(planned)
                             if planned.links[&context.from.link] == context.to.link
                                 && !planned.upgrade.changes.is_empty() =>
