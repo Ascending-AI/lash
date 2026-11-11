@@ -702,17 +702,22 @@ fn gmail_operation(name: &str) -> String {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
+    let witnesses_output = index.is_multiple_of(7);
+    let mut input = gmail_like_input_schema(name);
+    if witnesses_output && let Some(input) = input.as_object_mut() {
+        lash_vocabulary::schema_contract::declare_output_witness(input, "projection");
+    }
     let mut definition = ToolDefinition::raw(
         format!("tool:{name}"),
         gmail_operation(name),
         gmail_like_tool_description(index, name),
-        gmail_like_input_schema(name),
+        input,
         gmail_like_output_schema(name),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120));
 
-    if index.is_multiple_of(7) {
+    if witnesses_output {
         definition.contract.output_contract = ToolOutputContract::from_input_schema(
             "projection",
             Some(

@@ -376,16 +376,16 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
 }
 
 fn llm_query_input_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "task": { "type": "string" },
-            "inputs": {},
-            "output": { "type": "object", "additionalProperties": true }
-        },
-        "required": ["task"],
-        "additionalProperties": false
-    })
+    let mut schema = serde_json::Map::new();
+    schema.insert("type".into(), json!("object"));
+    schema.insert(
+        "properties".into(),
+        json!({ "task": { "type": "string" }, "inputs": {} }),
+    );
+    lash_vocabulary::schema_contract::declare_output_witness(&mut schema, "output");
+    schema.insert("required".into(), json!(["task"]));
+    schema.insert("additionalProperties".into(), json!(false));
+    Value::Object(schema)
 }
 
 fn llm_query_prompt(task: &str, inputs: &Value, output_schema: Option<&Value>) -> String {
@@ -697,6 +697,139 @@ mod tests {
         });
         lash_core::testing::ToolCallFixture::with_host_and_direct_completions(manager, completions)
             .attempt("test-turn")
+    }
+
+    /// FIG-7709: `output` is declared as exactly what the runtime accepts.
+    /// The tool's declared input schema and the runtime witness parser both
+    /// give each candidate its hand-derived verdict: every descriptor
+    /// spelling and Type witness is admitted; the write-up's JSON Schema,
+    /// non-record values, unknown spellings and the empty record are refused.
+    #[test]
+    fn declared_output_admits_exactly_the_witnesses_the_runtime_parses() {
+        use lash_kernel_value::{
+            EntrySchemaPolicy, RecordRest, RecordType, RecordTypeField, Type, json_schema_of_type,
+        };
+        let declared = llm_query_tool_definition()
+            .contract()
+            .input_schema
+            .canonical;
+        let type_witness = |ty: Type| {
+            let schema = json_schema_of_type(&ty, EntrySchemaPolicy::default())
+                .expect("projectable type")
+                .into_value();
+            serde_json::json!({ "$lash_type": schema })
+        };
+        let field = |name: &str, ty: Type| RecordTypeField {
+            name: name.into(),
+            ty,
+            optional: false,
+        };
+        let (yes, no) = (true, false);
+        let candidates = [
+            // Every descriptor spelling, bare, in a list, and trimmed of
+            // Unicode whitespace; then near misses.
+            (
+                serde_json::json!({ "personal_data": "bool", "reason": "str" }),
+                yes,
+            ),
+            (
+                serde_json::json!({ "a": "string", "b": "int", "c": "integer", "d": "float" }),
+                yes,
+            ),
+            (
+                serde_json::json!({ "a": "number", "b": "boolean", "c": "record", "d": "dict" }),
+                yes,
+            ),
+            (
+                serde_json::json!({ "a": "object", "b": "list[str]", "c": "list[record]" }),
+                yes,
+            ),
+            (
+                serde_json::json!({ "a": " list[ \u{3000}int\t] \u{85}", "b": "\u{a0}bool\n" }),
+                yes,
+            ),
+            (
+                serde_json::json!({ "$lash_type": "str", "value": "int" }),
+                yes,
+            ),
+            (serde_json::json!({ "a": "list[list[str]]" }), no),
+            (serde_json::json!({ "a": "list[]" }), no),
+            (serde_json::json!({ "a": "list[str]]" }), no),
+            (serde_json::json!({ "a": "\u{feff}str" }), no),
+            (serde_json::json!({ "a": "Str" }), no),
+            (serde_json::json!({ "a": "optional[str]" }), no),
+            (serde_json::json!({ "a": "str", "b": "bigint" }), no),
+            (serde_json::json!({ "$lash_type": "str" }), no),
+            // The write-up's incorrect call: a JSON Schema in `output`.
+            (
+                serde_json::json!({
+                    "type": "object",
+                    "properties": { "personal_data": { "type": "boolean" } },
+                    "required": ["personal_data"],
+                    "additionalProperties": false
+                }),
+                no,
+            ),
+            (serde_json::json!({ "a": ["str"] }), no),
+            (serde_json::json!({ "a": true }), no),
+            (serde_json::json!({}), no),
+            (serde_json::json!(["str"]), no),
+            (serde_json::json!(true), no),
+            (serde_json::json!("str"), no),
+            // Type witnesses as the VM compiler projects a Type literal.
+            (type_witness(Type::Text), yes),
+            (type_witness(Type::List(Box::new(Type::Int))), yes),
+            (
+                type_witness(Type::Record(RecordType {
+                    fields: vec![field("summary", Type::Text), field("score", Type::Number)],
+                    rest: RecordRest::Closed,
+                })),
+                yes,
+            ),
+            (serde_json::json!({ "$lash_type": {} }), yes),
+            (
+                serde_json::json!({ "$lash_type": { "anyOf": [{}, { "type": "null" },
+                    { "anyOf": [{ "type": "integer" }] }] } }),
+                yes,
+            ),
+            (serde_json::json!({ "$lash_type": { "anyOf": [] } }), no),
+            (
+                serde_json::json!({ "$lash_type": { "anyOf": [{ "type": "string" }], "x": 1 } }),
+                no,
+            ),
+            (
+                serde_json::json!({ "$lash_type": { "anyOf": [{ "type": "frobnicate" }] } }),
+                no,
+            ),
+            (
+                serde_json::json!({ "$lash_type": { "properties": {} } }),
+                no,
+            ),
+            (
+                serde_json::json!({ "$lash_type": { "type": ["string", "null"] } }),
+                no,
+            ),
+            (
+                serde_json::json!({ "$lash_type": { "type": "object" }, "extra": "str" }),
+                no,
+            ),
+            (serde_json::json!({ "$lash_type": [] }), no),
+        ];
+        for (output, accepted) in candidates {
+            let runtime = lash_vocabulary::schema_contract::parse_output_schema(Some(&output));
+            let declaration =
+                declared.validate(&serde_json::json!({ "task": "t", "output": output }));
+            assert_eq!(
+                runtime.is_ok(),
+                accepted,
+                "runtime, output {output}: {runtime:?}"
+            );
+            assert_eq!(
+                declaration.is_ok(),
+                accepted,
+                "declaration, output {output}: {declaration:?}"
+            );
+        }
     }
 
     #[test]

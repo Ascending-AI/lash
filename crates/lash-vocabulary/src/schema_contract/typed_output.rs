@@ -1,8 +1,6 @@
 //! Parsing for the typed-output schema witness vocabulary.
 
-use serde_json::Value;
-#[cfg(test)]
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 use {
     lash_kernel_value::EntrySchemaPolicy, lash_kernel_value::RecordType,
@@ -28,6 +26,17 @@ pub enum SchemaScalarKind {
 }
 
 impl SchemaScalarKind {
+    /// Every kind, in declaration order.
+    pub const ALL: [Self; 7] = [
+        Self::String,
+        Self::Number,
+        Self::Integer,
+        Self::Boolean,
+        Self::Array,
+        Self::Object,
+        Self::Null,
+    ];
+
     pub fn from_schema_name(name: &str) -> Option<Self> {
         Some(match name {
             "string" => Self::String,
@@ -237,29 +246,176 @@ fn validate_lash_type_schema_at_depth(
     }
 }
 
-fn type_descriptor(descriptor: &str) -> Result<Type, OutputSchemaError> {
-    let scalar = |ty: &str| -> Result<Type, OutputSchemaError> {
-        Ok(match ty {
-            "str" | "string" => Type::Text,
-            "int" | "integer" => Type::Int,
-            "float" | "number" => Type::Number,
-            "bool" | "boolean" => Type::Bool,
-            "record" | "dict" | "object" => Type::Record(RecordType {
+/// What a scalar descriptor spelling stands for.
+#[derive(Clone, Copy)]
+enum DescriptorScalar {
+    Text,
+    Int,
+    Number,
+    Bool,
+    Record,
+}
+
+/// Every scalar descriptor spelling the witness grammar accepts: the one
+/// source for parsing a descriptor and for declaring the descriptor grammar.
+const DESCRIPTOR_SCALARS: [(&str, DescriptorScalar); 11] = [
+    ("str", DescriptorScalar::Text),
+    ("string", DescriptorScalar::Text),
+    ("int", DescriptorScalar::Int),
+    ("integer", DescriptorScalar::Int),
+    ("float", DescriptorScalar::Number),
+    ("number", DescriptorScalar::Number),
+    ("bool", DescriptorScalar::Bool),
+    ("boolean", DescriptorScalar::Bool),
+    ("record", DescriptorScalar::Record),
+    ("dict", DescriptorScalar::Record),
+    ("object", DescriptorScalar::Record),
+];
+
+/// A descriptor is `[ws] scalar [ws]` or `[ws] list[ [ws] scalar [ws] ] [ws]`,
+/// whitespace being what [`str::trim`] removes.
+const LIST_DESCRIPTOR_OPEN: &str = "list[";
+const LIST_DESCRIPTOR_CLOSE: char = ']';
+
+impl DescriptorScalar {
+    fn ty(self) -> Type {
+        match self {
+            Self::Text => Type::Text,
+            Self::Int => Type::Int,
+            Self::Number => Type::Number,
+            Self::Bool => Type::Bool,
+            Self::Record => Type::Record(RecordType {
                 fields: vec![],
                 rest: lash_kernel_value::RecordRest::Keep(Box::new(Type::Json)),
             }),
-            _ => return Err(OutputSchemaError::UnknownScalar { kind: ty.into() }),
-        })
+        }
+    }
+}
+
+fn type_descriptor(descriptor: &str) -> Result<Type, OutputSchemaError> {
+    let scalar = |ty: &str| -> Result<Type, OutputSchemaError> {
+        DESCRIPTOR_SCALARS
+            .iter()
+            .find(|(spelling, _)| *spelling == ty)
+            .map(|(_, scalar)| scalar.ty())
+            .ok_or_else(|| OutputSchemaError::UnknownScalar { kind: ty.into() })
     };
     let trimmed = descriptor.trim();
     if let Some(inner) = trimmed
-        .strip_prefix("list[")
-        .and_then(|rest| rest.strip_suffix(']'))
+        .strip_prefix(LIST_DESCRIPTOR_OPEN)
+        .and_then(|rest| rest.strip_suffix(LIST_DESCRIPTOR_CLOSE))
     {
         return Ok(Type::List(Box::new(scalar(inner.trim())?)));
     }
     scalar(trimmed)
 }
+
+/// The `$defs` name [`declare_output_witness`] gives the Type-witness schema.
+pub const LASH_TYPE_SCHEMA_DEFINITION: &str = "LashTypeSchema";
+
+/// Declare `field` of a tool input schema as an output witness: exactly the
+/// two forms [`parse_output_schema`] accepts, short of the Type witness's
+/// depth bound. Adds `properties.<field>` and `$defs.LashTypeSchema` to the
+/// root object, replacing either if it is not an object.
+pub fn declare_output_witness(input_schema: &mut Map<String, Value>, field: &str) {
+    let type_schema = format!("#/$defs/{LASH_TYPE_SCHEMA_DEFINITION}");
+    let witness = json!({
+        "anyOf": [
+            {
+                "type": "object",
+                "description": "Record of field name to type descriptor.",
+                "minProperties": 1,
+                "additionalProperties": { "type": "string", "pattern": DESCRIPTOR_PATTERN.as_str() },
+                // A lone `$lash_type` key is always the Type witness.
+                "not": { "required": [LASH_TYPE_KEY], "maxProperties": 1 }
+            },
+            {
+                "type": "object",
+                "description": "Type witness: a Type literal's JSON Schema.",
+                "properties": { (LASH_TYPE_KEY): { "$ref": type_schema } },
+                "required": [LASH_TYPE_KEY],
+                "additionalProperties": false
+            }
+        ]
+    });
+    let kinds = SchemaScalarKind::ALL
+        .iter()
+        .map(|kind| kind.as_schema_name())
+        .collect::<Vec<_>>();
+    let type_schema_definition = json!({
+        "anyOf": [
+            // `any` and process types project to the empty schema.
+            { "type": "object", "additionalProperties": false },
+            {
+                "type": "object",
+                "properties": { "type": { "enum": kinds } },
+                "required": ["type"],
+                "additionalProperties": true,
+                "not": { "required": ["anyOf"] }
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "anyOf": { "type": "array", "minItems": 1, "items": { "$ref": type_schema } }
+                },
+                "required": ["anyOf"],
+                "maxProperties": 1
+            }
+        ]
+    });
+    insert_member(input_schema, "properties", field, witness);
+    insert_member(
+        input_schema,
+        "$defs",
+        LASH_TYPE_SCHEMA_DEFINITION,
+        type_schema_definition,
+    );
+}
+
+fn insert_member(map: &mut Map<String, Value>, key: &str, name: &str, value: Value) {
+    let mut members = match map.remove(key) {
+        Some(Value::Object(members)) => members,
+        _ => Map::new(),
+    };
+    members.insert(name.to_string(), value);
+    map.insert(key.to_string(), Value::Object(members));
+}
+
+/// The descriptor grammar of [`type_descriptor`] as an anchored pattern.
+/// Whitespace is every character [`char::is_whitespace`] admits, so the
+/// pattern trims exactly what [`str::trim`] does.
+static DESCRIPTOR_PATTERN: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for c in (char::MIN..=char::MAX).filter(|c| c.is_whitespace()) {
+        let code = u32::from(c);
+        match runs.last_mut() {
+            Some((_, end)) if *end + 1 == code => *end = code,
+            _ => runs.push((code, code)),
+        }
+    }
+    let whitespace = format!(
+        "[{}]*",
+        runs.iter()
+            .map(|&(start, end)| match end - start {
+                0 => format!("\\u{start:04X}"),
+                1 => format!("\\u{start:04X}\\u{end:04X}"),
+                _ => format!("\\u{start:04X}-\\u{end:04X}"),
+            })
+            .collect::<String>()
+    );
+    let scalar = format!(
+        "(?:{})",
+        DESCRIPTOR_SCALARS
+            .iter()
+            .map(|(spelling, _)| *spelling)
+            .collect::<Vec<_>>()
+            .join("|")
+    );
+    let open = LIST_DESCRIPTOR_OPEN.replace('[', "\\[");
+    format!(
+        "^{whitespace}(?:{open}{whitespace}{scalar}{whitespace}\\{LIST_DESCRIPTOR_CLOSE}|{scalar}){whitespace}$"
+    )
+});
 
 #[cfg(test)]
 mod tests {
