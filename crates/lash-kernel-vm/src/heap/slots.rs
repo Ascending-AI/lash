@@ -733,12 +733,24 @@ impl Heap for SlotHeap {
     }
 
     fn install(&mut self, built: Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {
-        let placed: Vec<(ArenaHandle, u64)> = built
-            .iter()
-            .map(|(handle, object)| (*handle, schedule(object)))
-            .collect();
+        // A native's batch is nearly always a few objects: their schedules
+        // wait on the stack while the arena takes the objects.
+        let mut few = [(ArenaHandle::new(0, 0), 0); 4];
+        let many: Vec<(ArenaHandle, u64)>;
+        let placed = if built.len() <= few.len() {
+            for (slot, (handle, object)) in few.iter_mut().zip(&built) {
+                *slot = (*handle, schedule(object));
+            }
+            &few[..built.len()]
+        } else {
+            many = built
+                .iter()
+                .map(|(handle, object)| (*handle, schedule(object)))
+                .collect();
+            &many[..]
+        };
         self.arena.install(built)?;
-        for (handle, admitted) in placed {
+        for &(handle, admitted) in placed {
             self.settle_placed(handle, admitted);
         }
         Ok(())

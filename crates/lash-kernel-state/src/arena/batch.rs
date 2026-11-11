@@ -39,6 +39,8 @@ pub(super) struct Entry {
     pub(super) handle: ArenaHandle,
     body: Body,
     pub(super) facts: Facts,
+    /// Whether preparation has summarized the member yet.
+    summarized: bool,
 }
 struct View<'a> {
     arena: &'a Arena,
@@ -136,6 +138,7 @@ impl Arena {
                     token,
                     ..Facts::default()
                 },
+                summarized: false,
             });
             allocations += u64::from(mutable);
         }
@@ -145,14 +148,11 @@ impl Arena {
             .checked_add(allocations)
             .ok_or_else(|| malformed("object allocations overflow"))?;
         // Immutable summaries follow dependencies, rather than reservation order.
-        let mut done = Vec::new();
-        reserve(&mut done, entries.len())?;
-        done.resize(entries.len(), false);
         let mut remaining = entries.len();
         while remaining != 0 {
             let before = remaining;
             for at in 0..entries.len() {
-                if done[at] {
+                if entries[at].summarized {
                     continue;
                 }
                 let mut ready = true;
@@ -167,7 +167,7 @@ impl Arena {
                         && let Some(child) = value
                             .handle()
                             .and_then(|h| indices.get(&entries, h.index()))
-                        && !done[child]
+                        && !entries[child].summarized
                     {
                         ready = false;
                     }
@@ -185,7 +185,7 @@ impl Arena {
                     if immutable {
                         entries[at].facts.summary = summary;
                     }
-                    done[at] = true;
+                    entries[at].summarized = true;
                     remaining -= 1;
                 }
             }
