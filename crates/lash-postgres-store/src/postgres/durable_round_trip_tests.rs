@@ -1946,3 +1946,142 @@ async fn a_reaper_commits_only_when_a_node_expired() {
     assert!(answer.unwrap().is_empty());
     assert_eq!(commits(&empty), 0);
 }
+
+/// The round trips of a process start's environment acquisition and of its
+/// settlement (the record's acquisition of the environment, then the start's
+/// environment and module ends carrying the environment and a document onto
+/// the record) for an environment authoring `links` links, each over its own
+/// document: `2 * links` package dependencies.
+async fn environment_retention_round_trips(
+    store: &crate::PostgresLashVmArtifactStore,
+    round: u8,
+    links: usize,
+) -> (u64, u64) {
+    use lash_core_store::artifact_referrer::{
+        ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreId, HostArtifactPin,
+        ReferrerClaim, ResolvedArtifactCleanup,
+    };
+    use lash_durable::packages::PackageStore as _;
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+    use lash_vocabulary::identity::ProcessId;
+
+    let pin = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let claim = ReferrerClaim::unguarded(pin.clone()).expect("pin claim");
+    let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+        lash_vocabulary::claims::RegistryKind::Process,
+    );
+    let mut carried_document = None;
+    for index in 0..links {
+        let mut id = [round; 32];
+        id[..8].copy_from_slice(&(index as u64).to_le_bytes());
+        let document = lash_kernel_value::names::DocumentId::from_bytes(id);
+        carried_document.get_or_insert_with(|| document.to_string());
+        store
+            .publish_module_artifact(&claim, &document.to_string(), b"dependency document")
+            .await
+            .expect("document");
+        let link = lash_kernel_value::package::Link {
+            helper_fills: Default::default(),
+            document,
+            fills: Default::default(),
+        };
+        let link = lash_core_store::packages::LinkRecord {
+            id: link.identity(),
+            link,
+        };
+        store.put_link(&claim, &link, &[]).await.expect("link");
+        execution.authored.insert(link.id);
+    }
+    let env = lash_core_store::process_env::ProcessEnv::builder(
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
+    )
+    .execution(execution)
+    .build()
+    .expect("environment");
+    let env_ref = env.stable_ref().expect("environment reference");
+    let bytes = env.to_store_bytes().expect("environment bytes");
+    store
+        .publish_process_env(&claim, &env_ref, &bytes)
+        .await
+        .expect("publish the environment");
+
+    let started = ProcessId::fixture(&format!("started-{round}"));
+    let (_, start) = round_trips(async {
+        let mut tx = crate::guarded_tx::begin_guarded(&store.pool, &store.fence)
+            .await
+            .expect("begin the start");
+        crate::artifact_store::acquire_process_env_tx(&mut tx, &env_ref, &started)
+            .await
+            .expect("the start acquires its environment");
+        tx.commit().await.expect("commit the start");
+    })
+    .await;
+
+    let record = ArtifactReferrer::ProcessRecord(ProcessId::fixture(&format!("settled-{round}")));
+    let record_claim = ReferrerClaim::unguarded(record.clone()).expect("record claim");
+    let (_, settle) = round_trips(async {
+        store
+            .acquire_process_env(&record_claim, &env_ref)
+            .await
+            .expect("the record holds the environment");
+        store
+            .end_process_env_referrer(&ResolvedArtifactCleanup {
+                referrer: pin.clone(),
+                carries: vec![ArtifactCarry {
+                    artifact: ArtifactName {
+                        store: ArtifactStoreId::ProcessEnv,
+                        artifact_ref: env_ref.as_str().into(),
+                    },
+                    to: record.clone(),
+                }],
+            })
+            .await
+            .expect("the settlement carries the environment");
+        store
+            .end_module_referrer(&ResolvedArtifactCleanup {
+                referrer: pin.clone(),
+                carries: vec![ArtifactCarry {
+                    artifact: ArtifactName {
+                        store: ArtifactStoreId::KernelDocument,
+                        artifact_ref: carried_document.clone().expect("a document"),
+                    },
+                    to: record.clone(),
+                }],
+            })
+            .await
+            .expect("the settlement carries a document");
+    })
+    .await;
+    (start, settle)
+}
+
+/// A process start and its settlement retain an environment's package
+/// dependencies in round trips that do not grow with their number
+/// (FIG-7699): one sorted lock statement, one existence check, one edge
+/// write per kind, and one read per dependency level.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn environment_dependency_retention_round_trips_ignore_the_dependency_count() {
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the environment retention round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let mut measured = Vec::new();
+    for (round, links) in [(1, 1), (2, 8), (3, 64)] {
+        let (start, settle) = environment_retention_round_trips(&store, round, links).await;
+        measured.push((2 * links, start, settle));
+    }
+    eprintln!("dependencies, start round trips, settlement round trips: {measured:?}");
+    let (_, start, settle) = measured[0];
+    assert!(
+        measured
+            .iter()
+            .all(|&(_, other_start, other_settle)| (other_start, other_settle) == (start, settle)),
+        "round trips grow with the dependency count: {measured:?}"
+    );
+}
