@@ -1251,6 +1251,14 @@ impl<'a> Compiler<'a> {
             ) if guard.is_none() => scalar,
             _ => None,
         };
+        // A plan's template states the depth its answer stands for: near
+        // the bound the body answers instead (`HelperTemplate::depth`).
+        let elided = self
+            .registry
+            .get(&id)
+            .and_then(|registered| registered.plan())
+            .and_then(|plan| plan.template.as_ref())
+            .map_or(0, |template| template.depth);
         let at = self.tag | (self.base.natives + self.natives.len()) as u32;
         self.natives.push(NativeEntry {
             function: id,
@@ -1259,6 +1267,7 @@ impl<'a> Compiler<'a> {
             charge,
             guard,
             body: None,
+            elided,
             scalar,
         });
         self.scope.native_ids.insert(id, at);

@@ -254,6 +254,17 @@ impl<H: Heap> Vm<H> {
             return Ok(());
         }
         let entry: &NativeEntry = program.native(native);
+        if entry.elided != 0
+            && let Some(body) = entry.body
+            && self.short_of(entry.elided)
+        {
+            // Near the bound a generated plan's elided helper frames are
+            // the body's to count: it runs, and refuses where it does.
+            let bill = (charged && !self.off).then(|| self.owe(entry.charge, argc));
+            self.cancel();
+            let link = self.running_link();
+            return self.enter(body, argc, None, bill, link);
+        }
         let implementation = match self.implementation(native) {
             Ok(implementation) => implementation,
             Err(flow) => {
@@ -444,10 +455,16 @@ impl<H: Heap> Vm<H> {
         args: &[Value],
     ) -> Option<Run<(Value, Option<u64>)>> {
         let entry = program.native(native);
-        if entry.body.is_some() && self.depth_full() {
-            return Some(Err(Flow::from(Stop::bound(
-                self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
-            ))));
+        if entry.body.is_some() {
+            if entry.elided != 0 {
+                if self.short_of(entry.elided) {
+                    return None;
+                }
+            } else if self.depth_full() {
+                return Some(Err(Flow::from(Stop::bound(
+                    self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
+                ))));
+            }
         }
         let inline = entry.scalar?;
         if args.len() != usize::from(entry.params) {

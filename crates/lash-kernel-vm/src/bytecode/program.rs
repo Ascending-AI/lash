@@ -657,6 +657,12 @@ pub struct NativeEntry {
     pub guard: Option<u32>,
     /// The definition's kernel body, covered, for a Decline (K-LIB-006).
     pub body: Option<UnitId>,
+    /// The call depth the native's answer stands for when its plan's
+    /// template states one: its body with the helper frames the answer
+    /// elides, its own included (`HelperTemplate::depth`). Short of that
+    /// headroom the body runs, and refuses where it does. 0 with no
+    /// template: an operation of one unit (`K-BND-002`).
+    pub elided: u32,
     /// The scalar operation and domain this native version declares it
     /// answers inline over immediate pairs (R8, `K-LIB-011`): selected
     /// from the declaration, never from the native's identity.

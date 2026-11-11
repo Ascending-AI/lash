@@ -875,6 +875,13 @@ impl<H: Heap> Vm<H> {
 
     // --- Frames.
 
+    /// Whether `reach` more call levels pass the call depth bound
+    /// (`K-BND-002`).
+    #[inline(always)]
+    pub(crate) fn short_of(&self, reach: u32) -> bool {
+        self.cx.depth().saturating_add(reach) > self.call_depth
+    }
+
     /// Whether the running task's active calls fill the call depth bound
     /// (`K-BND-002`): the top frame's [`Frame::depth`], read once.
     #[inline(always)]
