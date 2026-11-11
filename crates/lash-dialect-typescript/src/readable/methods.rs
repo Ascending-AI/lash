@@ -43,7 +43,7 @@ impl Lifter<'_> {
             k::Stmt::If {
                 condition,
                 then_block,
-                ..
+                else_block,
             },
             ..,
         ] = block
@@ -53,6 +53,40 @@ impl Lifter<'_> {
         let Some(target) = self.kind_test(condition, "map") else {
             return Ok(None);
         };
+        if let Some((method, mut args)) = self.map_body(then_block, target, result) {
+            // The body takes a missing argument as undefined; the other
+            // branch's method call passes the arguments the source wrote.
+            let mut nodes: Vec<_> = else_block.last().map(k::Node::Stmt).into_iter().collect();
+            let mut written = None;
+            while let Some(node) = nodes.pop() {
+                if let k::Node::Expr(k::Expr::List(items)) = node {
+                    written = Some(items.len());
+                    break;
+                }
+                nodes.extend(node.children());
+            }
+            let Some(written) = written else {
+                return Ok(None);
+            };
+            if written > args.len()
+                || args[written..]
+                    .iter()
+                    .any(|arg| *arg != k::Expr::Literal(k::Literal::Absent))
+            {
+                return Ok(None);
+            }
+            args.truncate(written);
+            let callee = Expr::Field(Box::new(self.expr(target)?), method.into());
+            let items = args
+                .iter()
+                .map(|item| self.expr(item))
+                .collect::<Lift<_>>()?;
+            return Ok(Some((
+                result.clone(),
+                Expr::Call(Box::new(callee), items),
+                2,
+            )));
+        }
         let [
             k::Stmt::Assign {
                 place: k::Place::Variable(assigned),
@@ -84,6 +118,89 @@ impl Lifter<'_> {
             }
         }
         Ok(None)
+    }
+
+    /// A map method's body in place over plain arguments
+    /// (`lower::calls`'s `map_method`), setting `result`: the method and the
+    /// arguments it was called with.
+    fn map_body<'e>(
+        &self,
+        block: &'e [k::Stmt],
+        target: &k::Expr,
+        result: &Name,
+    ) -> Option<(&'static str, Vec<k::Expr>)> {
+        // A key that is not known to be text is `ts.map.key`'s.
+        let key = |key: &k::Expr| {
+            self.helper_read(&k::Rhs::Expr(key.clone()), "ts.map.key")
+                .and_then(|args| <[k::Expr; 1]>::try_from(args).ok())
+                .map_or_else(|| key.clone(), |[authored]| authored)
+        };
+        let contains = |test: &'e k::Expr| match test {
+            k::Expr::Call { function, args } if self.is(function, "map.contains") => {
+                match args.as_slice() {
+                    [map, found] if map == target => Some(found),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let sets = |statement: &'e k::Stmt| match statement {
+            k::Stmt::Assign {
+                place: k::Place::Variable(set),
+                value: k::Rhs::Expr(value),
+                order: k::AssignOrder::ValueFirst,
+            } if set == result => Some(value),
+            _ => None,
+        };
+        match block {
+            [only] => {
+                let found = contains(sets(only)?)?;
+                Some(("has", vec![key(found)]))
+            }
+            [
+                k::Stmt::Assign {
+                    place: k::Place::Member(member),
+                    value: k::Rhs::Expr(value),
+                    order: k::AssignOrder::PlaceFirst,
+                },
+                last,
+            ] if sets(last) == Some(target) => match member {
+                k::Member::Index { target: map, index } if map == target => {
+                    Some(("set", vec![key(index), value.clone()]))
+                }
+                _ => None,
+            },
+            [
+                k::Stmt::Let {
+                    name: value,
+                    value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+                },
+                k::Stmt::If {
+                    condition,
+                    then_block,
+                    else_block,
+                },
+                last,
+            ] if else_block.is_empty() && sets(last) == Some(&k::Expr::Variable(value.clone())) => {
+                let found = contains(condition)?;
+                let [
+                    k::Stmt::Assign {
+                        place: k::Place::Variable(read),
+                        value: k::Rhs::Expr(k::Expr::Member(entry)),
+                        order: k::AssignOrder::ValueFirst,
+                    },
+                ] = then_block.as_slice()
+                else {
+                    return None;
+                };
+                let k::Member::Index { target: map, index } = &**entry else {
+                    return None;
+                };
+                (read == value && map == target && index == found)
+                    .then(|| ("get", vec![key(found)]))
+            }
+            _ => None,
+        }
     }
 
     /// The array read or method call at the start of `block`, its result
