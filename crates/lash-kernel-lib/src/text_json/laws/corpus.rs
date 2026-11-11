@@ -393,6 +393,15 @@ pub(crate) fn cases() -> Vec<Case> {
                 (t("b"), f(-0.0)),
             ])),
         ),
+        // The whole text is validated before a number is checked against
+        // its kind: a fraction under `int` before trailing text is a syntax
+        // error, not a mismatch.
+        (
+            "K-LJSON-006",
+            "json.decode".to_owned(),
+            vec![t("[1.5] 0"), t("int"), t("by_spelling"), t("record")],
+            Err("json_syntax"),
+        ),
         // One record node, four two-unit comparisons, one list node and
         // two scalar nodes: work = 12, encoded admission = 2 * 12 + 1.
         (

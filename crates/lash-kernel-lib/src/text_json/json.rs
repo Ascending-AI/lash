@@ -195,34 +195,8 @@ fn exact_integer(
     Ok(if negative { -value } else { value })
 }
 
-#[derive(Debug)]
-enum Json<'text> {
-    Null,
-    Bool(bool),
-    Number(&'text str),
-    Text(Cow<'text, str>),
-    Array(Vec<Json<'text>>),
-    Object(Vec<(Cow<'text, str>, Json<'text>)>),
-}
-
-#[cfg(test)]
-impl Json<'_> {
-    fn observed_bytes(&self) -> u64 {
-        16 + match self {
-            Json::Text(s) => s.len() as u64,
-            Json::Number(s) => s.len() as u64,
-            Json::Array(xs) => xs.iter().map(Self::observed_bytes).sum(),
-            Json::Object(xs) => xs
-                .iter()
-                .map(|(key, value)| key.len() as u64 + value.observed_bytes())
-                .sum(),
-            _ => 0,
-        }
-    }
-}
-
 mod reader;
-use reader::{read, syntax};
+use reader::{At, View, read, syntax};
 
 /// A JSON value checked against its stated type: its numbers converted and
 /// its containers' kinds chosen, its text borrowed from the parsed tree.
@@ -239,7 +213,7 @@ enum Checked<'j> {
 }
 
 fn check<'j>(
-    json: &'j Json<'_>,
+    json: At<'j>,
     ty: &Type,
     policy: NumberPolicy,
     new: &mut Nursery<'_>,
@@ -254,74 +228,64 @@ fn check<'j>(
         }
         return Err(mismatch());
     }
-    let list = |items: &'j [Json<'_>], element: &Type, new: &mut Nursery<'_>| {
+    let list = |items: reader::Items<'j>, element: &Type, new: &mut Nursery<'_>| {
         items
-            .iter()
             .map(|item| check(item, element, policy, new))
             .collect::<Result<_, _>>()
     };
-    Ok(match (json, ty) {
-        (Json::Number(token), _) => Checked::Number(convert_number(token, ty, policy, new)?),
-        (Json::Null, Type::Null | Type::Any) => Checked::Null,
-        (Json::Bool(value), Type::Bool | Type::Any) => Checked::Bool(*value),
-        (Json::Text(text), Type::Text | Type::Any) => Checked::Text(text),
-        (Json::Text(text), Type::Enum(members))
-            if members.iter().any(|member| member == text.as_ref()) =>
-        {
+    Ok(match (json.view(), ty) {
+        (View::Number(token), _) => Checked::Number(convert_number(token, ty, policy, new)?),
+        (View::Null, Type::Null | Type::Any) => Checked::Null,
+        (View::Bool(value), Type::Bool | Type::Any) => Checked::Bool(value),
+        (View::Text(text), Type::Text | Type::Any) => Checked::Text(text),
+        (View::Text(text), Type::Enum(members)) if members.iter().any(|member| member == text) => {
             Checked::Text(text)
         }
-        (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => Checked::Tuple(
+        (View::Array(items), Type::Tuple(types)) if items.len() == types.len() => Checked::Tuple(
             items
-                .iter()
                 .zip(types)
                 .map(|(item, ty)| check(item, ty, policy, new))
                 .collect::<Result<_, _>>()?,
         ),
-        (Json::Array(items), Type::List(element)) => Checked::List(list(items, element, new)?),
-        (Json::Array(items), Type::Any) => Checked::List(list(items, &Type::Any, new)?),
-        (Json::Object(fields), Type::Any) => Checked::Record(
+        (View::Array(items), Type::List(element)) => Checked::List(list(items, element, new)?),
+        (View::Array(items), Type::Any) => Checked::List(list(items, &Type::Any, new)?),
+        (View::Object(fields), Type::Any) => Checked::Record(
             fields
-                .iter()
-                .map(|(name, value)| Ok((name.as_ref(), check(value, &Type::Any, policy, new)?)))
+                .map(|(name, value)| Ok((name, check(value, &Type::Any, policy, new)?)))
                 .collect::<Result<_, NativeError>>()?,
         ),
-        (Json::Object(fields), Type::Record(record)) => {
+        (View::Object(fields), Type::Record(record)) => {
             for field in &record.fields {
-                if !field.optional && !fields.iter().any(|(name, _)| *name == field.name) {
+                if !field.optional && !fields.clone().any(|(name, _)| name == field.name) {
                     return Err(mismatch());
                 }
             }
             Checked::Record(
                 fields
-                    .iter()
                     .filter(|(name, _)| {
                         !matches!(record.rest, lash_kernel_value::RecordRest::Drop)
-                            || record
-                                .fields
-                                .iter()
-                                .any(|field| field.name == name.as_ref())
+                            || record.fields.iter().any(|field| field.name == *name)
                     })
                     .map(|(name, value)| {
                         let ty = record
                             .fields
                             .iter()
-                            .find(|field| field.name == *name)
+                            .find(|field| field.name == name)
                             .map(|field| &field.ty)
                             .or(record.rest.kept_type())
                             .ok_or_else(mismatch)?;
-                        Ok((name.as_ref(), check(value, ty, policy, new)?))
+                        Ok((name, check(value, ty, policy, new)?))
                     })
                     .collect::<Result<_, NativeError>>()?,
             )
         }
-        (Json::Object(fields), Type::Map(map)) => Checked::Map(
+        (View::Object(fields), Type::Map(map)) => Checked::Map(
             fields
-                .iter()
                 .map(|(name, value)| {
                     if !key_fits(name, &map.key) {
                         return Err(mismatch());
                     }
-                    Ok((name.as_ref(), check(value, &map.value, policy, new)?))
+                    Ok((name, check(value, &map.value, policy, new)?))
                 })
                 .collect::<Result<_, NativeError>>()?,
         ),
@@ -379,8 +343,8 @@ pub fn parse_json(
     depth_limit: usize,
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
-    let json = read(text, depth_limit, new)?;
-    let checked = check(&json, expected, policy, new)?;
+    let tape = read(text, depth_limit, new)?;
+    let checked = check(tape.root(), expected, policy, new)?;
     Ok(build(checked, new))
 }
 
@@ -756,11 +720,9 @@ fn parse(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 // its finite Float contract; only this explicit codec selects IEEE overflow.
 fn parse_binary64(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = text_arg(&call.args, 0)?;
-    let json = read(&text, call.args.limits().document_depth(), call.new)?;
-    #[cfg(test)]
-    let _parsed = crate::native_contract_laws::scratch(json.observed_bytes());
+    let tape = read(&text, call.args.limits().document_depth(), call.new)?;
     decode_with_numbers(
-        &json,
+        tape.root(),
         &Type::Float,
         NumberPolicy::Float,
         false,
@@ -780,9 +742,7 @@ fn decode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 
 fn parse_objects(call: NativeCall<'_, '_>, maps: bool) -> Result<Value, NativeError> {
     let text = text_arg(&call.args, 0)?;
-    let json = read(&text, call.args.limits().document_depth(), call.new)?;
-    #[cfg(test)]
-    let _parsed = crate::native_contract_laws::scratch(json.observed_bytes());
+    let tape = read(&text, call.args.limits().document_depth(), call.new)?;
     let numbers = match materialized_text(&call.args, call.new, 1)?.as_ref() {
         "int" => Type::Int,
         "float" => Type::Float,
@@ -794,25 +754,25 @@ fn parse_objects(call: NativeCall<'_, '_>, maps: bool) -> Result<Value, NativeEr
         "float" => NumberPolicy::Float,
         _ => return Err(raise("type_error", "expected a number policy")),
     };
-    decode_with_numbers(&json, &numbers, policy, maps, false, call.new)
+    decode_with_numbers(tape.root(), &numbers, policy, maps, false, call.new)
 }
 
 fn decode_with_numbers(
-    json: &Json<'_>,
+    json: At<'_>,
     numbers: &Type,
     policy: NumberPolicy,
     maps: bool,
     ieee: bool,
     new: &mut Nursery<'_>,
 ) -> Result<Value, NativeError> {
-    match json {
-        Json::Number(token) if ieee => {
+    match json.view() {
+        View::Number(token) if ieee => {
             new.read_whole(token.len() as u64)?;
             let value = token.parse::<f64>().map_err(|_| mismatch())?;
             Ok(Value::Float(Float::new(value)))
         }
-        Json::Number(token) => Ok(convert_number(token, numbers, policy, new)?.store(new)),
-        Json::Array(items) => {
+        View::Number(token) => Ok(convert_number(token, numbers, policy, new)?.store(new)),
+        View::Array(items) => {
             #[cfg(test)]
             let mut _completed = Vec::new();
             #[cfg(test)]
@@ -832,14 +792,14 @@ fn decode_with_numbers(
             }
             Ok(new.allocate(NewObject::List(values)))
         }
-        Json::Object(fields) => {
+        View::Object(fields) => {
             #[cfg(test)]
             let mut _completed = Vec::new();
             #[cfg(test)]
             let mut _prefix = crate::native_contract_laws::scratch(0);
             let mut values = Vec::with_capacity(fields.len());
             for (key, item) in fields {
-                let key = new.text(key.as_ref());
+                let key = new.text(key);
                 #[cfg(test)]
                 {
                     _completed.push(key);
@@ -865,9 +825,9 @@ fn decode_with_numbers(
                 NewObject::Record(values)
             }))
         }
-        Json::Null => Ok(Value::Null),
-        Json::Bool(value) => Ok(Value::Bool(*value)),
-        Json::Text(text) => Ok(new.text(text.as_ref())),
+        View::Null => Ok(Value::Null),
+        View::Bool(value) => Ok(Value::Bool(value)),
+        View::Text(text) => Ok(new.text(text)),
     }
 }
 

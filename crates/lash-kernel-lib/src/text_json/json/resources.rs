@@ -1,5 +1,5 @@
 //! JSON semantic queries share token and layout rules, but never allocate a
-//! guest value. Entity events are authored from the parsed input tree.
+//! guest value. Entity events are authored from the read input tape.
 use super::*;
 use lash_kernel_doc::{
     LogicalHeldV1 as Cost, NativeResourceContract as Contract, NativeResourceEntity as Entity,
@@ -35,16 +35,16 @@ struct Graph {
 impl Graph {
     fn node(
         &mut self,
-        json: &Json<'_>,
+        json: At<'_>,
         numbers: &Type,
         policy: NumberPolicy,
         maps: bool,
         ieee: bool,
     ) -> Result<Holding, NativeError> {
-        Ok(match json {
-            Json::Null | Json::Bool(_) => immutable(Cost::REFERENCE),
-            Json::Text(s) => text(s.len()),
-            Json::Number(token) => {
+        Ok(match json.view() {
+            View::Null | View::Bool(_) => immutable(Cost::REFERENCE),
+            View::Text(s) => text(s.len()),
+            View::Number(token) => {
                 let value = if ieee {
                     token.parse::<f64>().map_err(|_| mismatch())?;
                     immutable(Cost::REFERENCE)
@@ -62,14 +62,13 @@ impl Graph {
                     .ok_or_else(overflow)?;
                 value
             }
-            Json::Array(values) => {
+            View::Array(values) => {
                 let members = values
-                    .iter()
                     .map(|v| self.node(v, numbers, policy, maps, ieee))
                     .collect::<Result<_, _>>()?;
                 self.entity(Entity::List, members)?
             }
-            Json::Object(fields) => {
+            View::Object(fields) => {
                 let mut names = 0_u64;
                 let mut members = vec![];
                 for (key, value) in fields {
@@ -133,7 +132,7 @@ fn parse_contract(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
         };
         let input = text_arg(&args, 0)?;
         input_bytes = input.len() as u64;
-        let json = reader::read_with(&input, args.limits().document_depth(), |_, _| Ok(()))?;
+        let tape = reader::read_with(&input, args.limits().document_depth(), |_, _| Ok(()))?;
         let (numbers, policy) = if op == "parse_binary64" {
             (Type::Float, NumberPolicy::Float)
         } else {
@@ -150,7 +149,7 @@ fn parse_contract(args: Args<'_>, op: &str) -> Result<Contract, NativeError> {
             };
             (numbers, policy)
         };
-        graph.node(&json, &numbers, policy, maps, op == "parse_binary64")
+        graph.node(tape.root(), &numbers, policy, maps, op == "parse_binary64")
     })();
     let mut contract = Contract {
         exit: Exit::Returned,

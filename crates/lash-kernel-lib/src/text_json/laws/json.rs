@@ -923,3 +923,33 @@ fn k_bnd_003_an_encode_stops_at_the_first_piece_its_room_refuses() {
         }
     }
 }
+
+/// K-LJSON-006, K-BND-003: a parse that runs out of room keeps reading, and
+/// its refusal names the room the whole document takes: what an unbounded
+/// parse of it reserves, from whichever value the room ran out at.
+#[test]
+fn k_ljson_006_a_parse_refusal_names_the_room_of_its_whole_text() {
+    let items = (0..40)
+        .map(|n| format!(r#"{{"k{n}":"{}","n":{n}}}"#, "v".repeat(n)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut lab = Lab::new();
+    let args = lab.values(&[
+        t(&format!("[{items}]")),
+        t("int"),
+        t("by_spelling"),
+        t("map"),
+    ]);
+    lab.room(None);
+    lab.call("json.decode", &args).unwrap();
+    let whole = lab.reserved;
+    for room in [0, 1, whole / 2, whole - 1] {
+        lab.room(Some(room));
+        match lab.call("json.decode", &args) {
+            Err(NativeError::Retry(Retry::Room { wanted })) => {
+                assert_eq!(wanted.0, whole, "room {room}");
+            }
+            other => panic!("room {room}: {other:?}"),
+        }
+    }
+}
