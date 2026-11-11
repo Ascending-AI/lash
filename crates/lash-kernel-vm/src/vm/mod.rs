@@ -961,7 +961,7 @@ impl<H: Heap> Vm<H> {
         let link = self.link_of(unit, caller);
         self.prepare(unit, link)?;
         let code = self.program.unit(unit);
-        let (locals, boxes) = (code.locals, !code.boxed.is_empty());
+        let (locals, boxes, call) = (code.locals, !code.boxed.is_empty(), code.call);
         let base = self.cx.stack.len() - argc;
         self.cx
             .stack
@@ -969,7 +969,7 @@ impl<H: Heap> Vm<H> {
         if boxes {
             self.box_locals(unit, base)?;
         }
-        let depth = self.cx.depth() + u32::from(code.call);
+        let depth = self.cx.depth() + u32::from(call);
         self.cx.frames.push(Frame {
             unit,
             pc: 0,
