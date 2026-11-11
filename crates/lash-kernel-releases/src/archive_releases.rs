@@ -14,4 +14,5 @@
     include_str!("../archive/release-0012.json"),
     include_str!("../archive/release-0013.json"),
     include_str!("../archive/release-0014.json"),
+    include_str!("../archive/release-0015.json"),
 ]

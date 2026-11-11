@@ -29,6 +29,7 @@ py.sub	a802f30e278ec571745d7e9b17ff53167137dfd03ebcb8d65d19d4887dd1ea5e	closed	-
 py.mul	607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32	closed	-	true	0	true	sum(4, size(left), size(right), size(result))	generated
 py.truediv	8365ade18145fbd529c751c2580b3fc271e03a3d619d5753ff6c3f41c698dcc9	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.floordiv	3b31bcd890cc9c278aeb855c3d2a07b7b589fd65c38be344c5e2d01577fc1094	closed	-	true	0	false	sum(4, size(left), size(right))	generated
+py.number.mod	b4439b0b2b7203798525fc3fdf4a4b9ba16b2e8089a8e7e46142f48a3a892d05	closed	-	false	0	false	sum(4, size(left), size(right))	generated
 py.pow	38a4a9e01ccdce8bff8f1e69e4136f32a3201c661aa675879b75cd2572a3437e	closed	-	true	0	false	sum(4, size(left), product(size(left), magnitude(right)))	generated
 py.neg	0c890dbb514328318fd2911a86770a9cf51c57eb667566ebe78478724bcba0f8	closed	-	true	0	false	sum(4, size(value))	generated
 py.pos	d3f1a92e495b11f9a571e19bc5666747f4275a3303a3c5e3b0018c1b69e74d5e	closed	-	true	0	false	sum(4, size(value))	generated

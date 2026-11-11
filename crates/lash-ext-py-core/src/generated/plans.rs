@@ -257,6 +257,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &SET_CLEAR_PLAN,
     &PY_MATH_ERFC_PLAN,
     &PY_EXTREME_PLAN,
+    &PY_NUMBER_MOD_PLAN,
     &PY_MATH_CBRT_PLAN,
     &PY_ARGS_APPEND_PLAN,
     &PY_DICT_EXTEND_PLAN,
@@ -7060,6 +7061,76 @@ fn py_floordiv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(0, 0)?;
     ctx.local(1, 1)?;
     ctx.call(7, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const PY_NUMBER_MOD_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.mod",
+    function: p::function("b4439b0b2b7203798525fc3fdf4a4b9ba16b2e8089a8e7e46142f48a3a892d05"),
+    callees: &[
+        p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"),
+        p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
+        p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
+        p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("ZeroDivisionError"),
+        p::PlanLiteral::Text("integer modulo by zero"),
+        p::PlanLiteral::Text("float modulo"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_mod,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), ], heap: None, forwards: p::Forwards { floats: None, ints: Some(1), texts: None, identity: None } }),
+};
+
+/// `py.number.mod`.
+fn py_number_mod(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
     Ok(ctx.take(0))
 }
 

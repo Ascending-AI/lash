@@ -5901,6 +5901,11 @@
     "source": "await host.observe(type(1).__name__)\n"
   },
   {
+    "id": "python/core/21",
+    "dialect": "python",
+    "source": "def m(a: int, b: int):\n    try:\n        return a % b\n    except ZeroDivisionError as e:\n        return str(e)\ndef f(a: float, b: float):\n    try:\n        return a % b\n    except ZeroDivisionError as e:\n        return str(e)\nbig = 9223372036854775807\nawait host.observe([m(-7, 2), m(7, -2), m(-7, -2), m(6, -3), m(5, 0), m(-big - 1, -1), m(big, -1), m(-big - 1, 3), f(-7.5, 2.0), f(1.0, 0.0)])\n"
+  },
+  {
     "id": "python/program/0",
     "dialect": "python",
     "source": "a=[1,2]\na[0]=3\ndel a[1]\nawait host.observe(a)\n"

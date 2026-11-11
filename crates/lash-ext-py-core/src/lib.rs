@@ -17,6 +17,7 @@ use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_doc::RegistryError;
 use lash_kernel_value::names::FunctionId;
 
+mod numbers;
 #[rustfmt::skip]
 #[path = "generated/plans.rs"]
 mod plans;
@@ -75,6 +76,7 @@ pub fn native(name: &str) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFu
     use std::sync::Arc;
     match name {
         "py.bytes_len" => Some(Arc::new(text::BytesLength)),
+        "py.number.mod" => Some(Arc::new(numbers::Mod)),
         "py.text_repr" => Some(Arc::new(text::Repr)),
         "py.text.printable" => Some(Arc::new(text::Predicate::Printable)),
         "py.text.whitespace" => Some(Arc::new(text::Predicate::Whitespace)),
