@@ -10,8 +10,8 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_value::names::CallableId;
 
-use super::{Run, Vm, fault};
-use crate::bytecode::program::{Constant, LIB, UnitId};
+use super::{Run, Stop, Vm, fault};
+use crate::bytecode::program::{Constant, LIB, Program, UnitId};
 use crate::heap::Heap;
 
 /// What one Link's frames of library code read in an instance.
@@ -21,6 +21,52 @@ pub(crate) struct LibraryPlaced {
     constants: Vec<Option<Value>>,
     /// Each library unit whose constants are placed.
     units: Vec<bool>,
+}
+
+/// The program's own constants, placed in `heap`. A sealed run's are bound
+/// to the objects they were placed as (`placed`): a constant is
+/// materialized once (contract §2). A run its code does not fit places
+/// none.
+pub(crate) fn place_constants<H: Heap>(
+    heap: &mut H,
+    program: &Program,
+    placed: Option<&[Value]>,
+    unadmitted: bool,
+) -> Result<Vec<Value>, Stop> {
+    if placed.is_some_and(|placed| placed.len() != program.constants.len()) {
+        return Err(Stop::Fault(
+            "the run's constants are not its program's".into(),
+        ));
+    }
+    let mut constants = Vec::with_capacity(program.constants.len());
+    for (at, constant) in program.constants.iter().enumerate() {
+        let object = match constant {
+            Constant::Immediate(value) => {
+                constants.push(*value);
+                continue;
+            }
+            Constant::Text(text) => NewObject::LongText(text.clone()),
+            Constant::BigInt(int) => NewObject::BigInt(int.clone()),
+            Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
+            Constant::Function(callable) => NewObject::Function(*callable),
+        };
+        if unadmitted {
+            constants.push(Value::Absent);
+            continue;
+        }
+        if let Some(saved) = placed.map(|placed| placed[at])
+            && saved.handle().is_some()
+        {
+            heap.adopt_constant(saved);
+            constants.push(saved);
+            continue;
+        }
+        let value = heap
+            .constant(object)
+            .map_err(|error| Stop::Fault(error.to_string()))?;
+        constants.push(value);
+    }
+    Ok(constants)
 }
 
 impl LibraryPlaced {

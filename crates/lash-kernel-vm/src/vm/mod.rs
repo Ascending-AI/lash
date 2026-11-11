@@ -306,41 +306,8 @@ impl<H: Heap> Vm<H> {
             .admit(crate::heap::meter::code(&document))
             .err()
             .map(|refused| Exceeded::run(Bound::Memory, refused.bound));
-        // A sealed run's constants are bound to the objects they were
-        // placed as: a constant is materialized once (contract §2).
-        if placed.is_some_and(|placed| placed.len() != program.constants.len()) {
-            return Err(Stop::Fault(
-                "the run's constants are not its program's".into(),
-            ));
-        }
-        let mut constants = Vec::with_capacity(program.constants.len());
-        for (at, constant) in program.constants.iter().enumerate() {
-            let object = match constant {
-                Constant::Immediate(value) => {
-                    constants.push(*value);
-                    continue;
-                }
-                Constant::Text(text) => NewObject::LongText(text.clone()),
-                Constant::BigInt(int) => NewObject::BigInt(int.clone()),
-                Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
-                Constant::Function(callable) => NewObject::Function(*callable),
-            };
-            if unadmitted.is_some() {
-                constants.push(Value::Absent);
-                continue;
-            }
-            if let Some(saved) = placed.map(|placed| placed[at])
-                && saved.handle().is_some()
-            {
-                heap.adopt_constant(saved);
-                constants.push(saved);
-                continue;
-            }
-            let value = heap
-                .constant(object)
-                .map_err(|error| Stop::Fault(error.to_string()))?;
-            constants.push(value);
-        }
+        let constants =
+            library::place_constants(&mut heap, &program, placed, unadmitted.is_some())?;
         let frames = program
             .units
             .iter()
