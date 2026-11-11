@@ -157,7 +157,7 @@ fn pairs(call: &mut NativeCall<'_, '_>, input: &str) -> Value {
     for (name, value) in form_urlencoded::parse(input.trim_start_matches('?').as_bytes()) {
         #[cfg(test)]
         native_contract_laws::observe(32 + (name.len() + value.len()) as u64);
-        let (name, value) = (call.new.text(&name), call.new.text(&value));
+        let (name, value) = (call.new.text(name), call.new.text(value));
         result.push(call.new.allocate(NewObject::List(vec![name, value])));
     }
     call.new.allocate(NewObject::List(result))
@@ -361,7 +361,7 @@ impl NativeFunction for Function {
                     call.new.read_whole(value.len())?;
                     serializer.append_pair(&name.whole()?, &value.whole()?);
                 }
-                Ok(call.new.text(&serializer.finish()))
+                Ok(call.new.text(serializer.finish()))
             }
         }
     }

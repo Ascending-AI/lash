@@ -757,7 +757,7 @@ fn regex_value(heap: &mut Nursery<'_>, pattern: &str, flags: Flags, built: Funct
     let pattern = heap.text(pattern);
     #[cfg(test)]
     crate::native_contract_laws::observe(16 + flags.canonical().len() as u64);
-    let flags = heap.text(&flags.canonical());
+    let flags = heap.text(flags.canonical());
     record(
         heap,
         [

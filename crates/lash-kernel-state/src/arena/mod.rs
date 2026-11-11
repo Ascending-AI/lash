@@ -962,10 +962,7 @@ impl Arena {
                 ));
             }
             NewObject::LongText(text) => {
-                return Ok((
-                    Body::LongText(resident_text(text.as_ref().into())),
-                    Facts::default(),
-                ));
+                return Ok((Body::LongText(resident_text(text)), Facts::default()));
             }
             NewObject::Bytes(bytes) => {
                 return Ok((

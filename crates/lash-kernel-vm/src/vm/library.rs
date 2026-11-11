@@ -45,7 +45,7 @@ pub(crate) fn place_constants<H: Heap>(
                 constants.push(*value);
                 continue;
             }
-            Constant::Text(text) => NewObject::LongText(text.clone()),
+            Constant::Text(text) => NewObject::LongText(text.to_string()),
             Constant::BigInt(int) => NewObject::BigInt(int.clone()),
             Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
             Constant::Function(callable) => NewObject::Function(*callable),
@@ -216,7 +216,7 @@ impl<H: Heap> Vm<H> {
                     placed.constants[k] = Some(*value);
                     continue;
                 }
-                Constant::Text(text) => NewObject::LongText(text.clone()),
+                Constant::Text(text) => NewObject::LongText(text.to_string()),
                 Constant::BigInt(int) => NewObject::BigInt(int.clone()),
                 Constant::Bytes(bytes) => NewObject::Bytes(bytes.clone()),
                 Constant::Function(callable) => NewObject::Function(CallableId {

@@ -874,7 +874,7 @@ pub(crate) fn integer_text(
     let digits = (integer.bits() as f64 / f64::from(radix).log2()) as u64 + 3;
     new.reserve(0, digits.saturating_mul(2))?;
     new.read_whole(integer.bits().div_ceil(8))?;
-    Ok(new.text(&integer.as_bigint().to_str_radix(radix)))
+    Ok(new.text(integer.as_bigint().to_str_radix(radix)))
 }
 
 fn radix(value: &Value) -> Result<u32, NativeError> {

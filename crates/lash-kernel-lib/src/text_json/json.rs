@@ -830,7 +830,7 @@ fn decode_with_numbers(
             let mut _prefix = crate::native_contract_laws::scratch(0);
             let mut values = Vec::with_capacity(fields.len());
             for (key, item) in fields {
-                let key = new.text(key);
+                let key = new.text(key.as_ref());
                 #[cfg(test)]
                 {
                     _completed.push(key);
@@ -858,13 +858,13 @@ fn decode_with_numbers(
         }
         Json::Null => Ok(Value::Null),
         Json::Bool(value) => Ok(Value::Bool(*value)),
-        Json::Text(text) => Ok(new.text(text)),
+        Json::Text(text) => Ok(new.text(text.as_ref())),
     }
 }
 
 fn stringify(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = stringify_json(arg(call.args.values(), 0)?, &call.args, call.new)?;
-    Ok(call.new.text(&text))
+    Ok(call.new.text(text))
 }
 
 fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -907,7 +907,7 @@ fn render(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     };
     let answer = arg(args.values(), 0).and_then(|value| write(value, true, &mut out));
     let ((), text) = out.output.finish(answer)?;
-    Ok(call.new.text(&text))
+    Ok(call.new.text(text))
 }
 
 /// Shortest decimal layout is caller policy, not a language in the codec.
@@ -1217,7 +1217,7 @@ fn encode(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         )
     });
     let (_, text) = out.output.finish(answer)?;
-    Ok(call.new.text(&text))
+    Ok(call.new.text(text))
 }
 
 fn boundary_definition(selection: &Selection<'_>) -> Function {

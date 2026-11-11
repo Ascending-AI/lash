@@ -274,7 +274,7 @@ impl NativeFunction for Repeat {
         let length = u64::try_from(*length).unwrap_or(0);
         call.new.reserve(0, length)?;
         REPEAT_BUILDS.set(REPEAT_BUILDS.get() + 1);
-        Ok(call.new.text(&"x".repeat(length as usize)))
+        Ok(call.new.text("x".repeat(length as usize)))
     }
 }
 
@@ -303,8 +303,8 @@ impl NativeFunction for Twice {
 struct LargeError;
 impl NativeFunction for LargeError {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        let kind = call.new.text(&"k".repeat(1 << 20));
-        let message = call.new.text(&"m".repeat(1 << 20));
+        let kind = call.new.text("k".repeat(1 << 20));
+        let message = call.new.text("m".repeat(1 << 20));
         let data =
             lash_kernel_doc::error_object::native(call.args, call.new, kind, message, Value::Null)?;
         Err(NativeError::Raised(call.new.allocate(NewObject::Error {

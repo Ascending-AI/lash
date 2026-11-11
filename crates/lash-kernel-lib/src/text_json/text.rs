@@ -335,7 +335,7 @@ fn trim_set(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     output.push_str(trimmed);
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(output.len() as u64);
-    Ok(call.new.text(&output))
+    Ok(call.new.text(output))
 }
 
 fn normalize(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -375,7 +375,7 @@ fn normalize(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     }
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(output.len() as u64);
-    Ok(call.new.text(&output))
+    Ok(call.new.text(output))
 }
 
 /// A distance from the selected end. A magnitude beyond machine size can
@@ -704,7 +704,7 @@ fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     out.push_str(&other);
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 /// [`concat`] of two short texts whose concatenation is short: the same
 /// text, which is inline, so the call builds and holds nothing of the
@@ -821,7 +821,7 @@ fn join_or_index(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         String::from_utf8(out).map_err(|_| NativeError::Malformed("joined text is not UTF-8"))?;
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 
 fn replace(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -845,7 +845,7 @@ fn replace(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     out.push_str(&text[end..]);
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 fn trim(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = materialized_text(&call.args, call.new, 0)?;
@@ -864,14 +864,14 @@ fn lower(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let out = text.to_lowercase();
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 fn upper(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = materialized_text(&call.args, call.new, 0)?;
     let out = text.to_uppercase();
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 
 fn repeat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -886,7 +886,7 @@ fn repeat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     }
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 
 fn pad_start(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -928,7 +928,7 @@ pub(super) fn padded(
     }
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(new.text(&out))
+    Ok(new.text(out))
 }
 
 fn pad(call: NativeCall<'_, '_>, start: bool) -> Result<Value, NativeError> {
@@ -972,7 +972,7 @@ fn from_code_points(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         })
         .collect();
     let chars = chars?;
-    Ok(call.new.text(&chars))
+    Ok(call.new.text(chars))
 }
 
 fn from_utf16_units(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

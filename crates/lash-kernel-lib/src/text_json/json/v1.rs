@@ -168,7 +168,7 @@ fn written(
     let answer = arg(args.values(), 0)
         .and_then(|value| write(&args, value, &mut Vec::new(), 0, raw_numbers, &mut out));
     let ((), text) = out.output.finish(answer)?;
-    Ok(call.new.text(&text))
+    Ok(call.new.text(text))
 }
 
 fn contract(args: Args<'_>, op: Op) -> Result<Contract, NativeError> {

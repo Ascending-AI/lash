@@ -684,7 +684,7 @@ pub enum NewObject {
     Map(Vec<(Value, Value)>),
     Set(Vec<Value>),
     Record(Vec<(Value, Value)>),
-    LongText(Arc<str>),
+    LongText(String),
     /// A function reference by a name past [`ShortText::MAX`] bytes.
     Function(lash_kernel_value::names::CallableId),
     Bytes(Arc<[u8]>),
@@ -848,10 +848,10 @@ impl<'call> Nursery<'call> {
     }
 
     /// A text: inline when it is short, otherwise built.
-    pub fn text(&mut self, text: &str) -> Value {
-        match ShortText::new(text) {
+    pub fn text<T: AsRef<str> + Into<String>>(&mut self, text: T) -> Value {
+        match ShortText::new(text.as_ref()) {
             Some(short) => Value::Text(short),
-            None => self.allocate(NewObject::LongText(Arc::from(text))),
+            None => self.allocate(NewObject::LongText(text.into())),
         }
     }
 

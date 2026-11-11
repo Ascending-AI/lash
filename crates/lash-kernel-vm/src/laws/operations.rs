@@ -35,7 +35,7 @@ impl NativeFunction for Step1 {
                     return Err(NativeError::Malformed("a text names another body"));
                 };
                 let text = text.whole()?;
-                Ok(call.new.text(&format!("{text}{text}")))
+                Ok(call.new.text(format!("{text}{text}")))
             }
             _ => Err(NativeError::Decline),
         }

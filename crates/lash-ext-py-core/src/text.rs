@@ -180,7 +180,7 @@ impl NativeFunction for Repr {
                 .saturating_add(second_work)
                 .saturating_add(length.saturating_mul(2)),
         )?;
-        Ok(call.new.text(&output))
+        Ok(call.new.text(output))
     }
 }
 
