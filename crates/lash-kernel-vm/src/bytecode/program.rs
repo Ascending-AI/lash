@@ -302,6 +302,13 @@ pub enum Step {
         args: [Slot; 2],
         argc: u8,
     },
+    /// A kind answer compared with a kind's name by a same answer,
+    /// making the same answer's value: whether the value is of the kind,
+    /// read from its tag (`InlineOperation::kind_is`).
+    KindIs {
+        value: Slot,
+        kind: lash_kernel_doc::ValueKind,
+    },
     /// A branch the path takes: the value must be `Bool(holds)`.
     Guard { value: Slot, holds: bool },
     /// An index read that finds a value, making it: a list or tuple at

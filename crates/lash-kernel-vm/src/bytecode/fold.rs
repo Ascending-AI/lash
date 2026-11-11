@@ -34,10 +34,12 @@
 //!
 //! It runs after validation, on validated code, before fusion.
 
+use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::{InlineOperation, IntegerTextDomain};
 
 use super::op::Op;
-use super::program::{Callee, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
+
+use super::program::{Callee, Constant, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
 
 /// Folds the guard path of every inline region of `program`.
 pub(crate) fn fold(program: &mut Program) {
@@ -206,9 +208,10 @@ fn walk(
                 path.stack.push(made);
             }
             Op::Leave(leaving) if leaving == n => {
-                let [result] = path.stack[..] else {
+                let [mut result] = path.stack[..] else {
                     return None;
                 };
+                kind_tests(program, &mut path.steps, &mut result);
                 let mut steps = [Step::Guard {
                     value: result,
                     holds: true,
@@ -224,6 +227,88 @@ fn walk(
             _ => return None,
         }
         pc += 1;
+    }
+}
+
+/// Makes each same answer of a kind answer and a kind's name one
+/// `Step::KindIs`, which declines where the kind answer would, and drops
+/// each kind answer so replaced that no step reads any more. A Python
+/// operator helper tests its operands' kinds this way before each
+/// answer.
+fn kind_tests(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
+    let makes = |steps: &[Step]| -> Vec<usize> {
+        (0..steps.len())
+            .filter(|&at| !matches!(steps[at], Step::Guard { .. }))
+            .collect()
+    };
+    let made = makes(steps);
+    let mut replaced = Vec::new();
+    for at in 0..steps.len() {
+        let Step::Answer {
+            operation: InlineOperation::Same,
+            args,
+            argc: 2,
+        } = steps[at]
+        else {
+            continue;
+        };
+        for (answer, name) in [(args[0], args[1]), (args[1], args[0])] {
+            let (Slot::Made(k), Slot::Const(id)) = (answer, name) else {
+                continue;
+            };
+            let Step::Answer {
+                operation: InlineOperation::Kind,
+                args: [value, _],
+                argc: 1,
+            } = steps[made[usize::from(k)]]
+            else {
+                continue;
+            };
+            let Some(Constant::Immediate(Value::Text(text))) = program.get_constant(id) else {
+                continue;
+            };
+            let Some(kind) = InlineOperation::kind_named(text) else {
+                continue;
+            };
+            steps[at] = Step::KindIs { value, kind };
+            replaced.push(k);
+            break;
+        }
+    }
+    replaced.sort_unstable();
+    replaced.dedup();
+    for &k in replaced.iter().rev() {
+        let mut read = *result == Slot::Made(k);
+        for step in steps.iter_mut() {
+            slots(step, |slot| read |= *slot == Slot::Made(k));
+        }
+        if read {
+            continue;
+        }
+        steps.remove(makes(steps)[usize::from(k)]);
+        let mut renumber = |slot: &mut Slot| {
+            if let Slot::Made(m) = slot
+                && *m > k
+            {
+                *m -= 1;
+            }
+        };
+        renumber(result);
+        for step in steps.iter_mut() {
+            slots(step, &mut renumber);
+        }
+    }
+}
+
+/// Runs `each` over every slot step `step` reads.
+fn slots(step: &mut Step, mut each: impl FnMut(&mut Slot)) {
+    match step {
+        Step::Answer { args, argc, .. } => args[..usize::from(*argc)].iter_mut().for_each(each),
+        Step::KindIs { value, .. } | Step::Guard { value, .. } => each(value),
+        Step::Index { target, index } => {
+            each(target);
+            each(index);
+        }
     }
 }
 

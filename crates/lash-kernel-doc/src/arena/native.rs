@@ -1071,6 +1071,25 @@ const KIND_TEXTS: [Option<ShortText>; crate::ValueKind::NAMES.len()] = {
 };
 
 impl InlineOperation {
+    /// The kind whose [`Self::Kind`] answer is the inline text `name`.
+    pub fn kind_named(name: &ShortText) -> Option<crate::ValueKind> {
+        KIND_TEXTS
+            .iter()
+            .position(|text| text.is_some_and(|text| text.as_bytes() == name.as_bytes()))
+            .map(|at| crate::ValueKind::NAMES[at].0)
+    }
+
+    /// What [`Self::Same`] answers over [`Self::Kind`]'s answer for
+    /// `value` and the name of `kind` (see [`Self::kind_named`]), read
+    /// from the tag alone: `None` where the kind answer declines.
+    #[inline(always)]
+    pub fn kind_is(value: &Value, kind: crate::ValueKind) -> Option<bool> {
+        let found = value.kind();
+        KIND_TEXTS[found as usize].map(|_| found == kind)
+    }
+}
+
+impl InlineOperation {
     /// Kind and arity eligibility only. This does not admit resources or
     /// authorize an answer when the native would raise or Decline.
     #[inline]

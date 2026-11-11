@@ -9,6 +9,7 @@
 //! and one that holds completes it as the region's `Op::Leave` would.
 
 use lash_kernel_doc::Value;
+use lash_kernel_doc::arena::native::InlineOperation;
 
 use super::frames::{Activation, Frame};
 use super::{Flow, Restart, Run, Stop, Vm, fault};
@@ -151,7 +152,7 @@ impl<H: Heap> Vm<H> {
     /// not hold or a step declines, so that the region runs. A region
     /// calls only natives with no body, so an answer holds no unit of
     /// depth.
-    #[inline(always)]
+    #[inline(never)]
     fn folded(&self, fold: &Fold, base: usize) -> Option<Value> {
         let mut made = [Value::Absent; FOLD_STEPS];
         let mut count = 0;
@@ -173,6 +174,9 @@ impl<H: Heap> Vm<H> {
                         *value = read(&made, slot);
                     }
                     self.immediate(operation, &values[..argc])?
+                }
+                Step::KindIs { value, kind } => {
+                    Value::Bool(InlineOperation::kind_is(&read(&made, value), kind)?)
                 }
                 Step::Guard { value, holds } => {
                     if !matches!(read(&made, value), Value::Bool(found) if found == holds) {
