@@ -127,6 +127,18 @@ lash_store_sql::statements! {
              WHERE namespace = ?1 AND artifact_ref = ANY(?2::TEXT[])";
         /// Each reference of `?2` in namespace `?1` that referrer `?3`/`?4`
         /// holds no edge to.
+        /// Each stored byte artifact of `?2` in namespace `?1`, with every
+        /// referrer edge naming it, kinds and ids in the same order.
+        select_records_with_edges = "SELECT artifact.artifact_ref, artifact.artifact_bytes,
+                 ARRAY(SELECT edge.referrer_kind FROM artifact_referrer_edges AS edge
+                     WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref
+                     ORDER BY edge.referrer_kind, edge.referrer_id) AS kinds,
+                 ARRAY(SELECT edge.referrer_id FROM artifact_referrer_edges AS edge
+                     WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref
+                     ORDER BY edge.referrer_kind, edge.referrer_id) AS ids
+             FROM lash_vm_artifacts AS artifact
+             WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ANY(?2::TEXT[])
+                 AND artifact.storage_kind = 0 AND artifact.artifact_bytes IS NOT NULL";
         select_unheld = "SELECT wanted.artifact_ref FROM unnest(?2::TEXT[]) AS wanted(artifact_ref)
              WHERE NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
                  WHERE edge.namespace = ?1 AND edge.artifact_ref = wanted.artifact_ref
@@ -427,6 +439,61 @@ async fn admit_artifact_owner_tx(
         && !session_artifact_owner_live_tx(tx, referrer).await?
     {
         return Err(lash_durable::packages::PackageRefusal::SessionNotLive(session.clone()).into());
+    }
+    Ok(())
+}
+
+/// Carry each of `live` to its destination: the first carried artifact
+/// missing, in carry order, refuses the whole end; otherwise one edge write
+/// per live destination. The caller holds every artifact and referrer lock.
+async fn carry_edges_tx(
+    tx: &mut sqlx::PgConnection,
+    namespace: &str,
+    live: &[&lash_core_store::artifact_referrer::ArtifactCarry],
+    destinations: &[(&ArtifactReferrer, bool)],
+) -> Result<(), ArtifactStoreError> {
+    if live.is_empty() {
+        return Ok(());
+    }
+    let references: Vec<&str> = live
+        .iter()
+        .map(|carry| carry.artifact.artifact_ref.as_str())
+        .collect();
+    let namespaces = vec![namespace; references.len()];
+    let missing: Option<String> = crate::observed_sql::query_scalar(
+        artifact_sql()
+            .lash_vm_artifacts
+            .select_missing_manifest
+            .sql(),
+    )
+    .bind(&namespaces)
+    .bind(&references)
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+    .await
+    .map_err(backend)?;
+    if let Some(artifact_ref) = missing {
+        let to = live
+            .iter()
+            .find(|carry| carry.artifact.artifact_ref == artifact_ref)
+            .map(|carry| carry.to.clone())
+            .ok_or_else(|| ArtifactStoreError::Encode("carry refusal names no carry".into()))?;
+        return Err(ArtifactStoreError::CarryArtifactMissing { artifact_ref, to });
+    }
+    for (to, _) in destinations.iter().filter(|(_, live)| *live) {
+        let references: Vec<&str> = live
+            .iter()
+            .filter(|carry| &carry.to == *to)
+            .map(|carry| carry.artifact.artifact_ref.as_str())
+            .collect();
+        let namespaces = vec![namespace; references.len()];
+        crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_manifest_edges.sql())
+            .bind(&namespaces)
+            .bind(&references)
+            .bind(to.kind().as_str())
+            .bind(to.canonical_id())
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
     }
     Ok(())
 }
@@ -997,41 +1064,21 @@ impl PostgresLashVmArtifactStore {
             .await
             .map_err(backend)?;
         // Every destination's referrer lock is held, so whether it still
-        // takes carries cannot change below: read it once per carry.
-        let mut live = Vec::with_capacity(cleanup.carries.len());
+        // takes carries cannot change below: read it once per destination.
+        let mut destinations: Vec<(&ArtifactReferrer, bool)> = Vec::new();
         for carry in &cleanup.carries {
-            live.push(
-                session_artifact_owner_live_tx(tx, &carry.to).await?
-                    && !is_fenced_tx(tx, &carry.to).await?,
-            );
-        }
-        for (carry, live) in cleanup.carries.iter().zip(live) {
-            if !live {
-                continue;
+            if destinations.iter().all(|(to, _)| *to != &carry.to) {
+                let live = session_artifact_owner_live_tx(tx, &carry.to).await?
+                    && !is_fenced_tx(tx, &carry.to).await?;
+                destinations.push((&carry.to, live));
             }
-            let artifact_ref = &carry.artifact.artifact_ref;
-            let exists: bool =
-                crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
-                    .bind(namespace)
-                    .bind(artifact_ref)
-                    .fetch_one(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(backend)?;
-            if !exists {
-                return Err(ArtifactStoreError::CarryArtifactMissing {
-                    artifact_ref: artifact_ref.clone(),
-                    to: carry.to.clone(),
-                });
-            }
-            crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
-                .bind(namespace)
-                .bind(artifact_ref)
-                .bind(carry.to.kind().as_str())
-                .bind(carry.to.canonical_id())
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(backend)?;
         }
+        let live: Vec<&lash_core_store::artifact_referrer::ArtifactCarry> = cleanup
+            .carries
+            .iter()
+            .filter(|carry| destinations.contains(&(&carry.to, true)))
+            .collect();
+        carry_edges_tx(tx, namespace, &live, &destinations).await?;
         crate::observed_sql::query(
             artifact_sql()
                 .edges

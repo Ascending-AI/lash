@@ -1972,10 +1972,73 @@ async fn a_reaper_commits_only_when_a_node_expired() {
     assert_eq!(commits(&empty), 0);
 }
 
+/// A publication over every link `execution` authors, published by `claim`:
+/// the settlement carries it, and carrying it expands its whole closure.
+async fn carried_publication(
+    store: &crate::PostgresLashVmArtifactStore,
+    claim: &lash_core_store::artifact_referrer::ReferrerClaim,
+    round: u8,
+    execution: &lash_core_store::tool_surface::ExecutionEnvironment,
+) -> String {
+    use lash_durable::packages::PackageStore as _;
+    use lash_kernel_value::package::{
+        PublicationContext, PublicationDomain, PublicationScope, PublisherInstance,
+    };
+    use lash_vocabulary::package::{PublicationRecord, PublishedContent};
+    let root = lash_kernel_value::names::Segment::new(format!("carried{round}")).expect("root");
+    let path = lash_kernel_value::names::PackagePath::parse(&format!("carried{round}"))
+        .expect("package path");
+    let members = execution
+        .authored
+        .iter()
+        .enumerate()
+        .map(|(index, link)| {
+            let member = lash_kernel_value::package::Member {
+                visibility: lash_kernel_value::package::Visibility::Public,
+                kind: lash_kernel_value::package::MemberKind::Export {
+                    link: *link,
+                    export: lash_kernel_value::names::ExportName {
+                        name: lash_kernel_value::names::Name::new("run"),
+                        member: None,
+                    },
+                },
+            };
+            let name = lash_kernel_value::names::Segment::new(format!("m{index}"));
+            (name.expect("member name"), member)
+        })
+        .collect();
+    let package = lash_kernel_value::package::Package {
+        path: path.clone(),
+        members,
+    };
+    let package = lash_core_store::packages::PackageRecord {
+        id: package.identity(),
+        package,
+    };
+    store.put_package(claim, &package).await.expect("package");
+    let publication = PublicationRecord {
+        context: PublicationContext {
+            domain: PublicationDomain("round-trips".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("pin".into()),
+            root,
+        },
+        path,
+        content: PublishedContent::Package(package.id),
+        code_links: execution.authored.clone(),
+        imported_publications: vec![],
+    };
+    let key = store
+        .publish(claim, &publication)
+        .await
+        .expect("publication");
+    lash_durable::packages::publication_reference(&key)
+}
+
 /// The round trips of a process start's environment acquisition and of its
 /// settlement (the record's acquisition of the environment, then the start's
-/// environment and module ends carrying the environment and a document onto
-/// the record) for an environment authoring `links` links, each over its own
+/// environment and module ends carrying the environment, a document and a
+/// publication over every link onto the record) for an environment authoring `links` links, each over its own
 /// document: `2 * links` package dependencies.
 async fn environment_retention_round_trips(
     store: &crate::PostgresLashVmArtifactStore,
@@ -2018,6 +2081,7 @@ async fn environment_retention_round_trips(
         store.put_link(&claim, &link, &[]).await.expect("link");
         execution.authored.insert(link.id);
     }
+    let carried_publication = carried_publication(store, &claim, round, &execution).await;
     let env = lash_core_store::process_env::ProcessEnv::builder(
         lash_protocol_types::session_model::MaxToolCalls::new(1024),
     )
@@ -2066,13 +2130,19 @@ async fn environment_retention_round_trips(
         store
             .end_module_referrer(&ResolvedArtifactCleanup {
                 referrer: pin.clone(),
-                carries: vec![ArtifactCarry {
+                carries: [
+                    carried_document.clone().expect("a document"),
+                    carried_publication.clone(),
+                ]
+                .into_iter()
+                .map(|artifact_ref| ArtifactCarry {
                     artifact: ArtifactName {
                         store: ArtifactStoreId::KernelDocument,
-                        artifact_ref: carried_document.clone().expect("a document"),
+                        artifact_ref,
                     },
                     to: record.clone(),
-                }],
+                })
+                .collect(),
             })
             .await
             .expect("the settlement carries a document");
@@ -2084,7 +2154,8 @@ async fn environment_retention_round_trips(
 /// A process start and its settlement retain an environment's package
 /// dependencies in round trips that do not grow with their number
 /// (FIG-7699): one sorted lock statement, one existence check, one edge
-/// write per kind, and one read per dependency level.
+/// write per kind, and one read per dependency level, also when a carry
+/// expands a package closure (FIG-7700).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn environment_dependency_retention_round_trips_ignore_the_dependency_count() {
     let Some(database_url) = crate::postgres_test_support::database_url() else {

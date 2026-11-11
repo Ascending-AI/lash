@@ -2216,6 +2216,9 @@ mod idle_obligations;
 #[path = "core_node_processes/capacity_verdicts.rs"]
 mod capacity_verdicts;
 
+#[path = "core_node_processes/host_start_cut.rs"]
+mod host_start_cut;
+
 /// Host outcome projections use readable JSON for both values and typed failures,
 /// through the same path for the durable record and its terminal event (FIG-6309).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -195,35 +195,36 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         }
         let reference = reference.to_owned();
         self.read_connection()
+            .call(move |conn| package_record_conn(conn, &reference))
+            .await
+            .map_err(artifact_sqlite_error)
+            .map_err(Into::into)
+    }
+    async fn load_package_records(
+        &self,
+        references: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, lash_durable::DurableError> {
+        let wanted: Vec<String> = references
+            .iter()
+            .filter(|reference| {
+                lash_durable::packages::is_package_reference(reference)
+                    && crate::namespace::is_valid_opaque_key(reference)
+            })
+            .cloned()
+            .collect();
+        if wanted.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        // A record whose own read would answer otherwise is left to it.
+        self.read_connection()
             .call(move |conn| {
-                let stored: Option<(Option<Vec<u8>>, Option<i64>, String)> = conn
-                    .statement(PACKAGE_READ_SQL.record.sql())?
-                    .query_row(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
-                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok(wanted
+                    .into_iter()
+                    .filter_map(|reference| match package_record_conn(conn, &reference) {
+                        Ok(Some(bytes)) => Some((reference, bytes)),
+                        _ => None,
                     })
-                    .optional()?;
-                let Some((body, encoding, edges)) = stored else {
-                    return Ok(None);
-                };
-                let edges: Vec<(String, String)> =
-                    serde_json::from_str(&edges).map_err(|error| {
-                        sqlite_conversion_error(stored_data_corrupt(
-                            "package referrer edges",
-                            error,
-                        ))
-                    })?;
-                for (kind, id) in edges {
-                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
-                }
-                let body = body.filter(|_| encoding == Some(0)).ok_or_else(|| {
-                    sqlite_conversion_error(stored_data_corrupt(
-                        "package record",
-                        "missing opaque body",
-                    ))
-                })?;
-                crate::codec::decode_artifact_blob(&body)
-                    .map(Some)
-                    .map_err(sqlite_conversion_error)
+                    .collect())
             })
             .await
             .map_err(artifact_sqlite_error)
@@ -237,4 +238,33 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
             .await
             .map_err(Into::into)
     }
+}
+
+/// An opaque package record's bytes, after decoding every referrer edge
+/// naming it, in one snapshot.
+fn package_record_conn(
+    conn: &rusqlite::Connection,
+    reference: &str,
+) -> rusqlite::Result<Option<Vec<u8>>> {
+    let stored: Option<(Option<Vec<u8>>, Option<i64>, String)> = conn
+        .statement(PACKAGE_READ_SQL.record.sql())?
+        .query_row(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .optional()?;
+    let Some((body, encoding, edges)) = stored else {
+        return Ok(None);
+    };
+    let edges: Vec<(String, String)> = serde_json::from_str(&edges).map_err(|error| {
+        sqlite_conversion_error(stored_data_corrupt("package referrer edges", error))
+    })?;
+    for (kind, id) in edges {
+        decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+    }
+    let body = body.filter(|_| encoding == Some(0)).ok_or_else(|| {
+        sqlite_conversion_error(stored_data_corrupt("package record", "missing opaque body"))
+    })?;
+    crate::codec::decode_artifact_blob(&body)
+        .map(Some)
+        .map_err(sqlite_conversion_error)
 }

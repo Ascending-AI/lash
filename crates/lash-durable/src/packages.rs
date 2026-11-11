@@ -309,6 +309,17 @@ pub trait PackageStorage: Send + Sync {
     ) -> Result<(), DurableError>;
     async fn package_labels(&self, reference: &str) -> Result<Vec<String>, DurableError>;
     async fn load_package_record(&self, reference: &str) -> Result<Option<Vec<u8>>, DurableError>;
+    /// Each of `references` exactly as [`Self::load_package_record`] loads
+    /// it, in one read where the backend can. A reference left out of the
+    /// answer is loaded on its own, which gives its own answer or refusal,
+    /// so a backend leaves out every record it cannot vouch for.
+    async fn load_package_records(
+        &self,
+        references: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, DurableError> {
+        let _ = references;
+        Ok(std::collections::BTreeMap::new())
+    }
     async fn end_package_records(
         &self,
         cleanup: &ResolvedArtifactCleanup,
@@ -452,11 +463,52 @@ async fn closure<S: PackageStorage + ?Sized>(
     closure_with(store, roots, &std::collections::BTreeMap::new()).await
 }
 
+/// `prepared` and every package record reachable from `roots`, read one
+/// dependency level at a time. A record the read leaves out, or whose
+/// children do not decode, ends its branch here: the walk in
+/// [`closure_with`] loads it on its own and refuses exactly as it would.
+async fn prefetch<S: PackageStorage + ?Sized>(
+    store: &S,
+    roots: &[String],
+    prepared: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>, DurableError> {
+    let mut loaded = prepared.clone();
+    let mut seen: std::collections::BTreeSet<String> = roots.iter().cloned().collect();
+    let mut level: Vec<String> = seen.iter().cloned().collect();
+    while !level.is_empty() {
+        let wanted: Vec<String> = level
+            .iter()
+            .filter(|reference| is_package_reference(reference) && !loaded.contains_key(*reference))
+            .cloned()
+            .collect();
+        if !wanted.is_empty() {
+            loaded.extend(store.load_package_records(&wanted).await?);
+        }
+        let mut next = Vec::new();
+        for reference in &level {
+            let Some(bytes) = loaded.get(reference) else {
+                continue;
+            };
+            let Ok(children) = content_dependencies(reference, bytes) else {
+                continue;
+            };
+            next.extend(
+                children
+                    .into_iter()
+                    .filter(|child| is_package_reference(child) && seen.insert(child.clone())),
+            );
+        }
+        level = next;
+    }
+    Ok(loaded)
+}
+
 async fn closure_with<S: PackageStorage + ?Sized>(
     store: &S,
     roots: Vec<String>,
     prepared: &std::collections::BTreeMap<String, Vec<u8>>,
 ) -> Result<std::collections::BTreeSet<String>, DurableError> {
+    let prepared = &prefetch(store, &roots, prepared).await?;
     let mut found = std::collections::BTreeSet::new();
     let mut active = std::collections::BTreeSet::new();
     let mut pending: Vec<(String, bool)> = roots
