@@ -35,11 +35,13 @@
 //! It runs after validation, on validated code, before fusion.
 
 use lash_kernel_doc::Value;
-use lash_kernel_doc::arena::native::{InlineOperation, IntegerTextDomain};
+use lash_kernel_doc::arena::native::{InlineOperation, IntegerTextDomain, ScalarDomain};
 
 use super::op::Op;
 
-use super::program::{Callee, Constant, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit};
+use super::program::{
+    Callee, Constant, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit, WordFold,
+};
 
 /// Folds the guard path of every inline region of `program`.
 pub(crate) fn fold(program: &mut Program) {
@@ -222,6 +224,7 @@ fn walk(
                     len: path.steps.len() as u8,
                     result,
                     leave: pc as u32,
+                    words: word_form(&path.steps, result),
                 });
             }
             _ => return None,
@@ -337,4 +340,48 @@ fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperatio
         _ => return None,
     };
     (arity == argc).then_some(operation)
+}
+
+/// The word form of a fold of `steps` returning `result` (`Fold::words`):
+/// int kind tests of the two operands, guards that each test holds, and
+/// last the word-domain scalar answer over the operands, which the fold
+/// returns. Over two word ints every test is true and every guard holds,
+/// so the fold answers what the scalar answer does.
+fn word_form(steps: &[Step], result: Slot) -> Option<WordFold> {
+    let (&last, before) = steps.split_last()?;
+    let Step::Answer {
+        operation:
+            InlineOperation::Scalar {
+                operation,
+                domain: ScalarDomain::Words | ScalarDomain::WordsOrFloats,
+            },
+        args: operands @ [a, b],
+        argc: 2,
+    } = last
+    else {
+        return None;
+    };
+    let operand = |slot: Slot| matches!(slot, Slot::Local(_) | Slot::Const(_));
+    if !operand(a) || !operand(b) {
+        return None;
+    }
+    // Only the kind tests make values before the answer.
+    let mut made = 0u8;
+    for &step in before {
+        match step {
+            Step::KindIs {
+                value,
+                kind: lash_kernel_doc::ValueKind::Int,
+            } if value == a || value == b => made += 1,
+            Step::Guard {
+                value: Slot::Made(test),
+                holds: true,
+            } if test < made => {}
+            _ => return None,
+        }
+    }
+    (result == Slot::Made(made)).then_some(WordFold {
+        operation,
+        operands,
+    })
 }

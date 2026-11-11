@@ -164,6 +164,21 @@ impl<H: Heap> Vm<H> {
     /// depth.
     #[inline(never)]
     fn folded(&self, fold: &Fold, base: usize) -> Option<Value> {
+        if let Some(words) = fold.words {
+            let read = |slot: Slot| match slot {
+                Slot::Local(n) => self.cx.stack[base + usize::from(n)],
+                Slot::Const(n) => self.konst(n),
+                Slot::Made(_) => Value::Absent,
+            };
+            if let [Value::Int(a), Value::Int(b)] = words.operands.map(read) {
+                let value = lash_kernel_doc::scalar::ints(words.operation, a, b);
+                #[cfg(test)]
+                if value.is_some() {
+                    HELD.with(|held| held.set(held.get() + 1));
+                }
+                return value;
+            }
+        }
         let mut made = [Value::Absent; FOLD_STEPS];
         let mut count = 0;
         let read = |made: &[Value; FOLD_STEPS], slot: Slot| match slot {

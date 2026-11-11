@@ -303,6 +303,18 @@ pub struct Fold {
     pub len: u8,
     pub result: Slot,
     pub leave: u32,
+    /// The fold's answer where both of its operands are word ints, when
+    /// its steps are only their int kind tests, guards that each holds,
+    /// and one word-domain scalar answer over them: then the fold holds
+    /// exactly when `scalar::ints` answers, with that answer.
+    pub words: Option<WordFold>,
+}
+
+/// A fold's word-int form (`Fold::words`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WordFold {
+    pub operation: lash_kernel_doc::scalar::ScalarOp,
+    pub operands: [Slot; 2],
 }
 
 /// Where a fold step reads a value: a body local, a constant, or a value
