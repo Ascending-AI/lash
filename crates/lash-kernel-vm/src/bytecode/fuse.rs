@@ -3,8 +3,11 @@
 //!
 //! A prepaid block bills no op on its own and tests no slice inside it,
 //! so a run of its ops may dispatch together. The pass fuses up to two
-//! local or constant pushes, the scalar native call (R8) they feed, and
-//! the op that takes its answer. The call's fee cancels the block, and
+//! local or constant pushes, the two-argument native call with an inline
+//! answer (R8) they feed, and the op that takes its answer: a scalar
+//! operation, or a same or membership test such as a helper's kind
+//! dispatch runs. The fused call answers as the unfused call op does,
+//! and runs the native's call where it declines. The call's fee cancels the block, and
 //! the rest runs exact, so the taking op is fused only where the exact
 //! path bills, tests and sees nothing at it. The run's first op becomes
 //! `Op::Fused`; the exact path dispatches the first op alone, and the
@@ -19,15 +22,13 @@ use super::program::{Callee, Fused, Operand, Program, Then, Unit, Words};
 
 /// Fuses the runs of every unit of `program`.
 pub(crate) fn fuse(program: &mut Program) {
-    let scalar = |site: u32, unit: &Unit| {
+    let answered = |site: u32, unit: &Unit| {
         let call = &unit.calls[site as usize];
         let Callee::Native { native, .. } = call.callee else {
             return false;
         };
         let entry = program.native(native);
-        call.argc == 2
-            && entry.params == 2
-            && matches!(entry.scalar, Some(InlineOperation::Scalar { .. }))
+        call.argc == 2 && entry.params == 2 && entry.scalar.is_some()
     };
     // A native with no body is answered at its call with no frame, so
     // two word ints it accepts are answered and billed in place.
@@ -51,7 +52,7 @@ pub(crate) fn fuse(program: &mut Program) {
     for (at, unit) in program.units.iter().enumerate() {
         let mut pc = 0;
         while pc < unit.ops.len() {
-            match run(unit, pc, &scalar).map(|(mut fused, end)| {
+            match run(unit, pc, &answered).map(|(mut fused, end)| {
                 fused.words = words(fused.site, unit);
                 (fused, end)
             }) {
@@ -71,7 +72,7 @@ pub(crate) fn fuse(program: &mut Program) {
 }
 
 /// The run that starts at `pc`, and the op after it.
-fn run(unit: &Unit, pc: usize, scalar: &impl Fn(u32, &Unit) -> bool) -> Option<(Fused, usize)> {
+fn run(unit: &Unit, pc: usize, answered: &impl Fn(u32, &Unit) -> bool) -> Option<(Fused, usize)> {
     let operand = |op: Op| match op {
         Op::Local(n) => Some(Operand::Local(n)),
         Op::Const(n) => Some(Operand::Const(n)),
@@ -82,7 +83,7 @@ fn run(unit: &Unit, pc: usize, scalar: &impl Fn(u32, &Unit) -> bool) -> Option<(
     let mut at = pc;
     let site = loop {
         match *unit.ops.get(at)? {
-            Op::Call(site) if scalar(site, unit) => break site,
+            Op::Call(site) if answered(site, unit) => break site,
             _ if pushes == 2 => return None,
             op => {
                 operands[pushes] = operand(op)?;

@@ -317,9 +317,9 @@ pub enum Step {
 }
 
 /// A run of one prepaid block's ops that dispatches at once (`fuse`): up
-/// to two operand pushes, the scalar native call they feed, and what
-/// takes its answer. Its ops after the first stay in place, so a frame
-/// that stands inside the run continues op by op.
+/// to two operand pushes, the native call with an inline answer they
+/// feed, and what takes its answer. Its ops after the first stay in
+/// place, so a frame that stands inside the run continues op by op.
 #[derive(Clone, Copy, Debug)]
 pub struct Fused {
     /// The run's first op, which the exact path dispatches alone.
