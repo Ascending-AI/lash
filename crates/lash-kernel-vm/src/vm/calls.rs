@@ -357,6 +357,7 @@ impl<H: Heap> Vm<H> {
                     }
                     // The library call that would have exceeded the bound
                     // is named, as a guard that ends the run is.
+                    self.refused_memory = Some(used);
                     return Err(Flow::from(Stop::bound(Exceeded {
                         function: Some(self.library_call(&entry.name)),
                         ..self.exceeded(Bound::Memory, bound)

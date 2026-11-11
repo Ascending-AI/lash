@@ -1081,6 +1081,25 @@ fn core_end(body: &str, memory: u64) -> (End, u64) {
     (end, memory)
 }
 
+/// How a bytecode-core run of `body` under memory bound `memory` ended,
+/// with the memory it reports and the bytes its heap holds when it ended.
+fn core_refused(body: &str, memory: u64) -> (End, u64, u64) {
+    let mut machine = super::embedder::core_machine(
+        &format!("main {{\n{body}\n}}"),
+        Bounds { memory, ..ROOMY },
+        None,
+    )
+    .expect("the law's document starts");
+    let mut world = World::default();
+    loop {
+        match machine.run(&mut world, u64::MAX).expect("the core runs") {
+            Step::Ended(end) => return (end, machine.meters().memory, machine.held()),
+            Step::Slice => {}
+            Step::Parked(_) => panic!("the memory laws perform nothing"),
+        }
+    }
+}
+
 /// How a bytecode-core run of document `text` with `probes` under
 /// `bounds` ended, with what it held and had charged when it ended.
 fn core_in(
@@ -1205,7 +1224,9 @@ fn a_start_holds_its_document_by_its_nodes() {
 /// alone would move it by one. One byte under, the concatenation is
 /// refused and the holding stays as it stood before the call: the bound
 /// exceeds it by exactly the text's object part (a 16-byte slot header and
-/// an 8-byte mark word) and its 1,999 bytes. The two lengths stay distinct
+/// an 8-byte mark word) and its 1,999 bytes. The run reports the total the
+/// refused text would have reached, as a refused charge reports its total
+/// (FIG-7694): exactly the least bound that admits it. The two lengths stay distinct
 /// constants throughout, so the program's constant pool holds the same.
 #[test]
 fn the_core_admits_a_native_at_its_live_inputs_plus_its_peak() {
@@ -1216,7 +1237,7 @@ fn the_core_admits_a_native_at_its_live_inputs_plus_its_peak() {
     for k in [1u64, 7, 100] {
         assert_eq!(threshold(&concat(1000 + k, 999)), base + 2 * k, "+{k}");
     }
-    let (end, held) = core_end(&concat(1000, 999), base - 1);
+    let (end, reported, held) = core_refused(&concat(1000, 999), base - 1);
     let End::Error(RunError::Bound(exceeded)) = end else {
         panic!("under {}: {end:?}", base - 1);
     };
@@ -1228,6 +1249,7 @@ fn the_core_admits_a_native_at_its_live_inputs_plus_its_peak() {
         )
     );
     assert_eq!(held + 16 + 8 + 1999, base);
+    assert_eq!(reported, base);
 }
 
 /// G011, contract §2, K-CLO-001/002: a captured cell edge is one value in
@@ -1473,7 +1495,10 @@ fn a_delivered_outcome_is_held_at_its_deep_size_until_it_is_consumed() {
 /// are held once, by the values they already were. Under that bound by
 /// one byte the constructor is refused with the memory bound and the run
 /// holds what it held before it: the operands still live, nothing of the
-/// refused object. At the bound and above it the run finishes. A list or
+/// refused object. It reports the total the refusal would have reached,
+/// as a refused charge reports its total (FIG-7694): exactly the least
+/// bound that admits it. At the
+/// bound and above it the run finishes. A list or
 /// tuple of two holds an object part and a value a member; a record of
 /// two fields holds an object part and two values a field.
 #[test]
@@ -1486,7 +1511,7 @@ fn a_constructor_is_admitted_at_exactly_its_schedule_and_a_refusal_keeps_its_ope
     ] {
         let body = format!("  let a = work.fill(1000)\n  let c = {constructor}\n  return 7");
         let base = threshold(&body);
-        let (end, held) = core_end(&body, base - 1);
+        let (end, reported, held) = core_refused(&body, base - 1);
         let End::Error(RunError::Bound(exceeded)) = end else {
             panic!("{constructor} under {}: {end:?}", base - 1);
         };
@@ -1496,6 +1521,7 @@ fn a_constructor_is_admitted_at_exactly_its_schedule_and_a_refusal_keeps_its_ope
             "{constructor}"
         );
         assert_eq!(held + schedule, base, "{constructor}");
+        assert_eq!(reported, base, "{constructor}");
         for memory in [base, base + 1] {
             assert_eq!(result(core_end(&body, memory).0), int(7), "{constructor}");
         }

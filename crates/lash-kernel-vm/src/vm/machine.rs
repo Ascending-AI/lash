@@ -393,6 +393,14 @@ fn linked(problem: impl ToString) -> StartError {
     }
 }
 
+#[cfg(test)]
+impl CoreMachine {
+    /// What the run's heap holds now, apart from what a refusal reports.
+    pub(crate) fn held(&self) -> u64 {
+        self.vm.heap.held()
+    }
+}
+
 impl CoreMachine {
     /// What the tokens of this run's counts and context name.
     #[cfg(any(test, feature = "perf-witness"))]
@@ -1060,7 +1068,9 @@ impl Machine for CoreMachine {
             // have made.
             charged: (!self.vm.off()).then(|| self.vm.refused.unwrap_or(self.vm.charged())),
             memory: match self.header.bounds.memory_meter {
-                crate::MemoryMeter::On => self.vm.heap.held(),
+                // A refused run reports the total its refused allocation
+                // would have held.
+                crate::MemoryMeter::On => self.vm.refused_memory.unwrap_or(self.vm.heap.held()),
                 crate::MemoryMeter::Off => 0,
             },
             live_tasks: self.vm.tasks.live,

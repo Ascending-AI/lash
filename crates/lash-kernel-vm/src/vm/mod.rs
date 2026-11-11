@@ -271,6 +271,9 @@ pub(crate) struct Vm<H: Heap> {
     pub memory_limiter: Option<Box<dyn crate::interface::MemoryLimiter>>,
     /// The total a charge refusal reported, once one has.
     pub refused: Option<u64>,
+    /// The held total a memory refusal would have reached, once one has:
+    /// the run reports it as it reports a refused charge.
+    pub refused_memory: Option<u64>,
     /// Each closure function's body unit, by its Link and function.
     closures: Digests<UnitId>,
     /// Each function value's trampoline, by its Link and function: every
@@ -338,10 +341,10 @@ impl<H: Heap> Vm<H> {
         // The run holds its own document's code; the program's constants
         // are code, its own or the library's, and hold nothing (contract
         // §2, `K-MACH-001`, `K-BND-003`).
-        let unadmitted = heap
-            .admit(crate::heap::meter::code(&document))
-            .err()
-            .map(|refused| Exceeded::run(Bound::Memory, refused.bound));
+        let refused_code = heap.admit(crate::heap::meter::code(&document)).err();
+        let refused_memory =
+            refused_code.map(|refused| refused.held.saturating_add(refused.wanted));
+        let unadmitted = refused_code.map(|refused| Exceeded::run(Bound::Memory, refused.bound));
         // A sealed run's constants are code, held at nothing, until a
         // collection finds no value referencing one it no longer places.
         for value in saved.values() {
@@ -400,6 +403,7 @@ impl<H: Heap> Vm<H> {
             limiter: None,
             memory_limiter: None,
             refused: None,
+            refused_memory,
             closures,
             functions,
             watch: None,
@@ -687,6 +691,7 @@ impl<H: Heap> Vm<H> {
             match decision {
                 LimitDecision::Grow(more) if more > 0 => self.heap.grow(more),
                 _ => {
+                    self.refused_memory = Some(used);
                     return Err(Flow::from(Stop::bound(
                         self.exceeded(Bound::Memory, refused.bound),
                     )));
@@ -795,6 +800,7 @@ impl<H: Heap> Vm<H> {
             // The faulting op's reservation is unbilled once, as at any
             // stop, and the run refuses at the memory bound.
             Err(LoadError::Memory(refused)) => {
+                self.refused_memory = Some(refused.held.saturating_add(refused.wanted));
                 Err(Stop::bound(self.exceeded(Bound::Memory, refused.bound)))
             }
             // The store failed: infrastructure, never a guest raise or a
