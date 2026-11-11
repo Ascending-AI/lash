@@ -188,6 +188,9 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
         .map_err(|error| Unsupported(format!("the library does not validate: {error}")))?;
     super::fold::fold(&mut program);
     super::fuse::fuse(&mut program);
+    // Traces are a load-time product beside the validated body: a held
+    // body's validation reads it through `Unit::original`.
+    super::trace::trace(&mut program);
     let mut code = LibCode::clone(held);
     let mut performs: std::collections::HashSet<_> = code.performs.iter().copied().collect();
     let units = program.units.into_iter().zip(checked);

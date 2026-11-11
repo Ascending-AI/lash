@@ -138,12 +138,21 @@ impl Micro {
     }
 }
 
-/// Builds the traces of every unit of `program`, its own code.
+/// Builds the traces of every unit of `program`, its own code: a
+/// document's, when it is linked, or the library's, when it is
+/// published. A library body's validated ops stay what inlining and
+/// validation read (`Unit::original`).
 pub(crate) fn trace(program: &mut Program) {
-    let readable: Vec<bool> = (0..program.lib.constants.len())
+    let own = if program.tag == LIB {
+        program.constants.len()
+    } else {
+        0
+    };
+    let readable: Vec<bool> = (0..program.lib.constants.len() + own)
         .map(|k| program.readable(LIB | k as u32))
         .collect();
-    let readable = |n: u32| n & LIB == 0 || readable[(n & !LIB) as usize];
+    let document = program.tag == 0;
+    let readable = |n: u32| n & LIB == 0 && document || readable[(n & !LIB) as usize];
     for unit in &mut program.units {
         trace_unit(unit, &readable);
     }

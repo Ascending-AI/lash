@@ -453,7 +453,7 @@ impl Unit {
             match op {
                 Op::Leave(_) | Op::Raise => {}
                 Op::Deopt(to) => {
-                    let head = matches!(body.ops.get(to as usize), Some(Op::Block(_)));
+                    let head = matches!(body.original(to as usize), Some(Op::Block(_)));
                     if !head || body_depth[to as usize] != Some(d) {
                         return Err(at(format!(
                             "region {n} leaves to its body's op {to} at depth {d}"

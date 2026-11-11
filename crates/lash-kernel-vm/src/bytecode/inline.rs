@@ -128,10 +128,12 @@ pub(crate) fn expandable(body: &Unit) -> bool {
         && body.points.is_empty()
 }
 
-/// `body`'s op at `pc`, a fused run's first op as it was.
+/// `body`'s op at `pc` as it was compiled: a published library body's
+/// fused runs and traces stand for the ops it validated with.
 fn op_at(body: &Unit, pc: usize) -> Op {
     match body.ops[pc] {
         Op::Fused(n) => body.fused[n as usize].first,
+        Op::Trace(n) => Op::Block(body.traces[n as usize].block),
         op => op,
     }
 }
