@@ -42,7 +42,7 @@ use crate::{Case, CaseBounds, ExpectedEnd, HarnessError, HostAnswer, Observation
 /// version_surface = "coexist"
 /// format_outside_manifest = "conformance runner exchange files read by the compatibility gate; not durable execution state"
 /// version_guard(roots(Manifest, Image, Runs, Refusal))
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 /// The sweep's slice (`r57/l7-runner-interface.md`: slice size 1).
 const SLICE: u64 = 1;
 /// Steps after which a run is an error rather than an observation.

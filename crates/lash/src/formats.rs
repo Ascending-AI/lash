@@ -126,7 +126,7 @@ pub use lash_vm_runtime::{
 /// )
 /// version_surface = "drain"
 /// format_manifest = "HostStoredShapes"
-pub const HOST_STORED_SCHEMA_VERSION: u32 = 19;
+pub const HOST_STORED_SCHEMA_VERSION: u32 = 20;
 
 /// One durable format whose version decides whether stored bytes open under
 /// this build.
@@ -629,12 +629,12 @@ pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::
 /// hand; `scripts/check_format_registry.py` holds it to the named build's
 /// stamps and refuses a stamp moved since without it.
 ///
-/// Replaced build: `d5a878a22dffa36ec89226acfce795dec5463547`.
+/// Replaced build: `0e92399c29c92a5eecfd05b9c39d54b2f57b7d57`.
 const RETIRED_BUILD: &[(&str, u32)] = &[
-    ("codemode-snapshot", 17),
+    ("codemode-snapshot", 18),
     ("engine/lashvm", 1),
-    ("kernel-parked-state", 16),
-    ("kernel-saved-function", 5),
+    ("kernel-parked-state", 17),
+    ("kernel-saved-function", 6),
     ("outcome-material", 1),
     ("run-record", 19),
     ("session-state", 3),
