@@ -788,6 +788,8 @@ impl NativeFunction for Native {
                     Some(InlineOperation::Length(collection))
                 }
                 (Kind::Map, Op::Contains) => Some(InlineOperation::Membership(Table::Map)),
+                (Kind::Set, Op::Contains) => Some(InlineOperation::Membership(Table::Set)),
+                (Kind::Record, Op::Contains) => Some(InlineOperation::Membership(Table::Record)),
                 _ => None,
             }
             .map(|operation| InlineNative {

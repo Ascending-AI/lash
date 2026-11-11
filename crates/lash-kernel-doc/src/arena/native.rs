@@ -1087,13 +1087,13 @@ impl InlineOperation {
                     | (crate::plan::Collection::Set, Value::Set(_))
                     | (crate::plan::Collection::Record, Value::Record(_))
             ),
-            (Self::Membership(table), [target, key]) => {
-                matches!(
-                    (table, target),
-                    (crate::plan::Table::Map, Value::Map(_))
-                        | (crate::plan::Table::Set, Value::Set(_))
-                ) && inline_key(key)
-            }
+            (Self::Membership(table), [target, key]) => match (table, target) {
+                (crate::plan::Table::Map, Value::Map(_))
+                | (crate::plan::Table::Set, Value::Set(_)) => inline_key(key),
+                // A record's key is a text; any other key is the native's refusal.
+                (crate::plan::Table::Record, Value::Record(_)) => matches!(key, Value::Text(_)),
+                _ => false,
+            },
             (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => {
                 matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats)
             }

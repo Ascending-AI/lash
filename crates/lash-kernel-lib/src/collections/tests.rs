@@ -205,6 +205,11 @@ fn k_col_005_membership_and_missing_values_are_distinct() {
     );
     assert_eq!(error("return map.get(map{}, 0)"), "key_missing");
     assert_eq!(error("return set.contains(set{}, [])"), "invalid_key");
+    // A record's key is a text: an integer key is refused, never answered `false`.
+    assert_eq!(
+        error("let r = {x: 1} let k = list.get_or([1], 0) return record.contains(r, k)"),
+        "type_error"
+    );
     assert_eq!(
         body(
             "return (list.contains([[1]], [1.0]), tuple.index_of((1, 2, 1), 1.0), tuple.contains((), 1))"
