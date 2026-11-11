@@ -52,6 +52,7 @@ impl<H: Heap> Vm<H> {
     /// Why `value`, returned to an authored call of a typed build
     /// helper's body, does not fit the helper's declared result: the
     /// caller's frame stands below the returning one, at the call.
+    #[inline]
     pub(super) fn unfit_result(&mut self, value: Value) -> Run<Option<EntryTypeMismatch>> {
         let Some(caller) = self.cx.frames.len().checked_sub(2) else {
             return Ok(None);

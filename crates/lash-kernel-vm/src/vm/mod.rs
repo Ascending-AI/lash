@@ -69,7 +69,7 @@ use crate::heap::{Heap, LoadError};
 use crate::observe::Weight;
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
 use charge::{Meter, Refused, Rest};
-use frames::{Bill, Context, Frame, Handler};
+use frames::{Bill, Context, Entry, Frame, Handler};
 
 /// Why [`Vm::run`] returned.
 #[derive(Debug)]
@@ -248,6 +248,9 @@ pub(crate) struct Vm<H: Heap> {
     /// Values the scheduler holds outside any context (results, operands
     /// of issued actions), for the collector.
     pub held: Vec<Value>,
+    /// The direct-call guard ([`calls::Direct`]): the instance's own
+    /// cache, never sealed.
+    direct: Option<calls::Direct>,
     meter: Meter,
     /// The run is under `Charge::Off`: fixed costs place slices; no
     /// limit, fee or readout.
@@ -374,6 +377,7 @@ impl<H: Heap> Vm<H> {
             tasks: tasks::Tasks::new(),
             document,
             held: Vec::new(),
+            direct: None,
             meter: Meter::new(used, if off { u64::MAX } else { limit }),
             off,
             exact: true,
@@ -937,33 +941,60 @@ impl<H: Heap> Vm<H> {
         bill: Option<Bill>,
         caller: u32,
     ) -> Run<()> {
+        let entry = self.entry(unit, caller);
+        self.push_frame(entry, argc, closure, bill)
+    }
+
+    /// What entering a frame of `unit` called from Link `caller` reads of
+    /// the program.
+    #[inline(always)]
+    pub(crate) fn entry(&self, unit: UnitId, caller: u32) -> Entry {
+        let code = self.program.unit(unit);
+        Entry {
+            unit,
+            link: self.link_of(unit, caller),
+            locals: code.locals,
+            call: code.call,
+            boxes: !code.boxed.is_empty(),
+            cost: self.frame_cost(unit),
+        }
+    }
+
+    /// Pushes a frame of `entry` whose `argc` arguments are the top of
+    /// the stack ([`Self::enter`]).
+    #[inline(always)]
+    pub(crate) fn push_frame(
+        &mut self,
+        entry: Entry,
+        argc: usize,
+        closure: Option<ArenaHandle>,
+        bill: Option<Bill>,
+    ) -> Run<()> {
         // A frame that is no call takes no unit; the call it makes is
         // checked where it is made.
-        if self.depth_full() && self.program.unit(unit).call {
+        if self.depth_full() && entry.call {
             return Err(Flow::from(Stop::bound(
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
         }
-        self.admit(self.frame_cost(unit))?;
-        let link = self.link_of(unit, caller);
-        self.prepare(unit, link)?;
-        let code = self.program.unit(unit);
-        let (locals, boxes, call) = (code.locals, !code.boxed.is_empty(), code.call);
+        self.admit(entry.cost)?;
+        self.prepare(entry.unit, entry.link)?;
         let base = self.cx.stack.len() - argc;
-        self.cx
-            .stack
-            .resize(base + usize::from(locals.max(argc as u16)), Value::Absent);
-        if boxes {
-            self.box_locals(unit, base)?;
+        self.cx.stack.resize(
+            base + usize::from(entry.locals.max(argc as u16)),
+            Value::Absent,
+        );
+        if entry.boxes {
+            self.box_locals(entry.unit, base)?;
         }
-        let depth = self.cx.depth() + u32::from(call);
+        let depth = self.cx.depth() + u32::from(entry.call);
         self.cx.frames.push(Frame {
-            unit,
+            unit: entry.unit,
             pc: 0,
             base: base as u32,
             closure,
             bill,
-            link,
+            link: entry.link,
             depth,
         });
         Ok(())
@@ -1374,6 +1405,14 @@ impl<H: Heap> Vm<H> {
                             None => continue 'frames,
                         }
                     }
+                    Op::Return => {
+                        sync!(pc);
+                        let [value] = self.operands();
+                        if let Some(stop) = self.ret(host, value, true)? {
+                            return Ok(stop);
+                        }
+                        continue 'frames;
+                    }
                     Op::CellGet(_) | Op::CellSet(_) | Op::CaptureGet(_) | Op::CaptureSet(_) => {
                         sync!(pc);
                         self.cell_op(op)?;
@@ -1532,12 +1571,6 @@ impl<H: Heap> Vm<H> {
                 self.popped(1);
             }
             Op::Call(site) => self.call(program, unit, site)?,
-            Op::Return => {
-                let [value] = self.operands();
-                if let Some(stop) = self.ret(host, value, true)? {
-                    return Ok(Some(stop));
-                }
-            }
             Op::Fall => {
                 if let Some(stop) = self.ret(host, Value::Null, false)? {
                     return Ok(Some(stop));
@@ -1620,6 +1653,7 @@ impl<H: Heap> Vm<H> {
             | Op::CellSet(_)
             | Op::CaptureGet(_)
             | Op::CaptureSet(_)
+            | Op::Return
             | Op::Fused(_) => return Err(fault("a dispatched op ran out of line")),
         }
         Ok(None)
@@ -1632,6 +1666,23 @@ impl<H: Heap> Vm<H> {
         self.meter.leave();
         self.exact = true;
         let bottom = self.cx.frames.len() == 1;
+        // A frame above another that owes no completion copies nothing
+        // out and bills nothing: it checks its result, leaves and hands
+        // the value to its caller.
+        if !bottom && let Some(Frame { bill: None, .. }) = self.cx.frames.last() {
+            let unfit = self.unfit_result(value)?;
+            let Some(frame) = self.cx.frames.pop() else {
+                return Err(fault("a return with no frame"));
+            };
+            self.heap.release(self.frame_cost(frame.unit));
+            self.drop_handlers();
+            self.cx.stack.truncate(frame.base as usize);
+            if let Some(unfit) = unfit {
+                return Err(self.typed_error("entry_type_mismatch", &unfit));
+            }
+            self.push(value);
+            return Ok(None);
+        }
         let main = self.tasks.running == tasks::MAIN;
         // A return that leaves the run copies its value out where it
         // stands, so a raise of the copy is caught by the frame's own

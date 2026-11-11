@@ -13,12 +13,13 @@
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::WorkCounter;
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{
     Args, InlineOperation, IntegerTextDomain, NativeCall, NativeError, NewObject, Nursery, Retry,
 };
 use lash_kernel_doc::heap::LogicalBytes;
 
-use super::frames::Bill;
+use super::frames::{Bill, Entry};
 use super::{Exceeded, Flow, Restart, Run, Stop, Vm, fault, read};
 use crate::Bound;
 use crate::bytecode::program::{Callee, NativeEntry, Program, Unit};
@@ -41,6 +42,21 @@ impl Done {
             Self::Refused(..) => {}
         }
     }
+}
+
+/// The direct-call guard: what the last closure a value call entered
+/// resolved to. It holds while the arena has freed nothing, so no handle
+/// was freed or given to another object and a closure's identity is
+/// the one read; and while no saved function was bound, which only
+/// appends globals, so the closure is still no saved function. The
+/// program's tables are the instance's for its life.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Direct {
+    closure: ArenaHandle,
+    freed: u64,
+    globals: usize,
+    params: u16,
+    entry: Entry,
 }
 
 impl<H: Heap> Vm<H> {
@@ -79,10 +95,19 @@ impl<H: Heap> Vm<H> {
 
     /// Calls the closure or function value below the top `argc` operands
     /// (`K-FN-004`, `K-CLO-001`). The callee is read where it stands and
-    /// removed once read.
+    /// removed once read. A closure the last call entered, still the same
+    /// object, enters as it resolved then ([`Direct`]).
     fn call_value(&mut self, argc: usize) -> Run<()> {
         let at = self.cx.stack.len() - argc - 1;
         let callee = self.cx.stack[at];
+        if let Value::Closure(handle) = callee
+            && let Some(direct) = self.direct
+            && direct.closure == handle
+            && direct.freed == self.heap.arena().freed()
+            && direct.globals == self.globals.len()
+        {
+            return self.enter_value(at, argc, direct.params, direct.entry, Some(handle));
+        }
         let (unit, closure, callable) = match callee {
             Value::Closure(handle) => {
                 let callable = {
@@ -114,8 +139,51 @@ impl<H: Heap> Vm<H> {
                 ));
             }
         };
-        self.cx.stack.remove(at);
-        let params = usize::from(self.program.unit(unit).params);
+        // Library code runs as the Link the value names; an own unit runs
+        // as its own whatever the caller passes (`Self::link_of`).
+        let link = match self.program.own_index(unit) {
+            Some(_) => 0,
+            None => self.link_index(&callable.link).unwrap_or(0),
+        };
+        let params = self.program.unit(unit).params;
+        let entry = self.entry(unit, link);
+        if let (Value::Closure(handle), Some(closure)) = (callee, closure)
+            && handle == closure
+        {
+            self.direct = Some(Direct {
+                closure,
+                freed: self.heap.arena().freed(),
+                globals: self.globals.len(),
+                params,
+                entry,
+            });
+        }
+        self.enter_value(at, argc, params, entry, closure)
+    }
+
+    /// Enters a frame of a called value's `entry` over the top `argc`
+    /// operands, removing the callee at `at` below them.
+    #[inline(always)]
+    fn enter_value(
+        &mut self,
+        at: usize,
+        argc: usize,
+        params: u16,
+        entry: Entry,
+        closure: Option<ArenaHandle>,
+    ) -> Run<()> {
+        let stack = &mut self.cx.stack;
+        match argc {
+            0 => stack.truncate(at),
+            1 => {
+                stack[at] = stack[at + 1];
+                stack.truncate(at + 1);
+            }
+            _ => {
+                stack.remove(at);
+            }
+        }
+        let params = usize::from(params);
         if argc > params {
             return Err(self.error(
                 "arity",
@@ -124,18 +192,12 @@ impl<H: Heap> Vm<H> {
         }
         self.meter.leave();
         self.exact = true;
-        // Library code runs as the Link the value names; an own unit runs
-        // as its own whatever the caller passes (`Self::link_of`).
-        let link = match self.program.own_index(unit) {
-            Some(_) => 0,
-            None => self.link_index(&callable.link).unwrap_or(0),
-        };
         // The frame holds the closure only once entered.
         let mark = self.held.len();
         if let Some(closure) = closure {
             self.held.push(Value::Closure(closure));
         }
-        let entered = self.enter(unit, argc, closure, None, link);
+        let entered = self.push_frame(entry, argc, closure, None);
         self.held.truncate(mark);
         entered
     }

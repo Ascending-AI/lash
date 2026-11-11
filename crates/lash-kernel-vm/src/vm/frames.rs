@@ -32,6 +32,22 @@ pub(crate) struct Frame {
     pub depth: u32,
 }
 
+/// What entering a frame of a unit reads of the program: resolved once
+/// for each call, or kept by the direct-call guard (`calls::Direct`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Entry {
+    pub unit: UnitId,
+    /// The Link the frame runs as.
+    pub link: u32,
+    pub locals: u16,
+    /// Its unit is a call (`Frame::depth`).
+    pub call: bool,
+    /// A closure shares one of its locals (`K-CLO-001`).
+    pub boxes: bool,
+    /// What the frame holds (contract §2).
+    pub cost: u64,
+}
+
 /// A completion formula owed by a frame. The arguments it measures are
 /// [`Context::billed`] from `from` up: frames leave in the order they
 /// came, so a frame's bill is the top of that stack when it leaves.
