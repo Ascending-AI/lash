@@ -529,7 +529,9 @@ fn lower_beside_result(
 impl Lowerer<'_> {
     // Names.
 
-    /// A name the source does not spell and nothing has taken.
+    /// A name the source does not spell and nothing has taken. Main's are
+    /// private: a name the source does not spell is never a session
+    /// binding (`K-SES-001`), whatever statement declares it.
     fn fresh(&mut self, base: &str) -> Name {
         let mut number = self.next_fresh.get(base).copied().unwrap_or(1);
         loop {
@@ -537,7 +539,11 @@ impl Lowerer<'_> {
             number += 1;
             if self.taken.insert(candidate.clone()) {
                 self.next_fresh.insert(base.to_string(), number);
-                return Name::new(candidate);
+                let name = Name::new(candidate);
+                if self.in_main() {
+                    self.private.insert(name.clone());
+                }
+                return name;
             }
         }
     }

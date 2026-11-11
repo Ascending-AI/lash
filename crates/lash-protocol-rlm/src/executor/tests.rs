@@ -992,7 +992,7 @@ async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
         &services,
-        "const kept = [1, 2];\nlet count = 1;",
+        "const kept = [1, 2];\nlet count = 1;\nfor (const [x, y] of [kept]) {}\nfor (const item of kept) {}\ntry { throw new Error(\"e\"); } catch (e) {}",
     )
     .await;
     assert!(first.error().is_none(), "{:?}", first.error());
