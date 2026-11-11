@@ -20,6 +20,52 @@ impl Lifter<'_> {
             || matches!(statement, k::Stmt::If { condition, then_block, else_block } if methods::SLICE_TOO_LARGE.recognize(condition, &|id, name| self.is(id, name)).is_some() && else_block.is_empty() && matches!(then_block.as_slice(), [k::Stmt::Throw { value }] if methods::SLICE_ERROR.recognize(value, &|id, name| self.is(id, name)).is_some()))
     }
 
+    /// The kind check a method on a declared number or boolean receiver
+    /// begins with (`do num.to_float(r)`, `do bool.not(r)`), where the next
+    /// statement calls a built-in's helper on that receiver: the method call
+    /// lowers it again.
+    pub(super) fn typed_receiver_check(&self, block: &[k::Stmt]) -> bool {
+        let [
+            k::Stmt::Do {
+                value: k::Expr::Call { function, args },
+            },
+            next,
+            ..,
+        ] = block
+        else {
+            return false;
+        };
+        let [receiver @ k::Expr::Variable(_)] = args.as_slice() else {
+            return false;
+        };
+        if !self.is(function, "num.to_float") && !self.is(function, "bool.not") {
+            return false;
+        }
+        let table = lash_ext_ts_helpers::builtins::table();
+        let mut nodes = vec![k::Node::Stmt(next)];
+        while let Some(node) = nodes.pop() {
+            let found = match node {
+                k::Node::Action(action @ k::Action::Call { .. }) => {
+                    Some(super::statements::act_of(action))
+                }
+                k::Node::Expr(k::Expr::Act(act)) => Some((**act).clone()),
+                _ => None,
+            };
+            if let Some(act) = found
+                && let k::ActKind::Call(k::Callee::Local(id)) = &act.kind
+                && act.args.first() == Some(receiver)
+                && table
+                    .functions
+                    .iter()
+                    .any(|(_, helper)| self.is(id, helper))
+            {
+                return true;
+            }
+            nodes.extend(node.children());
+        }
+        false
+    }
+
     /// `let start = …; let end = …;` ahead of the `ts.string.slice_units`
     /// call that reads them: the bounds of `receiver.slice(start, end)`,
     /// written where that call reads them.

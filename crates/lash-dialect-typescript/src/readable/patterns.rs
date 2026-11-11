@@ -9,6 +9,15 @@ impl Lifter<'_> {
         &mut self,
         block: &[k::Stmt],
     ) -> Lift<Option<(Pattern, Expr, usize)>> {
+        let Some((pattern, value, taken)) = self.destructured(block)? else {
+            return Ok(None);
+        };
+        Ok(Some((pattern, self.expr(&value)?, taken)))
+    }
+
+    /// An object or array pattern at the start of `block`, the value it
+    /// destructures, and how many statements it takes.
+    fn destructured(&mut self, block: &[k::Stmt]) -> Lift<Option<(Pattern, k::Expr, usize)>> {
         if let Some(found) = self.object_binding_pattern(block)? {
             return Ok(Some(found));
         }
@@ -18,7 +27,7 @@ impl Lifter<'_> {
     fn object_binding_pattern(
         &mut self,
         block: &[k::Stmt],
-    ) -> Lift<Option<(Pattern, Expr, usize)>> {
+    ) -> Lift<Option<(Pattern, k::Expr, usize)>> {
         let Some(k::Stmt::Do {
             value: k::Expr::Call { function, args },
         }) = block.first()
@@ -91,14 +100,13 @@ impl Lifter<'_> {
         if fields.is_empty() && rest.is_none() {
             return Ok(None);
         }
-        Ok(Some((
-            Pattern::Object(fields, rest),
-            self.expr(value)?,
-            index,
-        )))
+        Ok(Some((Pattern::Object(fields, rest), value.clone(), index)))
     }
 
-    fn array_binding_pattern(&mut self, block: &[k::Stmt]) -> Lift<Option<(Pattern, Expr, usize)>> {
+    fn array_binding_pattern(
+        &mut self,
+        block: &[k::Stmt],
+    ) -> Lift<Option<(Pattern, k::Expr, usize)>> {
         let [
             k::Stmt::Let {
                 name: iterator,
@@ -175,11 +183,7 @@ impl Lifter<'_> {
         if elements.is_empty() && rest.is_none() {
             return Ok(None);
         }
-        Ok(Some((
-            Pattern::Array(elements, rest),
-            self.expr(value)?,
-            index,
-        )))
+        Ok(Some((Pattern::Array(elements, rest), value.clone(), index)))
     }
     fn bound_pattern(
         &mut self,
@@ -191,7 +195,13 @@ impl Lifter<'_> {
             value: k::Rhs::Expr(k::Expr::Variable(read)),
         }) = block.first()
         else {
-            return Ok(None);
+            // A nested pattern destructures the read itself.
+            return Ok(match self.destructured(block)? {
+                Some((pattern, k::Expr::Variable(read), taken)) if read == *input => {
+                    Some((pattern, taken))
+                }
+                _ => None,
+            });
         };
         if read != input {
             return Ok(None);

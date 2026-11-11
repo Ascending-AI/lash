@@ -135,10 +135,18 @@ pub(super) enum StmtKind {
         condition: Expr,
         body: Vec<Stmt>,
     },
+    DoWhile {
+        body: Vec<Stmt>,
+        condition: Expr,
+    },
     Return(Option<Expr>),
     Throw(Expr),
-    Break,
-    Continue,
+    /// `break` or `continue`, with the label it exits.
+    Break(Option<String>),
+    Continue(Option<String>),
+    /// `label: statement`.
+    Labeled(String, Box<StmtKind>),
+    Block(Vec<Stmt>),
     Try {
         body: Vec<Stmt>,
         catch: Option<(Arm, Option<String>)>,
@@ -552,6 +560,13 @@ impl Writer {
                 self.out.push_str(") ");
                 self.block(body);
             }
+            StmtKind::DoWhile { body, condition } => {
+                self.out.push_str("do ");
+                self.block(body);
+                self.out.push_str(" while (");
+                self.expr(condition, 0);
+                self.out.push_str(");");
+            }
             StmtKind::Return(value) => {
                 self.out.push_str("return");
                 if let Some(value) = value {
@@ -565,8 +580,24 @@ impl Writer {
                 self.expr(value, 0);
                 self.out.push(';');
             }
-            StmtKind::Break => self.out.push_str("break;"),
-            StmtKind::Continue => self.out.push_str("continue;"),
+            StmtKind::Break(label) | StmtKind::Continue(label) => {
+                self.out.push_str(if matches!(kind, StmtKind::Break(_)) {
+                    "break"
+                } else {
+                    "continue"
+                });
+                if let Some(label) = label {
+                    self.out.push(' ');
+                    self.out.push_str(label);
+                }
+                self.out.push(';');
+            }
+            StmtKind::Labeled(label, statement) => {
+                self.out.push_str(label);
+                self.out.push_str(": ");
+                self.statement_kind(statement);
+            }
+            StmtKind::Block(body) => self.block(body),
             StmtKind::Try {
                 body,
                 catch,

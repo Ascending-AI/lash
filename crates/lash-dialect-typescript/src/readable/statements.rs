@@ -100,23 +100,29 @@ impl Lifter<'_> {
                 via: Some(via),
                 body,
                 else_block,
-            } if else_block.is_empty() && self.for_of(via) => StmtKind::For {
-                operator: "of",
-                binding: self.binding(binding)?,
-                iterable: self.expr(iterable)?,
-                body: self.block(body, &site.child(1))?,
-            },
+            } if else_block.is_empty() && self.for_of(via) => {
+                let kind = StmtKind::For {
+                    operator: "of",
+                    binding: self.binding(binding)?,
+                    iterable: self.expr(iterable)?,
+                    body: self.block(body, &site.child(1))?,
+                };
+                self.labeled(kind)
+            }
             k::Stmt::While {
                 metered: 0,
                 condition,
                 body,
                 else_block,
-            } if else_block.is_empty() => StmtKind::While {
-                condition: self.condition(condition)?,
-                body: self.block(body, &site.child(1))?,
-            },
-            k::Stmt::Break => StmtKind::Break,
-            k::Stmt::Continue => StmtKind::Continue,
+            } if else_block.is_empty() => {
+                let kind = StmtKind::While {
+                    condition: self.condition(condition)?,
+                    body: self.block(body, &site.child(1))?,
+                };
+                self.labeled(kind)
+            }
+            k::Stmt::Break => StmtKind::Break(None),
+            k::Stmt::Continue => StmtKind::Continue(None),
             k::Stmt::ReturnVia { value, .. }
                 if crate::constructs::conventions::RETURNS
                     .is_statement(statement, |target, name| self.is(target, name)) =>
@@ -146,7 +152,10 @@ impl Lifter<'_> {
                 k::Expr::Literal(k::Literal::Absent) => StmtKind::Return(None),
                 value => StmtKind::Return(Some(self.expr(value)?)),
             },
-            k::Stmt::Throw { value } => StmtKind::Throw(self.expr(value)?),
+            k::Stmt::Throw { value } => match self.exit(value) {
+                Some(exit) => exit,
+                None => StmtKind::Throw(self.expr(value)?),
+            },
             k::Stmt::Try(scope) if scope.catch.is_some() || scope.finally.is_some() => {
                 let body = self.block(&scope.body, &site.child(0))?;
                 let mut child = 1;

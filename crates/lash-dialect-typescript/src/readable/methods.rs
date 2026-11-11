@@ -23,6 +23,69 @@ use super::lift::{Lift, Lifter};
 use super::source::Expr;
 
 impl Lifter<'_> {
+    /// `x.get(k)`, `x.set(k, v)` or `x.has(k)` on a value of no single
+    /// known kind:
+    ///
+    /// ```text
+    /// let r = absent
+    /// if same(kind(x), "map") { set r = invoke ts.map.get(x, [k]) }
+    /// else { <the method read and call of `x.get(k)`> }
+    /// ```
+    ///
+    /// read from the map's arm; the general arm is the front end's own
+    /// method call on the same receiver, which read-back verifies.
+    pub(super) fn map_ladder(&mut self, block: &[k::Stmt]) -> Lift<Option<(Name, Expr, usize)>> {
+        let [
+            k::Stmt::Let {
+                name: result,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            },
+            k::Stmt::If {
+                condition,
+                then_block,
+                ..
+            },
+            ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let Some(target) = self.kind_test(condition, "map") else {
+            return Ok(None);
+        };
+        let [
+            k::Stmt::Assign {
+                place: k::Place::Variable(assigned),
+                value,
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = then_block.as_slice()
+        else {
+            return Ok(None);
+        };
+        if assigned != result {
+            return Ok(None);
+        }
+        for method in ["get", "set", "has"] {
+            if let Some(args) = self.helper_read(value, &format!("ts.map.{method}"))
+                && let [receiver, k::Expr::List(items)] = args.as_slice()
+                && receiver == target
+            {
+                let callee = Expr::Field(Box::new(self.expr(target)?), method.into());
+                let items = items
+                    .iter()
+                    .map(|item| self.expr(item))
+                    .collect::<Lift<_>>()?;
+                return Ok(Some((
+                    result.clone(),
+                    Expr::Call(Box::new(callee), items),
+                    2,
+                )));
+            }
+        }
+        Ok(None)
+    }
+
     /// The array read or method call at the start of `block`, its result
     /// temporary, and how many statements it takes.
     pub(super) fn array_ladder(&mut self, block: &[k::Stmt]) -> Lift<Option<(Name, Expr, usize)>> {

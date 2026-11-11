@@ -6,6 +6,7 @@
 
 mod closures;
 mod expressions;
+mod labels;
 mod lift;
 mod methods;
 mod mixed;
@@ -243,21 +244,29 @@ impl Printer for crate::TypeScript {
 mod tests {
     use super::*;
 
-    /// FIG-7664: every helper emitted by syntax lowering needs an exact
-    /// authored spelling, including native constructors such as RegExp.
+    /// FIG-7664, FIG-7698: every helper and construct the lowering emits
+    /// in a function body, for every operator, built-in table row and
+    /// statement form, needs an exact authored spelling, including native
+    /// constructors such as RegExp.
     #[test]
     fn syntax_lowered_helpers_have_source_spellings() {
         let library = crate::tests::library();
         let namespaces = Default::default();
         let environment = Environment::new(library, &namespaces);
-        let forms = crate::lower::inventory::forms();
+        let mut forms = crate::lower::inventory::forms();
+        let admitted = forms.len();
+        forms.extend(crate::lower::inventory::members());
         let mut inventory = BTreeMap::new();
         let mut failures = Vec::new();
         for (index, (name, source)) in forms.iter().enumerate() {
             let (lowered, emitted) = crate::lower::inventory::collect(|| {
                 crate::lower(source, &environment, lash_kernel_dialect::Mode::Module)
             });
-            let lowered = lowered.unwrap_or_else(|error| panic!("{name}: {error}"));
+            let lowered = match lowered {
+                Ok(lowered) => lowered,
+                Err(_) if index >= admitted => continue,
+                Err(error) => panic!("{name}: {error}"),
+            };
             for (helper, identity) in emitted {
                 inventory.entry(helper).or_insert((identity, index));
             }
@@ -408,6 +417,7 @@ mod tests {
             ("integrations", "execute"),
             ("views", "table"),
             ("cenote", "read_document"),
+            ("cenote", "discuss"),
             ("views", "bar_chart"),
             ("views", "action"),
             ("views", "card"),

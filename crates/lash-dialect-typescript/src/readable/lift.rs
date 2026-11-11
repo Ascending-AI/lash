@@ -167,6 +167,10 @@ pub(super) struct Lifter<'a> {
     pub(super) module_helpers: BTreeSet<Name>,
     /// Bindings consumed by the conditional process-handle await adapter.
     pub(super) process_awaits: BTreeSet<Name>,
+    /// The unit's label tokens, with the exit each one's throw is.
+    pub(super) labels: BTreeMap<Name, super::labels::Exit>,
+    /// The label a loop body's exit handler gave the loop being lifted.
+    pub(super) loop_label: Option<String>,
 }
 
 impl<'a> Lifter<'a> {
@@ -279,8 +283,11 @@ impl<'a> Lifter<'a> {
             bindings,
             module_helpers: BTreeSet::new(),
             process_awaits: BTreeSet::new(),
+            labels: BTreeMap::new(),
+            loop_label: None,
         };
         if let Some(body) = body {
+            lifter.labels = lifter.label_tokens(body);
             let mut pending = vec![k::Node::Block(body)];
             while let Some(node) = pending.pop() {
                 if let k::Node::Expr(k::Expr::If { then, r#else, .. }) = node
@@ -648,6 +655,8 @@ impl<'a> Lifter<'a> {
             .position(|pending| pending.name == *name)
         {
             self.pending.remove(index);
+            // The body's own refusal names the shape that stopped it.
+            result?;
             return refuse("an unconsumed expression temporary");
         }
         result
@@ -853,7 +862,7 @@ impl<'a> Lifter<'a> {
         }
         // A primitive text method's receiver check, and its slice bounds:
         // the method call they precede writes and lowers them again.
-        if self.receiver_check(&block[0]) {
+        if self.receiver_check(&block[0]) || self.typed_receiver_check(block) {
             self.taken_captions.extend(caption);
             return Ok(1);
         }
@@ -889,7 +898,10 @@ impl<'a> Lifter<'a> {
         }
         let ladder = match self.array_ladder(block)? {
             Some(ladder) => Some(ladder),
-            None => self.read_ladder(block)?,
+            None => match self.map_ladder(block)? {
+                Some(ladder) => Some(ladder),
+                None => self.read_ladder(block)?,
+            },
         };
         if let Some((name, value, taken)) = ladder {
             if (1..taken).any(|later| caption_at(later).is_some()) {
@@ -1007,6 +1019,23 @@ impl<'a> Lifter<'a> {
                 index += taken;
                 continue;
             }
+            if let Some(kind) =
+                self.do_while(&block[index..], &site.child((first + index + 1) as u32))?
+            {
+                let kind = self.labeled(kind);
+                out.push(Stmt { caption, kind });
+                index += 2;
+                continue;
+            }
+            if self.label_machinery(&block[index]) {
+                index += 1;
+                continue;
+            }
+            if let Some(body) = self.exit_handler(&block[index], &here)? {
+                out.extend(body);
+                index += 1;
+                continue;
+            }
             let pended = self.pend(&block[index..], site, first + index)?;
             if pended > 0 {
                 if self.pending.len() == outer + 1
@@ -1072,6 +1101,103 @@ impl<'a> Lifter<'a> {
             return refuse("a temporary nothing reads");
         }
         Ok(out)
+    }
+}
+
+impl Lifter<'_> {
+    /// `do body while (test)`: a first-pass flag, then a loop that tests
+    /// on every pass but the first (`lower::statements`'s `DoWhile`).
+    /// `loop_site` is the loop statement's site.
+    fn do_while(&mut self, block: &[k::Stmt], loop_site: &Site) -> Lift<Option<source::StmtKind>> {
+        let [
+            k::Stmt::Let {
+                name: flag,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(true))),
+            },
+            k::Stmt::While {
+                metered: 0,
+                condition: k::Expr::Literal(k::Literal::Bool(true)),
+                body,
+                else_block: loop_else,
+            },
+            rest @ ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let [
+            k::Stmt::If {
+                condition: k::Expr::Variable(tested),
+                then_block,
+                else_block: test,
+            },
+            body @ ..,
+        ] = body.as_slice()
+        else {
+            return Ok(None);
+        };
+        let lowered = matches!(then_block.as_slice(), [k::Stmt::Assign {
+                place: k::Place::Variable(cleared),
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(false))),
+                order: k::AssignOrder::ValueFirst,
+            }] if cleared == flag);
+        let exits = match test.last() {
+            None => true,
+            Some(k::Stmt::If {
+                then_block,
+                else_block,
+                ..
+            }) => then_block.is_empty() && matches!(else_block.as_slice(), [k::Stmt::Break]),
+            Some(_) => false,
+        };
+        if !temporary(flag)
+            || tested != flag
+            || !lowered
+            || !exits
+            || !loop_else.is_empty()
+            || reads_name(k::Node::Block(body), flag)
+            || reads_name(k::Node::Block(rest), flag)
+        {
+            return Ok(None);
+        }
+        let first_pass = loop_site.child(1).child(0);
+        let condition = if test.is_empty() {
+            source::Expr::Bool(true)
+        } else {
+            let lifted = self.block(test, &first_pass.child(2))?;
+            match <[Stmt; 1]>::try_from(lifted) {
+                Ok(
+                    [
+                        Stmt {
+                            caption: None,
+                            kind:
+                                source::StmtKind::If {
+                                    condition,
+                                    then,
+                                    otherwise:
+                                        Some(source::Arm {
+                                            caption: None,
+                                            body: exit,
+                                        }),
+                                },
+                        },
+                    ],
+                ) if then.is_empty()
+                    && matches!(
+                        exit.as_slice(),
+                        [Stmt {
+                            caption: None,
+                            kind: source::StmtKind::Break(None)
+                        }]
+                    ) =>
+                {
+                    condition
+                }
+                _ => return refuse("a do-while test the dialect does not lower to"),
+            }
+        };
+        let body = self.block_at(body, &loop_site.child(1), 1)?;
+        Ok(Some(source::StmtKind::DoWhile { body, condition }))
     }
 }
 

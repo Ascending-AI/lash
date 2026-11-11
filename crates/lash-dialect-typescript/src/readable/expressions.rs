@@ -249,6 +249,13 @@ impl Lifter<'_> {
                 args.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
             ));
         }
+        // A built-in's helper called directly spells as its invocation would.
+        let table = lash_ext_ts_helpers::builtins::table();
+        let builtin = table
+            .functions
+            .iter()
+            .chain(table.values.iter())
+            .any(|(_, helper)| *helper == name);
         match (name.as_str(), args) {
             // A materialized capture cell starts as null and is filled after
             // its closures exist. Keep the strict text operation even when
@@ -275,6 +282,7 @@ impl Lifter<'_> {
                         self.expr(value)?
                     }),
                 )),
+                None if builtin => self.helper(name, args),
                 None => refuse(format!("`{name}` has no source spelling")),
             },
             (
@@ -286,8 +294,10 @@ impl Lifter<'_> {
             ) if separator.is_empty() => self.template(parts),
             (name, [left, right]) => match crate::constructs::operators::native_inverse(name) {
                 Some(op) => self.binary(op, left, right),
+                None if builtin => self.helper(name, args),
                 None => refuse(format!("`{name}` has no operator")),
             },
+            (name, _) if builtin => self.helper(name, args),
             (name, _) => refuse(format!("`{name}` has no source spelling")),
         }
     }
@@ -890,8 +900,13 @@ impl Lifter<'_> {
                     .unwrap_or_else(|| unreachable!("a declared unary inverse"));
                 Ok(Expr::Unary(token, Box::new(self.expr(value)?)))
             }
-            (name, [target]) if name.starts_with("ts.property.") => {
-                let property = &name["ts.property.".len()..];
+            (name, [target])
+                if name.starts_with("ts.property.") || name.starts_with("ts.member.") =>
+            {
+                let property = name
+                    .strip_prefix("ts.property.")
+                    .or_else(|| name.strip_prefix("ts.member."))
+                    .unwrap_or_else(|| unreachable!("a member helper"));
                 let target = self.expr(target)?;
                 Ok(Expr::Field(Box::new(target), property.to_owned()))
             }
@@ -915,7 +930,8 @@ impl Lifter<'_> {
                     .iter()
                     .map(|arg| self.expr(arg))
                     .collect::<Lift<Vec<_>>>()?;
-                let constructor = lash_ext_ts_helpers::builtins::table()
+                let table = lash_ext_ts_helpers::builtins::table();
+                let constructor = table
                     .constructors
                     .iter()
                     .find(|(_, helper)| **helper == name)
@@ -927,6 +943,17 @@ impl Lifter<'_> {
                     }
                     return Ok(Expr::New(Box::new(Expr::Ident(class.to_owned())), args));
                 }
+                // A static built-in keeps the spelling its namespace gives
+                // (`Math.abs`) and otherwise takes its table path
+                // (`Array.isArray` is `ts.array.is_array`).
+                if matches!(receiver, k::Expr::Literal(k::Literal::Absent))
+                    && global(namespace).is_none_or(|root| {
+                        table.functions.get(&format!("{root}.{method}")) != Some(&name)
+                    })
+                    && let Some(path) = global_path(name, table.functions.iter())
+                {
+                    return Ok(Expr::Call(Box::new(spelled(path)), args));
+                }
                 let target = match (receiver, global(namespace)) {
                     (k::Expr::Literal(k::Literal::Absent), Some(global)) => {
                         Expr::Ident(global.to_owned())
@@ -936,14 +963,58 @@ impl Lifter<'_> {
                     }
                     (receiver, _) => self.expr(receiver)?,
                 };
+                // The member is one the table's method rows name for this
+                // helper: the helper's own name where a row has it, since a
+                // helper need not be named for its method (`localeCompare`
+                // is `ts.string.locale_unsupported`).
+                let implements = |rows: &lash_ext_ts_helpers::builtins::Rows| {
+                    rows.iter()
+                        .any(|(_, path)| table.functions.get(path) == Some(&name))
+                };
+                let method = if table.methods.get(method).is_some_and(implements) {
+                    method
+                } else {
+                    table
+                        .methods
+                        .iter()
+                        .find(|(_, rows)| implements(rows))
+                        .map_or(method, |(member, _)| member)
+                };
                 Ok(Expr::Call(
                     Box::new(Expr::Field(Box::new(target), method.to_owned())),
                     args,
                 ))
             }
+            // A built-in value (`Math.PI`) reads its helper.
+            (name, []) => {
+                match global_path(name, lash_ext_ts_helpers::builtins::table().values.iter()) {
+                    Some(path) => Ok(spelled(path)),
+                    None => refuse(format!("`{name}` has no source spelling")),
+                }
+            }
             (name, _) => refuse(format!("`{name}` has no source spelling")),
         }
     }
+}
+
+/// The global path (`Array.isArray`, `isNaN`) a built-in's helper
+/// implements. A prototype's path is its receiver's method, not a global.
+fn global_path<'a>(
+    helper: &str,
+    mut paths: impl Iterator<Item = (&'a &'static str, &'a &'static str)>,
+) -> Option<&'static str> {
+    paths
+        .find(|(path, implementing)| **implementing == helper && !path.contains(".prototype."))
+        .map(|(path, _)| *path)
+}
+
+/// `Math.PI` as the member reads that spell it.
+fn spelled(path: &str) -> Expr {
+    let mut segments = path.split('.');
+    let root = Expr::Ident(segments.next().unwrap_or(path).to_owned());
+    segments.fold(root, |target, field| {
+        Expr::Field(Box::new(target), field.to_owned())
+    })
 }
 
 /// The global a static helper's namespace stands for.

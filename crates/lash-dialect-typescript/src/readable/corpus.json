@@ -310,5 +310,11 @@
     "source": "const run = async (): Promise<unknown> => { const pattern = /Week/; return [pattern, String(1)]; };",
     "cell": true,
     "materialize": true
+  },
+  {
+    "name": "FIG-7698 Cenote signup counts: do-while and regular expression literal (cursor unannotated, FIG-7706)",
+    "source": "try {\nconst created=await workflows.create({space_id:'01a1b3dd-b832-74e9-b62c-180a67f6a34f',name:'signup-counts-report',description:'Posts the current three weekly signup counts to the Signup counts room. No schedule is configured.',run:async ():Promise<unknown>=>{\n let cursor=null;\n let text='';\n let citation='';\n do {\n  const result=await cenote.readDocument({document:{doc_id:'01a1b3dd-b9cd-73d4-892f-2d0d287a2fe6'},cursor,limit:100});\n  if(!result.ok) throw new Error('Page read failed');\n  if(!citation && result.data.citation) citation=result.data.citation.uri;\n  for(const item of result.data.items) { if('text' in item) text+=item.text+'\\n'; }\n  cursor=result.data.next_cursor;\n } while(cursor);\n const matches=text.match(/Week\\s*[123]\\s*:\\s*\\d+/gi);\n if(!matches || matches.length!==3 || !citation) throw new Error('Expected three weekly signup counts and a citation');\n for(const n of ['1','2','3']) { const found=matches.filter((s:string):boolean=>new RegExp('Week\\\\s*'+n+'\\\\s*:','i').test(s)); if(found.length!==1) throw new Error('Expected exactly one count per week'); }\n const body='Signup counts: '+matches.join('; ')+'. [Signup counts]('+citation+')';\n await cenote.discuss({action:'start',subject:{type:'space',space_id:'01a1b3dd-b832-74e9-b62c-180a67f6a34f'},visibility:'everyone',body});\n return {posted:true};\n}});\nconsole.log(JSON.stringify(created));\n} catch(e) { console.log(JSON.stringify(e)); }",
+    "cell": true,
+    "materialize": true
   }
 ]
