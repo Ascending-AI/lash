@@ -50,14 +50,14 @@ fn a_seal_prunes_the_new_directory_and_keeps_the_retained_one() {
         let next = if id + 1 < 300 { vec![id + 1] } else { vec![] };
         directory.put(ObjectId(id), list(&next)).unwrap();
     }
-    assert_eq!(directory.prune([ObjectId(0)]).unwrap(), 2);
+    assert_eq!(directory.prune([ObjectId(0)]).unwrap().len(), 2);
     let first = directory.seal().unwrap();
     assert_eq!(first.rows, 298);
     assert!(pages.borrow().seals > 2, "the rows span several pages");
 
     // The run cuts 2 -> 5: the chain dies with the next seal.
     directory.put(ObjectId(2), list(&[1])).unwrap();
-    assert_eq!(directory.prune([ObjectId(0)]).unwrap(), 295);
+    assert_eq!(directory.prune([ObjectId(0)]).unwrap().len(), 295);
     let second = directory.seal().unwrap();
     assert_eq!(second.rows, 3);
 
@@ -250,7 +250,7 @@ fn immutable_heads_survive_retained_and_sibling_roots() {
             Row::of(Record::LongText(next.into()), Heads::default()),
         )
         .unwrap();
-    assert_eq!(directory.prune([ObjectId(0)]).unwrap(), 1);
+    assert_eq!(directory.prune([ObjectId(0)]).unwrap().len(), 1);
     let second = directory.seal().unwrap();
 
     let mut sibling = Directory::new(Box::new(Source(pages.clone())));

@@ -1225,6 +1225,19 @@ impl Arena {
         dirty
     }
 
+    /// Lists `handle` dirty again: the projection dropped its saved form
+    /// while the arena still holds it (an object on the zero-count list,
+    /// which the interned empty tuple can give out again), so the next
+    /// projection writes it before any row names it.
+    pub fn relist(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
+        let facts = self.facts_mut(handle)?;
+        facts.dirty = true;
+        if !std::mem::replace(&mut facts.listed, true) {
+            self.dirty.push(handle);
+        }
+        Ok(())
+    }
+
     /// Marks `handle` clean: the heap holds what it does, as its head.
     pub fn clean(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
         let facts = self.facts_mut(handle)?;

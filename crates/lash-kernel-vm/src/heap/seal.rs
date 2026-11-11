@@ -111,7 +111,7 @@ pub(crate) fn seal(
         .iter()
         .map(|value| run_value(arena, value))
         .collect::<Result<Vec<_>, _>>()?;
-    directory
+    let dead = directory
         .prune(roots.iter().filter_map(RunValue::id))
         .map_err(SealError::Heap)?;
     let directory = directory.seal().map_err(SealError::Heap)?;
@@ -122,6 +122,16 @@ pub(crate) fn seal(
             .map_err(|error| fault(error.to_string()))?;
     }
     let _ = arena.take_dirty();
+    // An object the roots no longer reach loses its row, but the arena may
+    // hold it until a release and give it out again: it is written anew
+    // before a row can name it, as every object with an id has a row.
+    for id in dead {
+        if let Some(handle) = arena.entity_handle(entity(id)) {
+            arena
+                .relist(handle)
+                .map_err(|error| fault(error.to_string()))?;
+        }
+    }
     Ok((
         HeapRoot {
             high_water: *high_water,

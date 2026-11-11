@@ -251,12 +251,15 @@ impl Directory {
     }
 
     /// Drops every row `roots` do not reach through the rows' edges, from
-    /// this directory only; gives how many it dropped.
+    /// this directory only; gives the ids it dropped.
     ///
     /// # Errors
     ///
     /// [`Directory::reached`]'s.
-    pub fn prune(&mut self, roots: impl IntoIterator<Item = ObjectId>) -> Result<u64, HeapFault> {
+    pub fn prune(
+        &mut self,
+        roots: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<Vec<ObjectId>, HeapFault> {
         let reached = self.reached(roots)?;
         let mut dead = Vec::new();
         self.tree.visit(&self.access, &mut |key, _| {
@@ -270,7 +273,7 @@ impl Directory {
         for id in &dead {
             self.remove(*id)?;
         }
-        Ok(dead.len() as u64)
+        Ok(dead)
     }
 
     /// Seals the changed rows and their paths, giving the new root.
