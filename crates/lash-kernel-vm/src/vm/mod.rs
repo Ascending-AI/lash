@@ -644,6 +644,13 @@ impl<H: Heap> Vm<H> {
         if let Some(units) = formula.constant() {
             return Ok(units);
         }
+        // Two arguments and a result of size 1 or 2 read their fee from
+        // the formula's table.
+        if let ([first, second], Some(result)) = (args, result)
+            && let Some(units) = formula.pair([first, second, result])
+        {
+            return Ok(units);
+        }
         // A sum of sizes over values the arena holds nothing of is billed
         // without its tree, the same amount.
         if let Some(linear) = formula.linear()
@@ -1149,7 +1156,9 @@ impl<H: Heap> Vm<H> {
                     crate::perf_witness::record(|work| work.vm_steps += 1);
                     self.chill();
                 }
-                if self.exact {
+                // A block head bills nothing and starts no step
+                // (validated): unobserved, it needs no exact step.
+                if self.exact && (self.watch.is_some() || !matches!(op, Op::Block(_))) {
                     // A refusal, a limiter and a slice read the frame at
                     // the op.
                     sync!(pc);

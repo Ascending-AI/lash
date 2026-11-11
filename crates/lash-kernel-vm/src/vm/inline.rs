@@ -170,7 +170,9 @@ impl<H: Heap> Vm<H> {
                 Slot::Const(n) => self.konst(n),
                 Slot::Made(_) => Value::Absent,
             };
-            if let [Value::Int(a), Value::Int(b)] = words.operands.map(read) {
+            if let (Value::Int(a), Value::Int(b)) =
+                (read(words.operands[0]), read(words.operands[1]))
+            {
                 let value = lash_kernel_doc::scalar::ints(words.operation, a, b);
                 #[cfg(test)]
                 if value.is_some() {

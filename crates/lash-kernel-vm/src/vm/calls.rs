@@ -132,7 +132,9 @@ impl<H: Heap> Vm<H> {
         };
         // The frame holds the closure only once entered.
         let mark = self.held.len();
-        self.held.extend(closure.map(Value::Closure));
+        if let Some(closure) = closure {
+            self.held.push(Value::Closure(closure));
+        }
         let entered = self.enter(unit, argc, closure, None, link);
         self.held.truncate(mark);
         entered
