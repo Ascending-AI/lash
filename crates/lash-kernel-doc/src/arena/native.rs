@@ -1162,6 +1162,9 @@ impl InlineOperation {
                 matches!(domain, ScalarDomain::Floats | ScalarDomain::WordsOrFloats)
             }
             (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(_)]) => true,
+            (Self::IntegerText(IntegerTextDomain::WholeFloat), [Value::Float(number)]) => {
+                whole_float(number.get()).is_some()
+            }
             (
                 Self::IntegerText(IntegerTextDomain::RadixArgument),
                 [Value::Int(_), Value::Int(radix)],
@@ -1185,6 +1188,9 @@ impl InlineOperation {
             (Self::FloatIdentity, [value @ Value::Float(_)]) => Some(*value),
             (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(word)]) => {
                 ShortText::digits(*word, 10).map(Value::Text)
+            }
+            (Self::IntegerText(IntegerTextDomain::WholeFloat), [Value::Float(number)]) => {
+                ShortText::digits(whole_float(number.get())?, 10).map(Value::Text)
             }
             (
                 Self::IntegerText(IntegerTextDomain::RadixArgument),
@@ -1296,6 +1302,16 @@ pub enum ScalarDomain {
 pub enum IntegerTextDomain {
     Decimal,
     RadixArgument,
+    /// A whole float below 2^53 in magnitude, spelled as its integer's
+    /// decimal digits; either zero is "0".
+    WholeFloat,
+}
+
+/// The integer a whole float below 2^53 in magnitude is exactly; either
+/// zero is 0. Kept out of line so the inline answers' tests stay small.
+#[inline(never)]
+fn whole_float(number: f64) -> Option<i64> {
+    (number.abs() < 9_007_199_254_740_992.0 && number.floor() == number).then_some(number as i64)
 }
 
 /// A read that neither allocates nor mutates its resident operands.

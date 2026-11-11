@@ -112,7 +112,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_PROPERTY_UNICODE_PLAN,
     &TS_READ_PLAN,
     &TS_DATE_GETUTCDAY_PLAN,
-    &TS_NOT_PLAN,
     &TS_MATH_CEIL_PLAN,
     &TS_MAP_SIZE_PLAN,
     &TS_OBJECT_ISEXTENSIBLE_PLAN,
@@ -121,6 +120,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &TS_ERROR_NEW_ERROR_PLAN,
     &TS_STRING_LOCALE_UNSUPPORTED_PLAN,
     &TS_DATE_SETUTCSECONDS_PLAN,
+    &TS_NOT_PLAN,
     &TS_MEMBER_MAX_PLAN,
     &TS_REGEXP_ARGUMENT_PLAN,
     &TS_LIST_WRITE_PLAN,
@@ -5379,7 +5379,7 @@ fn ts_to_boolean(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const TS_NOT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "ts.not",
-    function: p::function("1a3d964320f5afb0dce99c0b9cc737d637ccbe2ee417266b97487ac2eb465a20"),
+    function: p::function("1c8ee77be2225ff8ca9a9b9f96f02978e259ec62be3d2c3ad3fd1ab08e6b0a09"),
     callees: &[
         p::function("f6df6ed6d839b0136d92d7de63df9422c732fa26c089bb2e2b01952b1e01cb5b"),
         p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),

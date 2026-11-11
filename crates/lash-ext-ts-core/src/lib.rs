@@ -170,6 +170,7 @@ natives!(name, kernel;
         })),
         "ts.to_number" | "ts.to_numeric" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
+        "ts.not" => Arc::new(conversions::Not),
         "ts.number.format_value" => Arc::new(conversions::NumberToString),
         "ts.number_index" => Arc::new(number_index::NumberIndex {
             less: kernel("num.lt")?,

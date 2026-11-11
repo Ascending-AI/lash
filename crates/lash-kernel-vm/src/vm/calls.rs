@@ -16,6 +16,7 @@ use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::arena::native::{
     Args, InlineOperation, IntegerTextDomain, NativeCall, NativeError, NewObject, Nursery, Retry,
+    ScalarDomain,
 };
 use lash_kernel_doc::heap::LogicalBytes;
 
@@ -458,28 +459,23 @@ impl<H: Heap> Vm<H> {
     #[inline(always)]
     pub(super) fn immediate(&self, inline: InlineOperation, args: &[Value]) -> Option<Value> {
         match inline {
-            InlineOperation::Scalar { operation, .. } if args.len() == 2 => {
-                if !inline.accepts(args) {
-                    return None;
+            // The declared domain is read here, as `InlineOperation::accepts`
+            // reads it, so the hot scalar answer makes no call.
+            InlineOperation::Scalar { operation, domain } if args.len() == 2 => match *args {
+                [Value::Int(a), Value::Int(b)] if domain != ScalarDomain::Floats => {
+                    lash_kernel_doc::scalar::ints(operation, a, b)
                 }
-                match *args {
-                    [Value::Int(a), Value::Int(b)] => {
-                        lash_kernel_doc::scalar::ints(operation, a, b)
-                    }
-                    [Value::Float(a), Value::Float(b)] => {
-                        lash_kernel_doc::scalar::floats(operation, a, b)
-                    }
-                    _ => None,
+                [Value::Float(a), Value::Float(b)] if domain != ScalarDomain::Words => {
+                    lash_kernel_doc::scalar::floats(operation, a, b)
                 }
-            }
+                _ => None,
+            },
             InlineOperation::Kind
             | InlineOperation::Not
             | InlineOperation::FloatIdentity
-            | InlineOperation::IntegerText(IntegerTextDomain::Decimal)
-                if args.len() == 1 =>
-            {
-                inline.answer(args)
-            }
+            | InlineOperation::IntegerText(
+                IntegerTextDomain::Decimal | IntegerTextDomain::WholeFloat,
+            ) if args.len() == 1 => inline.answer(args),
             InlineOperation::IntegerText(IntegerTextDomain::RadixArgument) if args.len() == 2 => {
                 inline.answer(args)
             }

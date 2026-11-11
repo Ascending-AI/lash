@@ -304,6 +304,7 @@ body {
 function ts.not(value: Any) -> Bool
 kernel 1
 charge 4
+native
 body {
   let truthy = invoke ts.to_boolean(value)
   return bool.not(truthy)

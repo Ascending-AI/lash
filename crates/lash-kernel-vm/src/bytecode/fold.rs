@@ -337,7 +337,9 @@ fn answers(program: &Program, native: u32, argc: usize) -> Option<InlineOperatio
         | InlineOperation::Not
         | InlineOperation::FloatIdentity
         | InlineOperation::Length(_)
-        | InlineOperation::IntegerText(IntegerTextDomain::Decimal) => 1,
+        | InlineOperation::IntegerText(
+            IntegerTextDomain::Decimal | IntegerTextDomain::WholeFloat,
+        ) => 1,
         _ => return None,
     };
     (arity == argc).then_some(operation)
