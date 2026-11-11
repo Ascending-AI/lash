@@ -324,6 +324,7 @@
         "tests/core_node_processes.rs",
         "tests/core_node_processes/capacity_verdicts.rs",
         "tests/core_node_processes/engine_steps.rs",
+        "tests/core_node_processes/history_archive.rs",
         "tests/core_node_processes/host_start_cut.rs",
         "tests/core_node_processes/idle_obligations.rs",
         "tests/core_node_processes/process_endstates.rs",
