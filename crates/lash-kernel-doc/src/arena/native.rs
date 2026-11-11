@@ -1096,7 +1096,8 @@ impl InlineNative {
 }
 
 /// The operation and its exact argument-kind domain. Unlisted kinds and
-/// arities use the ordinary call. Numeric kernels require homogeneous pairs.
+/// arities use the ordinary call. Numeric kernels take the pairs their
+/// [`ScalarDomain`] names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InlineOperation {
     /// One value of any kind. Reads its tag only and returns its inline name.
@@ -1194,6 +1195,13 @@ impl InlineOperation {
             (Self::Scalar { domain, .. }, [Value::Float(_), Value::Float(_)]) => {
                 matches!(domain, ScalarDomain::Floats | ScalarDomain::WordsOrFloats)
             }
+            (
+                Self::Scalar {
+                    operation,
+                    domain: ScalarDomain::WordsOrFloats,
+                },
+                [left @ (Value::Int(_) | Value::Float(_)), right],
+            ) => crate::scalar::mixed(operation, *left, *right).is_some(),
             (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(_)]) => true,
             (Self::IntegerText(IntegerTextDomain::WholeFloat), [Value::Float(number)]) => {
                 whole_float(number.get()).is_some()
@@ -1249,6 +1257,13 @@ impl InlineOperation {
             {
                 crate::scalar::floats(operation, *a, *b)
             }
+            (
+                Self::Scalar {
+                    operation,
+                    domain: ScalarDomain::WordsOrFloats,
+                },
+                [left, right],
+            ) => crate::scalar::mixed(operation, *left, *right),
             _ => None,
         }
     }
@@ -1328,11 +1343,16 @@ fn shallow_same(left: &Value, right: &Value) -> Option<bool> {
     }
 }
 
-/// Homogeneous immediate pairs. Big integers and mixed pairs run normally.
+/// Immediate pairs a numeric kernel answers. Big integers run normally.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarDomain {
+    /// Two word integers.
     Words,
+    /// Two floats.
     Floats,
+    /// Two word integers, two floats, or a word and a float in either
+    /// order where the word is exactly a binary64 ([`crate::scalar::mixed`]).
+    /// Other mixed pairs run normally.
     WordsOrFloats,
 }
 

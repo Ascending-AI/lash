@@ -1344,7 +1344,9 @@ impl<H: Heap> Vm<H> {
                             sync!(pc);
                             return Err(fault("a fused call of no native"));
                         };
-                        if let Some(answer) = self.answer(&program, native, charged, &args) {
+                        if let Some(answer) =
+                            self.fused_answer(&program, fused, native, charged, args)
+                        {
                             let (value, fee) = match answer {
                                 Err(cold @ Flow::Cold { .. }) => {
                                     sync!(fused::rerun_from(fused));

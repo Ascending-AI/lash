@@ -31,8 +31,10 @@ pub(crate) fn fuse(program: &mut Program) {
         call.argc == 2 && entry.params == 2 && entry.scalar.is_some()
     };
     // A native with no body is answered at its call with no frame, so
-    // two word ints it accepts are answered and billed in place.
-    let words = |site: u32, unit: &Unit| {
+    // the scalar pairs its domain names are answered and billed in place:
+    // two word ints by its word form, two floats or a word and a float by
+    // its number form.
+    let form = |site: u32, unit: &Unit, words: bool| {
         let Callee::Native { native, charged } = unit.calls[site as usize].callee else {
             return None;
         };
@@ -44,16 +46,23 @@ pub(crate) fn fuse(program: &mut Program) {
             true => Some(program.charge(entry.charge).pairs()?),
             false => None,
         };
-        (entry.body.is_none()
-            && matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats))
-        .then_some(Words { operation, fee })
+        let named = match words {
+            true => matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats),
+            false => matches!(domain, ScalarDomain::Floats | ScalarDomain::WordsOrFloats),
+        };
+        (entry.body.is_none() && named).then_some(Words {
+            operation,
+            domain,
+            fee,
+        })
     };
     let mut runs = Vec::new();
     for (at, unit) in program.units.iter().enumerate() {
         let mut pc = 0;
         while pc < unit.ops.len() {
             match run(unit, pc, &answered, &|n| program.readable(n)).map(|(mut fused, end)| {
-                fused.words = words(fused.site, unit);
+                fused.words = form(fused.site, unit, true);
+                fused.numbers = form(fused.site, unit, false);
                 (fused, end)
             }) {
                 Some((fused, end)) => {
@@ -124,6 +133,7 @@ fn run(
         entry: unit.calls[site as usize].entry,
         then,
         words: None,
+        numbers: None,
     };
     Some((fused, end))
 }

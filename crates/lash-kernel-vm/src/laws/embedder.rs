@@ -143,7 +143,32 @@ prepared!(
     }
 );
 
-/// A TypeScript number's sum: its operands are floats.
+/// A number native's ordinary answer: two words, two floats, or a word
+/// and a float, the word as a binary64 (rounded past 2^53, where its
+/// `WordsOrFloats` declaration leaves the pair to this call). A word's sum
+/// past a word and a non-number raise.
+fn real(
+    operation: lash_kernel_doc::scalar::ScalarOp,
+    args: &[Value],
+    refusal: &'static str,
+) -> Result<Value, NativeError> {
+    let number = |value: Value| match value {
+        Value::Int(word) => Some(lash_kernel_doc::Float::new(word as f64)),
+        Value::Float(float) => Some(float),
+        _ => None,
+    };
+    let answer = match *args {
+        [Value::Int(a), Value::Int(b)] => lash_kernel_doc::scalar::ints(operation, a, b),
+        [a, b] => match (number(a), number(b)) {
+            (Some(a), Some(b)) => lash_kernel_doc::scalar::floats(operation, a, b),
+            _ => None,
+        },
+        _ => None,
+    };
+    answer.ok_or_else(|| type_error(refusal))
+}
+
+/// A TypeScript number's sum: its operands are numbers.
 struct RealAdd(bool);
 prepared!(
     RealAdd,
@@ -153,14 +178,14 @@ prepared!(
         lash_kernel_doc::scalar::ScalarOp::Add,
         lash_kernel_doc::arena::native::ScalarDomain::WordsOrFloats
     ),
-    |args| match args {
-        [Value::Float(a), Value::Float(b)] =>
-            Ok(Value::Float(lash_kernel_doc::Float::new(a.get() + b.get()))),
-        _ => Err(type_error("real.add takes two floats")),
-    }
+    |args| real(
+        lash_kernel_doc::scalar::ScalarOp::Add,
+        args,
+        "real.add takes two numbers"
+    )
 );
 
-/// A TypeScript number's order: its operands are floats.
+/// A TypeScript number's order: its operands are numbers.
 struct RealLess(bool);
 prepared!(
     RealLess,
@@ -170,10 +195,11 @@ prepared!(
         lash_kernel_doc::scalar::ScalarOp::Lt,
         lash_kernel_doc::arena::native::ScalarDomain::WordsOrFloats
     ),
-    |args| match args {
-        [Value::Float(a), Value::Float(b)] => Ok(Value::Bool(a.get() < b.get())),
-        _ => Err(type_error("real.lt takes two floats")),
-    }
+    |args| real(
+        lash_kernel_doc::scalar::ScalarOp::Lt,
+        args,
+        "real.lt takes two numbers"
+    )
 );
 
 /// Declares its inline answer when it holds `true`.

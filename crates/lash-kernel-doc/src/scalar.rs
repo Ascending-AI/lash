@@ -156,6 +156,24 @@ fn float_answer<T>(
     }
 }
 
+/// 2^53: every word at most this in magnitude is exactly a binary64.
+const EXACT: u64 = 1 << 53;
+
+/// `op` on a word and a float, in either order: the float kernel over the
+/// word as a binary64, where the word is one exactly (at most 2^53 in
+/// magnitude). A number's general path converts a word rounding to
+/// nearest and orders a word against a float exactly, and both agree with
+/// the exact conversion; a longer word is the general path's.
+#[inline(always)]
+pub fn mixed(op: ScalarOp, a: Value, b: Value) -> Option<Value> {
+    let exact = |word: i64| (word.unsigned_abs() <= EXACT).then(|| Float::new(word as f64));
+    match (a, b) {
+        (Value::Int(a), Value::Float(b)) => floats(op, exact(a)?, b),
+        (Value::Float(a), Value::Int(b)) => floats(op, a, exact(b)?),
+        _ => None,
+    }
+}
+
 /// `op` on two word integers, where the answer fits a word.
 #[inline(always)]
 pub fn ints(op: ScalarOp, a: i64, b: i64) -> Option<Value> {

@@ -597,6 +597,18 @@ fn known_answers_use_their_kernel_and_reject_disagreement() {
             [float(-0.0), float(0.0)],
             [float(f64::INFINITY), float(f64::NEG_INFINITY)],
             [float(f64::NAN), float(2.0)],
+            // A word and a float: the word as a binary64, exactly up to
+            // 2^53; one past it rounds to 2^53, which the ordinary call
+            // orders below it, so an inline answer there would differ.
+            [Value::Int(3), float(4.5)],
+            [float(-2.5), Value::Int(7)],
+            [Value::Int(0), float(-0.0)],
+            [Value::Int(5), float(f64::NAN)],
+            [Value::Int(1 << 53), float(9_007_199_254_740_992.0)],
+            [Value::Int((1 << 53) + 1), float(9_007_199_254_740_992.0)],
+            [float(9_007_199_254_740_992.0), Value::Int(-(1 << 53) - 1)],
+            [Value::Int(i64::MAX), float(f64::INFINITY)],
+            [Value::Int(6), float(4.0)],
         ];
         // One operand: a word to float rounds above 2^53, and rounding a
         // float keeps its sign at zero and its non-finite values.

@@ -1409,7 +1409,7 @@ fn a_cold_load_refused_for_memory_refuses_at_its_event_with_the_charge_before_it
 /// The perf rows' loops in core text: Python's on words, TypeScript's on
 /// floats, with a real multiply, an inline call, a closure and a property
 /// read in their bodies.
-const FLOOR_ROWS: [&str; 7] = [
+const FLOOR_ROWS: [&str; 8] = [
     r#"main {
   let j = 0
   while num.lt(j, 6) {
@@ -1493,6 +1493,23 @@ main {
     }
     set acc = real.add(acc, value)
     set j = real.add(j, 1.0)
+  }
+  return 0
+}"#,
+    // A float counter against a word bound and a word step: mixed pairs
+    // the word micro-op answers, and a word past 2^53 against the counter,
+    // which only the native's call answers.
+    r#"main {
+  let n = 6
+  let big = 9007199254740993
+  let seen = 0.0
+  let j = 0.0
+  while real.lt(j, n) {
+    if real.lt(big, j) {
+      set seen = real.add(seen, 1)
+    }
+    set seen = real.add(seen, 2)
+    set j = real.add(j, 1)
   }
   return 0
 }"#,
@@ -1596,6 +1613,7 @@ fn a_fused_operand_off_its_words_runs_the_native_call() {
         "main { let big = 9223372036854775807 let j = 0 while num.lt(j, 2) { set j = num.add(j, 1) } return num.add(big, j) }",
         "main { let j = 0 let big = 4611686018427387904 while num.lt(j, 2) { set j = num.add(j, 1) } set j = num.mul(big, j) return j }",
         "main { let j = 0 while num.lt(j, 2) { set j = num.add(j, 1) } return num.add(j, 0.5) }",
+        "main { let j = 0.0 let x = 1 while real.lt(j, 4.0) { set j = real.add(j, x) if real.lt(2.0, j) { set x = \"x\" } } return 0 }",
     ] {
         let exact = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
         assert!(exact.0.starts_with("Error(Uncaught"), "{exact:?}");

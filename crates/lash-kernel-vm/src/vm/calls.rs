@@ -509,6 +509,9 @@ impl<H: Heap> Vm<H> {
                 [Value::Float(a), Value::Float(b)] if domain != ScalarDomain::Words => {
                     lash_kernel_doc::scalar::floats(operation, a, b)
                 }
+                [a, b] if domain == ScalarDomain::WordsOrFloats => {
+                    lash_kernel_doc::scalar::mixed(operation, a, b)
+                }
                 _ => None,
             },
             InlineOperation::Kind

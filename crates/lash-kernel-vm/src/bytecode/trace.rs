@@ -173,7 +173,10 @@ pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
             match micro {
                 Micro::Exit { .. } => break,
                 Micro::Copy { .. } => saved += 2,
-                Micro::Fused { n, .. } if unit.fused[*n as usize].words.is_none() => {
+                Micro::Fused { n, .. }
+                    if unit.fused[*n as usize].words.is_none()
+                        && unit.fused[*n as usize].numbers.is_none() =>
+                {
                     saved += 1;
                     break;
                 }

@@ -19,7 +19,8 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ClosureIdentity;
-use lash_kernel_doc::arena::native::InlineOperation;
+use lash_kernel_doc::arena::native::{InlineOperation, ScalarDomain};
+use lash_kernel_doc::scalar;
 use lash_kernel_doc::{Integer, JoinMode, Value};
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
@@ -383,15 +384,46 @@ pub struct Fused {
     /// answers them in place: `None` sends every pair through the
     /// native's ordinary answer.
     pub words: Option<Words>,
+    /// The call's answer and fee over two floats, or a word and a float,
+    /// where the native's domain names them: `None` sends them through
+    /// the native's ordinary answer.
+    pub numbers: Option<Words>,
 }
 
-/// A fused call's word-int form: its operation, and its fee by which of
-/// the two operands and the answer are of size two (as
-/// [`Charge::pair`] indexes it), `None` for an uncharged call.
+/// A fused call's scalar form: its operation, the pairs its native's
+/// domain names, and its fee by which of the two operands and the answer
+/// are of size two (as [`Charge::pair`] indexes it), `None` for an
+/// uncharged call.
 #[derive(Clone, Copy, Debug)]
 pub struct Words {
     pub operation: lash_kernel_doc::scalar::ScalarOp,
+    pub domain: ScalarDomain,
     pub fee: Option<[u64; 8]>,
+}
+
+impl Words {
+    /// The answer and fee over two floats, or a word and a float, of the
+    /// domain, as the native's ordinary answer gives them; `None` for any
+    /// other pair. A float or a bool answer is of size one. Out of line:
+    /// the word path holds its registers.
+    #[inline(never)]
+    pub fn numbers(&self, args: [Value; 2]) -> Option<(Value, Option<u64>)> {
+        let (value, at) = match args {
+            [Value::Float(a), Value::Float(b)] if self.domain != ScalarDomain::Words => {
+                (scalar::floats(self.operation, a, b)?, 0)
+            }
+            [a, b] if self.domain == ScalarDomain::WordsOrFloats => {
+                let at = match (a, b) {
+                    (Value::Int(a), _) => usize::from(a != 0),
+                    (_, Value::Int(b)) => usize::from(b != 0) << 1,
+                    _ => 0,
+                };
+                (scalar::mixed(self.operation, a, b)?, at)
+            }
+            _ => return None,
+        };
+        Some((value, self.fee.map(|table| table[at])))
+    }
 }
 
 /// An operand a fused run pushes.

@@ -69,13 +69,33 @@ impl<H: Heap> Vm<H> {
         let Callee::Native { native, charged } = unit.calls[fused.site as usize].callee else {
             return Err(fault("a fused call of no native"));
         };
-        if let Some(answer) = self.answer(program, native, charged, &args) {
+        if let Some(answer) = self.fused_answer(program, fused, native, charged, args) {
             let (value, fee) = answer?;
             if fee.is_none_or(|units| self.meter.prepay(units)) {
                 return Ok(Some(value));
             }
         }
         Ok(None)
+    }
+
+    /// Fused run `fused`'s native's inline answer over `args`, and its
+    /// fee: two floats, or a word and a float, by its number form, any
+    /// other pair by the native's ordinary answer.
+    #[inline(always)]
+    pub(super) fn fused_answer(
+        &self,
+        program: &Program,
+        fused: &Fused,
+        native: u32,
+        charged: bool,
+        args: [Value; 2],
+    ) -> Option<Run<(Value, Option<u64>)>> {
+        if let Some(form) = &fused.numbers
+            && let Some((value, fee)) = form.numbers(args)
+        {
+            return Some(Ok((value, fee.filter(|_| !self.off))));
+        }
+        self.answer(program, native, charged, &args)
     }
 
     /// A fused run's two call arguments: its pushes read where they are,
@@ -137,7 +157,7 @@ impl<H: Heap> Vm<H> {
         };
         let (value, fee) = match words {
             Some(answered) => answered,
-            None => match self.answer(program, native, charged, &args) {
+            None => match self.fused_answer(program, fused, native, charged, args) {
                 Some(Err(cold @ Flow::Cold { .. })) => {
                     self.cx.frames[top].pc = rerun_from(fused);
                     return Err(cold);
