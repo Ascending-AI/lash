@@ -115,6 +115,7 @@ fn run(unit: &Unit, pc: usize, answered: &impl Fn(u32, &Unit) -> bool) -> Option
         pushes: pushes as u8,
         site,
         call: call as u32,
+        entry: unit.calls[site as usize].entry,
         then,
         words: None,
     };

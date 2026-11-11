@@ -352,6 +352,9 @@ pub struct Fused {
     /// The call's site and op index.
     pub site: u32,
     pub call: u32,
+    /// The call's entry counter (`CallSite::entry`), held here so that
+    /// the word path reads no call site.
+    pub entry: Option<u32>,
     /// What takes the call's answer.
     pub then: Then,
     /// The call's answer and fee over two word ints, where the native

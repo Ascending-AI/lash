@@ -19,6 +19,7 @@ mod exceeded;
 mod fits;
 pub(crate) mod frames;
 mod frozen;
+mod fused;
 pub(crate) mod inline;
 mod library;
 pub(crate) mod loops;
@@ -62,9 +63,7 @@ pub(crate) fn depth_reads() -> u64 {
 use self::library::LibraryPlaced;
 use crate::bytecode::charge_tables::RESULT;
 use crate::bytecode::op::Op;
-use crate::bytecode::program::{
-    Callee, Constant, LIB, Operand, Program, Then, Unit, UnitId, UnitKind,
-};
+use crate::bytecode::program::{Callee, Constant, LIB, Program, Then, Unit, UnitId, UnitKind};
 use crate::heap::{Heap, LoadError};
 use crate::observe::Weight;
 use crate::{Bound, ChargeLimiter, Host, LimitDecision};
@@ -1125,6 +1124,27 @@ impl<H: Heap> Vm<H> {
                     }
                 };
             }
+            // The op a fused run's answer goes to takes `$value`.
+            macro_rules! take {
+                ($then:expr, $value:expr) => {
+                    match $then {
+                        Then::Push => self.push($value),
+                        Then::SetLocal(n) => {
+                            pc += 1;
+                            self.cx.stack[base + usize::from(n)] = $value;
+                        }
+                        Then::Pop => pc += 1,
+                        Then::Branch { to, looping } => match $value {
+                            Value::Bool(true) => pc += 1,
+                            Value::Bool(false) => pc = to as usize,
+                            _ => {
+                                sync!(pc + 1);
+                                return Err(self.condition_error(looping));
+                            }
+                        },
+                    }
+                };
+            }
             loop {
                 let mut op = ops[pc];
                 #[cfg(test)]
@@ -1286,98 +1306,59 @@ impl<H: Heap> Vm<H> {
                     }
                     Op::Fused(n) => {
                         let fused = &unit.fused[n as usize];
-                        let call = &unit.calls[fused.site as usize];
-                        enter!(call, fused.call as usize + 1, rerun);
+                        if let Some(entry) = fused.entry
+                            && !rerun
+                        {
+                            if self.sites {
+                                sync!(fused.call as usize + 1);
+                            }
+                            check!(self.enter_call(host, entry, &unit.calls[fused.site as usize]));
+                        }
+                        let len = self.cx.stack.len();
+                        let args = self.fused_args(fused, base, len);
+                        pc = fused.call as usize + 1;
+                        // Two word ints whose fee the block's reservation
+                        // covers: the answer, as the native's ordinary
+                        // answer gives it, billed and taken in place. An
+                        // answer of `ints` is an int or a bool, of size
+                        // two exactly when it is a nonzero int.
+                        if let (Some(form), [Value::Int(a), Value::Int(b)]) = (&fused.words, args)
+                            && let Some(value) = lash_kernel_doc::scalar::ints(form.operation, a, b)
+                            && match form.fee {
+                                Some(table) if !self.off => {
+                                    let large = matches!(value, Value::Int(word) if word != 0);
+                                    self.meter.prepay(
+                                        table[usize::from(a != 0)
+                                            | usize::from(b != 0) << 1
+                                            | usize::from(large) << 2],
+                                    )
+                                }
+                                _ => true,
+                            }
+                        {
+                            self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
+                            take!(fused.then, value);
+                            continue;
+                        }
+                        // Another inline answer, its fee prepaid: taken in
+                        // place as well.
                         let Callee::Native { native, charged } =
                             unit.calls[fused.site as usize].callee
                         else {
                             sync!(pc);
                             return Err(fault("a fused call of no native"));
                         };
-                        let operand = |vm: &Self, operand: Operand| match operand {
-                            Operand::Local(n) => vm.cx.stack[base + usize::from(n)],
-                            Operand::Const(n) => vm.konst(n),
-                        };
-                        let len = self.cx.stack.len();
-                        let [first, second] = fused.operands;
-                        let args = match fused.pushes {
-                            2 => [operand(self, first), operand(self, second)],
-                            1 => [self.cx.stack[len - 1], operand(self, first)],
-                            _ => [self.cx.stack[len - 2], self.cx.stack[len - 1]],
-                        };
-                        pc = fused.call as usize + 1;
-                        // Two word ints: the answer and its fee in place, as
-                        // the native's ordinary answer gives them. An answer
-                        // of `ints` is an int or a bool, of size two exactly
-                        // when it is a nonzero int.
-                        let mut words = None;
-                        if let (Some(form), [Value::Int(a), Value::Int(b)]) = (fused.words, args)
-                            && let Some(value) = lash_kernel_doc::scalar::ints(form.operation, a, b)
-                        {
-                            let fee = match form.fee {
-                                Some(table) if !self.off => {
-                                    let large = matches!(value, Value::Int(word) if word != 0);
-                                    Some(
-                                        table[usize::from(a != 0)
-                                            | usize::from(b != 0) << 1
-                                            | usize::from(large) << 2],
-                                    )
-                                }
-                                _ => None,
-                            };
-                            words = Some((value, fee));
+                        if let Some(answer) = self.answer(&program, native, charged, &args) {
+                            let (value, fee) = check!(answer);
+                            if fee.is_none_or(|units| self.meter.prepay(units)) {
+                                self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
+                                take!(fused.then, value);
+                                continue;
+                            }
                         }
-                        let (value, fee) = match words {
-                            Some(answered) => answered,
-                            None => match self.answer(&program, native, charged, &args) {
-                                Some(answer) => check!(answer),
-                                None => {
-                                    // No inline answer: the pushes, then the call.
-                                    for &pushed in &fused.operands[..usize::from(fused.pushes)] {
-                                        self.push(operand(self, pushed));
-                                    }
-                                    sync!(pc);
-                                    self.call(&program, unit, fused.site)?;
-                                    continue 'frames;
-                                }
-                            },
-                        };
-                        self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
-                        // A fee the block's reservation does not cover is
-                        // billed with the answer on the stack, where the
-                        // call left it.
-                        let value = match fee {
-                            Some(units) if self.watch.is_some() || !self.meter.prepay(units) => {
-                                self.push(value);
-                                sync!(pc);
-                                self.fee(units)?;
-                                self.pop()
-                            }
-                            _ => value,
-                        };
-                        match fused.then {
-                            Then::Push => self.push(value),
-                            Then::SetLocal(n) => {
-                                pc += 1;
-                                self.cx.stack[base + usize::from(n)] = value;
-                            }
-                            Then::Pop => pc += 1,
-                            Then::Branch { to, looping } => {
-                                pc += 1;
-                                match value {
-                                    Value::Bool(true) => {}
-                                    Value::Bool(false) => pc = to as usize,
-                                    _ => {
-                                        sync!(pc);
-                                        let message = if looping {
-                                            "a `while` condition must be a bool"
-                                        } else {
-                                            "an `if` condition must be a bool"
-                                        };
-                                        return Err(self.error("type_error", message));
-                                    }
-                                }
-                            }
+                        match self.fused_slow(&program, unit, n, base, args, len, top)? {
+                            Some(next) => pc = next,
+                            None => continue 'frames,
                         }
                     }
                     _ => {
