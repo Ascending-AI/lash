@@ -49,6 +49,7 @@ use lash_durable::domain::graph::{
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
+use lash_durable::domain::process_archive;
 use lash_durable::domain::{ExecKey, OwnerKey, RunSeq};
 use lash_durable::{
     CommitLabel, DurableError, DurableInstant, Epoch, StoreFailure, StoreFailureKind,
@@ -418,6 +419,12 @@ pub(super) fn encoding_of(stored: i64) -> Result<BlobEncoding, GraphRefusal> {
 
 /// `owner`'s current root, or none when its row is gone or holds none.
 pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<NodeId>> {
+    Ok(root_in(tx, owner)?.map(|root| root.map(|(root, _)| root)))
+}
+
+/// `owner`'s current root, with the process history archive that names it
+/// when its row was packed.
+fn root_in(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<(NodeId, Option<Vec<u8>>)>> {
     fn one(
         tx: &Connection,
         sql: &str,
@@ -513,7 +520,79 @@ pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<
             [namespace.as_str(), artifact.as_str()],
         )?,
     };
-    Ok(stored.as_deref().map(node_of).transpose())
+    match stored.as_deref().map(node_of).transpose() {
+        Ok(Some(root)) => return Ok(Ok(Some((root, None)))),
+        Ok(None) => {}
+        Err(refusal) => return Ok(Err(refusal)),
+    }
+    // A finished process's packed history answers from its archive, read
+    // after its row was found gone: packing only removes rows.
+    let Some(process) = process_archive::root_process(owner) else {
+        return Ok(Ok(None));
+    };
+    let Some(bytes) = super::process_history::archive_bytes(tx, &process)? else {
+        return Ok(Ok(None));
+    };
+    Ok(archived_root(&bytes, owner).map(|root| root.map(|root| (root, Some(bytes)))))
+}
+
+fn archive_refused(error: process_archive::ArchiveCorrupt) -> GraphRefusal {
+    from_durable(error.into())
+}
+
+fn archived_root(bytes: &[u8], owner: &RootOwner) -> Result<Option<NodeId>, GraphRefusal> {
+    let archive = process_archive::ProcessArchive::open(bytes).map_err(archive_refused)?;
+    process_archive::archived_root(&archive, owner).map_err(archive_refused)
+}
+
+/// The nodes `roots` reach in a process history archive, checked within
+/// `limits` in the order a walk of the same stored rows checks them: a
+/// graph node's children come from its own child table, and the archive is
+/// the whole read, so a node it lacks is missing.
+pub(super) fn walk_archive(
+    archive: &process_archive::ProcessArchive<'_>,
+    roots: &[NodeId],
+    limits: &DecodeLimits,
+) -> Result<BTreeMap<NodeId, HydratedNode>, GraphRefusal> {
+    let mut nodes = BTreeMap::new();
+    let mut stack: Vec<_> = roots.iter().rev().copied().collect();
+    let mut visited = BTreeSet::new();
+    let mut total = 0_u64;
+    while let Some(id) = stack.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        let node = archive
+            .node(&id)
+            .map_err(archive_refused)?
+            .ok_or(GraphRefusal::MissingNode(id))?;
+        let encoding = encoding_of(i64::from(node.encoding))?;
+        let children = match encoding {
+            BlobEncoding::Opaque => Vec::new(),
+            BlobEncoding::Graph => {
+                let envelope = check_envelope(node.bytes, id, limits)?;
+                // A persistent-heap page is read as a leaf: its header,
+                // never what it reaches (FIG-6193).
+                if !is_semantic(envelope.kind) {
+                    envelope.children.iter().collect()
+                } else if roots.contains(&id) {
+                    return Err(GraphRefusal::SemanticPage(id));
+                } else {
+                    Vec::new()
+                }
+            }
+        };
+        count(&nodes, &mut total, node.bytes.len(), limits)?;
+        stack.extend(children.into_iter().rev());
+        nodes.insert(
+            id,
+            HydratedNode {
+                encoding,
+                bytes: node.bytes.to_vec().into(),
+            },
+        );
+    }
+    Ok(nodes)
 }
 
 /// Every node reachable from `root`, checked, within `limits`: a graph
@@ -901,13 +980,28 @@ pub(super) fn hydrate_in(
 ) -> GraphAnswer<HydratedGraph> {
     // The owner's row is the read's first statement: it fixes the snapshot
     // every descendant is read on.
-    let root = match root_of(tx, &owner)? {
+    let (root, archived) = match root_in(tx, &owner)? {
         Ok(Some(root)) => root,
         Ok(None) => return Ok(Err(GraphRefusal::RootRetired)),
         Err(refusal) => return Ok(Err(refusal)),
     };
     if expected.is_some_and(|expected| expected != root) {
         return Ok(Err(GraphRefusal::RevisionConflict));
+    }
+    // A root only the archive names is walked in the archive: its rows are
+    // gone, and with them its blobs.
+    if let Some(bytes) = archived {
+        let archive = match process_archive::ProcessArchive::open(&bytes) {
+            Ok(archive) => archive,
+            Err(error) => return Ok(Err(archive_refused(error))),
+        };
+        return Ok(
+            walk_archive(&archive, &[root], limits).map(|nodes| HydratedGraph {
+                owner,
+                root,
+                nodes,
+            }),
+        );
     }
     Ok(walk(tx, root, limits)?.map(|nodes| HydratedGraph { owner, root, nodes }))
 }

@@ -755,6 +755,10 @@ impl DurableStore for FaultStore {
         self.read(self.inner.readiness()).await
     }
 
+    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
+        self.read(self.inner.pack_finished_histories(limit)).await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         self.activity
             .turn(&self.node, &self.life, &self.clock)

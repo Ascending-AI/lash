@@ -326,6 +326,13 @@ pub(super) fn read(
                 .collect::<rusqlite::Result<Vec<_>>>()?
         }
     };
+    if stored.is_empty() {
+        match super::process_history::tool_calls(tx, owner, selection, &limits)? {
+            Ok(Some(archived)) => return Ok(Ok(archived)),
+            Ok(None) => {}
+            Err(error) => return Ok(Err(error)),
+        }
+    }
     let rows = match stored
         .into_iter()
         .map(

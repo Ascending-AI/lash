@@ -51,13 +51,30 @@ pub(super) fn ids(
     session: &lash_kernel_value::identity::SessionId,
     owner: &str,
 ) -> Answer<Vec<lash_protocol_types::llm::types::LlmCallId>> {
-    Ok(Ok(tx
+    let ids = tx
         .statement(SQL.ids.sql())?
         .query_map([session.as_str(), owner], |row| {
             row.get::<_, String>(0)
                 .map(lash_protocol_types::llm::types::LlmCallId)
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()?))
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if ids.is_empty() {
+        return Ok(super::process_history::model_calls(
+            tx,
+            session,
+            owner,
+            lash_durable::domain::process_archive::ModelSelection::Records(None),
+        )?
+        .map(|archived| {
+            archived.map_or_else(Vec::new, |(_, models)| {
+                models
+                    .into_iter()
+                    .map(|model| lash_protocol_types::llm::types::LlmCallId(model.call_id))
+                    .collect()
+            })
+        }));
+    }
+    Ok(Ok(ids))
 }
 
 pub(super) fn apply(
@@ -125,28 +142,58 @@ pub(super) fn read(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let roots = match rows
-        .iter()
-        .map(|(_, root, _)| super::node_ref(root))
-        .collect::<Result<Vec<_>, _>>()
+    if rows.is_empty() {
+        match super::process_history::model_calls(
+            tx,
+            session,
+            owner,
+            lash_durable::domain::process_archive::ModelSelection::Records(ids),
+        )? {
+            Ok(Some((bytes, models))) => {
+                return Ok(super::process_history::model_records(
+                    &bytes, models, limits,
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => return Ok(Err(error)),
+        }
+    }
+    let rows = match rows
+        .into_iter()
+        .map(|(id, root, ended)| Ok((id, super::node_ref(&root)?, ended)))
+        .collect::<Result<Vec<_>, lash_durable::DurableError>>()
     {
-        Ok(roots) => roots,
+        Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
+    let roots: Vec<_> = rows.iter().map(|(_, root, _)| *root).collect();
     let nodes = match super::graph::walk_roots(tx, &roots, &limits)? {
         Ok(nodes) => nodes,
         Err(error) => return Ok(Err(error.into())),
     };
+    Ok(decode_records(rows, nodes, limits))
+}
+
+/// Sealed records from their rows' ids, roots and end instants and the
+/// nodes those roots reach: the record read's decoding, whichever source
+/// answered it.
+pub(super) fn decode_records(
+    rows: Vec<(String, lash_core_store::checkpoint_graph::NodeId, i64)>,
+    nodes: std::collections::BTreeMap<
+        lash_core_store::checkpoint_graph::NodeId,
+        lash_durable::domain::HydratedNode,
+    >,
+    limits: DecodeLimits,
+) -> Result<Vec<ModelCallRecord>, lash_durable::DurableError> {
     let graph = RunFacts {
         nodes,
         read_limits: limits,
         ..Default::default()
     };
     let mut decoder = GraphDecoder::new(&graph, limits);
-    let records = rows
+    let mut records = rows
         .into_iter()
-        .zip(roots)
-        .map(|((id, _, ended), root)| {
+        .map(|(id, root, ended)| {
             let fact = ModelCallFact::load(&mut decoder, root)?;
             if fact.call_id.0 != id {
                 return Err(super::corrupt("model call", "row and fact identity differ"));
@@ -160,11 +207,9 @@ pub(super) fn read(
                     .map_err(|_| super::corrupt("model call", "negative end time"))?,
             })
         })
-        .collect::<Result<Vec<_>, lash_durable::DurableError>>();
-    Ok(records.map(|mut records| {
-        records.sort_by_key(|record| record.call);
-        records
-    }))
+        .collect::<Result<Vec<_>, lash_durable::DurableError>>()?;
+    records.sort_by_key(|record| record.call);
+    Ok(records)
 }
 
 pub(super) fn apply_pin(
@@ -244,6 +289,23 @@ pub(super) fn pins(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    if rows.is_empty() {
+        match super::process_history::model_calls(
+            tx,
+            session,
+            owner,
+            lash_durable::domain::process_archive::ModelSelection::Pins { ids, call },
+        )? {
+            Ok(Some((_, models))) => {
+                return Ok(models
+                    .into_iter()
+                    .map(|model| lash_durable::domain::process_archive::pin_row(session, model))
+                    .collect());
+            }
+            Ok(None) => {}
+            Err(error) => return Ok(Err(error)),
+        }
+    }
     Ok(rows
         .into_iter()
         .map(

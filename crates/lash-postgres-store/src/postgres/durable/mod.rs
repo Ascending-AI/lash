@@ -1236,6 +1236,10 @@ impl DurableStore for PostgresDurableStore {
         .await
     }
 
+    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
+        self.pack_due_histories(limit).await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
             let rows: Vec<(String, i64, String, Option<String>)> =

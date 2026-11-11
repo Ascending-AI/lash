@@ -420,6 +420,10 @@ impl DurableStore for CountingStore {
         readiness
     }
 
+    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
+        self.inner.pack_finished_histories(limit).await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let claimed = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &claimed {

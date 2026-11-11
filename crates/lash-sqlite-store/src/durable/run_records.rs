@@ -425,6 +425,13 @@ pub(super) fn facts_limited(
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
+    if rows.is_empty() {
+        match super::process_history::run_facts(tx, owner, run, max_rows, &limits)? {
+            Ok(Some(archived)) => return Ok(Ok(archived)),
+            Ok(None) => {}
+            Err(error) => return Ok(Err(error)),
+        }
+    }
     let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
     Ok(super::graph::walk_roots(tx, &roots, &limits)?
         .map(|nodes| lash_durable::domain::RunFacts {

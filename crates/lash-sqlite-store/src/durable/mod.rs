@@ -62,6 +62,7 @@ mod node_wake_sql;
 pub(crate) mod packages;
 mod pages;
 mod park;
+mod process_history;
 mod process_view;
 pub(crate) mod processes;
 mod prompts;
@@ -1203,6 +1204,10 @@ impl DurableStore for SqliteDurableStore {
 
     async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
         self.readiness_now().await
+    }
+
+    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
+        self.pack_due_histories(limit).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
