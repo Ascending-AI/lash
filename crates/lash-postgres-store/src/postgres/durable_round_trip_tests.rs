@@ -2233,3 +2233,34 @@ async fn an_artifact_read_is_one_statement() {
     assert_eq!(read.expect("read"), Some(b"held document".to_vec()));
     assert_eq!(trips, 1, "edges and bytes in one statement");
 }
+
+/// A module acquisition is its guarded BEGIN, one call that locks the
+/// referrer and reads its fence, one that locks the artifact, checks it
+/// and writes the edge, and COMMIT (FIG-7701 R3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_module_acquisition_is_two_calls_in_its_transaction() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
+
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the acquisition round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let publisher = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let document = lash_kernel_value::names::DocumentId::from_bytes([10; 32]).to_string();
+    store
+        .publish_module_artifact(&publisher, &document, b"held document")
+        .await
+        .expect("publish the document");
+    let holder = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let (held, trips) = round_trips(store.acquire_module_artifact(&holder, &document)).await;
+    held.expect("acquire the document");
+    assert_eq!(trips, 4, "BEGIN, referrer, holds, COMMIT");
+}

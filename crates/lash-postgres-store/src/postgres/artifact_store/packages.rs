@@ -30,14 +30,7 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
             .await
             .map_err(ArtifactStoreError::from)?;
         let referrer = claim.referrer();
-        lock_session_artifact_owner_tx(&mut tx, &referrer).await?;
-        lock_referrer_tx(&mut tx, &referrer)
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &referrer).await?;
-        if is_fenced_tx(&mut tx, &referrer).await? {
-            return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
-        }
+        lock_admitted_referrer_tx(&mut tx, &referrer).await?;
         let references: BTreeMap<_, _> = keys
             .iter()
             .map(|key| {
@@ -94,14 +87,7 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
             .await
             .map_err(ArtifactStoreError::from)?;
         let referrer = claim.referrer();
-        lock_session_artifact_owner_tx(&mut tx, &referrer).await?;
-        lock_referrer_tx(&mut tx, &referrer)
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &referrer).await?;
-        if is_fenced_tx(&mut tx, &referrer).await? {
-            return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
-        }
+        lock_admitted_referrer_tx(&mut tx, &referrer).await?;
         lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
         let held: bool =
             crate::observed_sql::query_scalar(artifact_sql().dependencies.select_reaches.sql())

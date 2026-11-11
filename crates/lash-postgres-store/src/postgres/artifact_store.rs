@@ -19,6 +19,11 @@ use crate::*;
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
         end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5)";
+        /// Lock referrer `?1`/`?2`, then whether it ended (FIG-7701 R3).
+        lock_referrer = "SELECT lash_lock_referrer(?1, ?2)";
+        /// Lock keys `?1` in order, then the first of `?2`/`?3` not stored,
+        /// else edges from referrer `?4`/`?5` to each of `?6`/`?7`.
+        acquire_holds = "SELECT lash_acquire_holds(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4, ?5, ?6::TEXT[], ?7::TEXT[])";
         /// Delete each artifact of `?2` in namespace `?1` that no referrer
         /// edge and no dependency edge names. Each deleted row answers the
         /// graph node it rooted, if bridged, once per artifact it held: its
@@ -222,6 +227,13 @@ pub(crate) use local_end::{
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use local_end::function_ddl as local_end_function_ddl;
 
+#[path = "artifact_store/holds.rs"]
+mod holds;
+use holds::{Holds, lock_live_referrer_tx};
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use holds::function_ddl as holds_function_ddl;
+
 #[path = "artifact_store/env_storage.rs"]
 mod env_storage;
 use env_storage::{EnvPublication, held_closure_tx};
@@ -337,33 +349,16 @@ pub(crate) async fn acquire_process_env_tx(
     process: &lash_vocabulary::identity::ProcessId,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
-    lock_referrer_tx(tx, &referrer).await.map_err(backend)?;
-    if is_fenced_tx(tx, &referrer).await? {
-        return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
-    }
-    lock_artifact_tx(tx, PROCESS_ENV_NAMESPACE, env.as_str()).await?;
-    let exists: bool =
-        crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
-            .bind(PROCESS_ENV_NAMESPACE)
-            .bind(env.as_str())
-            .fetch_one(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(backend)?;
-    if !exists {
-        return Err(ArtifactStoreError::ArtifactMissing {
-            artifact_ref: env.as_str().to_owned(),
-        }
-        .into());
-    }
+    lock_live_referrer_tx(tx, &referrer).await?;
     // The head holds its closure: the start's one edge keeps all of it.
-    crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
-        .bind(PROCESS_ENV_NAMESPACE)
-        .bind(env.as_str())
-        .bind(referrer.kind().as_str())
-        .bind(referrer.canonical_id())
-        .execute(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(backend)?;
+    let head = [(PROCESS_ENV_NAMESPACE, env.as_str())];
+    Holds {
+        locks: &head,
+        checks: &head,
+        edges: &head,
+    }
+    .run(tx, &referrer)
+    .await?;
     Ok(())
 }
 
@@ -400,6 +395,31 @@ pub(crate) async fn is_fenced_tx(
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(backend)
+}
+
+/// Take `referrer`'s owner and referrer locks, admit its owner, and refuse
+/// it if it has ended, in that order. A referrer whose owner admission
+/// reads nothing has its lock and fence read in one call.
+async fn lock_admitted_referrer_tx(
+    tx: &mut sqlx::PgConnection,
+    referrer: &ArtifactReferrer,
+) -> Result<(), ArtifactStoreError> {
+    lock_session_artifact_owner_tx(tx, referrer).await?;
+    if matches!(
+        referrer,
+        ArtifactReferrer::EnvironmentVersion(_) | ArtifactReferrer::Session(_)
+    ) {
+        lock_referrer_tx(tx, referrer).await.map_err(backend)?;
+        admit_artifact_owner_tx(tx, referrer).await?;
+        if is_fenced_tx(tx, referrer).await? {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: referrer.clone(),
+            });
+        }
+        return Ok(());
+    }
+    admit_artifact_owner_tx(tx, referrer).await?;
+    lock_live_referrer_tx(tx, referrer).await
 }
 
 /// Must precede every referrer lock, matching session deletion's order.
@@ -580,37 +600,55 @@ impl PostgresLashVmArtifactStore {
         tx.admit_plugin_writers(&plugin_publication)
             .await
             .map_err(ArtifactStoreError::from)?;
-        lock_session_artifact_owner_tx(&mut tx, &claim.referrer()).await?;
-        lock_referrer_tx(&mut tx, &claim.referrer())
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &claim.referrer()).await?;
-        if is_fenced_tx(&mut tx, &claim.referrer()).await? {
-            return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer(),
-            });
-        }
+        lock_admitted_referrer_tx(&mut tx, &claim.referrer()).await?;
+        let Some(bytes) = bytes else {
+            // An acquisition: the artifact's lock, the claim's guard, then
+            // its existence and the edge.
+            let artifact = [(namespace, artifact_ref)];
+            let cleanup = claim.guard_cleanup();
+            Holds {
+                locks: &artifact,
+                checks: if cleanup.is_none() { &artifact } else { &[] },
+                edges: if cleanup.is_none() { &artifact } else { &[] },
+            }
+            .run(&mut tx, &claim.referrer())
+            .await?;
+            if let Some(cleanup) = cleanup {
+                crate::obligation_ledger::arm_cleanup_tx(
+                    &mut tx,
+                    &cleanup,
+                    self.clock.timestamp_ms(),
+                )
+                .await
+                .map_err(ArtifactStoreError::from)?;
+                Holds {
+                    locks: &[],
+                    checks: &artifact,
+                    edges: &artifact,
+                }
+                .run(&mut tx, &claim.referrer())
+                .await?;
+            }
+            return tx.commit().await.map_err(backend);
+        };
         // A published environment's head, body and closure join one sorted
         // lock acquisition (FIG-7700).
-        let env_publication = match bytes {
-            Some(bytes) if namespace == PROCESS_ENV_NAMESPACE => {
-                let publication = EnvPublication::read(&mut tx, bytes).await?;
-                lock_artifact_set_tx(&mut tx, &publication.lock_set(artifact_ref)).await?;
-                Some((publication, bytes))
-            }
-            _ => {
-                lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
-                None
-            }
+        let env_publication = if namespace == PROCESS_ENV_NAMESPACE {
+            let publication = EnvPublication::read(&mut tx, bytes).await?;
+            lock_artifact_set_tx(&mut tx, &publication.lock_set(artifact_ref)).await?;
+            Some(publication)
+        } else {
+            lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
+            None
         };
         if let Some(cleanup) = claim.guard_cleanup() {
             crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, self.clock.timestamp_ms())
                 .await
                 .map_err(ArtifactStoreError::from)?;
         }
-        if let Some((publication, bytes)) = env_publication {
+        if let Some(publication) = env_publication {
             publication.store(&mut tx, artifact_ref, bytes).await?;
-        } else if let Some(bytes) = bytes {
+        } else {
             crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
@@ -628,19 +666,6 @@ impl PostgresLashVmArtifactStore {
             .map_err(backend)?;
             if stored != bytes {
                 return Err(ArtifactStoreError::Immutable {
-                    artifact_ref: artifact_ref.to_owned(),
-                });
-            }
-        } else {
-            let exists: bool =
-                crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
-                    .bind(namespace)
-                    .bind(artifact_ref)
-                    .fetch_one(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(backend)?;
-            if !exists {
-                return Err(ArtifactStoreError::ArtifactMissing {
                     artifact_ref: artifact_ref.to_owned(),
                 });
             }
@@ -674,16 +699,7 @@ impl PostgresLashVmArtifactStore {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;
-        lock_session_artifact_owner_tx(&mut tx, &claim.referrer()).await?;
-        lock_referrer_tx(&mut tx, &claim.referrer())
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &claim.referrer()).await?;
-        if is_fenced_tx(&mut tx, &claim.referrer()).await? {
-            return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer(),
-            });
-        }
+        lock_admitted_referrer_tx(&mut tx, &claim.referrer()).await?;
         let acquired: Vec<&str> = artifacts
             .iter()
             .filter(|artifact| {
@@ -889,16 +905,7 @@ impl PostgresLashVmArtifactStore {
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
             .map_err(ArtifactStoreError::from)?;
-        lock_session_artifact_owner_tx(&mut tx, &claim.referrer()).await?;
-        lock_referrer_tx(&mut tx, &claim.referrer())
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &claim.referrer()).await?;
-        if is_fenced_tx(&mut tx, &claim.referrer()).await? {
-            return Err(ArtifactStoreError::ReferrerEnded {
-                referrer: claim.referrer(),
-            });
-        }
+        lock_admitted_referrer_tx(&mut tx, &claim.referrer()).await?;
         let mut locked: Vec<(&str, &str)> = manifest
             .iter()
             .map(|(namespace, artifact_ref)| (*namespace, artifact_ref.as_str()))
@@ -906,74 +913,48 @@ impl PostgresLashVmArtifactStore {
             .collect();
         locked.sort_by_key(|(namespace, artifact_ref)| artifact_lock_key(namespace, artifact_ref));
         locked.dedup();
-        let lock_keys: Vec<_> = locked
-            .iter()
-            .map(|(namespace, artifact_ref)| artifact_lock_key(namespace, artifact_ref))
-            .collect();
-        crate::observed_sql::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_ordered_texts
-                .sql(),
-        )
-        .bind(&lock_keys)
-        .execute(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(backend)?;
-        let (namespaces, references): (Vec<_>, Vec<_>) = manifest
+        // Every lock, then the first manifest member missing in manifest
+        // order, then, for an acquisition, the descriptor itself: the
+        // edges join when no guard is armed between.
+        let mut checks: Vec<(&str, &str)> = manifest
             .iter()
             .map(|(namespace, reference)| (*namespace, reference.as_str()))
-            .unzip();
-        let missing: Option<String> = crate::observed_sql::query_scalar(
-            artifact_sql()
-                .lash_vm_artifacts
-                .select_missing_manifest
-                .sql(),
-        )
-        .bind(&namespaces)
-        .bind(&references)
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(backend)?;
-        if let Some(artifact_ref) = missing {
-            return Err(ArtifactStoreError::ArtifactMissing { artifact_ref });
+            .collect();
+        if descriptor.is_none() {
+            checks.push((PROCESS_DEFINITION_NAMESPACE, id));
         }
-        match descriptor {
-            Some(bytes) => {
-                crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
-                    .bind(PROCESS_DEFINITION_NAMESPACE)
-                    .bind(id)
-                    .bind(bytes)
-                    .execute(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(backend)?;
-                let stored: Vec<u8> = crate::observed_sql::query_scalar(
-                    artifact_sql().lash_vm_artifacts.select_bytes.sql(),
-                )
+        let joined = descriptor.is_none() && claim.guard_cleanup().is_none();
+        Holds {
+            locks: &locked,
+            checks: &checks,
+            edges: if joined { &locked } else { &[] },
+        }
+        .run(&mut tx, &claim.referrer())
+        .await?;
+        if joined {
+            return tx.commit().await.map_err(backend);
+        }
+        // An acquisition's descriptor was checked with the manifest.
+        if let Some(bytes) = descriptor {
+            crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
                 .bind(PROCESS_DEFINITION_NAMESPACE)
                 .bind(id)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .bind(bytes)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
-                if stored != bytes {
-                    return Err(ArtifactStoreError::Immutable {
-                        artifact_ref: id.to_owned(),
-                    });
-                }
-            }
-            None => {
-                let exists: bool = crate::observed_sql::query_scalar(
-                    artifact_sql().lash_vm_artifacts.exists.sql(),
-                )
-                .bind(PROCESS_DEFINITION_NAMESPACE)
-                .bind(id)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(backend)?;
-                if !exists {
-                    return Err(ArtifactStoreError::ArtifactMissing {
-                        artifact_ref: id.to_owned(),
-                    });
-                }
+            let stored: Vec<u8> = crate::observed_sql::query_scalar(
+                artifact_sql().lash_vm_artifacts.select_bytes.sql(),
+            )
+            .bind(PROCESS_DEFINITION_NAMESPACE)
+            .bind(id)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(backend)?;
+            if stored != bytes {
+                return Err(ArtifactStoreError::Immutable {
+                    artifact_ref: id.to_owned(),
+                });
             }
         }
         if let Some(cleanup) = claim.guard_cleanup() {

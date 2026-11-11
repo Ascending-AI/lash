@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 40.
+-- lash-postgres-store schema, component version 41.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -962,7 +962,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 40, 40)
+VALUES ('lash-postgres-store', 41, 41)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable
@@ -2972,6 +2972,42 @@ BEGIN
     RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
 END
 $lash_artifact_end_local$;
+CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
+RETURNS boolean LANGUAGE plpgsql VOLATILE AS $lash_lock_referrer$
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || p_kind || ':' || p_id, 0));
+    -- This statement starts after the lock wait.
+    RETURN EXISTS (SELECT 1 FROM lash_referrer_fences
+        WHERE referrer_kind = p_kind AND referrer_id = p_id);
+END
+$lash_lock_referrer$;
+CREATE OR REPLACE FUNCTION lash_acquire_holds(
+    p_locks text[], p_check_namespaces text[], p_check_refs text[],
+    p_kind text, p_id text, p_edge_namespaces text[], p_edge_refs text[]
+) RETURNS text LANGUAGE plpgsql VOLATILE AS $lash_acquire_holds$
+DECLARE
+    v_key text;
+    v_missing text;
+BEGIN
+    FOREACH v_key IN ARRAY p_locks LOOP
+        PERFORM pg_advisory_xact_lock(hashtextextended(v_key, 0));
+    END LOOP;
+    -- These statements start after every lock wait.
+    SELECT wanted.artifact_ref INTO v_missing
+    FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
+    WHERE NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS stored
+        WHERE stored.namespace = wanted.namespace AND stored.artifact_ref = wanted.artifact_ref)
+    ORDER BY wanted.ordinal LIMIT 1;
+    IF v_missing IS NOT NULL THEN
+        RETURN v_missing;
+    END IF;
+    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+        SELECT namespace, artifact_ref, p_kind, p_id
+        FROM unnest(p_edge_namespaces, p_edge_refs) AS wanted(namespace, artifact_ref)
+        ON CONFLICT DO NOTHING;
+    RETURN NULL;
+END
+$lash_acquire_holds$;
 CREATE OR REPLACE FUNCTION lash_node_renew(
     p_node TEXT, p_boot TEXT, p_ttl BIGINT, p_fleet_low INTEGER, p_fleet_high INTEGER,
     p_lock_timeout TEXT, p_statement_ms BIGINT, p_now BIGINT)
