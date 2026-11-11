@@ -2205,3 +2205,31 @@ async fn a_guarded_transaction_fences_within_its_begin() {
     .await;
     assert_eq!(trips, 2, "BEGIN with its fence, then COMMIT");
 }
+
+/// An artifact read is one statement: the referrer edges it decodes and
+/// the bytes it answers come back together (FIG-7701 R1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_artifact_read_is_one_statement() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
+
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the artifact-read round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let document = lash_kernel_value::names::DocumentId::from_bytes([9; 32]).to_string();
+    store
+        .publish_module_artifact(&claim, &document, b"held document")
+        .await
+        .expect("publish the document");
+    let (read, trips) = round_trips(store.get_module_artifact(&document)).await;
+    assert_eq!(read.expect("read"), Some(b"held document".to_vec()));
+    assert_eq!(trips, 1, "edges and bytes in one statement");
+}

@@ -120,6 +120,32 @@ lash_store_sql::statements! {
              LEFT JOIN lash_vm_artifacts AS body ON artifact.storage_kind = 2
                  AND body.namespace = 'process_env_body' AND body.artifact_ref = artifact.body_ref
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2";
+        /// Every referrer edge naming artifact `?2` of namespace `?1`, kinds
+        /// and ids in stored-pair order, and what the artifact stores as
+        /// [`Self::select_stored`] reads it, all in one statement and one
+        /// snapshot: one row whether or not the artifact is stored, `present`
+        /// null when it is not (FIG-7701).
+        select_stored_with_edges = "SELECT
+                 ARRAY(SELECT edge.referrer_kind FROM artifact_referrer_edges AS edge
+                     WHERE edge.namespace = ?1 AND edge.artifact_ref = ?2
+                     ORDER BY edge.referrer_kind, edge.referrer_id) AS kinds,
+                 ARRAY(SELECT edge.referrer_id FROM artifact_referrer_edges AS edge
+                     WHERE edge.namespace = ?1 AND edge.artifact_ref = ?2
+                     ORDER BY edge.referrer_kind, edge.referrer_id) AS ids,
+                 stored.present, stored.bytes, stored.graph_ref
+             FROM (SELECT 1) AS one
+             LEFT JOIN (
+                 SELECT TRUE AS present,
+                     CASE WHEN artifact.storage_kind = 2
+                         THEN substr(artifact.artifact_bytes, 1, artifact.body_at) || body.artifact_bytes
+                             || substr(artifact.artifact_bytes, artifact.body_at + 1)
+                         ELSE artifact.artifact_bytes END AS bytes,
+                     (SELECT hash FROM blobs WHERE id = artifact.graph_ref) AS graph_ref
+                 FROM lash_vm_artifacts AS artifact
+                 LEFT JOIN lash_vm_artifacts AS body ON artifact.storage_kind = 2
+                     AND body.namespace = 'process_env_body' AND body.artifact_ref = artifact.body_ref
+                 WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
+             ) AS stored ON TRUE";
         /// What each stored artifact of `?2` in namespace `?1` stores, as
         /// [`Self::select_stored`]; an absent one has no row.
         select_stored_set = "SELECT artifact_ref, artifact_bytes, (SELECT hash FROM blobs WHERE id = graph_ref) AS graph_ref
@@ -501,7 +527,13 @@ async fn carry_edges_tx(
 fn decode_edge_referrer(row: &PgRow) -> Result<ArtifactReferrer, ArtifactStoreError> {
     let kind: String = row.try_get("referrer_kind").map_err(backend)?;
     let id: String = row.try_get("referrer_id").map_err(backend)?;
-    ArtifactReferrer::decode(&kind, &id).map_err(|error| match error {
+    decode_referrer(&kind, &id)
+}
+
+/// A stored referrer edge's referrer: an unknown kind is vocabulary this
+/// build cannot read, anything else unreadable is corrupt.
+fn decode_referrer(kind: &str, id: &str) -> Result<ArtifactReferrer, ArtifactStoreError> {
+    ArtifactReferrer::decode(kind, id).map_err(|error| match error {
         lash_core_store::artifact_referrer::ArtifactReferrerError::UnknownKind(label) => {
             StoreError::Incompatible {
                 refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
@@ -1223,26 +1255,33 @@ impl PostgresLashVmArtifactStore {
         namespace: &str,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
-        let edges = crate::observed_sql::query(artifact_sql().edges.select_artifact_edges.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .fetch_all(crate::observed_sql::executor(&self.pool))
-            .await
-            .map_err(backend)?;
-        for row in &edges {
-            decode_edge_referrer(row)?;
+        let row = crate::observed_sql::query(
+            artifact_sql()
+                .lash_vm_artifacts
+                .select_stored_with_edges
+                .sql(),
+        )
+        .bind(namespace)
+        .bind(artifact_ref)
+        .fetch_one(crate::observed_sql::executor(&self.pool))
+        .await
+        .map_err(backend)?;
+        // Every edge decodes, in stored-pair order, before the bytes are
+        // looked at: an edge this build cannot read refuses the read.
+        let kinds: Vec<String> = row.try_get("kinds").map_err(backend)?;
+        let ids: Vec<String> = row.try_get("ids").map_err(backend)?;
+        for (kind, id) in kinds.iter().zip(&ids) {
+            decode_referrer(kind, id)?;
         }
-        let stored: Option<(Option<Vec<u8>>, Option<crate::keys::Key>)> =
-            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
-                .bind(namespace)
-                .bind(artifact_ref)
-                .fetch_optional(crate::observed_sql::executor(&self.pool))
-                .await
-                .map_err(backend)?;
-        match stored {
-            None => Ok(None),
-            Some((Some(bytes), _)) => Ok(Some(bytes)),
-            Some((None, root)) => self.module_node_body(root.as_deref()).await,
+        let present: Option<bool> = row.try_get("present").map_err(backend)?;
+        if present.is_none() {
+            return Ok(None);
+        }
+        let bytes: Option<Vec<u8>> = row.try_get("bytes").map_err(backend)?;
+        let root: Option<crate::keys::Key> = row.try_get("graph_ref").map_err(backend)?;
+        match bytes {
+            Some(bytes) => Ok(Some(bytes)),
+            None => self.module_node_body(root.as_deref()).await,
         }
     }
 
@@ -1526,3 +1565,7 @@ impl lash_execution_contracts::process::ProcessDefinitionStore for PostgresLashV
 
 #[path = "artifact_store/packages.rs"]
 mod packages;
+
+#[cfg(test)]
+#[path = "artifact_store_tests.rs"]
+mod tests;
