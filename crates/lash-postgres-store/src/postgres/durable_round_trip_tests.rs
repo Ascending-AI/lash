@@ -1137,20 +1137,45 @@ async fn an_execution_end_commits_in_one_call() {
         execution: execution.clone(),
         uses: Default::default(),
         referrer: lash_core_store::artifact_referrer::ArtifactReferrer::Execution(journal),
-        requirements: Default::default(),
+        requirements: lash_durable::ClaimRequirements {
+            machine: lash_kernel_value::claims::NodeRequirements {
+                kernels: [3].into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     });
     store
         .commit(tx, CommitLabel::CELL_SNAPSHOT)
         .await
         .expect("register the execution");
-    let mut tx = store
-        .begin(&owned.actor, owned.epoch, u64::MAX)
+    let debts = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM lash_execution_debts WHERE execution = $1",
+        )
+        .bind(&execution.0)
+        .fetch_one(owned.storage.pool())
         .await
-        .expect("open");
-    tx.end_execution(execution.clone());
-    let (ended, trips) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
-    ended.expect("the execution ends");
-    within("an execution's end", trips, 1);
+        .expect("count the execution's debt")
+    };
+    assert_eq!(debts().await, 1, "the registration owes its stable debt");
+    // A4: the authorized end deletes the debt in its own commit, and a
+    // replayed end with no debt left answers as the first did.
+    for attempt in ["first", "replayed"] {
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
+        tx.end_execution(execution.clone());
+        let (ended, trips) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
+        ended.unwrap_or_else(|error| panic!("the {attempt} end answered {error:?}"));
+        within("an execution's end", trips, 1);
+        assert_eq!(
+            debts().await,
+            0,
+            "the {attempt} end left the execution's debt"
+        );
+    }
     let mut tx = store
         .begin(&owned.actor, owned.epoch, u64::MAX)
         .await

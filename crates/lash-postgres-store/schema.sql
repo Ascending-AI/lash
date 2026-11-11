@@ -1513,9 +1513,9 @@ DECLARE
     v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 2b221f0c76806173); a call
+    -- Generated from this build's statements (registry 002a0759949729f2); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '2b221f0c76806173'
+    IF p_registry IS DISTINCT FROM '002a0759949729f2'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1633,6 +1633,10 @@ BEGIN
             END LOOP;
         WHEN 'durable_packages.end_execution' THEN
             UPDATE lash_package_executions SET ended = 1 WHERE execution = (v_p->>0) AND actor_key = (v_p->>1);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_packages.end_debts' THEN
+            DELETE FROM lash_execution_debts WHERE execution = (v_p->>0) AND EXISTS (SELECT 1 FROM lash_package_executions WHERE execution = (v_p->>0) AND actor_key = (v_p->>1));
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_packages.register_execution' THEN

@@ -639,18 +639,29 @@ pub(super) static END_EXECUTION: super::steps::Entry = super::steps::Entry::new(
     super::steps::Shape::Exec,
 );
 
-/// `actor`'s execution `execution` ends, as a step: it must be the actor's.
-pub(super) fn end_execution_step(
+/// The ending execution `?1`'s debt, when it is actor `?2`'s.
+pub(super) static END_DEBTS: super::steps::Entry = super::steps::Entry::new(
+    || &SQL.end_debts,
+    &[super::steps::Ty::Text, super::steps::Ty::Text],
+    super::steps::Shape::Exec,
+);
+
+/// `actor`'s execution `execution` ends, as steps: it must be the actor's,
+/// and its debt goes with it.
+pub(super) fn end_execution_steps(
     actor: &lash_durable::ActorKey,
     execution: &lash_durable::resolutions::ExecutionId,
-) -> super::steps::Step {
-    super::steps::Step::one(
-        &END_EXECUTION,
+) -> Vec<super::steps::Step> {
+    let values = || {
         vec![
             super::steps::Value::text(execution.0.clone()),
             super::steps::Value::text(actor.as_str()),
-        ],
-    )
+        ]
+    };
+    vec![
+        super::steps::Step::one(&END_EXECUTION, values()),
+        super::steps::Step::any(&END_DEBTS, values()),
+    ]
 }
 
 pub(super) async fn end_execution(
@@ -668,6 +679,12 @@ pub(super) async fn end_execution(
     if changed == 0 {
         return Err(lash_durable::packages::PackageRefusal::ExecutionUse.into());
     }
+    crate::observed_sql::query(SQL.end_debts.sql())
+        .bind(&execution.0)
+        .bind(actor.as_str())
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
     Ok(())
 }
 
@@ -751,6 +768,11 @@ pub(super) async fn end_actor_executions(
     tx: &mut PgConnection,
     actor: &lash_durable::ActorKey,
 ) -> Result<(), DurableError> {
+    crate::observed_sql::query(SQL.end_actor_debts.sql())
+        .bind(actor.as_str())
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
     crate::observed_sql::query(SQL.end_actor_executions.sql())
         .bind(actor.as_str())
         .execute(crate::observed_sql::executor(tx))

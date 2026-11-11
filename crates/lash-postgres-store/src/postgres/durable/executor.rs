@@ -205,6 +205,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &tool_calls::COMPLETE,
         &tool_calls::EXPIRE,
         &packages::END_EXECUTION,
+        &packages::END_DEBTS,
         &packages::REGISTER,
         &packages::SAME_REGISTRATION,
         &packages::ADOPTABLE,
@@ -353,7 +354,7 @@ pub(super) fn program(
     match write {
         DomainWrite::Environment(write) => environment::steps(actor, epoch, write).map(Some),
         DomainWrite::EndExecution(execution) => {
-            Ok(Some(vec![packages::end_execution_step(actor, execution)]))
+            Ok(Some(packages::end_execution_steps(actor, execution)))
         }
         DomainWrite::RegisterExecution(_)
         | DomainWrite::AdoptExecution(_)

@@ -313,11 +313,14 @@ pub(super) fn end_execution(
     let changed = tx
         .statement(SQL.end_execution.sql())?
         .execute([&execution.0, actor.as_str()])?;
-    Ok(if changed == 0 {
-        Err(lash_durable::packages::PackageRefusal::ExecutionUse.into())
-    } else {
-        Ok(())
-    })
+    if changed == 0 {
+        return Ok(Err(
+            lash_durable::packages::PackageRefusal::ExecutionUse.into()
+        ));
+    }
+    tx.statement(SQL.end_debts.sql())?
+        .execute([&execution.0, actor.as_str()])?;
+    Ok(Ok(()))
 }
 
 /// Actor `actor`'s merged debt tokens, which the store merges.
@@ -561,6 +564,8 @@ pub(super) fn end_actor_executions(
     tx: &Connection,
     actor: &lash_durable::ActorKey,
 ) -> rusqlite::Result<()> {
+    tx.statement(SQL.end_actor_debts.sql())?
+        .execute([actor.as_str()])?;
     tx.statement(SQL.end_actor_executions.sql())?
         .execute([actor.as_str()])?;
     Ok(())
@@ -600,7 +605,8 @@ mod tests {
                         let execution = format!("ended-{ordinal}");
                         connection.execute_once(
                             "INSERT INTO package_executions
-                             (execution, actor_key, referrer_json, requirements_json, ended) VALUES (?1, ?2, ?3, ?4, 1)",
+                             (execution, actor_key, referrer_json, referrer_kind, referrer_id, requirements_json, ended)
+                             VALUES (?1, ?2, ?3, 'host_pin', ?1, ?4, 1)",
                             rusqlite::params![execution, seed_actor.as_str(), "ended referrer", "ended requirements"],
                         )?;
                         // An ended resolution must be excluded by the join too.
@@ -641,7 +647,12 @@ mod tests {
                         ClaimRequirements::default()
                     }
                 );
-                assert_eq!(receipt.statements, 1, "one measured package statement");
+                // An end deletes its live executions' debt, then ends them.
+                assert_eq!(
+                    receipt.statements,
+                    if stage % 2 == 0 { 1 } else { 2 },
+                    "measured package statements"
+                );
                 let steps = receipt.sqlite_work.unwrap().vm_steps;
                 assert!(steps > 0, "package store work was not measured");
                 work.push(steps);
@@ -657,11 +668,66 @@ mod tests {
             "ended history must cost no store work"
         );
         for (_, affected) in samples {
+            // The end deletes the open execution's one stable debt and ends it.
             assert_eq!(
                 affected,
-                [0, 1, 0, 0],
-                "only the one open execution may be rewritten"
+                [0, 2, 0, 0],
+                "only the one open execution and its debt may be rewritten"
             );
         }
+    }
+
+    /// A4: an authorized execution end deletes the execution's debt in the
+    /// same commit; a replayed end with no debt left answers as the first,
+    /// and another actor's end is refused and deletes nothing.
+    #[tokio::test]
+    async fn an_execution_end_deletes_its_debt_and_replays_unchanged() {
+        use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
+        use lash_durable::resolutions::{ClaimRequirements, ExecutionId, ExecutionRegistration};
+
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        lash_core_execution::testing::sql_work::owner_commit(&set).await;
+        let store = set.durable_store();
+        let actor = lash_durable::ActorKey::session("sql-work-owner").unwrap();
+        let stranger = lash_durable::ActorKey::session("debt-end-stranger").unwrap();
+        let mut debt = ClaimRequirements::default();
+        debt.machine.kernels.insert(1);
+        let registration = ExecutionRegistration {
+            execution: ExecutionId("debt-end-execution".into()),
+            uses: Default::default(),
+            referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
+            requirements: debt,
+        };
+        let answers = store
+            .conn
+            .call(move |connection| {
+                let execution = registration.execution.clone();
+                let debts = |connection: &rusqlite::Connection| -> rusqlite::Result<i64> {
+                    connection.query_row(
+                        "SELECT count(*) FROM execution_debts WHERE execution = ?1",
+                        [&execution.0],
+                        |row| row.get(0),
+                    )
+                };
+                super::register(connection, &actor, &registration)?.unwrap();
+                let registered = debts(connection)?;
+                let foreign = super::end_execution(connection, &stranger, &execution)?;
+                let after_foreign = debts(connection)?;
+                let first = super::end_execution(connection, &actor, &execution)?;
+                let after_first = debts(connection)?;
+                let replayed = super::end_execution(connection, &actor, &execution)?;
+                Ok((
+                    registered,
+                    foreign.is_err(),
+                    after_foreign,
+                    first.is_ok(),
+                    after_first,
+                    replayed.is_ok(),
+                    debts(connection)?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(answers, (1, true, 1, true, 0, true, 0));
     }
 }
