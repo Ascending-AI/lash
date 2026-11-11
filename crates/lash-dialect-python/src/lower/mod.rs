@@ -233,6 +233,14 @@ pub(crate) struct Lowerer<'a> {
     /// The package value types operands are known to hold, which
     /// `Ty::Package` names by position.
     brands: Vec<lash_kernel_dialect::dispatch::Brand>,
+    /// For each function being lowered, innermost last, the bindings whose
+    /// trusted annotation its lowering used, by kernel name: source
+    /// evidence its written notes keep. A binding annotated two ways has
+    /// none.
+    declared: Vec<BTreeMap<Name, Option<lash_kernel_value::Type>>>,
+    /// The declared locals of the function body lowered last, for its
+    /// written notes.
+    declared_locals: Vec<lash_kernel_doc::DeclaredLocal>,
 }
 
 /// Whether `name` is one of the dialect's built-ins.
@@ -362,6 +370,8 @@ pub(crate) fn lower(
         },
         typed_dicts,
         brands: Vec::new(),
+        declared: Vec::new(),
+        declared_locals: Vec::new(),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -589,16 +599,36 @@ impl Lowerer<'_> {
     /// An inferred type fact applies only to a bound local of the current
     /// scope. An enclosing scope may run differently when a closure is
     /// called, and a branch-local definition may not reach this read.
-    fn type_of(&self, found: &Found, id: &str) -> Ty {
-        let annotated = found
-            .scope
-            .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied())
-            .unwrap_or(Ty::Unknown);
+    fn type_of(&mut self, found: &Found, id: &str) -> Ty {
+        let annotated = self.annotated(found, id);
         // Explicit annotations retain the dialect's existing trust rule.
         if annotated != Ty::Unknown {
             return annotated;
         }
         self.local_type(found.scope, id)
+    }
+
+    /// The trusted annotation of the binding `found` of `id`, recorded as
+    /// source evidence of every function being lowered when there is one.
+    fn annotated(&mut self, found: &Found, id: &str) -> Ty {
+        let annotated = found
+            .scope
+            .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied())
+            .unwrap_or(Ty::Unknown);
+        if annotated != Ty::Unknown {
+            let ty = annotated.declared();
+            for frame in &mut self.declared {
+                frame
+                    .entry(found.name.clone())
+                    .and_modify(|known| {
+                        if *known != ty {
+                            *known = None;
+                        }
+                    })
+                    .or_insert_with(|| ty.clone());
+            }
+        }
+        annotated
     }
 
     /// Facts proved from definitions, independently of annotations.

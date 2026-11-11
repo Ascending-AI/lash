@@ -26,8 +26,10 @@ pub(super) fn call_signature(saved: &Option<Written>) -> Option<CallShape> {
 }
 
 impl Lowerer<'_> {
+    /// What the source wrote of the function whose body was lowered last,
+    /// with the declared locals that body's lowering used.
     pub(super) fn function_written(
-        &self,
+        &mut self,
         parameters: Option<&ast::Parameters>,
         is_async: bool,
         returns: Option<&PyExpr>,
@@ -99,7 +101,7 @@ impl Lowerer<'_> {
         }
         Written {
             implicit_text_conversions: Vec::new(),
-            declared_locals: Vec::new(),
+            declared_locals: std::mem::take(&mut self.declared_locals),
             captions: Vec::new(),
             language: SourceLanguage::Python,
             signature: text,

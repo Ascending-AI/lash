@@ -42,7 +42,9 @@ handling rather than a reserved kernel namespace.
 
 Typed data constructors preserve value kinds: `error.new`,
 `timestamp.from_nanoseconds`, `integer.from_decimal`, `bytes.from_hex`,
-`tuple.of`, `map.from_entries`, `set.of`, `record.new` and `value.absent`.
+`tuple.of`, `map.from_entries`, `set.of`, `record.new`, `value.absent` and
+`value.null`. `value.null()` is the null value as an operand no source type
+describes.
 `tuple.at` expresses strict kernel indexing. `value.same` retains exact native
 equality, including default-argument checks, without Python's `is` adapter. TypeScript prints a strict
 numeric operation over checked `number` operands as the operator it lowers
@@ -124,6 +126,18 @@ only when the printed source still lowers to the same document. Evidence
 proves no construction, and a printer never guesses missing evidence from a
 current value: without evidence, a local whose type decided its lowering
 refuses to print.
+
+Python trusts a simple local annotation (`total: int`, `label: str`) for every
+read and write of the binding, including reads from a nested function, and
+checks an assigned value of another type with `py.name_check`. Its evidence is
+each annotation the lowering of a function and the functions it contains used,
+keyed by the binding's kernel name. The printer spells the annotation on the
+binding's first write in the scope that binds it: the scope's own evidence, or
+for `main` and a materialized factory, which have none, what the functions
+they contain agree on. Under the annotation, a checked value is written as the
+value it checks, since the annotation writes the check again. A materialized
+capture cell starts as an unchecked null, which it writes as
+`label: str = value.null()`.
 
 GeneratedSourceLimits independently bounds source bytes and node depth.
 Printing refuses oversized or unrepresentable content with typed errors and

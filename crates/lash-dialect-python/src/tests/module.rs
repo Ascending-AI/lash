@@ -926,10 +926,15 @@ fn for_bindings_keep_the_guest_namespace_when_printed() {
         .expect("loop binding map");
 }
 
-/// FIG-7352: a saved callable's packed token has an ordinary Python spelling.
-#[test]
-fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
-    use lash_kernel_doc::{CaptureValue, Datum, Expr, Literal, Node};
+/// The opened workflow of the saved callable `handle` that `source` defines,
+/// with `captures` as its frozen environment and its value as `saved`
+/// leaves it.
+fn materialized_handle(
+    source: &str,
+    captures: BTreeMap<Name, lash_kernel_doc::CaptureValue>,
+    saved: impl FnOnce(lash_kernel_doc::FunctionValue) -> lash_kernel_doc::FunctionValue,
+) -> lash_kernel_package::MaterializedWorkflow {
+    use lash_kernel_doc::{Datum, Expr, Literal, Node};
     fn data(expr: &Expr, callable: &Name) -> Datum {
         match expr {
             Expr::Literal(Literal::Null) => Datum::Null,
@@ -943,9 +948,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
             _ => panic!("literal token data: {expr:?}"),
         }
     }
-    let lowered =
-        machine::lower("offset = 7\nasync def handle(x: int) -> int:\n    return x + offset\n")
-            .unwrap();
+    let lowered = machine::lower(source).unwrap();
     let (site, written) = lowered
         .written
         .iter()
@@ -974,7 +977,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         document: document.identity(),
         fills: Default::default(),
     };
-    let function = lash_kernel_doc::FunctionValue {
+    let function = saved(lash_kernel_doc::FunctionValue {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
@@ -983,31 +986,41 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
             link: link.identity(),
             function: closure.function,
         },
-        captures: [(
-            Name::new("offset"),
-            CaptureValue::Data(Datum::Int(7.into())),
-        )]
-        .into(),
+        captures,
         signature: presentation.signature.clone(),
         convention: presentation.convention.clone(),
         representation: presentation.representation.clone(),
-        captions: lowered.captions,
+        captions: lowered.captions.clone(),
         creation: Some(site.clone()),
         token: Some(token),
-    };
+    });
     let content = lash_kernel_package::LinkedContent {
         documents: [(document.identity(), document.into())].into(),
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };
-    let opened = lash_kernel_package::materialize_workflow(
+    lash_kernel_package::materialize_workflow(
         &content,
         &lash_kernel_doc::WorkflowReference::Callable(function.callable),
         Some(&function),
         None,
         machine::installed().prepared.helpers(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+/// FIG-7352: a saved callable's packed token has an ordinary Python spelling.
+#[test]
+fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
+    let opened = materialized_handle(
+        "offset = 7\nasync def handle(x: int) -> int:\n    return x + offset\n",
+        [(
+            Name::new("offset"),
+            lash_kernel_doc::CaptureValue::Data(lash_kernel_doc::Datum::Int(7.into())),
+        )]
+        .into(),
+        |function| function,
+    );
     crate::print(
         &opened.document,
         None,
@@ -1015,6 +1028,72 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         Default::default(),
     )
     .expect("materialized callable has an exact authored Python readback");
+}
+
+/// FIG-7708: a trusted local annotation chooses its operations (`total: int`
+/// makes `+` the native `add`, `label: str` makes it `text.concat`, and
+/// `cursor: str = None` checks the name). The annotation is source evidence
+/// beside the callable, keyed by its binding: the module and the saved
+/// callable print it and read back exactly, again after the value is stored
+/// and reloaded, and refuse without the evidence.
+#[test]
+fn declared_local_annotations_print_from_their_evidence() {
+    use lash_kernel_doc::{CaptureValue, Datum};
+    let cases: [(&str, BTreeMap<Name, CaptureValue>); 3] = [
+        (
+            "async def handle(x: int) -> int:\n    total: int = 0\n    total = total + x\n    return total\n",
+            BTreeMap::new(),
+        ),
+        (
+            "label: str = 'a'\nasync def handle(x: str) -> str:\n    return x + label\n",
+            [(
+                Name::new("label"),
+                CaptureValue::Data(Datum::Text("a".into())),
+            )]
+            .into(),
+        ),
+        (
+            "async def handle(x: str) -> str:\n    cursor: str = None\n    cursor = x\n    return cursor + '!'\n",
+            BTreeMap::new(),
+        ),
+    ];
+    let prints = |document: &lash_kernel_doc::Document| {
+        crate::print(document, None, machine::library(), Default::default())
+    };
+    for (source, captures) in cases {
+        let lowered = machine::lower(source).unwrap();
+        if let Err(error) = prints(lowered.document.document()) {
+            panic!("module: {error}\n{source}");
+        }
+        let opened = materialized_handle(source, captures.clone(), |function| function);
+        if let Err(error) = prints(&opened.document) {
+            panic!("callable: {error}\n{source}");
+        }
+        let stored = materialized_handle(source, captures.clone(), |function| {
+            let stored: lash_kernel_doc::FunctionValue = lash_kernel_value::tokens::decode_body(
+                &lash_kernel_value::tokens::encode_body(&function),
+            )
+            .unwrap();
+            assert_eq!(stored, function);
+            stored
+        });
+        if let Err(error) = prints(&stored.document) {
+            panic!("stored callable: {error}\n{source}");
+        }
+        let bare = materialized_handle(source, captures, |mut function| {
+            assert!(!function.declared_locals.is_empty(), "{source}");
+            function.declared_locals.clear();
+            function
+        });
+        let refused = prints(&bare.document);
+        assert!(
+            matches!(
+                refused,
+                Err(lash_kernel_dialect::PrintError::Unprintable { .. })
+            ),
+            "{source}: {refused:?}"
+        );
+    }
 }
 
 /// FIG-7664: syntax helpers must retain an authored spelling and exact readback.

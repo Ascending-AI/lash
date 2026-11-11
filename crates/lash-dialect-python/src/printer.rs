@@ -55,6 +55,7 @@ pub(crate) fn print_regions(
         displays: BTreeMap::new(),
         expression_depth: 0,
         max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
+        declared: declared_locals(document, None),
     };
     let asyncio = ["py.task.run", "py.gather", "py.sleep"]
         .iter()
@@ -135,6 +136,77 @@ struct Renderer<'a> {
     displays: BTreeMap<Name, syntax::Display>,
     expression_depth: usize,
     max_depth: usize,
+    /// The declared types source evidence gives the locals of the scope
+    /// being written, not yet spelled.
+    declared: BTreeMap<Name, lash_kernel_value::Type>,
+}
+
+/// The declared types of the locals a scope binds, by kernel name: those of
+/// `function`'s source evidence, or, for a scope with none of its own (`main`
+/// or a materialized factory), those every function it contains with
+/// evidence agrees on.
+fn declared_locals(
+    document: &k::Document,
+    function: Option<lash_kernel_value::FunctionId>,
+) -> BTreeMap<Name, lash_kernel_value::Type> {
+    if let Some(evidence) = function.and_then(|id| document.source_evidence.get(&id)) {
+        return evidence
+            .declared_locals
+            .iter()
+            .map(|local| (local.name.clone(), local.ty.clone()))
+            .collect();
+    }
+    let contained: BTreeSet<lash_kernel_value::FunctionId> = match function {
+        None => document.source_evidence.keys().copied().collect(),
+        Some(root) => {
+            let mut reached = BTreeSet::new();
+            let mut pending = vec![root];
+            while let Some(id) = pending.pop() {
+                if let Some(body) = document.functions.get(&id).and_then(|d| d.body())
+                    && reached.insert(id)
+                {
+                    pending.extend(k::Node::Block(&body.block).functions_within());
+                }
+            }
+            reached
+        }
+    };
+    let mut declared = BTreeMap::new();
+    let mut conflicting = BTreeSet::new();
+    for local in contained
+        .iter()
+        .filter_map(|id| document.source_evidence.get(id))
+        .flat_map(|evidence| &evidence.declared_locals)
+    {
+        match declared.get(&local.name) {
+            Some(ty) if *ty != local.ty => {
+                conflicting.insert(local.name.clone());
+            }
+            Some(_) => {}
+            None => {
+                declared.insert(local.name.clone(), local.ty.clone());
+            }
+        }
+    }
+    declared.retain(|name, _| !conflicting.contains(name));
+    declared
+}
+
+/// The annotation a trusted Python local declaration of `ty` is written with:
+/// the bare name the dialect's annotation trust reads.
+fn declared_annotation(ty: &lash_kernel_value::Type) -> Option<&'static str> {
+    use lash_kernel_value::Type;
+    Some(match ty {
+        Type::Null => "None",
+        Type::Bool => "bool",
+        Type::Int => "int",
+        Type::Float => "float",
+        Type::Text => "str",
+        Type::List(_) => "list",
+        Type::Set(_) => "set",
+        Type::Map(_) => "dict",
+        _ => return None,
+    })
 }
 impl Renderer<'_> {
     fn export_function(
@@ -248,6 +320,7 @@ impl Renderer<'_> {
         if block.is_empty() {
             self.empty();
         }
+        let mut declared = None;
         if let Some(lash_kernel_value::sites::Unit::Library(id)) = root {
             let params = self.document.functions[id]
                 .signature
@@ -255,15 +328,24 @@ impl Renderer<'_> {
                 .iter()
                 .map(|p| p.name.clone())
                 .collect::<Vec<_>>();
-            self.nonlocals(block, &params);
+            let nonlocal = self.nonlocals(block, &params);
+            // A parameter or a `nonlocal` is no declaration of this scope.
+            let mut own = declared_locals(self.document, Some(*id));
+            own.retain(|name, _| !params.contains(name) && !nonlocal.contains(name));
+            declared = Some(std::mem::replace(&mut self.declared, own));
         }
         self.authored_statements(block);
+        if let Some(declared) = declared {
+            self.declared = declared;
+        }
         self.indent -= 1;
         self.out.end_node();
         self.sync = sync;
         self.asynchronous = asynchronous;
     }
-    fn nonlocals(&mut self, block: &k::Block, params: &[Name]) {
+    /// Writes the `nonlocal` statements of a function body, giving the
+    /// names they declare.
+    fn nonlocals(&mut self, block: &k::Block, params: &[Name]) -> BTreeSet<Name> {
         let mut locals: BTreeSet<_> = params.iter().cloned().collect();
         let mut writes = BTreeSet::new();
         let mut pending = vec![k::Node::Block(block)];
@@ -283,12 +365,14 @@ impl Renderer<'_> {
             }
             pending.extend(node.children());
         }
-        for name in writes.difference(&locals) {
+        let nonlocal: BTreeSet<Name> = writes.difference(&locals).cloned().collect();
+        for name in &nonlocal {
             self.padding();
             self.out.write("nonlocal ");
             self.name(name);
             self.out.write("\n");
         }
+        nonlocal
     }
     fn name(&mut self, n: &Name) {
         // Authored source spells the document's names; only the kernel

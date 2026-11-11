@@ -53,6 +53,27 @@ impl Ty {
     }
 
     /// The type an annotation names, as far as the front end uses it.
+    /// The kernel type a trusted annotation of this kind declares, as
+    /// source evidence keeps it, if one does.
+    pub(crate) fn declared(self) -> Option<lash_kernel_value::Type> {
+        use lash_kernel_value::Type;
+        Some(match self {
+            Self::None => Type::Null,
+            Self::Bool => Type::Bool,
+            Self::Int => Type::Int,
+            Self::Float => Type::Float,
+            Self::Str => Type::Text,
+            Self::List => Type::List(Box::new(Type::Json)),
+            Self::Set => Type::Set(Box::new(Type::Json)),
+            Self::Dict => Type::Map(Box::new(lash_kernel_value::MapType {
+                key: Type::Json,
+                value: Type::Json,
+            })),
+            // No kernel type is a tuple of any length.
+            Self::Tuple | Self::Unknown | Self::Number | Self::Package(_) => return None,
+        })
+    }
+
     pub(crate) fn of_annotation(annotation: &Expr) -> Ty {
         let name = match annotation {
             Expr::Name(name) => name.id.as_str(),
