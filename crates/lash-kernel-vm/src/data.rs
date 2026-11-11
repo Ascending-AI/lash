@@ -235,6 +235,12 @@ pub(crate) fn size_one(value: &Value) -> bool {
     )
 }
 
+/// A read of the unread payload of `object`, an error the machine has
+/// not opened: it opens the page and runs the read again.
+fn cold(object: ArenaHandle) -> NativeError {
+    lash_kernel_doc::Retry::Cold { object, chunk: 0 }.into()
+}
+
 /// The members of an immutable composite: a tuple's, an error's data.
 fn immutable_members(
     arena: &impl ChargeArena,
@@ -248,7 +254,8 @@ fn immutable_members(
             }
         }
         Value::Error(error) => match arena.body(*error)? {
-            Body::Error(error) => visitor(&error.data)?,
+            Body::Error(body) => visitor(&body.data)?,
+            Body::Cold(_) => return Err(cold(*error)),
             _ => return Err(NativeError::Malformed("an error handle names another body")),
         },
         _ => {}
@@ -331,8 +338,10 @@ pub(crate) fn view_nested_size(
         return Ok(0);
     }
     if let Value::Error(handle) = value {
-        let Body::Error(error) = arena.body(*handle)? else {
-            return Err(NativeError::Malformed("an error handle names another body"));
+        let error = match arena.body(*handle)? {
+            Body::Error(error) => error,
+            Body::Cold(_) => return Err(cold(*handle)),
+            _ => return Err(NativeError::Malformed("an error handle names another body")),
         };
         let Value::Record(object) = error.data else {
             return Err(NativeError::Malformed("an error has no object"));
