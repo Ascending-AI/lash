@@ -33,12 +33,12 @@ lash_store_sql::statements! {
         /// `?2`'s model calls reach along every edge: each blob's id, size
         /// and edge count, before any content is read. The limit stops the
         /// recursion itself.
-        closure = "WITH RECURSIVE roots(id) AS (
-                 SELECT record_ref FROM run_records WHERE owner_key = ?1
+        closure = "WITH RECURSIVE roots AS (
+                 SELECT record_ref AS id FROM run_records WHERE owner_key = ?1
                  UNION SELECT decision_ref FROM tool_calls WHERE owner_key = ?1 AND decision_ref IS NOT NULL
                  UNION SELECT body_ref FROM tool_calls WHERE owner_key = ?1 AND body_ref IS NOT NULL
                  UNION SELECT record_ref FROM model_call_records WHERE session_id = ?2 AND record_ref IS NOT NULL
-             ), reach(id) AS (
+             ), reach AS (
                  SELECT id FROM roots
                  UNION
                  SELECT edge.child_id FROM blob_edges AS edge JOIN reach ON edge.parent_id = reach.id

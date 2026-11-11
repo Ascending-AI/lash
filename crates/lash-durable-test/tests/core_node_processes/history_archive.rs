@@ -311,8 +311,9 @@ fn core_over(stores: Arc<dyn StoreSet>, answer_bytes: usize) -> (lash::Backend, 
     )
 }
 
-/// Run one workflow process to its successful end.
-async fn run_one(core: &lash::LashCore) -> ProcessId {
+/// Run one workflow process making `reads` source reads to its successful
+/// end.
+async fn run_one(core: &lash::LashCore, reads: usize) -> ProcessId {
     let pin = lash_core::HostArtifactPin::mint();
     let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
         .model(lash_core::ProcessModel::new(
@@ -341,17 +342,23 @@ async fn run_one(core: &lash::LashCore) -> ProcessId {
         .unwrap()
         .unwrap();
     let bound = lash::dialect::Environment::new(&library, checked.namespaces());
-    let lowered = lash::typescript::lower(
-        r#"export async function run(): Promise<unknown> {
-  const a = await archive00.read({});
-  const label = await llm.query({ task: "Name the source", output: { name: "str", tags: "list[str]" } });
-  const b = await archive01.read({});
-  return { label: label, first: a, last: b };
-}"#,
-        &bound,
-        lash::dialect::Mode::Module,
-    )
-    .unwrap();
+    // The model query between the first read and the rest; the answer keeps
+    // the first and last reads only when they are small.
+    let mut source = String::from(
+        "export async function run(): Promise<unknown> {\n  const r0 = await archive00.read({});\n  const label = await llm.query({ task: \"Name the source\", output: { name: \"str\", tags: \"list[str]\" } });\n",
+    );
+    for read in 1..reads {
+        source.push_str(&format!(
+            "  const r{read} = await archive0{}.read({{}});\n",
+            read % 2
+        ));
+    }
+    source.push_str(&if reads == 2 {
+        "  return { label: label, first: r0, last: r1 };\n}".to_owned()
+    } else {
+        "  return { label: label };\n}".to_owned()
+    });
+    let lowered = lash::typescript::lower(&source, &bound, lash::dialect::Mode::Module).unwrap();
     let start = core
         .host_artifacts()
         .publish_workflow(
@@ -501,10 +508,9 @@ async fn answers(
         .await;
     out.insert("calls".to_owned(), format!("{listed:?}"));
     let calls = listed.map(|calls| calls.rows).unwrap_or_default();
-    assert_eq!(
-        calls.len(),
-        2,
-        "the process admitted its two reads: {calls:?}"
+    assert!(
+        calls.len() >= 2,
+        "the process admitted its reads: {calls:?}"
     );
     let cursor = ToolCallCursor {
         sequence: calls[0].sequence,
@@ -647,7 +653,7 @@ fn same(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>, whe
 async fn a_packed_history_reads_as_its_rows(tier: Tier) {
     let (stores, raw, _keep) = raw_stores(tier).await;
     let (backend, core) = core_over(stores, 400);
-    let process = run_one(&core).await;
+    let process = run_one(&core, 2).await;
     let durable = Arc::clone(backend.durable());
     let model_keys = raw.model_keys(&process).await;
     let before = answers(durable.as_ref(), &process, &model_keys).await;
@@ -757,8 +763,10 @@ on_every_tier!(a_packed_history_reads_as_its_rows: sqlite_memory, postgres);
 /// is not packed again.
 async fn a_history_over_the_cap_keeps_its_rows(tier: Tier) {
     let (stores, raw, _keep) = raw_stores(tier).await;
-    let (backend, core) = core_over(stores, PROCESS_ARCHIVE_CAP_BYTES / 2 + 1);
-    let process = run_one(&core).await;
+    // Six reads of 50 KiB: each stays inline in history (64 KiB), together
+    // over the cap.
+    let (backend, core) = core_over(stores, 50 * 1024);
+    let process = run_one(&core, 6).await;
     let durable = Arc::clone(backend.durable());
     let model_keys = raw.model_keys(&process).await;
     let before = answers(durable.as_ref(), &process, &model_keys).await;
