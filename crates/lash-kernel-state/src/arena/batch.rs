@@ -155,15 +155,19 @@ impl Arena {
                 if entries[at].summarized {
                     continue;
                 }
+                // Only an immutable composite keeps a summary of its members.
+                if !matches!(entries[at].body, Body::Tuple(_) | Body::Error(_)) {
+                    entries[at].summarized = true;
+                    remaining -= 1;
+                    continue;
+                }
                 let mut ready = true;
                 let mut summary = Summary {
                     depth: 1,
                     ..Summary::default()
                 };
-                let immutable = matches!(entries[at].body, Body::Tuple(_) | Body::Error(_));
                 each_member(&entries[at].body, &mut |value| {
-                    if immutable
-                        && matches!(value, Value::Tuple(_) | Value::Error(_))
+                    if matches!(value, Value::Tuple(_) | Value::Error(_))
                         && let Some(child) = value
                             .handle()
                             .and_then(|h| indices.get(&entries, h.index()))
@@ -182,9 +186,7 @@ impl Arena {
                     summary.has_edges |= inner.has_edges;
                 });
                 if ready {
-                    if immutable {
-                        entries[at].facts.summary = summary;
-                    }
+                    entries[at].facts.summary = summary;
                     entries[at].summarized = true;
                     remaining -= 1;
                 }

@@ -1,7 +1,7 @@
 //! JSON reads its text in place, without an input copy. One validating scan
 //! writes the document as a flat tape, which a decode then walks once.
 use super::{raise, room};
-use lash_kernel_doc::{NativeError, NumberToken, Nursery, Retry};
+use lash_kernel_doc::{NativeError, NumberToken, Nursery};
 use std::borrow::Cow;
 
 /// One value of a read document. The tape holds the values in document
@@ -28,7 +28,7 @@ enum Node<'text> {
 }
 
 /// A document read and validated whole: no tape exists for a text with a
-/// syntax error anywhere, or one whose reservations were refused.
+/// syntax error anywhere, or one whose room was refused.
 pub(super) struct Tape<'text> {
     nodes: Vec<Node<'text>>,
     /// Each object's distinct names, in the order they first appear, each
@@ -141,17 +141,16 @@ impl<'t> Iterator for Fields<'t> {
 }
 impl ExactSizeIterator for Fields<'_> {}
 
-struct Parser<'text, R> {
+struct Parser<'text> {
     /// The text, and its bytes: every slice the parser takes ends at an
     /// ASCII delimiter, so it is the text's own UTF-8.
     text: &'text str,
     input: &'text [u8],
     cursor: usize,
-    reserve: R,
     depth_limit: usize,
-    /// The room the first refused reservation asked for, and what the
-    /// reservations after it would have added.
-    refused: Option<(u64, u64)>,
+    /// The values the document keeps, and the bytes they hold.
+    values: u64,
+    bytes: u64,
     nodes: Vec<Node<'text>>,
     fields: Vec<(Cow<'text, str>, usize)>,
     /// The fields of the objects being read, innermost last.
@@ -159,42 +158,24 @@ struct Parser<'text, R> {
     #[cfg(test)]
     held: crate::native_contract_laws::ScratchLease,
 }
-impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
+impl<'text> Parser<'text> {
     fn byte(&self) -> Option<u8> {
         self.input.get(self.cursor).copied()
     }
-    /// Reserves a finished value of `bytes` payload, named by `name` bytes
-    /// when it is an object field. A memory refusal stops the tape while
-    /// syntax validation continues, counting the room the rest would take.
-    /// Infrastructure causes end the read unchanged.
-    fn keep(&mut self, bytes: usize, name: usize) -> Result<bool, NativeError> {
-        let bytes = room(bytes.saturating_add(name));
-        if let Some((_, owed)) = &mut self.refused {
-            *owed = owed.saturating_add(16).saturating_add(bytes);
-            return Ok(false);
-        }
-        match (self.reserve)(1, bytes) {
-            Ok(()) => Ok(true),
-            Err(NativeError::Retry(Retry::Room { wanted })) => {
-                self.refused = Some((wanted.0, 0));
-                Ok(false)
-            }
-            Err(error) => Err(error),
-        }
+    /// Counts a finished value of `bytes` payload, named by `name` bytes
+    /// when it is an object field.
+    fn keep(&mut self, bytes: usize, name: usize) {
+        self.values += 1;
+        self.bytes = self.bytes.saturating_add(room(bytes.saturating_add(name)));
     }
-    /// Writes `node` while no reservation has been refused, returning its
-    /// index. After a refusal the tape stays as it was: the read can only
-    /// end in that refusal or in a syntax error.
+    /// Writes `node`, returning its index.
     fn push(&mut self, node: Node<'text>, bytes: usize) -> usize {
-        let index = self.nodes.len();
-        if self.refused.is_none() {
-            #[cfg(test)]
-            self.held.grow(16 + bytes as u64);
-            #[cfg(not(test))]
-            let _ = bytes;
-            self.nodes.push(node);
-        }
-        index
+        #[cfg(test)]
+        self.held.grow(16 + bytes as u64);
+        #[cfg(not(test))]
+        let _ = bytes;
+        self.nodes.push(node);
+        self.nodes.len() - 1
     }
     fn slice(&self, range: std::ops::Range<usize>) -> Result<&'text str, NativeError> {
         self.text.get(range).ok_or_else(syntax)
@@ -214,6 +195,18 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
             true
         } else {
             false
+        }
+    }
+    /// Whether `close` ends the container after a member, past whitespace;
+    /// otherwise a comma continues it.
+    fn closes(&mut self, close: u8) -> Result<bool, NativeError> {
+        self.whitespace();
+        let next = self.byte();
+        if next == Some(close) || next == Some(b',') {
+            self.cursor += 1;
+            Ok(next == Some(close))
+        } else {
+            Err(syntax())
         }
     }
     fn string(&mut self) -> Result<Cow<'text, str>, NativeError> {
@@ -277,14 +270,10 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
                 if !self.take(b']') {
                     loop {
                         let (_, bytes) = self.value(depth + 1)?;
-                        if self.keep(bytes, 0)? {
-                            items += 1;
-                        }
-                        if self.take(b']') {
+                        self.keep(bytes, 0);
+                        items += 1;
+                        if self.closes(b']')? {
                             break;
-                        }
-                        if !self.take(b',') {
-                            return Err(syntax());
                         }
                     }
                 }
@@ -320,14 +309,12 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
                             self.open[mark..].iter_mut().find(|(key, _)| *key == name)
                         {
                             *old = value;
-                        } else if self.keep(bytes, name.len())? {
+                        } else {
+                            self.keep(bytes, name.len());
                             self.open.push((name, value));
                         }
-                        if self.take(b'}') {
+                        if self.closes(b'}')? {
                             break;
-                        }
-                        if !self.take(b',') {
-                            return Err(syntax());
                         }
                     }
                 }
@@ -374,8 +361,8 @@ impl<'text, R: FnMut(u64, u64) -> Result<(), NativeError>> Parser<'text, R> {
 pub(super) fn syntax() -> NativeError {
     raise("json_syntax", "invalid JSON, including unpaired surrogates")
 }
-/// Reads strict JSON nesting at most `depth_limit` levels, reserving
-/// each value it keeps in `new`.
+/// Reads strict JSON nesting at most `depth_limit` levels, reserving the
+/// values it keeps in `new`.
 pub(super) fn read<'text>(
     text: &'text str,
     depth_limit: usize,
@@ -387,22 +374,21 @@ pub(super) fn read<'text>(
 /// Uses the canonical tokenizer and duplicate-field policy without allocating
 /// guest identities. The caller supplies physical reservation, if needed.
 ///
-/// The whole text is validated before the read answers: a syntax error
-/// anywhere in it comes before a memory refusal. A refusal names the room
-/// of the whole document: the first refused reservation's figure plus
-/// every reservation after it.
+/// The whole text is validated before anything is reserved, so a syntax
+/// error anywhere in it comes before a memory refusal. The document is then
+/// reserved at once: a refusal names the room of the whole of it.
 pub(super) fn read_with(
     text: &str,
     depth_limit: usize,
-    reserve: impl FnMut(u64, u64) -> Result<(), NativeError>,
+    reserve: impl FnOnce(u64, u64) -> Result<(), NativeError>,
 ) -> Result<Tape<'_>, NativeError> {
     let mut parser = Parser {
         text,
         input: text.as_bytes(),
         cursor: 0,
-        reserve,
         depth_limit: depth_limit.min(64),
-        refused: None,
+        values: 0,
+        bytes: 0,
         nodes: Vec::new(),
         fields: Vec::new(),
         open: Vec::new(),
@@ -414,13 +400,8 @@ pub(super) fn read_with(
     if parser.cursor != parser.input.len() {
         return Err(syntax());
     }
-    parser.keep(bytes, 0)?;
-    if let Some((wanted, owed)) = parser.refused {
-        return Err(Retry::Room {
-            wanted: lash_kernel_doc::heap::LogicalBytes(wanted.saturating_add(owed)),
-        }
-        .into());
-    }
+    parser.keep(bytes, 0);
+    reserve(parser.values, parser.bytes)?;
     Ok(Tape {
         nodes: parser.nodes,
         fields: parser.fields,
