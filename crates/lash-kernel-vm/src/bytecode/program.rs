@@ -393,6 +393,9 @@ pub struct Fused {
     /// where the native's domain names them: `None` sends them through
     /// the native's ordinary answer.
     pub numbers: Option<Words>,
+    /// A body native's number form, checked against its call-depth reach
+    /// only after the body-free forms decline.
+    pub guarded_numbers: Option<Words>,
 }
 
 /// A fused call's scalar form: its operation, the pairs its native's

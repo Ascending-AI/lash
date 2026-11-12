@@ -207,7 +207,8 @@ pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
                 Micro::Then { pass, .. } if *pass != NO_PASS => saved += 2,
                 Micro::Fused { n, .. }
                     if unit.fused[*n as usize].words.is_none()
-                        && unit.fused[*n as usize].numbers.is_none() =>
+                        && unit.fused[*n as usize].numbers.is_none()
+                        && unit.fused[*n as usize].guarded_numbers.is_none() =>
                 {
                     saved += 1;
                     break;

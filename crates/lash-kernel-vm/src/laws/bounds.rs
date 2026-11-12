@@ -1,6 +1,8 @@
 //! The bound laws (`K-BND-001`): each bound ends the run with its typed
 //! error, and no `catch` or `finally` sees it (`K-ERR-004`).
 
+mod fused_numbers;
+
 use std::sync::Arc;
 
 use lash_kernel_doc::parse_document;

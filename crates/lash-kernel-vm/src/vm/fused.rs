@@ -95,6 +95,19 @@ impl<H: Heap> Vm<H> {
         {
             return Some(Ok((value, fee.filter(|_| !self.off))));
         }
+        if let Some(form) = &fused.guarded_numbers {
+            let entry = program.native(native);
+            let full = match entry.elided {
+                0 => self.depth_full(),
+                reach => self.short_of(reach),
+            };
+            if full {
+                return None;
+            }
+            if let Some((value, fee)) = form.numbers(args) {
+                return Some(Ok((value, fee.filter(|_| !self.off))));
+            }
+        }
         self.answer(program, native, charged, &args)
     }
 
