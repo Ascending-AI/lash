@@ -2273,3 +2273,264 @@ async fn a_publication_over_a_stored_body_is_one_call_after_its_locks() {
         "BEGIN, fence read, admission, referrer, two closure levels, locks, the call, COMMIT"
     );
 }
+
+/// A created process's execution writes (FIG-7701): its registration, each
+/// initial resolution and then the stamp of its actor's requirements answer
+/// as their explicit form did, in the writes' order: the stamp merges the
+/// registration's stable debt and the debt a winner leaves unsettled; a
+/// seed's refusal names that seed's program, and a seed that cannot be
+/// built answers only once every write before it ran; every refusal
+/// commits nothing. The writes are one call after the process's own
+/// statements.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_created_process_execution_answers_its_writes_in_order() {
+    use lash_core_store::tool_surface::{OperationRoute, RouteSource};
+    use lash_durable::packages::PackageRefusal;
+    use lash_durable::resolutions::{
+        DeferredUse, ExecutionId, ExecutionRegistration, ResolutionEntry, ResolutionKey,
+        ResolutionRecord,
+    };
+    use lash_execution_contracts::PluginError;
+    use lash_execution_contracts::process::{
+        EngineLaunch, Lifetime, ProcessInput, ProcessProvenance, ProcessRegistrar as _,
+        ProcessRegistration,
+    };
+    use lash_kernel_value::names::{ImportSlot, OperationUse, QualifiedName};
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the created process execution law: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let stores = crate::PostgresStoreSet::new(
+        &storage,
+        std::sync::Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+    );
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = stores.process_registry();
+    let name = |member: &str| QualifiedName {
+        package: lash_kernel_value::names::PackagePath::parse("wip").expect("package"),
+        member: lash_kernel_value::names::Segment::new(member).expect("member"),
+        type_member: None,
+    };
+    let kernel = |version: u32| lash_durable::ClaimRequirements {
+        machine: lash_kernel_value::claims::NodeRequirements {
+            kernels: [version].into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let use_at = |slot: u32| OperationUse {
+        link: lash_kernel_value::package::LinkId::from_bytes([7; 32]),
+        slot: ImportSlot(slot).into(),
+    };
+    let refused = |execution: &ExecutionId, slot: u32, note: &str| ResolutionRecord {
+        key: ResolutionKey {
+            execution: execution.clone(),
+            use_: use_at(slot),
+        },
+        requested: name("lookup"),
+        entry: ResolutionEntry::Refused { note: note.into() },
+    };
+    // A winner whose target a read-only mode cannot run: it is refused
+    // before the store sees it.
+    let unrunnable = |execution: &ExecutionId| {
+        let definition = lash_vocabulary::ToolDefinition::raw(
+            "tool:resolved",
+            "wip.lookup",
+            "lookup",
+            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
+        )
+        .expect("definition")
+        .with_execution(std::time::Duration::from_secs(1));
+        let route = OperationRoute {
+            tool: definition.manifest.id.clone(),
+            provider: lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Process,
+                "target",
+                lash_vocabulary::providers::ToolProviderKey::new("tools").expect("key"),
+            ),
+            policy: definition.manifest.execution_policy,
+            projection: definition.manifest.argument_projection.clone(),
+            payload: None,
+            source: RouteSource::Resolved {
+                definition: Box::new(definition.clone()),
+            },
+        };
+        ResolutionRecord {
+            key: ResolutionKey {
+                execution: execution.clone(),
+                use_: use_at(2),
+            },
+            requested: name("other"),
+            entry: ResolutionEntry::Resolved {
+                contract: definition.contract_id(),
+                definition: Box::new(definition),
+                route: Box::new(route),
+                mode: lash_kernel_value::package::OperationMode::Read,
+                requirements: kernel(5).into(),
+            },
+        }
+    };
+    // Each case registers a fresh process with one registered use (slot 1,
+    // discovery debt kernel 2, stable debt kernel 1) and the seeds `seeds`
+    // builds for its execution.
+    let prepare = || {
+        let registry = registry.clone();
+        let input = ProcessInput::Engine {
+            kind: "execution-writes".into(),
+            payload: serde_json::json!({}),
+            launch: EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
+        };
+        async move {
+            registry
+                .prepare_process_registration(
+                    ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached),
+                    &[],
+                )
+                .await
+                .expect("prepare the registration")
+        }
+    };
+    let with = |prepared: lash_execution_contracts::process::PreparedProcessRegistration,
+                seeds: &dyn Fn(&ExecutionId) -> Vec<ResolutionRecord>| {
+        let process = prepared.process_id().clone();
+        let execution = ExecutionId::process(&process);
+        let registration = ExecutionRegistration {
+            execution: execution.clone(),
+            uses: [(
+                use_at(1),
+                DeferredUse {
+                    requested: name("lookup"),
+                    discovery: kernel(2),
+                },
+            )]
+            .into(),
+            referrer: lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(
+                process.clone(),
+            ),
+            requirements: kernel(1),
+        };
+        let seeds = seeds(&execution);
+        (process, prepared.with_execution(registration, seeds))
+    };
+    let processes = |process: lash_vocabulary::identity::ProcessId| {
+        let pool = storage.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM lash_processes WHERE process_id = $1",
+            )
+            .bind(process.as_str())
+            .fetch_one(&pool)
+            .await
+            .expect("count the process's rows")
+        }
+    };
+
+    // A winner settles its use's discovery debt; the stamp keeps the
+    // stable debt alone.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![refused(execution, 1, "first")]
+    });
+    let (created, trips) = round_trips(registry.commit_process_registration(prepared)).await;
+    created.expect("register the process and its execution");
+    within("a created process's registration", trips, 8);
+    let actor = ActorKey::process(process.as_str()).expect("actor key");
+    let mut stamped = storage
+        .durable_store()
+        .actor_requirements(None, 64)
+        .await
+        .expect("requirements");
+    stamped.retain(|(stamped, _)| *stamped == actor);
+    let kernels: Vec<Vec<String>> = stamped
+        .into_iter()
+        .map(|(_, tokens)| {
+            tokens
+                .into_iter()
+                .filter(|token| token.starts_with("kernel:"))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        kernels,
+        vec![vec!["kernel:1".to_owned()]],
+        "the stable debt is stamped; the winner settled the discovery debt"
+    );
+
+    // A seed of a use the execution never registered is refused as an
+    // execution use, after the winner before it ran.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![
+            refused(execution, 1, "first"),
+            refused(execution, 9, "stray"),
+        ]
+    });
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            answer,
+            Err(PluginError::PackageStoreRefused(
+                PackageRefusal::ExecutionUse
+            ))
+        ),
+        "a stray seed answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+
+    // A second winner of the same use is refused as immutable: the refusal
+    // is the second seed's own, not the registration's.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![
+            refused(execution, 1, "first"),
+            refused(execution, 1, "second"),
+        ]
+    });
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            &answer,
+            Err(PluginError::PackageStoreRefused(PackageRefusal::Immutable(detail)))
+                if detail.contains("ResolutionKey")
+        ),
+        "a second winner answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+
+    // A seed that cannot be built answers once the writes before it ran:
+    // the stray seed's refusal comes first, and alone it is the answer.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![refused(execution, 9, "stray"), unrunnable(execution)]
+    });
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            answer,
+            Err(PluginError::PackageStoreRefused(
+                PackageRefusal::ExecutionUse
+            ))
+        ),
+        "a stray seed before an unbuildable one answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+    let (process, prepared) = with(prepare().await, &|execution| vec![unrunnable(execution)]);
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            answer,
+            Err(PluginError::PackageStoreRefused(
+                PackageRefusal::ResolutionTarget
+            ))
+        ),
+        "an unbuildable seed answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+}

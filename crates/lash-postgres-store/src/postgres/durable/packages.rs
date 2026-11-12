@@ -151,7 +151,33 @@ lash_store_sql::statements! {
         /// The winner of use `?2`/`?3` of execution `?1` is `?4`.
         same_resolution = "SELECT 1 FROM execution_resolutions
              WHERE execution = ?1 AND link = ?2 AND slot = ?3 AND record_json = ?4";
+        /// A created process's execution writes, as [`REGISTRATION_FUNCTION`]
+        /// runs them: registry `?1`, actor `?2`, the step programs `?3`, and
+        /// whether the actor's requirements are stamped after them (`?4`).
+        register_process_execution = "SELECT o_program, o_step
+             FROM lash_register_process_execution(?1, ?2, ?3::JSONB, ?4)";
     }
+}
+
+/// The server function a created process's execution writes run in.
+pub(super) const REGISTRATION_FUNCTION: &str = "lash_register_process_execution";
+
+/// The entries of the registration and seed programs, which
+/// [`REGISTRATION_FUNCTION`] dispatches.
+pub(super) fn registration_entries() -> [&'static Entry; 11] {
+    [
+        &super::turns::LOCK_KEY,
+        &REFERRER_FENCED,
+        &REGISTER,
+        &INSERT_USES,
+        &INSERT_DEBTS,
+        &SAME_REGISTRATION,
+        &USE_REGISTERED,
+        &LOCK_EXECUTION_REFERRER,
+        &EXECUTION_FENCED,
+        &SEED,
+        &SAME_RESOLUTION,
+    ]
 }
 pub(super) static POSTGRES: LazyLock<ResolutionPostgresStatements> =
     LazyLock::new(|| ResolutionPostgresStatements::render(Dialect::postgres()));
@@ -457,7 +483,18 @@ pub(super) async fn apply(
     let Some(refused) = super::steps::run(tx, &steps, context).await? else {
         return Ok(());
     };
-    Err(match refusals.into_iter().nth(refused.index) {
+    Err(refusal(tx, write, refusals, refused.index).await?)
+}
+
+/// What the refusal of step `index` of `write`'s program, whose refusals
+/// are `refusals`, means.
+async fn refusal(
+    tx: &mut PgConnection,
+    write: &lash_durable::DomainWrite,
+    refusals: Vec<Refusal>,
+    index: usize,
+) -> Result<DurableError, DurableError> {
+    Ok(match refusals.into_iter().nth(index) {
         Some(Refusal::ExecutionUse) => PackageRefusal::ExecutionUse.into(),
         Some(Refusal::ReferrerEnded(Some(referrer))) => {
             PackageRefusal::ReferrerEnded(referrer).into()
@@ -741,27 +778,72 @@ pub(crate) async fn register_process_execution(
     }
     let actor = lash_durable::ActorKey::process(process.as_str())
         .map_err(|_| lash_durable::packages::PackageRefusal::ExecutionUse)?;
-    let retired = super::Retired::default();
-    let context = super::steps::Context {
-        retired: &retired,
-        actor: &actor,
-        now: DurableInstant(0),
-    };
-    apply(
-        tx,
-        &context,
-        &lash_durable::DomainWrite::RegisterExecution(execution.clone()),
+    // The writes in the order the explicit form ran them. A program that
+    // cannot be built is that write's answer once those before it ran.
+    let writes: Vec<lash_durable::DomainWrite> = std::iter::once(
+        lash_durable::DomainWrite::RegisterExecution(execution.clone()),
     )
-    .await?;
-    for record in initial {
-        apply(
-            tx,
-            &context,
-            &lash_durable::DomainWrite::SeedResolution(record.clone()),
-        )
-        .await?;
+    .chain(
+        initial
+            .iter()
+            .cloned()
+            .map(lash_durable::DomainWrite::SeedResolution),
+    )
+    .collect();
+    let mut programs = Vec::with_capacity(writes.len());
+    let mut unbuilt = None;
+    for write in &writes {
+        match program(&actor, write) {
+            Ok(Some(program)) => programs.push(program),
+            Ok(None) => {
+                return Err(super::corrupt(
+                    "execution write",
+                    "a write without a program",
+                ));
+            }
+            Err(error) => {
+                unbuilt = Some(error);
+                break;
+            }
+        }
     }
-    stamp_requires(tx, &actor, None).await
+    if programs.is_empty() {
+        return Err(unbuilt.unwrap_or_else(|| super::corrupt("execution write", "no program")));
+    }
+    let shipped: Vec<Vec<serde_json::Value>> = programs
+        .iter()
+        .map(|program| {
+            program
+                .iter()
+                .map(|(step, _)| super::executor::step_json(step))
+                .collect()
+        })
+        .collect();
+    let (refused_program, refused_step): (Option<i32>, Option<i32>) =
+        crate::observed_sql::query_as(POSTGRES.register_process_execution.sql())
+            .bind(super::executor::REGISTRY.as_str())
+            .bind(actor.as_str())
+            .bind(sqlx::types::Json(shipped))
+            .bind(unbuilt.is_none())
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    if let (Some(index), Some(step)) = (refused_program, refused_step) {
+        let index = usize::try_from(index)
+            .map_err(|_| super::corrupt("execution write", "a negative program"))?;
+        let step = usize::try_from(step)
+            .map_err(|_| super::corrupt("execution write", "a negative step"))?;
+        let (Some(write), Some(program)) = (writes.get(index), programs.into_iter().nth(index))
+        else {
+            return Err(super::corrupt(
+                "execution write",
+                "an unknown program refused",
+            ));
+        };
+        let refusals = program.into_iter().map(|(_, refusal)| refusal).collect();
+        return Err(refusal(tx, write, refusals, step).await?);
+    }
+    unbuilt.map_or(Ok(()), Err)
 }
 
 pub(super) async fn end_actor_executions(

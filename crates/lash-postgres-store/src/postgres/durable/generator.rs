@@ -659,6 +659,7 @@ $lash_owner_commit$;
         + &crate::artifact_store::holds_function_ddl()
         + &crate::artifact_store::env_over_body_function_ddl()
         + &renewal_ddl()
+        + &registration_ddl()
         + &super::graph::retirement_function_ddl()
 }
 
@@ -718,6 +719,103 @@ BEGIN
     RETURN QUERY SELECT v_fleet, v_expires;
 END
 ${RENEW_FUNCTION}$;
+"
+    )
+}
+
+/// A created process's execution writes as one server request (FIG-7701):
+/// its registration's step program, then each initial resolution's, then
+/// the stamp of the actor's requirements, in the order the explicit form
+/// runs them, each statement static SQL dispatched by name. The programs'
+/// only lock wait is the referrer lock their first step takes; every later
+/// statement reads with its own snapshot, taken after that wait. A step
+/// that answers another number of rows than it must ends the call there,
+/// answering its program and step, which the caller names and rolls back
+/// as the explicit form does; the stamp runs only when `p_stamp` holds.
+fn registration_ddl() -> String {
+    let entries = super::packages::registration_entries();
+    for entry in entries {
+        assert!(
+            entry.collects().next().is_none() && entry.shape != Shape::GraphReclaim,
+            "a registration step gathers nothing: {}",
+            entry.name()
+        );
+        assert!(
+            !entry.params.contains(&Ty::Now),
+            "a registration step names no clock: {}",
+            entry.name()
+        );
+    }
+    let branches: String = entries.iter().map(|entry| branch(entry)).collect();
+    let registry = &*REGISTRY;
+    let debt_tokens = inline(super::packages::SQL.debt_tokens.sql(), &["p_actor"]);
+    let stamp_requires = inline(
+        EXECUTOR_SQL.stamp_requires.sql(),
+        &["p_actor", "NULL::TEXT", "v_debts"],
+    );
+    let function = super::packages::REGISTRATION_FUNCTION;
+    format!(
+        "CREATE OR REPLACE FUNCTION {function}(
+    p_registry TEXT, p_actor TEXT, p_programs JSONB, p_stamp BOOLEAN)
+RETURNS TABLE (o_program INTEGER, o_step INTEGER)
+LANGUAGE plpgsql
+VOLATILE
+AS ${function}$
+DECLARE
+    v_program JSONB;
+    v_programs INTEGER := 0;
+    v_index INTEGER;
+    v_step JSONB;
+    v_p JSONB;
+    v_rows BIGINT;
+    v_row RECORD;
+    v_first JSONB;
+    v_slots JSONB := '{{}}';
+    v_when JSONB;
+    v_debts TEXT[];
+BEGIN
+    IF p_registry IS DISTINCT FROM '{registry}'
+        OR current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION '{function}: registry or isolation refused' USING ERRCODE = 'LX000';
+    END IF;
+    FOR v_program IN SELECT value FROM jsonb_array_elements(p_programs) LOOP
+        v_index := 0;
+        FOR v_step IN SELECT value FROM jsonb_array_elements(v_program) LOOP
+            v_index := v_index + 1;
+            IF v_step ? 'w' THEN
+                v_when := v_slots->(v_step->'w'->>0);
+                IF (CASE
+                        WHEN v_when IS NULL OR v_when = 'null'::JSONB THEN FALSE
+                        WHEN v_step->'w'->>1 IS NULL THEN TRUE
+                        ELSE COALESCE((v_when->>(v_step->'w'->>1))::BOOLEAN, FALSE)
+                    END) IS DISTINCT FROM (v_step->'w'->>2)::BOOLEAN THEN
+                    CONTINUE;
+                END IF;
+            END IF;
+            v_p := v_step->'p';
+            v_first := NULL;
+            CASE v_step->>'s'
+{branches}            ELSE
+                RAISE EXCEPTION '{function}: no step %', v_step->>'s' USING ERRCODE = 'LX000';
+            END CASE;
+            IF v_step ? 'c' THEN
+                v_slots := v_slots || jsonb_build_object(v_step->>'c', COALESCE(v_first, 'null'::JSONB));
+            END IF;
+            IF v_step ? 'n' AND v_rows <> (v_step->>'n')::BIGINT THEN
+                RETURN QUERY SELECT v_programs, v_index - 1;
+                RETURN;
+            END IF;
+        END LOOP;
+        v_programs := v_programs + 1;
+    END LOOP;
+    IF p_stamp THEN
+        SELECT COALESCE(array_agg(debt.token), '{{}}') INTO v_debts
+        FROM ({debt_tokens}) AS debt(token);
+        {stamp_requires};
+    END IF;
+    RETURN QUERY SELECT NULL::INTEGER, NULL::INTEGER;
+END
+${function}$;
 "
     )
 }

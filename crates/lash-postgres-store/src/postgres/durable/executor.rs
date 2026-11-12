@@ -464,7 +464,7 @@ pub(super) struct Call {
 }
 
 /// `step` as the function reads it.
-fn step_json(step: &Step) -> serde_json::Value {
+pub(super) fn step_json(step: &Step) -> serde_json::Value {
     let mut json = serde_json::json!({
         "s": step.entry.name(),
         "p": step.values.iter().map(super::steps::Value::json).collect::<Vec<_>>(),
