@@ -349,6 +349,11 @@ impl<H: Heap> Vm<H> {
         {
             return Ok(units);
         }
+        if let Some(linear) = formula.linear()
+            && let Some(units) = self.collection_fee(linear, args, result)
+        {
+            return Ok(units);
+        }
         let mut failed = None;
         let units = formula.evaluate(|position, how| {
             let value = if position == RESULT {
@@ -377,5 +382,32 @@ impl<H: Heap> Vm<H> {
             Some(error) => Err(read(error)),
             None => Ok(units),
         }
+    }
+
+    /// A shallow collection measure after the ordinary leaf form declined.
+    /// Deep collections and unreadable values retain the original tree.
+    #[inline(never)]
+    fn collection_fee(
+        &self,
+        linear: crate::bytecode::charge_tables::Linear,
+        args: &[Value],
+        result: Option<&Value>,
+    ) -> Option<u64> {
+        let arena = self.heap.arena();
+        linear.measured_units(|position, how| {
+            let value = if position == RESULT {
+                result
+            } else {
+                args.get(usize::from(position))
+            };
+            match value {
+                None => Some(0),
+                Some(value) => crate::data::immediate_size(value).or_else(|| {
+                    (how == Measure::Size || crate::data::holds_nothing(value))
+                        .then(|| crate::data::size(arena, value).ok())
+                        .flatten()
+                }),
+            }
+        })
     }
 }

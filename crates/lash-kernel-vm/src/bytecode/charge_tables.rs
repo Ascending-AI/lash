@@ -32,14 +32,15 @@ pub struct Charge {
 }
 
 /// A formula that adds a constant to the sizes, shallow or deep, of the
-/// operands at `positions[..len]` (`Charge::linear`). Over values the
-/// arena holds nothing of, a deep size is the size, so it is the
-/// formula's sum without its tree.
+/// operands at `positions[..len]` (`Charge::linear`). Each occurrence
+/// keeps its own shallow or deep measure, including repeated operands.
 #[derive(Clone, Copy, Debug)]
 pub struct Linear {
     pub constant: u64,
     pub positions: [u8; 3],
     pub len: u8,
+    /// Bit `n` says occurrence `n` is a deep measure rather than shallow.
+    pub deep: u8,
 }
 
 impl Linear {
@@ -55,12 +56,32 @@ impl Linear {
         Some(units)
     }
 
+    /// The formula's value where `size` answers each occurrence's measure,
+    /// `Some(0)` for a missing operand. A measure that needs the original
+    /// tree gives `None`, and the caller evaluates that tree.
+    #[inline]
+    pub fn measured_units(self, mut size: impl FnMut(u8, Measure) -> Option<u64>) -> Option<u64> {
+        let mut units = self.constant;
+        for (at, &position) in self.positions[..usize::from(self.len)].iter().enumerate() {
+            let how = if self.deep & (1 << at) == 0 {
+                Measure::Size
+            } else {
+                Measure::DeepSize
+            };
+            units = units.saturating_add(size(position, how)?);
+        }
+        Some(units)
+    }
+
     fn of(term: &Term) -> Option<Self> {
         fn add(term: &Term, linear: &mut Linear) -> Option<()> {
             match term {
                 Term::Constant(units) => linear.constant = linear.constant.saturating_add(*units),
-                Term::Measure(position, Measure::Size | Measure::DeepSize) => {
+                Term::Measure(position, how @ (Measure::Size | Measure::DeepSize)) => {
                     *linear.positions.get_mut(usize::from(linear.len))? = *position;
+                    if *how == Measure::DeepSize {
+                        linear.deep |= 1 << linear.len;
+                    }
                     linear.len += 1;
                 }
                 Term::Sum(terms) => {
@@ -75,6 +96,7 @@ impl Linear {
         let mut linear = Self {
             constant: 0,
             positions: [0; 3],
+            deep: 0,
             len: 0,
         };
         add(term, &mut linear)?;
@@ -288,6 +310,73 @@ mod tests {
 
     use super::{Charge, RESULT};
     use crate::data::immediate_measure;
+
+    /// K-CHG-004 and K-CHG-005: shallow and deep occurrences of the same
+    /// collection operand keep their own measure in a compiled formula.
+    #[test]
+    fn a_linear_formula_distinguishes_shallow_and_deep_collection_measures() {
+        let mut arena = lash_kernel_state::arena::Arena::new();
+        let list = arena.create_list(&[Value::Int(7), Value::Int(8)]);
+        let tuple = arena.tuple(vec![list, list], 100).unwrap();
+        let key = Value::Text(lash_kernel_doc::arena::ShortText::new("a").unwrap());
+        let map = arena.create_map([(key, list)].into_iter()).unwrap();
+        let record = arena
+            .create(lash_kernel_doc::NewObject::Record(vec![(key, tuple)]))
+            .unwrap();
+        let values = [Value::Null, Value::Int(7), list, tuple, map, record];
+        assert_ne!(
+            crate::data::size(&arena, &list).unwrap(),
+            crate::data::deep_size(&arena, &list).unwrap()
+        );
+        for formula in [
+            "sum(1, size(a), size(b))",
+            "sum(1, deep(a), size(b))",
+            "sum(1, size(a), deep(b))",
+            "sum(size(a), deep(a), size(result))",
+            "sum(deep(a), size(a), deep(result))",
+        ] {
+            let definition = parse_definition(&format!(
+                "function law.f(a: Any, b: Any) -> Any\nkernel 1\ncharge {formula}\nnative\n"
+            ))
+            .unwrap();
+            let charge = Charge::new(
+                definition.charge().unwrap(),
+                definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect(),
+            );
+            let form = charge.linear().unwrap();
+            for a in values {
+                for b in values {
+                    for result in values {
+                        let measure = |position, how| {
+                            let value = match position {
+                                0 => a,
+                                1 => b,
+                                RESULT => result,
+                                _ => return 0,
+                            };
+                            match how {
+                                Measure::Size => crate::data::size(&arena, &value).unwrap(),
+                                Measure::DeepSize => {
+                                    crate::data::deep_size(&arena, &value).unwrap()
+                                }
+                                _ => unreachable!(),
+                            }
+                        };
+                        assert_eq!(
+                            form.measured_units(|position, how| Some(measure(position, how))),
+                            Some(charge.evaluate(measure)),
+                            "{formula} over {a:?}, {b:?}, {result:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     /// `K-CHG-003`, `K-CHG-005`: a formula's linear form bills what its
     /// tree bills over every value the arena holds nothing of, each
