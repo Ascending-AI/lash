@@ -305,6 +305,19 @@ impl<H: Heap> Vm<H> {
                     }
                     continue;
                 }
+                Step::Kinds {
+                    value,
+                    allowed,
+                    witness,
+                } => {
+                    let value = read(&made, value);
+                    InlineOperation::kind_is(&value, witness)?;
+                    let bit = 1u32.checked_shl(value.kind() as u32)?;
+                    if allowed & bit == 0 {
+                        return None;
+                    }
+                    continue;
+                }
                 Step::Lookup { target, key } => {
                     let (target, key) = (read(&made, target), read(&made, key));
                     if !InlineOperation::Membership(Table::Map).accepts(&[target, key]) {

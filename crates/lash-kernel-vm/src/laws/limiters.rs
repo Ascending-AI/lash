@@ -2,6 +2,7 @@
 //! bound, its host's limiter grows the limit or refuses; a grown limit is
 //! saved with the run, and a run resumed from before the save asks again.
 
+mod kinds;
 mod lookup;
 
 use std::cell::RefCell;
@@ -1168,6 +1169,7 @@ fn huge_charges(
             });
         registered.push((name, registry.register(definition, native).unwrap()));
     }
+    kinds::register(registry, &mut registered);
     registered
 }
 

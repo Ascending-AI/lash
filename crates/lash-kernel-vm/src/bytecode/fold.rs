@@ -6,7 +6,8 @@
 //! one element read. The pass follows each region from its entry along
 //! both ways of each branch to its `Op::Leave`s, carrying what each op
 //! pushes as a fact about where its value comes from, and records each
-//! path that gets there, up to four, as a fold: the native answers (R8) it computes, the branches it
+//! path that gets there as a fold, up to four for general bodies or sixteen
+//! for unary kind dispatch: the native answers (R8) it computes, the branches it
 //! takes as guards, its index reads and the value it returns. An answer
 //! step holds the operation the native's version declares, resolved
 //! once here. A path reads a local only where it was written on the path
@@ -64,16 +65,19 @@ pub(crate) fn fold(program: &mut Program) {
 /// What a path holds at an op: where each operand above the body's
 /// locals comes from, the locals the path wrote, and its steps so far.
 #[derive(Clone)]
-struct Path {
+struct Path<'a> {
     stack: Vec<Slot>,
     set: Vec<(u16, Slot)>,
     steps: Vec<Step>,
     made: u8,
+    paths: usize,
+    limit: usize,
+    budget: &'a std::cell::Cell<usize>,
 }
 
-impl Path {
+impl Path<'_> {
     fn make(&mut self, step: Step) -> Option<Slot> {
-        if self.steps.len() == FOLD_STEPS || usize::from(self.made) == FOLD_STEPS {
+        if self.steps.len() == self.limit || usize::from(self.made) == self.limit {
             return None;
         }
         self.steps.push(step);
@@ -82,7 +86,7 @@ impl Path {
     }
 
     fn guard(&mut self, holds: bool) -> Option<()> {
-        if self.steps.len() == FOLD_STEPS {
+        if self.steps.len() == self.limit {
             return None;
         }
         let value = self.stack.pop()?;
@@ -91,16 +95,37 @@ impl Path {
     }
 }
 
-/// The folds of inline site `n` of `unit`: its region's paths that fold,
-/// at most [`FOLD_PATHS`] of them.
+/// The folds of inline site `n` of `unit`: up to [`FOLD_PATHS`] general
+/// paths, or sixteen for unary kind dispatch with no native body calls.
+/// A shared walk budget bounds work across all branches.
 fn derive(program: &Program, unit: &Unit, n: u32) -> Vec<Fold> {
     let site = unit.inlines[n as usize];
     let argc = unit.calls[site.call as usize].argc;
+    let native_frames = unit.ops[site.entry as usize..site.end as usize].iter().any(|op| {
+        matches!(*op, Op::Call(n) if matches!(unit.calls[n as usize].callee, Callee::Native { native, .. } if program.native(native).body.is_some()))
+    });
+    let kind_dispatch = !native_frames
+        && argc == 1
+        && unit.ops[site.entry as usize..site.end as usize]
+            .iter()
+            .find_map(|op| match *op {
+                Op::Call(n) => Some(n),
+                _ => None,
+            })
+            .is_some_and(|n| {
+                let call = &unit.calls[n as usize];
+                matches!(call.callee, Callee::Native { native, charged: false }
+                    if call.argc == 1 && answers(program, native, 1) == Some(InlineOperation::Kind))
+            });
+    let budget = std::cell::Cell::new(512);
     let path = Path {
         stack: Vec::new(),
         set: Vec::new(),
         steps: Vec::new(),
         made: 0,
+        paths: if kind_dispatch { 16 } else { FOLD_PATHS },
+        limit: if kind_dispatch { 32 } else { FOLD_STEPS },
+        budget: &budget,
     };
     let mut folds = Vec::new();
     follow(
@@ -117,7 +142,7 @@ fn derive(program: &Program, unit: &Unit, n: u32) -> Vec<Fold> {
 
 /// Adds to `folds` the folds of the paths from `pc` that reach the
 /// region's `Op::Leave`, each branch's fall-through before its jump,
-/// until [`FOLD_PATHS`] fold. The call passed `argc` arguments, the
+/// until the path budget is full. The call passed `argc` arguments, the
 /// body's first locals.
 fn follow(
     program: &Program,
@@ -125,10 +150,10 @@ fn follow(
     n: u32,
     argc: u16,
     pc: usize,
-    path: Path,
+    path: Path<'_>,
     folds: &mut Vec<Fold>,
 ) {
-    if folds.len() < FOLD_PATHS
+    if folds.len() < path.paths
         && let Some(fold) = walk(program, unit, n, argc, pc, path, folds)
     {
         folds.push(fold);
@@ -144,11 +169,12 @@ fn walk(
     n: u32,
     argc: u16,
     mut pc: usize,
-    mut path: Path,
+    mut path: Path<'_>,
     folds: &mut Vec<Fold>,
 ) -> Option<Fold> {
     let site = unit.inlines[n as usize];
     loop {
+        path.budget.set(path.budget.get().checked_sub(1)?);
         if !(site.entry as usize..site.end as usize).contains(&pc) || !quiet(unit, pc) {
             return None;
         }
@@ -222,6 +248,13 @@ fn walk(
                 kind_tests(program, &mut path.steps, &mut result);
                 lookups(&mut path.steps, &mut result);
                 elements(program, &mut path.steps, &mut result);
+                let words = word_form(&path.steps, result);
+                if path.limit > FOLD_STEPS {
+                    kind_masks(&mut path.steps, &mut result);
+                }
+                if path.steps.len() > FOLD_STEPS {
+                    return None;
+                }
                 let mut steps = [Step::Guard {
                     value: result,
                     holds: true,
@@ -232,7 +265,7 @@ fn walk(
                     len: path.steps.len() as u8,
                     result,
                     leave: pc as u32,
-                    words: word_form(&path.steps, result),
+                    words,
                 });
             }
             _ => return None,
@@ -315,7 +348,9 @@ fn kind_tests(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
 fn slots(step: &mut Step, mut each: impl FnMut(&mut Slot)) {
     match step {
         Step::Answer { args, argc, .. } => args[..usize::from(*argc)].iter_mut().for_each(each),
-        Step::KindIs { value, .. } | Step::Guard { value, .. } => each(value),
+        Step::KindIs { value, .. } | Step::Guard { value, .. } | Step::Kinds { value, .. } => {
+            each(value)
+        }
         Step::Index { target, index }
         | Step::Lookup { target, key: index }
         | Step::Element { target, index } => {
@@ -420,7 +455,7 @@ fn elements(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
             operation:
                 InlineOperation::Scalar {
                     operation: ScalarOp::Le,
-                    domain: ScalarDomain::Words | ScalarDomain::WordsOrFloats,
+                    domain: lower_domain,
                 },
             args: [Slot::Const(zero), index],
             argc: 2,
@@ -438,7 +473,7 @@ fn elements(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
             operation:
                 InlineOperation::Scalar {
                     operation: ScalarOp::Lt,
-                    domain: ScalarDomain::Words | ScalarDomain::WordsOrFloats,
+                    domain: upper_domain,
                 },
             args: [upper_index, Slot::Made(1)],
             argc: 2,
@@ -455,7 +490,9 @@ fn elements(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
     else {
         return;
     };
-    if *result != Slot::Made(3)
+    if !lower_domain.words()
+        || !upper_domain.words()
+        || *result != Slot::Made(3)
         || index != upper_index
         || index != read_index
         || target != read_target
@@ -475,6 +512,92 @@ fn elements(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
     steps.clear();
     steps.push(element);
     *result = Slot::Made(0);
+}
+
+/// Kind tests consumed only by their guards need no bool values. Consecutive
+/// guards on the same input intersect their permitted kinds.
+fn kind_masks(steps: &mut Vec<Step>, result: &mut Slot) {
+    let mut at = 0;
+    while at + 1 < steps.len() {
+        let Step::KindIs { value, kind } = steps[at] else {
+            at += 1;
+            continue;
+        };
+        let Some(bit) = 1u32.checked_shl(kind as u32) else {
+            at += 1;
+            continue;
+        };
+        let made = steps[..at]
+            .iter()
+            .filter(|step| !matches!(step, Step::Guard { .. } | Step::Kinds { .. }))
+            .count() as u8;
+        let Step::Guard {
+            value: guard,
+            holds,
+        } = steps[at + 1]
+        else {
+            at += 1;
+            continue;
+        };
+        if guard != Slot::Made(made) {
+            at += 1;
+            continue;
+        }
+        let mut used = *result == guard;
+        for (n, step) in steps.iter_mut().enumerate() {
+            if n != at + 1 {
+                slots(step, |slot| used |= *slot == guard);
+            }
+        }
+        if used {
+            at += 1;
+            continue;
+        }
+        steps[at] = Step::Kinds {
+            value,
+            allowed: if holds { bit } else { !bit },
+            witness: kind,
+        };
+        steps.remove(at + 1);
+        let mut renumber = |slot: &mut Slot| {
+            if let Slot::Made(n) = slot
+                && *n > made
+            {
+                *n -= 1;
+            }
+        };
+        renumber(result);
+        for step in steps.iter_mut() {
+            slots(step, &mut renumber);
+        }
+        at += 1;
+    }
+    let mut at = 0;
+    while at + 1 < steps.len() {
+        if let (
+            Step::Kinds {
+                value: a,
+                allowed: first,
+                witness,
+            },
+            Step::Kinds {
+                value: b,
+                allowed: next,
+                ..
+            },
+        ) = (steps[at], steps[at + 1])
+            && a == b
+        {
+            steps[at] = Step::Kinds {
+                value: a,
+                allowed: first & next,
+                witness,
+            };
+            steps.remove(at + 1);
+        } else {
+            at += 1;
+        }
+    }
 }
 
 /// Whether op `pc` bills, tests and shows nothing.

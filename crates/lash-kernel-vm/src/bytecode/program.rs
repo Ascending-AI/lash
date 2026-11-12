@@ -390,6 +390,12 @@ pub enum Step {
     /// A list's nonnegative-index and length guards followed by its
     /// element read, with the same decline outside that guarded path.
     Element { target: Slot, index: Slot },
+    /// Consecutive kind guards on one value, within Kind's named domain.
+    Kinds {
+        value: Slot,
+        allowed: u32,
+        witness: lash_kernel_doc::ValueKind,
+    },
 }
 
 /// A run of one prepaid block's ops that dispatches at once (`fuse`): up
