@@ -75,15 +75,17 @@ static SQLITE: LazyLock<ProcessHistorySqliteStatements> =
 
 const PACK: CommitLabel = CommitLabel::new("process.history_pack");
 
-/// Process `process`'s history archive, when its history is packed.
+/// Process `process`'s history archive, when its history discriminator says
+/// it is packed: what every history read consults before any row.
 pub(super) fn archive_bytes(tx: &Connection, process: &str) -> rusqlite::Result<Option<Vec<u8>>> {
     tx.statement(SQL.archive.sql())?
         .query_row([process], |row| row.get(0))
         .optional()
 }
 
-/// `owner`'s run facts from its process's archive, when its rows are
-/// packed: the same rows, order, `max_rows` refusal and graph walk.
+/// `owner`'s run facts from its process's archive, when its history is
+/// packed (none while its rows hold it): the same rows, order, `max_rows`
+/// refusal and graph walk.
 pub(super) fn run_facts(
     tx: &Connection,
     owner: &OwnerKey,
@@ -119,7 +121,7 @@ pub(super) fn run_facts(
             .collect::<Result<Vec<_>, _>>()?;
         let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
         let nodes =
-            super::graph::walk_archive(&archive, &roots, limits).map_err(DurableError::Graph)?;
+            super::graph::walk_archive(&archive, &roots, limits).map_err(DurableError::from)?;
         Ok(Some(RunFacts {
             rows,
             nodes,
@@ -128,7 +130,8 @@ pub(super) fn run_facts(
     })())
 }
 
-/// `owner`'s tool calls `selection` reads, from its process's archive.
+/// `owner`'s tool calls `selection` reads, from its process's archive when
+/// its history is packed (none while its rows hold it).
 pub(super) fn tool_calls(
     tx: &Connection,
     owner: &CallOwner,
@@ -157,7 +160,7 @@ pub(super) fn tool_calls(
             })
             .collect();
         let nodes =
-            super::graph::walk_archive(&archive, &roots, limits).map_err(DurableError::Graph)?;
+            super::graph::walk_archive(&archive, &roots, limits).map_err(DurableError::from)?;
         Ok(Some(ToolCalls {
             rows,
             graph: RunFacts {
@@ -170,7 +173,8 @@ pub(super) fn tool_calls(
 }
 
 /// Session `session`'s model calls `selection` reads for `owner`, from its
-/// process's archive, with the archive's bytes.
+/// process's archive, with the archive's bytes, when its history is packed
+/// (none while its rows hold it).
 pub(super) fn model_calls(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
@@ -206,7 +210,7 @@ pub(super) fn model_records(
         .collect::<Result<Vec<_>, _>>()?;
     let roots: Vec<NodeId> = rows.iter().map(|(_, root, _)| *root).collect();
     let nodes =
-        super::graph::walk_archive(&archive, &roots, &limits).map_err(DurableError::Graph)?;
+        super::graph::walk_archive(&archive, &roots, &limits).map_err(DurableError::from)?;
     super::model_calls::decode_records(rows, nodes, limits)
 }
 

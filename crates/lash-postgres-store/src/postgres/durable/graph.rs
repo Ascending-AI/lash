@@ -128,7 +128,8 @@ lash_store_sql::statements! {
              JOIN blobs AS child ON child.hash = staged.child";
 
         /// Every blob the roots `?1` reach along stored edges, the roots
-        /// included, with its encoding and bytes: one read of a whole graph,
+        /// included, with its encoding and bytes, in digest order (the order
+        /// a read charges them to its limits): one read of a whole graph,
         /// whose child tables a walk still checks. Nothing under a
         /// persistent-heap page is read (envelope kind 1000 to 1999, a
         /// two-byte varint after the magic): the page is a leaf.
@@ -147,7 +148,7 @@ lash_store_sql::statements! {
                    END
              )
              SELECT blobs.hash, blobs.encoding, blobs.content
-             FROM blobs JOIN reach ON blobs.id = reach.id";
+             FROM blobs JOIN reach ON blobs.id = reach.id ORDER BY blobs.hash";
 
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
         /// roots' bytes: what a reader of the graph alone reads.
@@ -167,13 +168,13 @@ lash_store_sql::statements! {
              )
              SELECT blobs.hash, blobs.encoding,
                     CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::bytea[]) THEN blobs.content END
-             FROM blobs JOIN reach ON blobs.id = reach.id";
+             FROM blobs JOIN reach ON blobs.id = reach.id ORDER BY blobs.hash";
 
-        /// One level of a walk: every blob in `?1`. A graph-only walk
+        /// One level of a walk: every blob in `?1`, in digest order. A graph-only walk
         /// (`?3`) omits opaque children's bytes, but includes roots `?2`.
         walk_level = "SELECT hash, encoding,
                     CASE WHEN NOT ?3::boolean OR encoding = 1 OR hash = ANY(?2::bytea[]) THEN content END
-             FROM blobs WHERE hash = ANY(?1::bytea[])";
+             FROM blobs WHERE hash = ANY(?1::bytea[]) ORDER BY hash";
 
         /// Lock for its delete every candidate of a peel's level `?1` that
         /// no other transaction holds, in digest order, and answer them as
@@ -219,7 +220,7 @@ lash_store_sql::statements! {
         /// The root owner `?1` (its kind) names, with every blob it reaches
         /// along stored edges and their bytes, in one statement: the root
         /// column (no row, or a null one, when the owner is gone), then each
-        /// node. Owner keys are `?2` to `?4` as text, `?5` and `?6` as
+        /// node, in digest order. Owner keys are `?2` to `?4` as text, `?5` and `?6` as
         /// integers and `?7` as bytes, as each kind's source names them. A
         /// walk stops at what a persistent-heap page reaches (envelope kind
         /// 1000 to 1999, a two-byte varint after the magic) unless `?8`
@@ -264,7 +265,8 @@ lash_store_sql::statements! {
                             NOT BETWEEN 1000 AND 1999
                    END)
              SELECT (SELECT hash FROM blobs WHERE id = root.id) AS id, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.id = reach.id) ON TRUE";
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.id = reach.id) ON TRUE
+             ORDER BY blob.hash";
     }
 }
 
@@ -417,31 +419,68 @@ pub(super) async fn walk_within(
         SQL.postgres.walk_reach.sql()
     };
     let mut found = BTreeMap::new();
-    let mut total = 0_u64;
-    let mut count = 0_u64;
+    let mut spent = Budget { count: 0, total: 0 };
     {
         let mut rows =
             crate::observed_sql::query_as::<_, (crate::keys::Key, i16, Option<Vec<u8>>)>(reach)
                 .bind(crate::keys::keys(&roots_hex))
                 .fetch(crate::observed_sql::executor(&mut *tx));
         while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
-            let id = node_of(&hash.0)?;
-            let encoding = encoding_of(encoding)?;
-            if let Some(bytes) = &bytes {
-                charge_node(limits, &mut count, &mut total, bytes.len())?;
-            }
-            found.insert(id, (encoding, bytes));
+            Ingest::EncodingFirst.take(
+                &mut found,
+                &mut spent,
+                limits,
+                || node_of(&hash.0),
+                encoding,
+                bytes,
+            )?;
         }
     }
-    walk_found(
-        Some(tx),
-        roots,
-        found,
-        Budget { count, total },
-        limits,
-        skipped,
-    )
-    .await
+    walk_found(Some(tx), roots, found, spent, limits, skipped).await
+}
+
+/// The order a read checks a node it ingests in: its encoding before or
+/// after charging the node to the read's limits. Each reader keeps its own
+/// order, whichever representation its nodes come from: an aggregate read
+/// of facts and calls checks the encoding first, a root's hydration charges
+/// first.
+#[derive(Clone, Copy)]
+pub(super) enum Ingest {
+    EncodingFirst,
+    ChargeFirst,
+}
+
+impl Ingest {
+    /// Check and record one node read, `id` with stored `encoding` and,
+    /// unless skipped, `bytes`, charged to `spent`.
+    fn take(
+        self,
+        found: &mut Found,
+        spent: &mut Budget,
+        limits: &DecodeLimits,
+        id: impl FnOnce() -> Answer<NodeId>,
+        encoding: i16,
+        bytes: Option<Vec<u8>>,
+    ) -> Answer<()> {
+        let mut charge = || match &bytes {
+            Some(bytes) => charge_node(limits, &mut spent.count, &mut spent.total, bytes.len()),
+            None => Ok(()),
+        };
+        let (id, encoding) = match self {
+            Self::EncodingFirst => {
+                let id = id()?;
+                let encoding = encoding_of(encoding)?;
+                charge()?;
+                (id, encoding)
+            }
+            Self::ChargeFirst => {
+                charge()?;
+                (id()?, encoding_of(encoding)?)
+            }
+        };
+        found.insert(id, (encoding, bytes));
+        Ok(())
+    }
 }
 
 /// What a walk has charged against its limits so far.
@@ -465,10 +504,7 @@ async fn walk_found(
     limits: &DecodeLimits,
     mut skipped: Option<&mut BTreeSet<NodeId>>,
 ) -> Answer<BTreeMap<NodeId, HydratedNode>> {
-    let Budget {
-        mut count,
-        mut total,
-    } = spent;
+    let mut spent = spent;
     let roots_hex: Vec<_> = roots.iter().map(NodeId::to_hex).collect();
     let mut nodes = BTreeMap::new();
     let mut level = BTreeSet::new();
@@ -502,12 +538,14 @@ async fn walk_found(
             .bind(skipped.is_some())
             .fetch(crate::observed_sql::executor(&mut *tx));
             while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
-                let id = node_of(&hash.0)?;
-                let encoding = encoding_of(encoding)?;
-                if let Some(bytes) = &bytes {
-                    charge_node(limits, &mut count, &mut total, bytes.len())?;
-                }
-                found.insert(id, (encoding, bytes));
+                Ingest::EncodingFirst.take(
+                    &mut found,
+                    &mut spent,
+                    limits,
+                    || node_of(&hash.0),
+                    encoding,
+                    bytes,
+                )?;
             }
         }
         let mut next = BTreeSet::new();
@@ -781,6 +819,13 @@ pub(super) async fn root_in(
             .bind(namespace.as_str())
             .bind(artifact.as_str()),
     };
+    // A process whose history is packed answers from its archive: the
+    // history discriminator chooses the representation before any row is
+    // read.
+    let process = process_archive::root_process(owner);
+    if let Some(found) = archived_in(connection, process.as_deref(), owner).await? {
+        return Ok(Some(found));
+    }
     let root = bound
         .fetch_optional(crate::observed_sql::executor(&mut *connection))
         .await
@@ -792,13 +837,20 @@ pub(super) async fn root_in(
     if let Some(root) = root {
         return Ok(Some((root, None)));
     }
-    let Some(process) = process_archive::root_process(owner) else {
-        return Ok(None);
-    };
-    match super::process_history::archive_bytes(connection, &process)
-        .await
-        .map_err(db)?
-    {
+    // Each statement reads its own snapshot, and a pack only ever moves a
+    // history from rows to its archive: a row gone since the discriminator
+    // was read is answered by the discriminator read again.
+    archived_in(connection, process.as_deref(), owner).await
+}
+
+/// `owner`'s root in its process's history archive, with the archive, when
+/// the history discriminator of `process` says it is packed.
+async fn archived_in(
+    connection: &mut PgConnection,
+    process: Option<&str>,
+    owner: &RootOwner,
+) -> Answer<Option<(NodeId, Option<Vec<u8>>)>> {
+    match packed_history(connection, process).await? {
         Some(bytes) => Ok(archived_root(&bytes, owner)?.map(|root| (root, Some(bytes)))),
         None => Ok(None),
     }
@@ -829,31 +881,35 @@ async fn hydrate_archived(
     if expected.is_some_and(|expected| expected != root) {
         return Err(GraphRefusal::RevisionConflict);
     }
-    let nodes = walk_archive(&archive, &[root], limits).await?;
+    let nodes = walk_archive(&archive, &[root], limits, Ingest::ChargeFirst).await?;
     Ok(HydratedGraph { owner, root, nodes })
 }
 
-/// The nodes `roots` reach in a process history archive, checked within
-/// `limits` as a walk of the same stored rows checks them: the archive is
-/// the whole read, so a node it lacks is missing.
+/// The nodes `roots` reach in a process history archive: the row walk
+/// itself, charging nodes in digest order as the row reads return them and
+/// ingesting each in `order`, the order of the row read it answers for, then validating and traversing it as the rows are. The
+/// archive is the whole read, so a node it lacks is missing.
 pub(super) async fn walk_archive(
     archive: &process_archive::ProcessArchive<'_>,
     roots: &[NodeId],
     limits: &DecodeLimits,
+    order: Ingest,
 ) -> Answer<BTreeMap<NodeId, HydratedNode>> {
     let mut found = Found::new();
-    let (mut count, mut total) = (0, 0);
-    for node in archive.reach(roots, false).map_err(archive_refused)? {
-        charge_node(limits, &mut count, &mut total, node.bytes.len())?;
-        found.insert(
-            node.id,
-            (
-                encoding_of(i16::from(node.encoding))?,
-                Some(node.bytes.to_vec()),
-            ),
-        );
+    let mut spent = Budget { count: 0, total: 0 };
+    let mut reached = archive.reach(roots, false).map_err(archive_refused)?;
+    reached.sort_unstable_by_key(|node| node.id);
+    for node in reached {
+        order.take(
+            &mut found,
+            &mut spent,
+            limits,
+            || Ok(node.id),
+            i16::from(node.encoding),
+            Some(node.bytes.to_vec()),
+        )?;
     }
-    walk_found(None, roots, found, Budget { count, total }, limits, None).await
+    walk_found(None, roots, found, spent, limits, None).await
 }
 
 /// `owner`'s root graph, hydrated in one statement on `connection`: its
@@ -865,15 +921,20 @@ pub(super) async fn hydrate_in(
     expected: Option<NodeId>,
     limits: &DecodeLimits,
 ) -> Answer<HydratedGraph> {
+    // A process whose history is packed answers from its archive: the
+    // history discriminator chooses the representation before any row is
+    // read.
+    let process = process_archive::root_process(&owner);
+    if let Some(bytes) = packed_history(connection, process.as_deref()).await? {
+        return hydrate_archived(&bytes, owner, expected, limits).await;
+    }
     let rows = hydrate_rows(connection, &owner).await?;
     let Some(root) = rows.first().and_then(|(root, ..)| root.as_deref()) else {
-        // A finished process's packed history answers from its archive,
-        // read after its rows were found gone: packing only removes rows.
-        if let Some(process) = process_archive::root_process(&owner)
-            && let Some(bytes) = super::process_history::archive_bytes(connection, &process)
-                .await
-                .map_err(db)?
-        {
+        // The hydration is its own statement, and a pack only ever moves a
+        // history from rows to its archive: a root gone since the
+        // discriminator was read is answered by the discriminator read
+        // again.
+        if let Some(bytes) = packed_history(connection, process.as_deref()).await? {
             return hydrate_archived(&bytes, owner, expected, limits).await;
         }
         return Err(GraphRefusal::RootRetired);
@@ -883,18 +944,35 @@ pub(super) async fn hydrate_in(
         return Err(GraphRefusal::RevisionConflict);
     }
     let mut found = Found::new();
-    let (mut count, mut total) = (0, 0);
+    let mut spent = Budget { count: 0, total: 0 };
     for (_, hash, encoding, bytes) in rows {
         if let (Some(hash), Some(encoding)) = (hash, encoding) {
-            if let Some(bytes) = &bytes {
-                charge_node(limits, &mut count, &mut total, bytes.len())?;
-            }
-            found.insert(node_of(&hash.0)?, (encoding_of(encoding)?, bytes));
+            Ingest::ChargeFirst.take(
+                &mut found,
+                &mut spent,
+                limits,
+                || node_of(&hash.0),
+                encoding,
+                bytes,
+            )?;
         }
     }
-    let spent = Budget { count, total };
     let nodes = walk_found(None, &[root], found, spent, limits, None).await?;
     Ok(HydratedGraph { owner, root, nodes })
+}
+
+/// Process `process`'s history archive, when its discriminator says the
+/// history is packed.
+async fn packed_history(
+    connection: &mut PgConnection,
+    process: Option<&str>,
+) -> Answer<Option<Vec<u8>>> {
+    match process {
+        Some(process) => super::process_history::archive_bytes(connection, process)
+            .await
+            .map_err(db),
+        None => Ok(None),
+    }
 }
 
 fn graph_refused(refusal: GraphRefusal) -> DurableError {
@@ -1413,14 +1491,15 @@ impl PostgresDurableStore {
         };
         self.read_snapshot(|snapshot| {
             Box::pin(async move {
-                let rows = super::run_records::read_limited(snapshot, owner, run, max_rows).await?;
-                if rows.is_empty()
-                    && let Some(archived) =
-                        super::process_history::run_facts(snapshot, owner, run, max_rows, &limits)
-                            .await?
+                // The history discriminator chooses the representation
+                // first, in the read's one snapshot.
+                if let Some(archived) =
+                    super::process_history::run_facts(snapshot, owner, run, max_rows, &limits)
+                        .await?
                 {
                     return Ok(archived);
                 }
+                let rows = super::run_records::read_limited(snapshot, owner, run, max_rows).await?;
                 let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
                 let nodes = walk_within(snapshot, &roots, &limits, None)
                     .await

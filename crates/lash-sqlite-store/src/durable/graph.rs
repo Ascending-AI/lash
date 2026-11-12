@@ -434,6 +434,14 @@ pub(super) fn root_in(
             .optional()?
             .flatten())
     }
+    // A process whose history is packed answers from its archive: the
+    // history discriminator chooses the representation before any row is
+    // read.
+    if let Some(process) = process_archive::root_process(owner)
+        && let Some(bytes) = super::process_history::archive_bytes(tx, &process)?
+    {
+        return Ok(archived_root(&bytes, owner).map(|root| root.map(|root| (root, Some(bytes)))));
+    }
     let stored = match owner {
         RootOwner::Exec(exec) => tx
             .statement(SQL.snapshots.root.sql())?
@@ -518,20 +526,11 @@ pub(super) fn root_in(
             [namespace.as_str(), artifact.as_str()],
         )?,
     };
-    match stored.as_deref().map(node_of).transpose() {
-        Ok(Some(root)) => return Ok(Ok(Some((root, None)))),
-        Ok(None) => {}
-        Err(refusal) => return Ok(Err(refusal)),
-    }
-    // A finished process's packed history answers from its archive, read
-    // after its row was found gone: packing only removes rows.
-    let Some(process) = process_archive::root_process(owner) else {
-        return Ok(Ok(None));
-    };
-    let Some(bytes) = super::process_history::archive_bytes(tx, &process)? else {
-        return Ok(Ok(None));
-    };
-    Ok(archived_root(&bytes, owner).map(|root| root.map(|root| (root, Some(bytes)))))
+    Ok(stored
+        .as_deref()
+        .map(node_of)
+        .transpose()
+        .map(|root| root.map(|root| (root, None))))
 }
 
 fn archive_refused(error: process_archive::ArchiveCorrupt) -> GraphRefusal {
@@ -543,54 +542,21 @@ fn archived_root(bytes: &[u8], owner: &RootOwner) -> Result<Option<NodeId>, Grap
     process_archive::archived_root(&archive, owner).map_err(archive_refused)
 }
 
-/// The nodes `roots` reach in a process history archive, checked within
-/// `limits` in the order a walk of the same stored rows checks them: a
-/// graph node's children come from its own child table, and the archive is
-/// the whole read, so a node it lacks is missing.
+/// The nodes `roots` reach in a process history archive: the row walk
+/// itself, its validation, budget and traversal order, with the archive as
+/// its node transport. The archive is the whole read, so a node it lacks is
+/// missing.
 pub(super) fn walk_archive(
     archive: &process_archive::ProcessArchive<'_>,
     roots: &[NodeId],
     limits: &DecodeLimits,
 ) -> Result<BTreeMap<NodeId, HydratedNode>, GraphRefusal> {
-    let mut nodes = BTreeMap::new();
-    let mut stack: Vec<_> = roots.iter().rev().copied().collect();
-    let mut visited = BTreeSet::new();
-    let mut total = 0_u64;
-    while let Some(id) = stack.pop() {
-        if !visited.insert(id) {
-            continue;
-        }
-        let node = archive
-            .node(&id)
-            .map_err(archive_refused)?
-            .ok_or(GraphRefusal::MissingNode(id))?;
-        let encoding = encoding_of(i64::from(node.encoding))?;
-        let children = match encoding {
-            BlobEncoding::Opaque => Vec::new(),
-            BlobEncoding::Graph => {
-                let envelope = check_envelope(node.bytes, id, limits)?;
-                // A persistent-heap page is read as a leaf: its header,
-                // never what it reaches (FIG-6193).
-                if !is_semantic(envelope.kind) {
-                    envelope.children.iter().collect()
-                } else if roots.contains(&id) {
-                    return Err(GraphRefusal::SemanticPage(id));
-                } else {
-                    Vec::new()
-                }
-            }
-        };
-        count(&nodes, &mut total, node.bytes.len(), limits)?;
-        stack.extend(children.into_iter().rev());
-        nodes.insert(
-            id,
-            HydratedNode {
-                encoding,
-                bytes: node.bytes.to_vec().into(),
-            },
-        );
-    }
-    Ok(nodes)
+    let mut reader = ArchiveReader {
+        archive,
+        roots: roots.iter().copied().collect(),
+    };
+    let Ok(answer) = walk_nodes(&mut reader, roots, limits, None);
+    answer
 }
 
 /// Every node reachable from `root`, checked, within `limits`: a graph
@@ -723,11 +689,91 @@ struct ReadNode {
     children: Result<Vec<NodeId>, GraphRefusal>,
 }
 
+/// The children a walk descends into from node `id`, checked: every
+/// transport's one validation of a node it read. An opaque blob is a leaf;
+/// a graph node's children come from its own checked child table.
+fn node_children(
+    id: NodeId,
+    encoding: BlobEncoding,
+    bytes: &[u8],
+    roots: &BTreeSet<NodeId>,
+    limits: &DecodeLimits,
+) -> Result<Vec<NodeId>, GraphRefusal> {
+    match encoding {
+        BlobEncoding::Opaque => Ok(Vec::new()),
+        BlobEncoding::Graph => match check_envelope(bytes, id, limits) {
+            // A persistent-heap page is read as a leaf: its header, never
+            // what it reaches (FIG-6193).
+            Ok(envelope) if is_semantic(envelope.kind) => {
+                if roots.contains(&id) {
+                    Err(GraphRefusal::SemanticPage(id))
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+            Ok(envelope) => Ok(envelope.children.iter().collect()),
+            Err(refusal) => Err(refusal.into()),
+        },
+    }
+}
+
+/// Where a walk reads its nodes from: the only thing the stored rows and a
+/// process history archive do differently. Each answers node `id`, met at
+/// `depth` of the walk, as [`ReadNode`]: an encoding refusal as the node's
+/// answer, an envelope refusal kept in its children for the walk to return
+/// after it charged the node.
+trait NodeTransport {
+    type Failure;
+
+    fn take(
+        &mut self,
+        id: NodeId,
+        depth: usize,
+        visited: &BTreeSet<NodeId>,
+        limits: &DecodeLimits,
+    ) -> Result<Result<ReadNode, GraphRefusal>, Self::Failure>;
+}
+
+/// A process history archive as a walk's transport: each node's stored
+/// encoding and bytes, read from the archive instead of the blob rows.
+struct ArchiveReader<'a> {
+    archive: &'a process_archive::ProcessArchive<'a>,
+    roots: BTreeSet<NodeId>,
+}
+
+impl NodeTransport for ArchiveReader<'_> {
+    type Failure = std::convert::Infallible;
+
+    fn take(
+        &mut self,
+        id: NodeId,
+        _depth: usize,
+        _visited: &BTreeSet<NodeId>,
+        limits: &DecodeLimits,
+    ) -> Result<Result<ReadNode, GraphRefusal>, Self::Failure> {
+        let node = match self.archive.node(&id) {
+            Ok(Some(node)) => node,
+            Ok(None) => return Ok(Err(GraphRefusal::MissingNode(id))),
+            Err(error) => return Ok(Err(archive_refused(error))),
+        };
+        let encoding = match encoding_of(i64::from(node.encoding)) {
+            Ok(encoding) => encoding,
+            Err(refusal) => return Ok(Err(refusal)),
+        };
+        Ok(Ok(ReadNode {
+            encoding,
+            bytes: node.bytes.to_vec(),
+            children: node_children(id, encoding, node.bytes, &self.roots, limits),
+        }))
+    }
+}
+
 /// Read-local frontier buffers. Fetching discovers the next frontier, but a
 /// node's result is consumed only at its depth-first validation position.
 /// In particular, SQL row order cannot choose the first refusal, and a
 /// prefetched envelope refusal cannot overtake the visited-node budget.
-struct FrontierReader {
+struct FrontierReader<'a> {
+    tx: &'a Connection,
     roots: BTreeSet<NodeId>,
     pending: BTreeMap<usize, std::collections::VecDeque<NodeId>>,
     discovered: BTreeSet<NodeId>,
@@ -738,10 +784,11 @@ struct FrontierReader {
     read_bytes: u64,
 }
 
-impl FrontierReader {
-    fn new(roots: &[NodeId], graph_only: bool) -> Self {
+impl<'a> FrontierReader<'a> {
+    fn new(tx: &'a Connection, roots: &[NodeId], graph_only: bool) -> Self {
         let roots_set: BTreeSet<_> = roots.iter().copied().collect();
         Self {
+            tx,
             roots: roots_set.clone(),
             pending: BTreeMap::from([(0, roots.iter().copied().collect())]),
             discovered: roots_set,
@@ -752,15 +799,19 @@ impl FrontierReader {
             read_bytes: 0,
         }
     }
+}
+
+impl NodeTransport for FrontierReader<'_> {
+    type Failure = rusqlite::Error;
 
     fn take(
         &mut self,
-        tx: &Connection,
         id: NodeId,
         depth: usize,
         visited: &BTreeSet<NodeId>,
         limits: &DecodeLimits,
     ) -> GraphAnswer<ReadNode> {
+        let tx = self.tx;
         while !self.fetched.contains(&id) {
             // Complete earlier frontiers before descending, so an uneven
             // forest cannot pay one partial batch per depth per root batch.
@@ -839,22 +890,7 @@ impl FrontierReader {
                             Err(refusal) => return Ok(Err(refusal)),
                         },
                     };
-                    let children = match encoding {
-                        BlobEncoding::Opaque => Ok(Vec::new()),
-                        BlobEncoding::Graph => match check_envelope(&bytes, node, limits) {
-                            // A persistent-heap page is read as a leaf: its
-                            // header, never what it reaches (FIG-6193).
-                            Ok(envelope) if is_semantic(envelope.kind) => {
-                                if self.roots.contains(&node) {
-                                    Err(GraphRefusal::SemanticPage(node))
-                                } else {
-                                    Ok(Vec::new())
-                                }
-                            }
-                            Ok(envelope) => Ok(envelope.children.iter().collect()),
-                            Err(refusal) => Err(refusal.into()),
-                        },
-                    };
+                    let children = node_children(node, encoding, &bytes, &self.roots, limits);
                     Ok(Ok(ReadNode {
                         encoding,
                         bytes,
@@ -895,14 +931,27 @@ fn walk_within(
     tx: &Connection,
     roots: &[NodeId],
     limits: &DecodeLimits,
-    mut skipped: Option<&mut BTreeSet<NodeId>>,
+    skipped: Option<&mut BTreeSet<NodeId>>,
 ) -> GraphAnswer<BTreeMap<NodeId, HydratedNode>> {
+    let mut reader = FrontierReader::new(tx, roots, skipped.is_some());
+    walk_nodes(&mut reader, roots, limits, skipped)
+}
+
+/// The checked depth-first walk from `roots` within `limits`, whichever
+/// transport reads its nodes: a node's encoding refusal first, then its
+/// charge against the budget, then its envelope refusal; children in their
+/// child-table order.
+fn walk_nodes<T: NodeTransport>(
+    reader: &mut T,
+    roots: &[NodeId],
+    limits: &DecodeLimits,
+    mut skipped: Option<&mut BTreeSet<NodeId>>,
+) -> Result<Result<BTreeMap<NodeId, HydratedNode>, GraphRefusal>, T::Failure> {
     #[cfg(test)]
     WALK_COUNTS.with_borrow_mut(|counts| counts.0 += 1);
     let mut nodes = BTreeMap::new();
     // Visit roots in fact order, as the individual walks did.
     let mut stack: Vec<_> = roots.iter().rev().map(|id| (*id, 0)).collect();
-    let mut reader = FrontierReader::new(roots, skipped.is_some());
     let mut visited = BTreeSet::new();
     let mut total = 0_u64;
     while let Some((id, depth)) = stack.pop() {
@@ -915,7 +964,7 @@ fn walk_within(
             encoding,
             bytes,
             children,
-        } = match reader.take(tx, id, depth, &visited, limits)? {
+        } = match reader.take(id, depth, &visited, limits)? {
             Ok(body) => body,
             Err(refusal) => return Ok(Err(refusal)),
         };
@@ -986,7 +1035,7 @@ pub(super) fn hydrate_in(
     if expected.is_some_and(|expected| expected != root) {
         return Ok(Err(GraphRefusal::RevisionConflict));
     }
-    // A root only the archive names is walked in the archive: its rows are
+    // A root of a packed history is walked in its archive: its rows are
     // gone, and with them its blobs.
     if let Some(bytes) = archived {
         let archive = match process_archive::ProcessArchive::open(&bytes) {

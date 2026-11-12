@@ -51,6 +51,22 @@ pub(super) fn ids(
     session: &lash_kernel_value::identity::SessionId,
     owner: &str,
 ) -> Answer<Vec<lash_protocol_types::llm::types::LlmCallId>> {
+    // The history discriminator chooses the representation first.
+    match super::process_history::model_calls(
+        tx,
+        session,
+        owner,
+        lash_durable::domain::process_archive::ModelSelection::Records(None),
+    )? {
+        Ok(Some((_, models))) => {
+            return Ok(Ok(models
+                .into_iter()
+                .map(|model| lash_protocol_types::llm::types::LlmCallId(model.call_id))
+                .collect()));
+        }
+        Ok(None) => {}
+        Err(error) => return Ok(Err(error)),
+    }
     let ids = tx
         .statement(SQL.ids.sql())?
         .query_map([session.as_str(), owner], |row| {
@@ -58,22 +74,6 @@ pub(super) fn ids(
                 .map(lash_protocol_types::llm::types::LlmCallId)
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if ids.is_empty() {
-        return Ok(super::process_history::model_calls(
-            tx,
-            session,
-            owner,
-            lash_durable::domain::process_archive::ModelSelection::Records(None),
-        )?
-        .map(|archived| {
-            archived.map_or_else(Vec::new, |(_, models)| {
-                models
-                    .into_iter()
-                    .map(|model| lash_protocol_types::llm::types::LlmCallId(model.call_id))
-                    .collect()
-            })
-        }));
-    }
     Ok(Ok(ids))
 }
 
@@ -120,6 +120,21 @@ pub(super) fn read(
     ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
     limits: DecodeLimits,
 ) -> Answer<Vec<ModelCallRecord>> {
+    // The history discriminator chooses the representation first.
+    match super::process_history::model_calls(
+        tx,
+        session,
+        owner,
+        lash_durable::domain::process_archive::ModelSelection::Records(ids),
+    )? {
+        Ok(Some((bytes, models))) => {
+            return Ok(super::process_history::model_records(
+                &bytes, models, limits,
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => return Ok(Err(error)),
+    }
     let keys = ids.map(|ids| {
         serde_json::Value::from(ids.iter().map(|id| id.0.as_str()).collect::<Vec<_>>()).to_string()
     });
@@ -142,22 +157,6 @@ pub(super) fn read(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if rows.is_empty() {
-        match super::process_history::model_calls(
-            tx,
-            session,
-            owner,
-            lash_durable::domain::process_archive::ModelSelection::Records(ids),
-        )? {
-            Ok(Some((bytes, models))) => {
-                return Ok(super::process_history::model_records(
-                    &bytes, models, limits,
-                ));
-            }
-            Ok(None) => {}
-            Err(error) => return Ok(Err(error)),
-        }
-    }
     let rows = match rows
         .into_iter()
         .map(|(id, root, ended)| Ok((id, super::node_ref(&root)?, ended)))
@@ -260,6 +259,22 @@ pub(super) fn pins(
     ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>,
     call: Option<&str>,
 ) -> Answer<Vec<lash_durable::domain::ModelCallPinRow>> {
+    // The history discriminator chooses the representation first.
+    match super::process_history::model_calls(
+        tx,
+        session,
+        owner,
+        lash_durable::domain::process_archive::ModelSelection::Pins { ids, call },
+    )? {
+        Ok(Some((_, models))) => {
+            return Ok(models
+                .into_iter()
+                .map(|model| lash_durable::domain::process_archive::pin_row(session, model))
+                .collect());
+        }
+        Ok(None) => {}
+        Err(error) => return Ok(Err(error)),
+    }
     let keys = ids.map(|ids| {
         serde_json::Value::from(ids.iter().map(|id| id.0.as_str()).collect::<Vec<_>>()).to_string()
     });
@@ -289,23 +304,6 @@ pub(super) fn pins(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if rows.is_empty() {
-        match super::process_history::model_calls(
-            tx,
-            session,
-            owner,
-            lash_durable::domain::process_archive::ModelSelection::Pins { ids, call },
-        )? {
-            Ok(Some((_, models))) => {
-                return Ok(models
-                    .into_iter()
-                    .map(|model| lash_durable::domain::process_archive::pin_row(session, model))
-                    .collect());
-            }
-            Ok(None) => {}
-            Err(error) => return Ok(Err(error)),
-        }
-    }
     Ok(rows
         .into_iter()
         .map(

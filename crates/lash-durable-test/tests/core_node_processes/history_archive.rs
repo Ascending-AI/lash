@@ -242,6 +242,96 @@ impl Raw {
         live
     }
 
+    /// The children live node `node`'s stored edges name.
+    async fn children(&self, node: &NodeId) -> Vec<NodeId> {
+        let sql = "SELECT child.hash FROM {e} AS edge
+             JOIN {b} AS parent ON parent.id = edge.parent_id
+             JOIN {b} AS child ON child.id = edge.child_id
+             WHERE parent.hash = ";
+        let hashes: Vec<Vec<u8>> = match self {
+            Self::Sqlite(path) => {
+                let sql = sql.replace("{e}", "blob_edges").replace("{b}", "blobs") + "?1";
+                let connection = Self::sqlite(path);
+                let mut statement = connection.prepare(&sql).unwrap();
+                statement
+                    .query_map([&node.0[..]], |row| row.get(0))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            }
+            Self::Postgres(url) => {
+                let sql = sql
+                    .replace("{e}", "lash_blob_edges")
+                    .replace("{b}", "lash_blobs")
+                    + "$1";
+                sqlx::query_scalar(&sql)
+                    .bind(&node.0[..])
+                    .fetch_all(&mut Self::pg(url).await)
+                    .await
+                    .unwrap()
+            }
+        };
+        hashes
+            .into_iter()
+            .map(|hash| NodeId(hash.try_into().unwrap()))
+            .collect()
+    }
+
+    /// The stored encoding and bytes of live node `node`.
+    async fn node(&self, node: &NodeId) -> (i64, Vec<u8>) {
+        match self {
+            Self::Sqlite(path) => Self::sqlite(path)
+                .query_row(
+                    "SELECT encoding, content FROM blobs WHERE hash = ?1",
+                    [&node.0[..]],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap(),
+            Self::Postgres(url) => {
+                let (encoding, content): (i16, Vec<u8>) =
+                    sqlx::query_as("SELECT encoding, content FROM lash_blobs WHERE hash = $1")
+                        .bind(&node.0[..])
+                        .fetch_one(&mut Self::pg(url).await)
+                        .await
+                        .unwrap();
+                (i64::from(encoding), content)
+            }
+        }
+    }
+
+    /// Store live node `node` as `encoding` and `bytes`, whatever they are:
+    /// the encoding check of the blob table does not hold here.
+    async fn set_node(&self, node: &NodeId, encoding: i64, bytes: &[u8]) {
+        match self {
+            Self::Sqlite(path) => {
+                let connection = Self::sqlite(path);
+                connection
+                    .execute_batch("PRAGMA ignore_check_constraints = ON")
+                    .unwrap();
+                connection
+                    .execute(
+                        "UPDATE blobs SET encoding = ?2, content = ?3 WHERE hash = ?1",
+                        rusqlite::params![&node.0[..], encoding, bytes],
+                    )
+                    .unwrap();
+            }
+            Self::Postgres(url) => {
+                let mut connection = Self::pg(url).await;
+                sqlx::query("ALTER TABLE lash_blobs DROP CONSTRAINT IF EXISTS ck_blobs_encoding")
+                    .execute(&mut connection)
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE lash_blobs SET encoding = $2, content = $3 WHERE hash = $1")
+                    .bind(&node.0[..])
+                    .bind(i16::try_from(encoding).unwrap())
+                    .bind(bytes)
+                    .execute(&mut connection)
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
     async fn set_archive(&self, process: &ProcessId, bytes: &[u8]) {
         match self {
             Self::Sqlite(path) => {
@@ -1179,3 +1269,315 @@ async fn a_packed_history_leases_as_its_rows(tier: Tier) {
 }
 
 on_every_tier!(a_packed_history_leases_as_its_rows: sqlite_memory, postgres);
+
+/// One corruption of stored nodes: each named node's new encoding and bytes,
+/// from its stored ones.
+type Corruption = BTreeMap<NodeId, (i64, Vec<u8>)>;
+
+/// The answers of the reads that walk `process`'s graphs: the aggregate
+/// read of every fact and the hydration of fact `target`, each under a
+/// spent and an unspent budget, and the reads of its tool calls and of
+/// `model_owners`' model calls.
+async fn walks(
+    store: &dyn lash_durable::DurableStore,
+    process: &ProcessId,
+    target: RootOwner,
+    facts: usize,
+    model_owners: &[String],
+) -> BTreeMap<String, String> {
+    let owner = OwnerKey::Process(process.clone());
+    let standard = GraphReadPolicy::standard().owner();
+    let mut out = BTreeMap::new();
+    let calls = ToolCallSelection::List {
+        after: None,
+        limit: 100,
+    };
+    out.insert(
+        "calls".to_owned(),
+        format!(
+            "{:?}",
+            store
+                .tool_calls(&CallOwner::Process(process.clone()), &calls)
+                .await
+        ),
+    );
+    for model_owner in model_owners {
+        out.insert(
+            format!("models of {model_owner}"),
+            format!(
+                "{:?}",
+                store
+                    .model_calls(&model_session(process), model_owner)
+                    .await
+            ),
+        );
+    }
+    for (label, limits) in [
+        ("standard", standard),
+        (
+            "no nodes",
+            DecodeLimits {
+                nodes: 0,
+                ..standard
+            },
+        ),
+        (
+            "one node",
+            DecodeLimits {
+                nodes: 1,
+                ..standard
+            },
+        ),
+        (
+            "no bytes",
+            DecodeLimits {
+                total_bytes: 0,
+                ..standard
+            },
+        ),
+    ] {
+        out.insert(
+            format!("facts, {label}"),
+            format!(
+                "{:?}",
+                store.run_facts_within(&owner, None, facts, limits).await
+            ),
+        );
+        out.insert(
+            format!("hydrate, {label}"),
+            format!("{:?}", store.hydrate(target.clone(), None, limits).await),
+        );
+    }
+    out
+}
+
+/// A corrupt history refuses the same from its archive as from its rows,
+/// per store: the archive walk is the row walk with another node source,
+/// so a corrupt node under a spent budget, an encoding no blob has, and
+/// two corrupt nodes one walk meets in turn give the first refusal they
+/// gave from the rows. The answer each store gave from its rows is the
+/// oracle.
+async fn a_corrupt_packed_history_refuses_as_its_rows(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 400);
+    let process = Box::pin(run_one(&core, 2)).await;
+    let durable = Arc::clone(backend.durable());
+    let owner = OwnerKey::Process(process.clone());
+    let limits = GraphReadPolicy::standard().owner();
+    let rows = durable.run_facts(&owner).await.unwrap().rows;
+    let mut graphs = Vec::new();
+    for row in &rows {
+        graphs.push(
+            durable
+                .hydrate(fact(&owner, row.run, row.ordinal), None, limits)
+                .await
+                .unwrap(),
+        );
+    }
+    // The fact with the most graph nodes under its root: two corrupt nodes
+    // under it are met in the walk's order.
+    let graph_nodes = |graph: &lash_durable::domain::HydratedGraph| {
+        graph
+            .nodes
+            .iter()
+            .filter(|(id, node)| {
+                **id != graph.root
+                    && node.encoding == lash_core_store::checkpoint_graph::BlobEncoding::Graph
+            })
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>()
+    };
+    let target = (0..graphs.len())
+        .max_by_key(|at| graph_nodes(&graphs[*at]).len())
+        .unwrap();
+    let below = graph_nodes(&graphs[target]);
+    assert!(
+        below.len() >= 2,
+        "a fact reaches two graph nodes below its root: {below:?}"
+    );
+    let target_root = graphs[target].root;
+    // Two children of one node under the target's root: the walk meets
+    // them in its child order.
+    let mut siblings = None;
+    for id in graphs[target].nodes.keys() {
+        let children: Vec<NodeId> = raw
+            .children(id)
+            .await
+            .into_iter()
+            .filter(|child| graphs[target].nodes.contains_key(child))
+            .collect();
+        if children.len() >= 2 {
+            siblings = Some([children[0], children[1]]);
+            break;
+        }
+    }
+    let siblings = siblings.expect("a node under the target's root has two children");
+    let target_owner = fact(&owner, rows[target].run, rows[target].ordinal);
+    let flip = |node: &lash_durable::domain::HydratedNode| {
+        let mut bytes = node.bytes.to_vec();
+        *bytes.last_mut().unwrap() ^= 0x5a;
+        bytes
+    };
+    let graph_encoding = |node: &lash_durable::domain::HydratedNode| match node.encoding {
+        lash_core_store::checkpoint_graph::BlobEncoding::Graph => 1,
+        lash_core_store::checkpoint_graph::BlobEncoding::Opaque => 0,
+    };
+    // Every node a read of the history reaches: its facts', its calls' and
+    // its model calls' graphs.
+    let mut every: BTreeMap<NodeId, lash_durable::domain::HydratedNode> = graphs
+        .iter()
+        .flat_map(|graph| graph.nodes.clone())
+        .collect();
+    let model_keys = raw.model_keys(&process).await;
+    let mut model_owners: Vec<String> = model_keys.iter().map(|(run, _)| run.clone()).collect();
+    model_owners.dedup();
+    let mut roots: Vec<RootOwner> = model_keys
+        .iter()
+        .map(|(run, call)| {
+            RootOwner::ModelCall(PromptCallKey {
+                session: model_session(&process),
+                call: ModelCallId::Owned {
+                    owner: run.strip_prefix("owned:").unwrap().to_owned(),
+                    key: call.clone(),
+                },
+            })
+        })
+        .collect();
+    let calls = durable
+        .tool_calls(
+            &CallOwner::Process(process.clone()),
+            &ToolCallSelection::List {
+                after: None,
+                limit: 100,
+            },
+        )
+        .await
+        .unwrap()
+        .rows;
+    for call in &calls {
+        for part in [ToolCallRoot::Decision, ToolCallRoot::Answer] {
+            roots.push(RootOwner::ToolCall {
+                owner: call.execution.clone(),
+                call: call.call.clone(),
+                part,
+            });
+        }
+    }
+    for root in roots {
+        if let Ok(graph) = durable.hydrate(root, None, limits).await {
+            every.extend(graph.nodes);
+        }
+    }
+    let corruptions: Vec<(&str, Corruption)> = vec![
+        (
+            "a corrupt root",
+            BTreeMap::from([(target_root, {
+                let node = &graphs[target].nodes[&target_root];
+                (graph_encoding(node), flip(node))
+            })]),
+        ),
+        (
+            "corrupt nodes below the root",
+            below
+                .iter()
+                .map(|id| {
+                    let node = &graphs[target].nodes[id];
+                    (*id, (graph_encoding(node), flip(node)))
+                })
+                .collect(),
+        ),
+        (
+            // A sibling's bytes no longer match its address, or an opaque
+            // one is read as a graph node.
+            "two corrupt siblings",
+            siblings
+                .iter()
+                .map(|id| {
+                    let node = &graphs[target].nodes[id];
+                    let bytes = match node.encoding {
+                        lash_core_store::checkpoint_graph::BlobEncoding::Graph => flip(node),
+                        lash_core_store::checkpoint_graph::BlobEncoding::Opaque => {
+                            node.bytes.to_vec()
+                        }
+                    };
+                    (*id, (1, bytes))
+                })
+                .collect(),
+        ),
+        (
+            "an encoding no blob has",
+            every
+                .iter()
+                .map(|(id, node)| (*id, (7, node.bytes.to_vec())))
+                .collect(),
+        ),
+    ];
+
+    let mut from_rows = Vec::new();
+    for (label, corruption) in &corruptions {
+        let mut stored = BTreeMap::new();
+        for (id, (encoding, bytes)) in corruption {
+            stored.insert(*id, raw.node(id).await);
+            raw.set_node(id, *encoding, bytes).await;
+        }
+        from_rows.push(
+            walks(
+                durable.as_ref(),
+                &process,
+                target_owner.clone(),
+                rows.len(),
+                &model_owners,
+            )
+            .await,
+        );
+        for (id, (encoding, bytes)) in &stored {
+            raw.set_node(id, *encoding, bytes).await;
+        }
+        assert_eq!(
+            durable
+                .hydrate(target_owner.clone(), None, limits)
+                .await
+                .unwrap(),
+            graphs[target],
+            "{label}: the rows are restored"
+        );
+    }
+
+    assert_eq!(
+        durable.pack_finished_histories(16).await.unwrap(),
+        1,
+        "one history packs"
+    );
+    assert_eq!(raw.rows(&process).await, 0, "the pack moved every row");
+    let archive = raw.archive(&process).await;
+    let contents = lash_durable::domain::process_archive::ProcessArchive::open(&archive)
+        .unwrap()
+        .contents()
+        .unwrap();
+    for ((label, corruption), rows_answers) in corruptions.iter().zip(&from_rows) {
+        let mut corrupt = contents.clone();
+        for node in &mut corrupt.nodes {
+            if let Some((encoding, bytes)) = corruption.get(&node.id) {
+                node.encoding = u8::try_from(*encoding).unwrap();
+                node.bytes.clone_from(bytes);
+            }
+        }
+        raw.set_archive(&process, &corrupt.encode().unwrap()).await;
+        same(
+            rows_answers,
+            &walks(
+                durable.as_ref(),
+                &process,
+                target_owner.clone(),
+                rows.len(),
+                &model_owners,
+            )
+            .await,
+            label,
+        );
+        raw.set_archive(&process, &archive).await;
+    }
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(a_corrupt_packed_history_refuses_as_its_rows: sqlite_memory, postgres);

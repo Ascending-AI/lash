@@ -146,20 +146,26 @@ impl super::PostgresDurableStore {
     ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
         self.read(|tx| {
             Box::pin(async move {
-                let mut ids: Vec<String> = crate::observed_sql::query_scalar(SQL.ids.sql())
-                    .bind(session.as_str())
-                    .bind(owner)
-                    .fetch_all(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(sqlx_failure)?;
+                let all = lash_durable::domain::process_archive::ModelSelection::Records(None);
+                // The history discriminator chooses the representation
+                // before any row is read.
+                let archived = super::process_history::model_calls(tx, session, owner, all).await?;
+                let mut ids: Vec<String> = match archived {
+                    Some((_, models)) => models.into_iter().map(|model| model.call_id).collect(),
+                    None => crate::observed_sql::query_scalar(SQL.ids.sql())
+                        .bind(session.as_str())
+                        .bind(owner)
+                        .fetch_all(crate::observed_sql::executor(&mut **tx))
+                        .await
+                        .map_err(sqlx_failure)?,
+                };
+                // Each statement reads its own snapshot, and a pack only ever
+                // moves a history from rows to its archive: rows gone since
+                // the discriminator was read are answered by the
+                // discriminator read again.
                 if ids.is_empty()
-                    && let Some((_, models)) = super::process_history::model_calls(
-                        tx,
-                        session,
-                        owner,
-                        lash_durable::domain::process_archive::ModelSelection::Records(None),
-                    )
-                    .await?
+                    && let Some((_, models)) =
+                        super::process_history::model_calls(tx, session, owner, all).await?
                 {
                     ids = models.into_iter().map(|model| model.call_id).collect();
                 }
@@ -180,6 +186,18 @@ impl super::PostgresDurableStore {
         let limits = self.pools.graph_reads.owner();
         self.read_snapshot(|snapshot| {
             Box::pin(async move {
+                // The history discriminator chooses the representation
+                // first, in the read's one snapshot.
+                if let Some((bytes, models)) = super::process_history::model_calls(
+                    snapshot,
+                    session,
+                    owner,
+                    lash_durable::domain::process_archive::ModelSelection::Records(ids),
+                )
+                .await?
+                {
+                    return super::process_history::model_records(&bytes, models, limits).await;
+                }
                 let sql = if ids.is_some() {
                     POSTGRES.selected.sql()
                 } else {
@@ -195,17 +213,6 @@ impl super::PostgresDurableStore {
                     .fetch_all(crate::observed_sql::executor(&mut **snapshot))
                     .await
                     .map_err(sqlx_failure)?;
-                if rows.is_empty()
-                    && let Some((bytes, models)) = super::process_history::model_calls(
-                        snapshot,
-                        session,
-                        owner,
-                        lash_durable::domain::process_archive::ModelSelection::Records(ids),
-                    )
-                    .await?
-                {
-                    return super::process_history::model_records(&bytes, models, limits).await;
-                }
                 let rows = rows
                     .into_iter()
                     .map(|(id, root, ended)| Ok((id, super::node_ref(&root)?, ended)))
@@ -295,6 +302,18 @@ impl super::PostgresDurableStore {
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.read(|tx| {
             Box::pin(async move {
+                let pinned =
+                    lash_durable::domain::process_archive::ModelSelection::Pins { ids, call };
+                // The history discriminator chooses the representation
+                // before any row is read.
+                if let Some((_, models)) =
+                    super::process_history::model_calls(tx, session, owner, pinned).await?
+                {
+                    return models
+                        .into_iter()
+                        .map(|model| lash_durable::domain::process_archive::pin_row(session, model))
+                        .collect();
+                }
                 let sql = if call.is_some() {
                     SQL.pin_by_key.sql()
                 } else if ids.is_some() {
@@ -314,14 +333,13 @@ impl super::PostgresDurableStore {
                     .fetch_all(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(sqlx_failure)?;
+                // Each statement reads its own snapshot, and a pack only ever
+                // moves a history from rows to its archive: rows gone since
+                // the discriminator was read are answered by the
+                // discriminator read again.
                 if rows.is_empty()
-                    && let Some((_, models)) = super::process_history::model_calls(
-                        tx,
-                        session,
-                        owner,
-                        lash_durable::domain::process_archive::ModelSelection::Pins { ids, call },
-                    )
-                    .await?
+                    && let Some((_, models)) =
+                        super::process_history::model_calls(tx, session, owner, pinned).await?
                 {
                     return models
                         .into_iter()

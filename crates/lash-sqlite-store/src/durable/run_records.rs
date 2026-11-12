@@ -421,17 +421,16 @@ pub(super) fn facts_limited(
     limits: lash_core_store::checkpoint_graph::DecodeLimits,
     max_rows: Option<usize>,
 ) -> Answer<lash_durable::domain::RunFacts> {
+    // The history discriminator chooses the representation first.
+    match super::process_history::run_facts(tx, owner, run, max_rows, &limits)? {
+        Ok(Some(archived)) => return Ok(Ok(archived)),
+        Ok(None) => {}
+        Err(error) => return Ok(Err(error)),
+    }
     let rows = match read_limited(tx, owner, run, max_rows)? {
         Ok(rows) => rows,
         Err(error) => return Ok(Err(error)),
     };
-    if rows.is_empty() {
-        match super::process_history::run_facts(tx, owner, run, max_rows, &limits)? {
-            Ok(Some(archived)) => return Ok(Ok(archived)),
-            Ok(None) => {}
-            Err(error) => return Ok(Err(error)),
-        }
-    }
     let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
     Ok(super::graph::walk_roots(tx, &roots, &limits)?
         .map(|nodes| lash_durable::domain::RunFacts {

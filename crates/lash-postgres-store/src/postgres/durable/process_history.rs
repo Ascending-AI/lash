@@ -143,9 +143,14 @@ pub(super) async fn run_facts(
         .map(|fact| archive::fact_row(owner, fact))
         .collect::<Result<Vec<_>, _>>()?;
     let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
-    let nodes = super::graph::walk_archive(&archive, &roots, limits)
-        .await
-        .map_err(DurableError::Graph)?;
+    let nodes = super::graph::walk_archive(
+        &archive,
+        &roots,
+        limits,
+        super::graph::Ingest::EncodingFirst,
+    )
+    .await
+    .map_err(DurableError::Graph)?;
     Ok(Some(RunFacts {
         rows,
         nodes,
@@ -180,9 +185,14 @@ pub(super) async fn tool_calls(
                 .copied()
         })
         .collect();
-    let nodes = super::graph::walk_archive(&archive, &roots, limits)
-        .await
-        .map_err(DurableError::Graph)?;
+    let nodes = super::graph::walk_archive(
+        &archive,
+        &roots,
+        limits,
+        super::graph::Ingest::EncodingFirst,
+    )
+    .await
+    .map_err(DurableError::from)?;
     Ok(Some(ToolCalls {
         rows,
         graph: RunFacts {
@@ -224,9 +234,14 @@ pub(super) async fn model_records(
         .map(archive::record_parts)
         .collect::<Result<Vec<_>, _>>()?;
     let roots: Vec<NodeId> = rows.iter().map(|(_, root, _)| *root).collect();
-    let nodes = super::graph::walk_archive(&archive, &roots, &limits)
-        .await
-        .map_err(DurableError::Graph)?;
+    let nodes = super::graph::walk_archive(
+        &archive,
+        &roots,
+        &limits,
+        super::graph::Ingest::EncodingFirst,
+    )
+    .await
+    .map_err(DurableError::from)?;
     super::model_calls::decode_records(rows, nodes, limits)
 }
 
@@ -458,7 +473,7 @@ async fn contents(
     // a closure the stored edges do not cover keeps its rows.
     let view = ProcessArchive::open(&bytes)?;
     for root in contents.roots() {
-        if super::graph::walk_archive(&view, &[root], limits)
+        if super::graph::walk_archive(&view, &[root], limits, super::graph::Ingest::EncodingFirst)
             .await
             .is_err()
         {

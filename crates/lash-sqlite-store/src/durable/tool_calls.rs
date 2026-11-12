@@ -287,6 +287,12 @@ pub(super) fn read(
     selection: &ToolCallSelection,
     limits: DecodeLimits,
 ) -> Answer<ToolCalls> {
+    // The history discriminator chooses the representation first.
+    match super::process_history::tool_calls(tx, owner, selection, &limits)? {
+        Ok(Some(archived)) => return Ok(Ok(archived)),
+        Ok(None) => {}
+        Err(error) => return Ok(Err(error)),
+    }
     let map = |row: &rusqlite::Row<'_>| -> rusqlite::Result<StoredCall> {
         Ok((
             row.get(0)?,
@@ -326,13 +332,6 @@ pub(super) fn read(
                 .collect::<rusqlite::Result<Vec<_>>>()?
         }
     };
-    if stored.is_empty() {
-        match super::process_history::tool_calls(tx, owner, selection, &limits)? {
-            Ok(Some(archived)) => return Ok(Ok(archived)),
-            Ok(None) => {}
-            Err(error) => return Ok(Err(error)),
-        }
-    }
     let rows = match stored
         .into_iter()
         .map(
