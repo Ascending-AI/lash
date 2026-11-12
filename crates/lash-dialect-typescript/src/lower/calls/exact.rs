@@ -51,8 +51,26 @@
 //! - `value.initialized(k)` is the read of a `let` or `const` an enclosing
 //!   function declares later: its temporal-dead-zone check (`ts.tdz`),
 //!   which fails where the read runs while the binding is uninitialized.
+//! - `value.operand(k)` is the binding `k` as an operator's operand, read
+//!   where that operator reads it, as for a binding nothing reassigns,
+//!   rather than held before its later operands run: `"a" in
+//!   value.operand(k)`, `delete value.operand(k)[f]`, `new
+//!   (value.operand(k))(...)`, `for (const p in value.operand(k))`,
+//!   `value.operand(k)?.(...)`. The operator itself, its `?.` test and
+//!   branch included, stays the source's, so an operand the original skips
+//!   is skipped.
+//! - `list.operand(xs)`, `record.operand(r)` and `value.text_operand(t)` are
+//!   that read of a list, a record or a text the source built: the operator
+//!   applied to it takes that kind's lowering (`list.operand(xs)?.[i]` the
+//!   list's element read without a kind test, `record.operand(r)?.name` the
+//!   record's own-field ladder, `value.text_operand(t)?.[i]` the text's
+//!   index read, `const {a} = list.operand(xs)` the kind's field reads).
+//!   None checks its operand's kind: a value of another kind fails where
+//!   that kind's operation fails (`collection has the wrong kind`), or gets
+//!   the generic helper the kind's lowering calls (a list's `ts.read`, a
+//!   text's `ts.text_index`).
 //!
-//! Neither infers, pins, forwards or converts anything else: each lowers to
+//! None infers, pins, forwards or converts anything else: each lowers to
 //! the nodes, helpers and order of the ordinary lowering it names, and keeps
 //! that operation's kind and bounds failures at its own site. Their roots
 //! are value-constructor roots, so namespace admission already reserves
@@ -76,6 +94,10 @@ pub(in crate::lower) enum Exact {
     TextLength,
     TextMethod,
     Initialized,
+    Operand,
+    ListOperand,
+    RecordOperand,
+    TextOperand,
 }
 
 impl Exact {
@@ -93,6 +115,10 @@ impl Exact {
             "record.method" => Self::RecordMethod,
             "value.length" => Self::TextLength,
             "value.method" => Self::TextMethod,
+            "value.operand" => Self::Operand,
+            "list.operand" => Self::ListOperand,
+            "record.operand" => Self::RecordOperand,
+            "value.text_operand" => Self::TextOperand,
             _ => return None,
         };
         debug_assert!(path.split_once('.').is_some_and(|(root, _)| {
@@ -257,6 +283,35 @@ impl Lowerer<'_> {
                     _ => self.initialised(kernel, name)?,
                 };
                 Ok(Operand::variable(read, Ty::Unknown))
+            }
+            Exact::Operand | Exact::ListOperand | Exact::RecordOperand | Exact::TextOperand => {
+                let [ast::CallArg::Value(ast::Expr::Ident(name, _))] = args else {
+                    return refuse("an operand spelling takes a binding");
+                };
+                if !self.is_bound(name) {
+                    return refuse("an operand spelling takes a binding");
+                }
+                // The binding's ordinary read, its checks included, read
+                // again wherever the operator applied to it reads it.
+                let read = self.read(name, Some(span))?;
+                let ty = match exact {
+                    Exact::ListOperand => Ty::Array,
+                    Exact::RecordOperand => Ty::Object,
+                    Exact::TextOperand => Ty::Text,
+                    _ => {
+                        return Ok(Operand {
+                            stable: true,
+                            ..read
+                        });
+                    }
+                };
+                Ok(Operand {
+                    ty,
+                    stable: true,
+                    plain: None,
+                    text_prefix: None,
+                    ..read
+                })
             }
             Exact::ListLength
             | Exact::ListField

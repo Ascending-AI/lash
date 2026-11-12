@@ -279,7 +279,7 @@ impl Lifter<'_> {
             // A known text's element read, `t[i]` (an optional chain's link
             // reads it as a value).
             ("ts.text_index", [target, key]) => Ok(Expr::Index(
-                Box::new(self.expr(target)?),
+                Box::new(self.operand(target, "value.text_operand")?),
                 Box::new(self.expr(key)?),
             )),
             (name, [value]) => match crate::constructs::operators::unary_inverse(name, true) {
@@ -386,6 +386,9 @@ impl Lifter<'_> {
             return Ok(Expr::Binary(mirrored, Box::new(right), Box::new(left)));
         }
         let mut operand = |value: &k::Expr| {
+            if op == "in" {
+                return self.operand(value, "value.operand");
+            }
             if !self.style.operators
                 && crate::constructs::operators::asserted(op)
                 && let k::Expr::Call { function, args } = value
@@ -577,11 +580,26 @@ impl Lifter<'_> {
             return Ok(None);
         };
         let applies = matches!(&act.kind, k::ActKind::Call(k::Callee::Value(value)) if value == callable)
-            && act.args.as_slice() == [receiver, k::Expr::Variable(list.clone())];
+            && act.args.as_slice() == [receiver.clone(), k::Expr::Variable(list.clone())];
         if !selects || !applies {
             return Ok(None);
         }
-        let callee = self.expr(value)?;
+        let callee = self.operand(value, "value.operand")?;
+        // A method a record holds, read by `record.field` and called with
+        // its receiver, is the record's member call.
+        let callee = match callee {
+            Expr::Call(read, mut field)
+                if !matches!(receiver, k::Expr::Literal(k::Literal::Absent))
+                    && matches!(&*read, Expr::Ident(name) if name == "record.field")
+                    && matches!(field.as_slice(), [_, Expr::Text(_)]) =>
+            {
+                let Some(Expr::Text(member)) = field.pop() else {
+                    return refuse("a record method's name");
+                };
+                Expr::Field(Box::new(constructor("record.operand", field)), member)
+            }
+            callee => callee,
+        };
         let Expr::Array(args) = self.expr(args)? else {
             return refuse("a call's argument list");
         };
@@ -768,7 +786,7 @@ impl Lifter<'_> {
         match (name, args) {
             ("ts.to_property_key", [value]) => self.expr(value),
             ("ts.construct", [callee, args]) => {
-                let callee = self.expr(callee)?;
+                let callee = self.operand(callee, "value.operand")?;
                 let Expr::Array(args) = self.expr(args)? else {
                     return refuse("a constructor's arguments");
                 };
@@ -778,7 +796,7 @@ impl Lifter<'_> {
             ("ts.delete", [target, key]) => Ok(Expr::Unary(
                 "delete ",
                 Box::new(Expr::Index(
-                    Box::new(self.expr(target)?),
+                    Box::new(self.operand(target, "value.operand")?),
                     Box::new(self.expr(key)?),
                 )),
             )),
@@ -939,7 +957,13 @@ impl Lifter<'_> {
                 })
             }
             ("ts.get_numeric" | "ts.get_computed" | "ts.text_index", [target, key]) => {
-                let target = self.expr(target)?;
+                // A direct numeric read is a record's: any other kind's
+                // takes a ladder.
+                let target = match name {
+                    "ts.text_index" => self.operand(target, "value.text_operand")?,
+                    "ts.get_numeric" => self.operand(target, "record.operand")?,
+                    _ => self.operand(target, "value.operand")?,
+                };
                 let key = self.expr(key)?;
                 Ok(Expr::Index(Box::new(target), Box::new(key)))
             }
@@ -949,7 +973,18 @@ impl Lifter<'_> {
                 let exact = self.style.exact && self.reads_binding(target);
                 let text =
                     matches!(target, k::Expr::Variable(name) if self.text_checked.contains(name));
-                let target = self.expr(target)?;
+                let target = if exact {
+                    self.expr(target)?
+                } else {
+                    self.operand(
+                        target,
+                        if text {
+                            "value.text_operand"
+                        } else {
+                            "list.operand"
+                        },
+                    )?
+                };
                 Ok(match (exact, text) {
                     (true, true) => {
                         constructor("value.field", vec![target, Expr::Text(field.clone())])

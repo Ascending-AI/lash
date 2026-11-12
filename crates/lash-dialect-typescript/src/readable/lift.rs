@@ -372,6 +372,43 @@ impl<'a> Lifter<'a> {
                 && self.pending_at(name).is_none())
     }
 
+    /// `target` as the operand an operation applies to it in place. A
+    /// binding some statement reassigns (a capture cell) is of no known
+    /// kind and reads back held, so the exact style names its in-place
+    /// read for the operation's kind: `spelling(x)`, or `spelling(x)?.`
+    /// where `x` is an optional chain's tested base.
+    pub(super) fn operand(&mut self, target: &k::Expr, spelling: &str) -> Lift<source::Expr> {
+        let value = self.expr(target)?;
+        Ok(self.spell_operand(target, value, spelling))
+    }
+
+    /// [`Self::operand`] of `target` already lifted as `value`.
+    pub(super) fn spell_operand(
+        &self,
+        target: &k::Expr,
+        value: source::Expr,
+        spelling: &str,
+    ) -> source::Expr {
+        let k::Expr::Variable(name) = target else {
+            return value;
+        };
+        if !self.style.exact
+            || !self.reassigned(name.as_str())
+            || self.templates.contains_key(name)
+            || self.pending_at(name).is_some()
+        {
+            return value;
+        }
+        let spelled = |value| super::expressions::constructor(spelling, vec![value]);
+        match value {
+            source::Expr::Optional(base) if matches!(*base, source::Expr::Ident(_)) => {
+                source::Expr::Optional(Box::new(spelled(*base)))
+            }
+            value @ source::Expr::Ident(_) => spelled(value),
+            value => value,
+        }
+    }
+
     /// Where the temporary `name` stands among those waiting to be read.
     pub(super) fn pending_at(&self, name: &Name) -> Option<usize> {
         self.pending

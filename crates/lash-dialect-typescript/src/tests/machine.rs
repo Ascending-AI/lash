@@ -422,6 +422,19 @@ pub(crate) fn end_of_entry(
     args: Vec<Datum>,
 ) -> (Vec<String>, Datum) {
     let text = lash_kernel_doc::print_document(&document);
+    match outcome_of_entry(document, entry, args) {
+        (asked, Ok(result)) => (asked, result),
+        (_, Err(other)) => panic!("{other:?}\n{text}"),
+    }
+}
+
+/// [`end_of_entry`], with the end of a run that did not finish.
+pub(crate) fn outcome_of_entry(
+    document: lash_kernel_doc::Document,
+    entry: &str,
+    args: Vec<Datum>,
+) -> (Vec<String>, Result<Datum, End>) {
+    let text = lash_kernel_doc::print_document(&document);
     let program = crate::tests::linked::program(Arc::new(document), prepared().clone());
     let start = CellStart {
         target: Target::Entry(Name::new(entry)),
@@ -441,8 +454,8 @@ pub(crate) fn end_of_entry(
             .unwrap_or_else(|error| panic!("{error}\n{text}"))
         {
             Step::Slice => unreachable!("the slice is unbounded"),
-            Step::Ended(End::Finished(finished)) => return (asked, finished.result),
-            Step::Ended(other) => panic!("{other:?}\n{text}"),
+            Step::Ended(End::Finished(finished)) => return (asked, Ok(finished.result)),
+            Step::Ended(other) => return (asked, Err(other)),
             Step::Parked(park) => {
                 for request in &park.requests {
                     asked.push(label(request));

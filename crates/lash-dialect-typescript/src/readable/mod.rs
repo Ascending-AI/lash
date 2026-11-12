@@ -524,13 +524,21 @@ console.log(JSON.stringify(created));
         out
     }
 
-    /// Captured forms whose original lowering has no exact spelling under
-    /// the FIG-7711 rules, stopped for the lead: an operator applied to the
-    /// capture itself reads the capture in place and calls its kind's own
-    /// helper with no kind check, where a printed callable holds the
-    /// capture in a temporary of unknown kind; a template literal joins a
-    /// known text without `ts.to_string`.
+    /// Captured template literals over a known text, stopped for the lead:
+    /// the template joins the text without `ts.to_string`, which no source
+    /// spelling reproduces yet.
     const STOPPED: &[(&[&str], &str)] = &[
+        (&["text"], "return `a\\n${x}\\`${x}`;"),
+        (&["text"], "return `hello ${x}!`;"),
+    ];
+    const ALL: &[&str] = &["list", "map", "record", "set", "text"];
+
+    /// Captured forms applying an operator to the capture itself, which the
+    /// original reads in place as a value of its known kind: they print
+    /// through the operand spellings (`value.operand(x)`, `list.operand`,
+    /// `record.operand`, `value.text_operand`). Each must lower, materialize,
+    /// print and import: a skip is a failure, not an acceptance.
+    const OPERAND_FORMS: &[(&[&str], &str)] = &[
         (ALL, "const {a = 1, ...rest} = x; return rest;"),
         (ALL, "const {a, b: [c]} = x; return a + c;"),
         (ALL, "const {a, ...rest} = x; return rest;"),
@@ -551,21 +559,56 @@ console.log(JSON.stringify(created));
         (ALL, "return x?.a;"),
         (ALL, "return x in y;"),
         (&["record"], "return x.f(...[1, 2]);"),
-        (&["text"], "return `a\\n${x}\\`${x}`;"),
-        (&["text"], "return `hello ${x}!`;"),
     ];
-    const ALL: &[&str] = &["list", "map", "record", "set", "text"];
 
     /// FIG-7711: every enumerated form over a known receiver that lowers
     /// prints and reads back to the same document, in a plain module and as
     /// a published arrow capturing `x`, except the captured forms
-    /// [`STOPPED`] names.
+    /// [`STOPPED`] names. The [`OPERAND_FORMS`] print, import, and run as
+    /// the original runs: with fills of another kind, with a later operand
+    /// that mutates the receiver, and with optional-chain operands that
+    /// throw when evaluated. The operand spellings keep the operator's
+    /// helper identity: a missing or re-identified helper and a namespace
+    /// claiming the spelling's root refuse.
     #[test]
     fn enumerated_forms_over_known_receivers_print() {
+        use k::CaptureValue as C;
         let library = crate::tests::library();
         let namespaces = Default::default();
         let environment = Environment::new(library, &namespaces);
         let mut refusals = Vec::new();
+        let mut operand_forms = BTreeSet::new();
+        let cell_mode =
+            || lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first());
+        let fill = |value: C| {
+            move |mut function: k::FunctionValue| {
+                function.captures = [(lash_kernel_value::Name::new("x"), value.clone())]
+                    .into_iter()
+                    .collect();
+                function
+            }
+        };
+        // The printed callable imports as an ordinary module and prints
+        // again to the same source.
+        let imports = |printed: &PrintedSource| -> Result<lash_kernel_dialect::Lowered, String> {
+            let read = crate::lower(
+                &printed.source,
+                &environment,
+                lash_kernel_dialect::Mode::Module,
+            )
+            .map_err(|error| format!("import: {error}"))?;
+            let reprinted = print(
+                &read.document,
+                Some(&read.captions),
+                library,
+                Default::default(),
+            )
+            .map_err(|error| format!("reprint: {error}"))?;
+            if reprinted.source != printed.source {
+                return Err(format!("reprints as\n{}", reprinted.source));
+            }
+            Ok(read)
+        };
         for form in known_receiver_forms() {
             let KnownReceiver {
                 kind,
@@ -576,6 +619,9 @@ console.log(JSON.stringify(created));
             let stopped = STOPPED
                 .iter()
                 .any(|(kinds, stopped)| *stopped == body && kinds.contains(kind));
+            let operand = OPERAND_FORMS
+                .iter()
+                .any(|(kinds, form)| *form == body && kinds.contains(kind));
             let module = format!(
                 "{prefix}export async function demo(y: any): Promise<unknown> {{ {body} }}\n"
             );
@@ -595,33 +641,46 @@ console.log(JSON.stringify(created));
             if stopped {
                 continue;
             }
-            let Ok(lowered) = crate::lower(
-                &cell,
-                &environment,
-                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
-            ) else {
-                continue;
+            let lowered = match crate::lower(&cell, &environment, cell_mode()) {
+                Ok(lowered) => lowered,
+                Err(error) if operand => {
+                    refusals.push(format!("captured {kind}: {body} :: lower: {error}"));
+                    continue;
+                }
+                Err(_) => continue,
             };
             // The materializer fills `x` alone: a callable that also
             // captures other cell values (a tagged template's strings) is
             // outside the captured arm.
-            let Ok(opened) = std::panic::catch_unwind(|| {
-                materialize_callable_as(&lowered, |mut function| {
-                    function.captures = [(lash_kernel_value::Name::new("x"), value.clone())]
-                        .into_iter()
-                        .collect();
-                    function
-                })
-            }) else {
+            let Ok(opened) =
+                std::panic::catch_unwind(|| materialize_callable_as(&lowered, fill(value.clone())))
+            else {
+                if operand {
+                    refusals.push(format!("captured {kind}: {body} :: materialization"));
+                }
                 continue;
             };
-            if let Err(error) = print(
+            match print(
                 &opened.document,
                 Some(&opened.captions),
                 library,
                 Default::default(),
             ) {
-                refusals.push(format!("captured {kind}: {body} :: {error}"));
+                Err(error) => refusals.push(format!("captured {kind}: {body} :: {error}")),
+                Ok(printed) if operand => {
+                    operand_forms.insert((*kind, body.clone()));
+                    if let Err(error) = imports(&printed) {
+                        refusals.push(format!("captured {kind}: {body} :: {error}"));
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+        for (kinds, body) in OPERAND_FORMS {
+            for kind in *kinds {
+                if !operand_forms.contains(&(*kind, (*body).to_owned())) {
+                    refusals.push(format!("captured {kind}: {body} :: not enumerated"));
+                }
             }
         }
         assert!(
@@ -630,6 +689,321 @@ console.log(JSON.stringify(created));
             refusals.len(),
             refusals.join("\n")
         );
+
+        // The printed callable runs as the original does, `y` its input: a
+        // result, or the same failure in the same function.
+        let int = |i: i64| C::Data(k::Datum::Int(i.into()));
+        let text = |t: &str| C::Data(k::Datum::Text(t.into()));
+        let list = || C::List(vec![int(7), int(8)]);
+        let record = || C::Record(vec![("a".into(), int(5)), ("b".into(), text("z"))]);
+        let null = || C::Data(k::Datum::Null);
+        const LIST: &str = "[7, 8]";
+        const RECORD: &str = "{a: 5, b: \"z\"}";
+        const TEXT: &str = "\"78\"";
+        // A function is named by its export, else its own name: the
+        // materialized entry is the printed module's `run`.
+        let outcome = |document: k::Document, y: &k::Datum| {
+            let names: Vec<(String, String)> = document
+                .functions
+                .iter()
+                .map(|(id, function)| {
+                    let exported = document.exports.iter().find_map(|(name, export)| {
+                        matches!(export, k::Export::Function(entry) if entry.function == *id)
+                            .then(|| name.to_string())
+                    });
+                    (
+                        format!("{id:?}"),
+                        exported.unwrap_or_else(|| function.name.to_string()),
+                    )
+                })
+                .collect();
+            let (asked, end) =
+                crate::tests::machine::outcome_of_entry(document, "run", vec![y.clone()]);
+            let mut ended = format!("{asked:?} {end:?}");
+            for (id, name) in names {
+                ended = ended.replace(&id, &name);
+            }
+            (end.ok(), ended)
+        };
+        let reading_k = "Cannot read properties of undefined or null (reading 'k')";
+        let record_y = k::Datum::Record(vec![("7,8,9".into(), k::Datum::Bool(true))]);
+        // (x's literal, its fill, body, y, the result JavaScript gives or
+        // the failure message it raises, where the case has one).
+        type Expected<'a> = Option<Result<k::Datum, &'a str>>;
+        let cases: Vec<(&str, C, &str, k::Datum, Expected)> = vec![
+            // Fills of another kind than the original's: the kind's own
+            // operation fails as the original's does.
+            (LIST, record(), "return x?.[1];", k::Datum::Null, None),
+            (LIST, text("78"), "return x?.a;", k::Datum::Null, None),
+            (RECORD, list(), "return x?.a;", k::Datum::Null, None),
+            (
+                RECORD,
+                list(),
+                "const {a, ...rest} = x; return rest;",
+                k::Datum::Null,
+                None,
+            ),
+            (
+                LIST,
+                text("78"),
+                "const {a, b: [c]} = x; return a + c;",
+                k::Datum::Null,
+                None,
+            ),
+            (TEXT, int(3), "return x?.[1];", k::Datum::Null, None),
+            (LIST, text("q"), "return \"a\" in x;", k::Datum::Null, None),
+            (
+                RECORD,
+                list(),
+                "return x.f(...[1, 2]);",
+                k::Datum::Null,
+                None,
+            ),
+            // A later operand mutates the receiver the operator read in
+            // place: the deleted slot is the pushed one, and `in` converts
+            // the mutated list to its key.
+            (
+                LIST,
+                list(),
+                "return [delete x[(x.push(9), 2)], 2 in x, x.length];",
+                k::Datum::Null,
+                Some(Ok(k::Datum::List(vec![
+                    k::Datum::Bool(true),
+                    k::Datum::Bool(false),
+                    k::Datum::Float(k::Float::new(3.0)),
+                ]))),
+            ),
+            (
+                LIST,
+                list(),
+                "return x in (x.push(9), y);",
+                record_y.clone(),
+                Some(Ok(k::Datum::Bool(true))),
+            ),
+            // Optional-chain operands that throw when evaluated: skipped on
+            // a nullish base, evaluated before the call's own check
+            // otherwise.
+            (
+                RECORD,
+                null(),
+                "return x?.a?.(y.k);",
+                k::Datum::Null,
+                Some(Ok(k::Datum::Null)),
+            ),
+            (
+                RECORD,
+                null(),
+                "return x?.(y.k);",
+                k::Datum::Null,
+                Some(Ok(k::Datum::Null)),
+            ),
+            (
+                RECORD,
+                record(),
+                "return x?.a?.(y.k);",
+                k::Datum::Null,
+                Some(Err(reading_k)),
+            ),
+            (
+                RECORD,
+                record(),
+                "return x?.(y.k);",
+                k::Datum::Null,
+                Some(Err(reading_k)),
+            ),
+            (
+                RECORD,
+                record(),
+                "return new x(y.k);",
+                k::Datum::Null,
+                Some(Err(reading_k)),
+            ),
+            (
+                RECORD,
+                record(),
+                "return x.f(...[y.k]);",
+                k::Datum::Null,
+                Some(Err(reading_k)),
+            ),
+            (
+                TEXT,
+                null(),
+                "return x?.[1];",
+                k::Datum::Null,
+                Some(Ok(k::Datum::Null)),
+            ),
+        ];
+        for (literal, value, body, y, expected) in cases {
+            let cell = format!(
+                "const x = {literal};\nconst demo = async (y: any): Promise<unknown> => {{ {body} }};\n"
+            );
+            let lowered = crate::lower(&cell, &environment, cell_mode()).unwrap();
+            let opened = materialize_callable_as(&lowered, fill(value.clone()));
+            let printed = print(
+                &opened.document,
+                Some(&opened.captions),
+                library,
+                Default::default(),
+            )
+            .unwrap_or_else(|error| panic!("{body} :: {error}"));
+            let read = imports(&printed).unwrap_or_else(|error| panic!("{body} :: {error}"));
+            let (result, original) = outcome(opened.document.clone(), &y);
+            let (_, reimported) = outcome(read.document.into_document(), &y);
+            assert_eq!(
+                original, reimported,
+                "{body} filled with {value:?}\n{}",
+                printed.source
+            );
+            match expected {
+                Some(Ok(expected)) => assert_eq!(result, Some(expected), "{body}"),
+                Some(Err(message)) => {
+                    assert!(
+                        result.is_none() && original.contains(message),
+                        "{body}: {original}"
+                    )
+                }
+                None => {}
+            }
+        }
+
+        // `"a" in value.operand(x)` lowers to the `in` operator's helper,
+        // `ts.in`, by its installed identity.
+        let lowered = crate::lower(
+            &format!(
+                "const x = {LIST};\nconst demo = async (y: any): Promise<unknown> => {{ return \"a\" in x; }};\n"
+            ),
+            &environment,
+            cell_mode(),
+        )
+        .unwrap();
+        let opened = materialize_callable_as(&lowered, fill(list()));
+        let printed = print(
+            &opened.document,
+            Some(&opened.captions),
+            library,
+            Default::default(),
+        )
+        .unwrap();
+        assert!(
+            printed.source.contains("\"a\" in value.operand(x)"),
+            "{}",
+            printed.source
+        );
+        let missing = Helper {
+            library,
+            name: "ts.in",
+            id: None,
+        };
+        let refused = crate::lower(
+            &printed.source,
+            &Environment::new(&missing, &namespaces),
+            lash_kernel_dialect::Mode::Module,
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(
+            refused.code(),
+            crate::DiagnosticCode::LinkError,
+            "{refused}"
+        );
+        let refused = print(
+            &opened.document,
+            Some(&opened.captions),
+            &missing,
+            Default::default(),
+        );
+        assert!(
+            matches!(refused, Err(PrintError::Unprintable { .. })),
+            "{refused:?}"
+        );
+        // The same name for another helper is not the original's identity.
+        let renamed = Helper {
+            library,
+            name: "ts.in",
+            id: library.resolve("ts.has"),
+        };
+        assert!(renamed.id.is_some());
+        let refused = print(
+            &opened.document,
+            Some(&opened.captions),
+            &renamed,
+            Default::default(),
+        );
+        assert!(
+            matches!(refused, Err(PrintError::Unprintable { .. })),
+            "{refused:?}"
+        );
+        // No package claims the spelling's root.
+        let claimed = lash_kernel_dialect::Namespaces::new(
+            Default::default(),
+            [lash_kernel_value::names::PackagePath::new(
+                lash_kernel_value::Segment::new("value").unwrap(),
+            )]
+            .into(),
+            &lash_kernel_dialect::value_constructors::Constructor::reserves,
+        );
+        assert!(
+            matches!(
+                claimed,
+                Err(lash_kernel_dialect::NamespaceRefusal::ReservedRoot { ref root, .. }) if root == "value"
+            ),
+            "{claimed:?}"
+        );
+    }
+
+    /// A library whose `name` resolves to `id` instead of its own helper.
+    struct Helper<'a> {
+        library: &'a lash_kernel_dialect::NamedLibrary,
+        name: &'static str,
+        id: Option<lash_kernel_value::FunctionId>,
+    }
+
+    impl k::FunctionCatalog for Helper<'_> {
+        fn named_helper(&self, name: &str) -> Option<lash_kernel_value::FunctionId> {
+            self.resolve(name)
+        }
+        fn projection_helper(
+            &self,
+            role: k::ProjectionRole,
+        ) -> Option<lash_kernel_value::FunctionId> {
+            self.library.projection_helper(role)
+        }
+        fn helper_library(&self) -> Option<&k::BuildHelpers> {
+            self.library.helper_library()
+        }
+        fn definition(
+            &self,
+            function: &lash_kernel_value::FunctionId,
+        ) -> Option<&k::FunctionDefinition> {
+            self.library.definition(function)
+        }
+        fn registered(
+            &self,
+            function: &lash_kernel_value::FunctionId,
+        ) -> Option<&k::RegisteredFunction> {
+            self.library.registered(function)
+        }
+        fn header(
+            &self,
+            function: &lash_kernel_value::FunctionId,
+        ) -> Option<std::sync::Arc<k::FunctionHeader>> {
+            self.library.header(function)
+        }
+        fn registration(
+            &self,
+            definition: &k::FunctionDefinition,
+        ) -> Option<&k::RegisteredFunction> {
+            self.library.registration(definition)
+        }
+    }
+
+    impl Library for Helper<'_> {
+        fn resolve(&self, name: &str) -> Option<lash_kernel_value::FunctionId> {
+            if name == self.name {
+                return self.id;
+            }
+            self.library.resolve(name)
+        }
     }
 
     /// Materializes the callable of `lowered` as `saved` leaves its value.

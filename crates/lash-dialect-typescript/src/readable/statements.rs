@@ -118,7 +118,7 @@ impl Lifter<'_> {
                 StmtKind::For {
                     operator: "in",
                     binding: self.binding(enumeration.binding)?,
-                    iterable: self.expr(enumeration.subject)?,
+                    iterable: self.operand(enumeration.subject, "value.operand")?,
                     body: self.block_at(enumeration.body, &site.child(1).child(0).child(1), 1)?,
                 }
             }
@@ -569,7 +569,11 @@ impl Lifter<'_> {
             return Ok(None);
         }
         let exact = otherwise.is_none() && self.style.exact && self.reads_binding(target);
-        let target = self.expr(target)?;
+        let target = match (exact, otherwise) {
+            (true, _) => self.expr(target)?,
+            (false, None) => self.operand(target, "record.operand")?,
+            (false, Some(_)) => self.operand(target, "value.operand")?,
+        };
         Ok(Some(if exact {
             super::expressions::constructor("record.field", vec![target, Expr::Text(field.clone())])
         } else {
@@ -692,14 +696,23 @@ impl Lifter<'_> {
         {
             return Ok(None);
         }
+        let read = target;
         let target = self.expr(target)?;
         let index = self.expr(index)?;
-        if otherwise.is_none() && self.style.exact {
+        // An optional chain's link keeps its `?.`: the element read of its
+        // base's operand.
+        if otherwise.is_none() && self.style.exact && !matches!(target, Expr::Optional(_)) {
             return Ok(Some(super::expressions::constructor(
                 "list.element",
                 vec![target, index],
             )));
         }
+        let spelling = if otherwise.is_none() {
+            "list.operand"
+        } else {
+            "value.operand"
+        };
+        let target = self.spell_operand(read, target, spelling);
         Ok(Some(Expr::Index(Box::new(target), Box::new(index))))
     }
 

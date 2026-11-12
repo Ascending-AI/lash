@@ -104,6 +104,17 @@ a receiver that is no list fails the length read's own kind check.
 `record.field(r, "name")` is a built record's field: its own field where it is
 unbranded, else the read helper. `value.length(t)` is a built text's
 `length`: the length helper's read, a number (`text` is no reserved root).
+`value.operand(k)` is a binding as an operator's operand, read where the
+operator reads it rather than held first: `"a" in value.operand(k)`,
+`delete value.operand(k)[f]`, `new (value.operand(k))(...)`, `for (const p in
+value.operand(k))`, `value.operand(k)?.(...)`. The operator, its `?.` test and
+branch included, stays in the source, so an operand the original skips stays
+skipped. `list.operand(xs)`, `record.operand(r)` and `value.text_operand(t)`
+are that read of a built list, record or text: the operator applied to it takes
+that kind's lowering (`list.operand(xs)?.[i]`, `record.operand(r)?.name`,
+`value.text_operand(t)?.[i]`, `const {a} = list.operand(xs)`). None checks
+the operand's kind; a value of another kind fails where the kind's operation
+fails, or gets the generic helper the kind's lowering calls.
 A materialized capture's factory declares its cell with the declared type the
 captured binding's evidence carries, so an annotated binding (`xs: unknown[]`)
 keeps the lowering its annotation chose. Python prints an in-place update of
