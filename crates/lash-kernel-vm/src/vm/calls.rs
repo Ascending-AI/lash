@@ -377,9 +377,9 @@ impl<H: Heap> Vm<H> {
                 copy(self, 0..positional);
                 let values = self.top(positional).to_vec();
                 self.place(positional, NewObject::List(values))?;
-                for (at, param) in checked.signature.params.iter().enumerate().take(argc) {
+                for (at, keyword) in checked.keywords.iter().enumerate().take(argc) {
                     if at >= positional {
-                        let name = self.text(param.name.as_str())?;
+                        let name = self.text(keyword.as_str())?;
                         self.push(name);
                         self.push(self.cx.stack[from + at]);
                     }

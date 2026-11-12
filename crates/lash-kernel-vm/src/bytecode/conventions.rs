@@ -391,9 +391,10 @@ impl Compiler<'_> {
     /// it holds to. An export is entered as a start enters it, under its
     /// start convention (`K-DOC-003`): one that adapts its arguments,
     /// settles its result or cleans up after its body runs its own entry
-    /// unit, in its own Link, its arguments checked against its public
-    /// signature and then packed at the call. A `Direct` export's call is
-    /// a call of its function, held to the import's signature (FIG-7143).
+    /// unit, in its own Link, its arguments checked against the import's
+    /// signature and then packed at the call by the export's. Every call
+    /// through an import, a `Direct` export's call of its function too,
+    /// holds to the import's signature (FIG-7143).
     pub(crate) fn import_call(
         &mut self,
         f: &Fun,
@@ -402,9 +403,12 @@ impl Compiler<'_> {
         let Some((callable, export)) = self.imports.get(&(self.link, slot)).cloned() else {
             return unsupported(format!("import {slot:?} names no function"));
         };
+        let Some(contract) = self.import_signature(slot).cloned() else {
+            return unsupported(format!("import {slot:?} declares no signature"));
+        };
         let home = self.link;
         self.enter_link(callable.link)?;
-        let adapted = self.adapted(callable, &export);
+        let adapted = self.adapted(callable, &export, contract);
         self.enter_link(home)?;
         match adapted? {
             Some((unit, adapt, checked)) => Ok((
@@ -423,11 +427,14 @@ impl Compiler<'_> {
 
     /// The entry unit of export `export` of the Link being compiled, which
     /// names `callable`, how a call adapts its arguments to it, and the
-    /// contract a call of it holds to; none for a `Direct` export.
+    /// contract a call of it holds to: the importer's `contract`, which an
+    /// export may serve with a wider signature (`K-DOC-003`, FIG-7143).
+    /// None for a `Direct` export.
     fn adapted(
         &mut self,
         callable: CallableId,
         export: &lash_kernel_value::names::ExportName,
+        contract: lash_kernel_value::Signature,
     ) -> Result<Option<Adapted>> {
         use lash_kernel_doc::StartConvention;
         let Some(descriptor) = crate::interface::exported(self.document, export) else {
@@ -466,7 +473,12 @@ impl Compiler<'_> {
                 unit
             }
         };
-        let checked = Checked::new(callable, descriptor.signature.clone());
+        let mut checked = Checked::new(callable, contract);
+        if let Some(Adapt::Python { .. }) = adapt {
+            checked.keywords = (descriptor.signature.params.iter())
+                .map(|param| param.name.clone())
+                .collect();
+        }
         Ok(Some((unit, adapt, Arc::new(checked))))
     }
 }

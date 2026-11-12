@@ -589,6 +589,10 @@ pub struct Checked {
     /// What each parameter's type holds a value to by its kind alone
     /// (`Shallow`), in order.
     pub shallow: Box<[Shallow]>,
+    /// The names a packed Python export takes its keyword arguments by,
+    /// from the export's own signature: packing, apart from the contract
+    /// a call holds to (empty for any other callee).
+    pub keywords: Box<[lash_kernel_value::Name]>,
 }
 
 impl Checked {
@@ -602,6 +606,7 @@ impl Checked {
                 .map(|param| Shallow::of(&param.ty))
                 .collect(),
             signature,
+            keywords: Box::default(),
         }
     }
 }

@@ -703,17 +703,25 @@ impl<'a> Compiler<'a> {
         slot: ImportSlot,
         callable: CallableId,
     ) -> Option<Arc<Checked>> {
-        let lash_kernel_value::names::ImportKind::Code { signature, .. } =
-            &self.document.imports.get(&slot)?.kind
-        else {
-            return None;
-        };
+        let signature = self.import_signature(slot)?;
         let typed = signature.result != lash_kernel_value::Type::Any
             || signature
                 .params
                 .iter()
                 .any(|param| param.ty != lash_kernel_value::Type::Any);
         typed.then(|| Arc::new(Checked::new(callable, signature.clone())))
+    }
+
+    /// The public signature import `slot` of the Link being compiled
+    /// declares: the contract a call through it holds to (FIG-7143).
+    pub(crate) fn import_signature(
+        &self,
+        slot: ImportSlot,
+    ) -> Option<&lash_kernel_value::Signature> {
+        match &self.document.imports.get(&slot)?.kind {
+            lash_kernel_value::names::ImportKind::Code { signature, .. } => Some(signature),
+            _ => None,
+        }
     }
 
     /// The callee `callable` is from `f`: its own Link's code.
