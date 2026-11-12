@@ -34,7 +34,7 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 /// an encoding change requires a reset, with no migration or old-body reader.
 ///
 /// version_guard(
-///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document)),
+///     roots(path = "crates/lash-kernel-doc/src/document.rs", Document),
 ///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
 /// )
 /// format_manifest = "KernelDocument"

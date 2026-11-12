@@ -122,6 +122,7 @@ STRICT_VERSION_BUMPS = False
 # overlay bytes have a separate reset witness, which must cover the complete
 # trace projection. Strict mode ignores this pre-cut ownership relation.
 PRE_CUT_RESET_WITNESSES = {"TRACE_SCHEMA_VERSION": "HOST_STORED_SCHEMA_VERSION"}
+DOCUMENT_PROJECTION_PREDECESSOR = "d709cfaf7f5bbc3ed9efb5363f10bbca7c7525ff"
 # The one table a record lift is registered in (ADR 0106 §2). Its default-build
 # arm is the upgrade evidence a bumped decoder-law surface owes.
 UPCASTER_REGISTRY = "crates/lash-core-store/src/store/fleet_format.rs"
@@ -2988,6 +2989,30 @@ def _declaration(view: TreeView, surface: Surface) -> Declaration | None:
                        None, declared.catalogs if declared else ())
 
 
+def audited_document_guards(
+    base: TreeView, surface: Surface, guards: tuple[Guard, ...]
+) -> tuple[Guard, ...]:
+    """Correct the reviewed main predecessor's overbroad document projection.
+
+    FIG-7694 / r57 L56: main's document.rs sweep included ephemeral Selection
+    and RestoreSelection, neither serialized by Document. Compare the Document
+    closure on BOTH trees instead. Only these two owners, this predecessor and
+    this exact sweep are corrected; decode and every other guard still bind.
+    The normal union of base/head guards, including dropped roots, stays intact.
+    """
+    if not isinstance(base, RevisionView) or base.revision != DOCUMENT_PROJECTION_PREDECESSOR:
+        return guards
+    if surface.key not in {
+        "crates/lash-kernel-doc/src/document_bytes.rs:DOCUMENT_GRAMMAR_VERSION",
+        "crates/lash-vm-runtime/src/formats.rs:KERNEL_DOCUMENT_SCHEMA_VERSION",
+    }:
+        return guards
+    paths = ("crates/lash-kernel-doc/src/document.rs",)
+    historical = Guard("shapes", paths, must_cover=("Document",))
+    corrected = Guard("roots", paths, ("Document",))
+    return tuple(corrected if guard == historical else guard for guard in guards)
+
+
 def _compare(
     base: TreeView,
     head: TreeView,
@@ -3115,8 +3140,11 @@ def check_views(
             changed, head_entries = _compare(
                 base_view,
                 head_view,
-                declaration.guards,
-                () if base_declaration is None else base_declaration.guards,
+                audited_document_guards(base_view, surface, declaration.guards),
+                audited_document_guards(
+                    base_view, surface,
+                    () if base_declaration is None else base_declaration.guards,
+                ),
             )
             if previous is None:
                 registered.append(surface)

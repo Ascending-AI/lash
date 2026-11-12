@@ -20,6 +20,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("check_version_bumps.py")
@@ -1015,6 +1016,118 @@ class GuardSet(Harness):
         code, output = self.verdict(self.commit("unknown kind"))
         self.assertEqual(code, 2, output)
         self.assertIn("unknown entry 'serde'", output)
+
+
+class DocumentProjection(Harness):
+    """Only the audited predecessor's document sweep gets corrected."""
+
+    document_path = "crates/lash-kernel-doc/src/document.rs"
+    bytes_path = "crates/lash-kernel-doc/src/document_bytes.rs"
+    runtime_path = "crates/lash-vm-runtime/src/formats.rs"
+    document = """
+        #[derive(Serialize, Deserialize)]
+        pub struct Document { pub function: FunctionDefinition }
+        #[derive(Serialize, Deserialize)]
+        pub struct FunctionDefinition { pub body: String }
+    """
+    ephemeral = """
+        #[derive(Serialize, Deserialize)]
+        pub struct Selection { pub live: bool }
+    """
+    codec = """
+        impl TokenCodec for FunctionDefinition {
+            fn encode(&self, out: &mut TokenWriter) { out.text(&self.body); }
+        }
+    """
+
+    def marker(self, kind: str) -> str:
+        root = 'cover(Document)' if kind == 'shapes' else 'Document'
+        return textwrap.dedent(f"""
+            /// version_guard(
+            ///     {kind}(path = "{self.document_path}", {root}),
+            ///     items(path = "{self.bytes_path}", decode),
+            /// )
+        """).lstrip("\n")
+
+    def declarations(self, kind: str) -> None:
+        self.write(self.bytes_path, self.marker(kind) + textwrap.dedent("""
+            /// version_surface = "coexist"
+            pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
+            pub fn decode(body: &[u8]) -> usize { body.len() }
+        """).lstrip("\n"))
+        self.write(self.runtime_path, self.marker(kind) + textwrap.dedent("""
+            /// version_surface = "migrate"
+            /// version_unguarded = "pre-1.0 reset"
+            pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 7;
+        """).lstrip("\n"))
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("crates/lash-kernel-doc/Cargo.toml", '[package]\nname = "lash-kernel-doc"\n')
+        self.write(self.document_path, self.document + self.ephemeral)
+        self.write("crates/lash-kernel-doc/src/codec.rs", self.codec)
+        self.declarations("shapes")
+        self.base = self.commit("predecessor sweeps ephemeral admission types")
+        self.declarations("roots")
+        self.write(self.document_path, self.document)
+
+    def corrected_verdict(self) -> tuple[int, str]:
+        # Fixture commits cannot have the production predecessor's SHA.
+        with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.base, create=True):
+            return self.verdict(self.commit("correct document projection"))
+
+    def test_removing_unreachable_admission_types_is_neutral(self) -> None:
+        code, output = self.corrected_verdict()
+        self.assertEqual(code, 0, output)
+
+    def test_executable_changes_still_require_both_document_bumps(self) -> None:
+        mutations = (
+            (self.document_path, "pub function:", "pub renamed:"),
+            (self.document_path, "pub body: String", "pub body: Vec<String>"),
+            ("crates/lash-kernel-doc/src/codec.rs", "out.text(&self.body)", "out.text(\"changed\")"),
+            (self.bytes_path, "body.len()", "body.len() + 1"),
+        )
+        for path, old, new in mutations:
+            with self.subTest(path=path, old=old):
+                original = (self.repo / path).read_text()
+                self.write(path, original.replace(old, new))
+                code, output = self.corrected_verdict()
+                self.assertEqual(code, 1, output)
+                for constant in ("DOCUMENT_GRAMMAR_VERSION", "KERNEL_DOCUMENT_SCHEMA_VERSION"):
+                    self.assertIn(f"{constant} is 7 on both sides", output)
+                self.write(path, original)
+
+    def test_an_unreviewed_predecessor_keeps_the_old_guard(self) -> None:
+        code, output = self.verdict(self.commit("unreviewed base"))
+        self.assertEqual(code, 1, output)
+        self.assertIn("Selection", output)
+
+    def test_other_guards_and_surfaces_keep_their_obligations(self) -> None:
+        # The same known sweep is not corrected for another surface.
+        self.write("crates/lash-kernel-doc/src/other.rs", self.marker("shapes") + textwrap.dedent("""
+            /// version_surface = "coexist"
+            pub const OTHER_DOCUMENT_VERSION: u32 = 7;
+        """).lstrip("\n"))
+        self.write(self.document_path, self.document + self.ephemeral)
+        self.base = self.commit("another surface guards selection")
+        self.write(self.document_path, self.document)
+        code, output = self.corrected_verdict()
+        self.assertEqual(code, 1, output)
+        self.assertIn("OTHER_DOCUMENT_VERSION is 7 on both sides", output)
+        self.assertIn("Selection", output)
+
+    def test_a_different_historical_guard_is_not_corrected(self) -> None:
+        self.declarations("shapes")
+        for path in (self.bytes_path, self.runtime_path):
+            self.write(path, (self.repo / path).read_text().replace(
+                "cover(Document)", "cover(Document, Selection)"))
+        self.write(self.document_path, self.document + self.ephemeral)
+        self.base = self.commit("different sweep identity")
+        self.declarations("roots")
+        self.write(self.document_path, self.document)
+        code, output = self.corrected_verdict()
+        self.assertEqual(code, 1, output)
+        self.assertIn("Selection", output)
 
 
 class Reachable(Harness):
