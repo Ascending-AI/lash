@@ -431,17 +431,35 @@ fn a_direct_memo_resolves_rebound_closures_and_their_captures() {
 /// before its next unpaid op, preserving captures and the exact refusal.
 #[test]
 fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
-    for (body, answers, retries) in [
+    for (body, answers, last, projected, retries) in [
         (
             "set last = x return x",
             Datum::List((0..6).map(int).collect()),
+            5,
+            false,
             false,
         ),
-        ("set last = x", Datum::List(vec![Datum::Null; 6]), false),
+        (
+            "set last = x",
+            Datum::List(vec![Datum::Null; 6]),
+            5,
+            false,
+            false,
+        ),
         (
             "let answer = call helper.item(null, x) set last = answer return answer",
             Datum::List((0..6).map(int).collect()),
+            5,
+            false,
             true,
+        ),
+        ("return 7", Datum::List(vec![int(7); 6]), 0, true, false),
+        (
+            "return x",
+            Datum::List((0..6).map(int).collect()),
+            0,
+            true,
+            false,
         ),
     ] {
         let source = format!(
@@ -449,13 +467,20 @@ fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
         );
         let roomy = super::super::embedder::ROOMY;
         let before = crate::vm::calls::leaves();
+        let projects = crate::vm::calls::projections();
         let retried = crate::vm::calls::retries();
         let fast = observe(&source, u64::MAX, roomy, false);
         assert!(
             crate::vm::calls::leaves() > before,
             "the authored f returned through its real-frame leaf path"
         );
-        let expected = Datum::Tuple(vec![answers, int(5)]);
+        if projected {
+            assert!(
+                crate::vm::calls::projections() > projects,
+                "the selected constant/local projection returned through its real frame: {body}"
+            );
+        }
+        let expected = Datum::Tuple(vec![answers, int(last)]);
         assert_eq!(fast.end, format!("finished {expected:?}"));
         let plain = crate::vm::calls::without_memo(|| observe(&source, u64::MAX, roomy, false));
         assert_eq!(fast.outcome(), plain.outcome());

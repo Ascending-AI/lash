@@ -58,13 +58,14 @@ pub(crate) struct Direct {
     globals: usize,
     params: u16,
     entry: Entry,
-    leaf: bool,
+    leaf: Leaf,
 }
 
 #[cfg(test)]
 thread_local! {
     static PLAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static RETRIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PROJECTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static LEAVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -94,6 +95,11 @@ pub(crate) fn leaves() -> u64 {
 #[cfg(test)]
 pub(crate) fn retries() -> u64 {
     RETRIES.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn projections() -> u64 {
+    PROJECTS.with(std::cell::Cell::get)
 }
 
 fn small_leaf(program: &Program, unit: &Unit) -> bool {
@@ -126,6 +132,34 @@ fn small_leaf(program: &Program, unit: &Unit) -> bool {
             }
             _ => false,
         })
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Leaf {
+    Plain,
+    Ops,
+    Project {
+        block: u32,
+        value: crate::bytecode::program::Operand,
+    },
+}
+
+fn leaf_of(program: &Program, unit: &Unit) -> Leaf {
+    use crate::bytecode::program::Operand;
+    if !small_leaf(program, unit) {
+        return Leaf::Plain;
+    }
+    match unit.ops.as_slice() {
+        [Op::Block(block), Op::Const(n), Op::Return, ..] => Leaf::Project {
+            block: *block,
+            value: Operand::Const(*n),
+        },
+        [Op::Block(block), Op::Local(n), Op::Return, ..] => Leaf::Project {
+            block: *block,
+            value: Operand::Local(*n),
+        },
+        _ => Leaf::Ops,
+    }
 }
 
 impl<H: Heap> Vm<H> {
@@ -398,10 +432,66 @@ impl<H: Heap> Vm<H> {
             #[cfg(test)]
             HITS.with(|hits| hits.set(hits.get() + 1));
             self.enter_value(at, argc, direct.params, direct.entry, Some(handle))?;
-            return if direct.leaf {
-                self.leaf_run(program, direct.entry, checked)
-            } else {
-                Ok(())
+            return match direct.leaf {
+                Leaf::Plain => Ok(()),
+                Leaf::Ops => self.leaf_run(program, direct.entry, checked),
+                Leaf::Project { block, value } => {
+                    if self.watch.is_some() {
+                        return Ok(());
+                    }
+                    #[cfg(test)]
+                    if self.chill.is_some() || self.collecting {
+                        return Ok(());
+                    }
+                    let unit = program.unit(direct.entry.unit);
+                    let top = self.cx.frames.len() - 1;
+                    self.meter.leave();
+                    self.exact = !self.meter.enter(unit.blocks[block as usize].charge);
+                    if self.exact {
+                        self.cx.frames[top].pc = 1;
+                        return Ok(());
+                    }
+                    #[cfg(test)]
+                    for pc in [1, 2] {
+                        if unit.steps && unit.step[pc] {
+                            crate::perf_witness::record(|work| work.vm_steps += 1);
+                        }
+                    }
+                    let base = self.cx.frames[top].base as usize;
+                    let value = match value {
+                        crate::bytecode::program::Operand::Local(n) => {
+                            self.cx.stack[base + usize::from(n)]
+                        }
+                        crate::bytecode::program::Operand::Const(n) => self.konst(n),
+                    };
+                    self.cx.frames[top].pc = 3;
+                    // A checked return may read cold and retry Return. Its operand
+                    // must then stand exactly where ordinary dispatch leaves it.
+                    if checked {
+                        self.push(value);
+                    }
+                    self.meter.leave();
+                    self.exact = true;
+                    let unfit = if checked {
+                        self.unfit_result(value)?
+                    } else {
+                        None
+                    };
+                    let Some(frame) = self.cx.frames.pop() else {
+                        return Err(fault("a leaf returned without a frame"));
+                    };
+                    self.heap.release(direct.entry.cost);
+                    self.cx.stack.truncate(frame.base as usize);
+                    if let Some(unfit) = unfit {
+                        return Err(self.typed_error("entry_type_mismatch", &unfit));
+                    }
+                    self.push(value);
+                    #[cfg(test)]
+                    LEAVES.with(|leaves| leaves.set(leaves.get() + 1));
+                    #[cfg(test)]
+                    PROJECTS.with(|projects| projects.set(projects.get() + 1));
+                    Ok(())
+                }
             };
         }
         let (unit, closure, callable) = match callee {
@@ -454,7 +544,7 @@ impl<H: Heap> Vm<H> {
                 globals: self.globals.len(),
                 params,
                 entry,
-                leaf: small_leaf(program, program.unit(unit)),
+                leaf: leaf_of(program, program.unit(unit)),
             });
         }
         self.enter_value(at, argc, params, entry, closure)
