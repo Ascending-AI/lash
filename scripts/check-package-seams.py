@@ -44,7 +44,13 @@ def check(metadata: dict) -> tuple[list[str], list[str]]:
     packages = {package["id"]: package for package in metadata["packages"]}
     names = {identity: package_name(package) for identity, package in packages.items()}
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    runtime = {identity for identity, name in names.items() if name.startswith(("lash-kernel-", "lash-vm-", "lash-dialect-"))}
+    # 2ec8e492978 made lash-kernel-value the shared value, identity, schema and
+    # tool-contract vocabulary owner. Hosts import those types directly; this
+    # exemption permits that owner, while traversal still checks its dependencies.
+    shared_vocabulary = {"lash-kernel-value"}
+    runtime = {identity for identity, name in names.items()
+               if name.startswith(("lash-kernel-", "lash-vm-", "lash-dialect-"))
+               and name not in shared_vocabulary}
     protocols = {identity for identity, name in names.items() if name in {"lash-protocol-standard", "lash-protocol-rlm"}}
     failures, development = [], []
     roots = {"lash-core", "lash-protocol-standard"}
@@ -72,6 +78,33 @@ def check(metadata: dict) -> tuple[list[str], list[str]]:
 
 class SeamsLaw(unittest.TestCase):
     """L-SEAMS traverses resolved IDs and enabled production edges."""
+
+    def test_shared_vocabulary_exemption_does_not_hide_runtime_paths(self):
+        names = ["lash-internal-core", "lash-internal-protocol-standard", "lash-kernel-value", "shared"]
+        packages = [{"id": str(index), "name": name} for index, name in enumerate(names)]
+        def edge(target):
+            return {"pkg": str(target), "dep_kinds": [{"kind": None}]}
+        nodes = [{"id": str(index), "deps": []} for index in range(len(names))]
+        nodes[0]["deps"] = [edge(2)]
+        nodes[1]["deps"] = [edge(3)]
+        nodes[3]["deps"] = [edge(2)]
+        metadata = {"packages": packages, "resolve": {"nodes": nodes}}
+        self.assertEqual(check(metadata), ([], []))
+        for refused in ["lash-kernel-doc", "lash-kernel-values", "lash-vm-runtime", "lash-dialect-typescript"]:
+            with self.subTest(refused=refused):
+                packages.append({"id": "4", "name": refused})
+                nodes.append({"id": "4", "deps": []})
+                nodes[2]["deps"] = [edge(4)]
+                self.assertEqual(check(metadata)[0], [
+                    f"L-SEAMS: lash-core -> lash-kernel-value -> {refused}",
+                    f"L-SEAMS: lash-protocol-standard -> shared -> lash-kernel-value -> {refused}",
+                ])
+                nodes[2]["deps"] = []
+                nodes[0]["deps"] = [edge(4)]
+                self.assertEqual(check(metadata)[0], [f"L-SEAMS: lash-core -> {refused}"])
+                nodes[0]["deps"] = [edge(2)]
+                nodes.pop()
+                packages.pop()
 
     def test_shared_optional_target_edge_is_production_and_dev_is_separate(self):
         names = ["lash-internal-core", "lash-internal-protocol-standard", "shared", "lash-internal-vm-runtime", "lash-internal-plugin-example"]
