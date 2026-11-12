@@ -692,7 +692,7 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                     _ => 0,
                 })
                 .collect();
-            for representation in 0..4 {
+            for representation in 0..5 {
                 let utf16 = representation == 3;
                 let sort = if utf16 {
                     "list.sort_by_utf16_keys"
@@ -702,6 +702,22 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                 let keys: Vec<String> = ranks
                     .iter()
                     .map(|rank| match representation {
+                        // Inline keys need a length tie-breaker after zero padding:
+                        // "" precedes "\0", and "a" precedes "a\0".
+                        4 => serde_json::to_string(
+                            &[
+                                "",
+                                "\0",
+                                "a",
+                                "a\0",
+                                "😀",
+                                "\u{e000}",
+                                "abcdefghijklm",
+                                "abcdefghijklmn",
+                            ][rank % 8],
+                        )
+                        .unwrap()
+                        .replace("\\u0000", "\\u{0}"),
                         1 => format!("({}, {rank})", rank % 3),
                         2 => format!("[{}, {rank}]", rank % 3),
                         3 => serde_json::to_string(
