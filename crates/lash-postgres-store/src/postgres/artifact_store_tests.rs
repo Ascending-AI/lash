@@ -246,3 +246,180 @@ async fn a_hold_reads_what_the_locks_it_waited_behind_committed() {
         "the reclamation committed behind the lock refuses the hold"
     );
 }
+
+/// An environment over one link and the document it links, published by
+/// `claim`: its reference, its bytes and the document.
+pub(crate) async fn published_environment(
+    store: &crate::PostgresLashVmArtifactStore,
+    claim: &ReferrerClaim,
+    round: u8,
+) -> (
+    lash_execution_contracts::process::ProcessEnvRef,
+    Vec<u8>,
+    String,
+) {
+    use lash_durable::packages::PackageStore as _;
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+
+    let document = lash_kernel_value::names::DocumentId::from_bytes([round; 32]);
+    store
+        .publish_module_artifact(claim, &document.to_string(), b"linked document")
+        .await
+        .expect("publish the document");
+    let link = lash_kernel_value::package::Link {
+        helper_fills: Default::default(),
+        document,
+        fills: Default::default(),
+    };
+    let link = lash_core_store::packages::LinkRecord {
+        id: link.identity(),
+        link,
+    };
+    store.put_link(claim, &link, &[]).await.expect("link");
+    let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+        lash_vocabulary::claims::RegistryKind::Process,
+    );
+    execution.authored.insert(link.id);
+    let env = lash_core_store::process_env::ProcessEnv::builder(
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
+    )
+    .execution(execution)
+    .build()
+    .expect("environment");
+    let env_ref = env.stable_ref().expect("environment reference");
+    let bytes = env.to_store_bytes().expect("environment bytes");
+    store
+        .publish_process_env(claim, &env_ref, &bytes)
+        .await
+        .expect("publish the environment");
+    (env_ref, bytes, document.to_string())
+}
+
+/// The dependency edges stored, in key order.
+async fn dependency_edges(pool: &sqlx::PgPool) -> Vec<(String, String, String, String)> {
+    sqlx::query_as(
+        "SELECT holder_namespace, holder_ref, namespace, artifact_ref
+         FROM lash_artifact_dependency_edges ORDER BY 1, 2, 3, 4",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read the dependency edges")
+}
+
+/// Republishing a stored environment answers as its first publication
+/// did: a corrupt stored body refuses as Immutable, missing dependency
+/// edges are written again, and a closure module reclaimed by the
+/// transaction its lock waited behind refuses as missing (FIG-7701 R5,
+/// review items 22 and 29). Other bytes under the reference never reach
+/// the store: `publish_process_env` refuses them first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_republication_answers_as_a_first_publication() {
+    use lash_core_store::process_env::stored;
+    use lash_execution_contracts::module_artifacts::ArtifactStoreError;
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the republication law: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = std::sync::Arc::new(storage.process_env_store());
+    let pool = storage.pool();
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let (env_ref, bytes, document) = published_environment(&store, &claim, 21).await;
+    let split = stored::split(&bytes).expect("the environment stores split");
+    let edges = dependency_edges(pool).await;
+    assert!(
+        edges.iter().any(|(holder_namespace, _, _, artifact_ref)| {
+            holder_namespace == stored::BODY_NAMESPACE && *artifact_ref == document
+        }),
+        "the body holds the document: {edges:?}"
+    );
+    let immutable = |error: ArtifactStoreError| match error {
+        ArtifactStoreError::Immutable { artifact_ref } => {
+            assert_eq!(artifact_ref, env_ref.as_str());
+        }
+        other => panic!("refuses as Immutable: {other:?}"),
+    };
+    let republisher = || {
+        ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+            .expect("pin claim")
+    };
+
+    // A corrupt stored body.
+    let corrupt = |body: Vec<u8>| {
+        sqlx::query(
+            "UPDATE lash_lash_vm_artifacts SET artifact_bytes = $2
+             WHERE namespace = 'process_env_body' AND artifact_ref = $1",
+        )
+        .bind(split.body_ref.clone())
+        .bind(body)
+        .execute(pool)
+    };
+    corrupt(b"{}".to_vec()).await.expect("corrupt the body");
+    immutable(
+        store
+            .publish_process_env(&republisher(), &env_ref, &bytes)
+            .await
+            .expect_err("a corrupt stored body"),
+    );
+    corrupt(split.body.clone()).await.expect("restore the body");
+
+    // Missing dependency edges are written again.
+    sqlx::query(
+        "DELETE FROM lash_artifact_dependency_edges WHERE holder_namespace <> 'kernel_document'",
+    )
+    .execute(pool)
+    .await
+    .expect("drop the environment's edges");
+    store
+        .publish_process_env(&republisher(), &env_ref, &bytes)
+        .await
+        .expect("republish");
+    assert_eq!(
+        dependency_edges(pool).await,
+        edges,
+        "the edges are repaired"
+    );
+
+    // A closure module reclaimed while the republication waits on its lock.
+    let mut reclaimer = pool.begin().await.expect("begin the reclamation");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(super::artifact_lock_key(
+            super::MODULE_ARTIFACT_NAMESPACE,
+            &document,
+        ))
+        .execute(&mut *reclaimer)
+        .await
+        .expect("hold the document lock");
+    for statement in [
+        "DELETE FROM lash_artifact_dependency_edges WHERE namespace = 'kernel_document' AND artifact_ref = $1",
+        "DELETE FROM lash_artifact_referrer_edges WHERE namespace = 'kernel_document' AND artifact_ref = $1",
+        "DELETE FROM lash_lash_vm_artifacts WHERE namespace = 'kernel_document' AND artifact_ref = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(&document)
+            .execute(&mut *reclaimer)
+            .await
+            .expect("reclaim the document");
+    }
+    let republication = tokio::spawn({
+        let store = std::sync::Arc::clone(&store);
+        let claim = republisher();
+        let (env_ref, bytes) = (env_ref.clone(), bytes.clone());
+        async move { store.publish_process_env(&claim, &env_ref, &bytes).await }
+    });
+    until_a_lock_waits(pool).await;
+    reclaimer.commit().await.expect("commit the reclamation");
+    assert!(
+        matches!(
+            republication.await.expect("the republication ran"),
+            Err(ArtifactStoreError::ArtifactMissing { artifact_ref }) if artifact_ref == document
+        ),
+        "the reclamation committed behind the lock refuses the republication"
+    );
+}

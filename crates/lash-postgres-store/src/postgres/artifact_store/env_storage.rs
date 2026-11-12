@@ -179,12 +179,22 @@ impl EnvPublication {
         tx: &mut sqlx::PgConnection,
         env_ref: &str,
         bytes: &[u8],
+        referrer: &ArtifactReferrer,
     ) -> Result<(), ArtifactStoreError> {
-        match &self.split {
-            Some(split) => {
-                let at = i32::try_from(split.at).map_err(|_| {
+        let at =
+            match &self.split {
+                Some(split) => Some(i32::try_from(split.at).map_err(|_| {
                     ArtifactStoreError::Encode("process environment too large".into())
-                })?;
+                })?),
+                None => None,
+            };
+        if let (Some(split), Some(at), Ok(closure)) = (&self.split, at, &self.closure)
+            && republish_tx(tx, env_ref, split, at, closure, referrer).await?
+        {
+            return Ok(());
+        }
+        match (&self.split, at) {
+            (Some(split), Some(at)) => {
                 crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
                     .bind(PROCESS_ENV_BODY_NAMESPACE)
                     .bind(&split.body_ref)
@@ -202,7 +212,7 @@ impl EnvPublication {
                     .await
                     .map_err(backend)?;
             }
-            None => {
+            _ => {
                 crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
                     .bind(PROCESS_ENV_NAMESPACE)
                     .bind(env_ref)
@@ -240,6 +250,101 @@ impl EnvPublication {
             )
             .await?;
         }
+        crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
+            .bind(PROCESS_ENV_NAMESPACE)
+            .bind(env_ref)
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
         Ok(())
     }
+}
+
+/// Republish an environment stored exactly as `split` stores it, in one
+/// call under the head's, the body's and every closure module's lock
+/// (FIG-7701 R5): the stored head and body compared with `split`, then the
+/// first missing module of `closure` refused, else the closure's, the
+/// body's and the referrer's edges written as a first publication writes
+/// them. `false` when the stored rows differ from `split` in any way or are
+/// absent: nothing is written, and the caller stores as a first
+/// publication does, so missing, corrupt and Immutable answers are its.
+async fn republish_tx(
+    tx: &mut sqlx::PgConnection,
+    env_ref: &str,
+    split: &lash_core_store::process_env::stored::StoredSplit,
+    at: i32,
+    closure: &BTreeSet<String>,
+    referrer: &ArtifactReferrer,
+) -> Result<bool, ArtifactStoreError> {
+    let modules: Vec<&str> = closure.iter().map(String::as_str).collect();
+    let (stored, missing): (bool, Option<String>) =
+        crate::observed_sql::query_as(artifact_sql().postgres.republish_process_env.sql())
+            .bind(env_ref)
+            .bind(&split.head)
+            .bind(&split.body_ref)
+            .bind(at)
+            .bind(&split.body)
+            .bind(&modules)
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
+    match missing {
+        Some(artifact_ref) => Err(ArtifactStoreError::ArtifactMissing { artifact_ref }),
+        None => Ok(stored),
+    }
+}
+
+/// The republication call. Its statements start after the caller's lock
+/// statement, so they read what any holder of those locks committed.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn function_ddl() -> String {
+    // The comparison is the splice `select_bytes` reads, taken apart as
+    // `stored::split` takes it; then `select_missing_manifest`,
+    // `insert_dependency_edges` twice and the referrer `insert_edge`.
+    format!(
+        r#"CREATE OR REPLACE FUNCTION lash_republish_process_env(
+    p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea,
+    p_modules text[], p_kind text, p_id text,
+    OUT stored boolean, OUT missing text
+) LANGUAGE plpgsql VOLATILE AS $lash_republish_process_env$
+BEGIN
+    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS head
+        JOIN lash_lash_vm_artifacts AS body
+            ON body.namespace = '{body}' AND body.artifact_ref = head.body_ref
+        WHERE head.namespace = '{env}' AND head.artifact_ref = p_env_ref
+            AND head.storage_kind = 2 AND head.body_ref = p_body_ref
+            AND head.body_at = p_at AND head.artifact_bytes = p_head
+            AND body.artifact_bytes = p_body);
+    IF NOT stored THEN
+        RETURN;
+    END IF;
+    SELECT wanted.artifact_ref INTO missing
+    FROM unnest(p_modules) WITH ORDINALITY AS wanted(artifact_ref, ordinal)
+    WHERE NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS module
+        WHERE module.namespace = '{module}' AND module.artifact_ref = wanted.artifact_ref)
+    ORDER BY wanted.ordinal LIMIT 1;
+    IF missing IS NOT NULL THEN
+        RETURN;
+    END IF;
+    INSERT INTO lash_artifact_dependency_edges (namespace, artifact_ref, holder_namespace, holder_ref)
+        SELECT '{module}', wanted.artifact_ref, '{body}', p_body_ref
+        FROM unnest(p_modules) AS wanted(artifact_ref)
+        ON CONFLICT DO NOTHING;
+    INSERT INTO lash_artifact_dependency_edges (namespace, artifact_ref, holder_namespace, holder_ref)
+        VALUES ('{body}', p_body_ref, '{env}', p_env_ref)
+        ON CONFLICT DO NOTHING;
+    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+        VALUES ('{env}', p_env_ref, p_kind, p_id)
+        ON CONFLICT DO NOTHING;
+END
+$lash_republish_process_env$;
+"#,
+        env = PROCESS_ENV_NAMESPACE,
+        body = PROCESS_ENV_BODY_NAMESPACE,
+        module = MODULE_ARTIFACT_NAMESPACE,
+    )
 }

@@ -24,6 +24,10 @@ lash_store_sql::statements! {
         /// Lock keys `?1` in order, then the first of `?2`/`?3` not stored,
         /// else edges from referrer `?4`/`?5` to each of `?6`/`?7`.
         acquire_holds = "SELECT lash_acquire_holds(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4, ?5, ?6::TEXT[], ?7::TEXT[])";
+        /// Republish environment `?1` if stored exactly as head `?2`, body
+        /// `?3`/`?5` at `?4`: its first missing module of `?6`, else its
+        /// edges and referrer `?7`/`?8`'s (FIG-7701 R5).
+        republish_process_env = "SELECT stored, missing FROM lash_republish_process_env(?1, ?2, ?3, ?4, ?5, ?6::TEXT[], ?7, ?8)";
         /// Delete each artifact of `?2` in namespace `?1` that no referrer
         /// edge and no dependency edge names. Each deleted row answers the
         /// graph node it rooted, if bridged, once per artifact it held: its
@@ -233,6 +237,9 @@ use holds::{Holds, lock_live_referrer_tx};
 
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use holds::function_ddl as holds_function_ddl;
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) use env_storage::function_ddl as republish_function_ddl;
 
 #[path = "artifact_store/env_storage.rs"]
 mod env_storage;
@@ -647,28 +654,29 @@ impl PostgresLashVmArtifactStore {
                 .map_err(ArtifactStoreError::from)?;
         }
         if let Some(publication) = env_publication {
-            publication.store(&mut tx, artifact_ref, bytes).await?;
-        } else {
-            crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
-                .bind(namespace)
-                .bind(artifact_ref)
-                .bind(bytes)
-                .execute(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(backend)?;
-            let stored: Vec<u8> = crate::observed_sql::query_scalar(
-                artifact_sql().lash_vm_artifacts.select_bytes.sql(),
-            )
+            publication
+                .store(&mut tx, artifact_ref, bytes, &claim.referrer())
+                .await?;
+            return tx.commit().await.map_err(backend);
+        }
+        crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
             .bind(namespace)
             .bind(artifact_ref)
-            .fetch_one(crate::observed_sql::executor(&mut **tx))
+            .bind(bytes)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(backend)?;
-            if stored != bytes {
-                return Err(ArtifactStoreError::Immutable {
-                    artifact_ref: artifact_ref.to_owned(),
-                });
-            }
+        let stored: Vec<u8> =
+            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(backend)?;
+        if stored != bytes {
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: artifact_ref.to_owned(),
+            });
         }
         crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
             .bind(namespace)
@@ -1549,4 +1557,4 @@ mod packages;
 
 #[cfg(test)]
 #[path = "artifact_store_tests.rs"]
-mod tests;
+pub(crate) mod tests;
