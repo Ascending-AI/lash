@@ -47,6 +47,62 @@ lash_conformance::process_prune_reclaim_tests!({
     (database, "postgres", factory, registry, probe)
 });
 
+/// Reads a process row's state revision and faults the parent-end table.
+struct PostgresProcessRowProbe(sqlx::PgPool);
+
+#[async_trait::async_trait]
+impl lash_conformance::ProcessRowProbe for PostgresProcessRowProbe {
+    async fn state_rev(&self, process_id: &lash_vocabulary::identity::ProcessId) -> i64 {
+        sqlx::query_scalar("SELECT state_rev FROM lash_processes WHERE process_id = $1")
+            .bind(process_id.as_str())
+            .fetch_one(&self.0)
+            .await
+            .expect("read the process row's state revision")
+    }
+
+    async fn fail_parent_end_plan_writes(&self) {
+        sqlx::query(
+            "CREATE FUNCTION lash_fail_parent_end_plan_write() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION 'injected parent-end plan write failure'; END $$",
+        )
+        .execute(&self.0)
+        .await
+        .expect("create the plan-write fault function");
+        sqlx::query(
+            "CREATE TRIGGER fail_parent_end_plan_write BEFORE INSERT ON lash_parent_end_plans \
+             FOR EACH ROW EXECUTE FUNCTION lash_fail_parent_end_plan_write()",
+        )
+        .execute(&self.0)
+        .await
+        .expect("install the plan-write fault");
+    }
+
+    async fn clear_injected_failure(&self) {
+        for sql in [
+            "DROP TRIGGER fail_parent_end_plan_write ON lash_parent_end_plans",
+            "DROP FUNCTION lash_fail_parent_end_plan_write()",
+        ] {
+            sqlx::query(sql)
+                .execute(&self.0)
+                .await
+                .expect("remove the plan-write fault");
+        }
+    }
+}
+
+lash_conformance::process_row_packing_tests!({
+    let Some((database, storage)) = storage().await else {
+        eprintln!("skipping Postgres packed process-row laws: database URL is not set");
+        return;
+    };
+    lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
+        .await;
+    let probe = Arc::new(PostgresProcessRowProbe(storage.pool().clone()))
+        as Arc<dyn lash_conformance::ProcessRowProbe>;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    (database, registry, probe)
+});
+
 lash_conformance::process_start_staging_tests!({
     let Some((database, storage)) = storage().await else {
         eprintln!("skipping Postgres refused-start staging law: database URL is not set");

@@ -14,7 +14,9 @@ pub use identity_claims::*;
 pub use lifecycle::lifecycle_event_timestamps_follow_the_registry_clock;
 pub use lifecycle::terminal_retention_ignores_later_observer_facts;
 mod observer_transfer;
+mod packing;
 mod parent_end;
+pub use packing::*;
 mod registration;
 
 pub use external_ref::{

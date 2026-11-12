@@ -29,6 +29,52 @@ lash_conformance::process_prune_reclaim_tests!({
     (backend, "sqlite", factory, registry, probe)
 });
 
+/// Reads a process row's state revision and faults the parent-end table.
+struct SqliteProcessRowProbe(TestBackend);
+
+#[async_trait::async_trait]
+impl lash_conformance::ProcessRowProbe for SqliteProcessRowProbe {
+    async fn state_rev(&self, process_id: &lash_vocabulary::identity::ProcessId) -> i64 {
+        self.0
+            .raw()
+            .query_row(
+                "SELECT state_rev FROM processes WHERE process_id = ?1",
+                [process_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("read the process row's state revision")
+    }
+
+    async fn fail_parent_end_plan_writes(&self) {
+        self.0
+            .raw()
+            .execute_batch(
+                "CREATE TRIGGER fail_parent_end_plan_write BEFORE INSERT ON parent_end_plans \
+                 BEGIN SELECT RAISE(ABORT, 'injected parent-end plan write failure'); END;",
+            )
+            .expect("install the plan-write fault");
+    }
+
+    async fn clear_injected_failure(&self) {
+        self.0
+            .raw()
+            .execute_batch("DROP TRIGGER fail_parent_end_plan_write")
+            .expect("remove the plan-write fault");
+    }
+}
+
+lash_conformance::process_row_packing_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
+    let probe = Arc::new(SqliteProcessRowProbe(backend.clone()))
+        as Arc<dyn lash_conformance::ProcessRowProbe>;
+    (backend, registry, probe)
+});
+
 lash_conformance::process_start_staging_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;

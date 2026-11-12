@@ -694,6 +694,29 @@ macro_rules! process_prune_reclaim_tests {
     };
 }
 
+/// Register the packed process-row laws (FIG-7701). The fixture yields
+/// `(guard, process registry, process-row probe)`.
+#[macro_export]
+macro_rules! process_row_packing_tests {
+    ($fixture:block) => {
+        $crate::process_row_packing_tests!(@catalogue $fixture; [
+            a_start_failed_cancel_keeps_its_kind_on_the_row,
+            packing_and_reclaim_leave_the_feed_and_state_revision,
+            a_late_child_racing_close_prune_and_reclaim_is_refused_until_the_plan_expires,
+            a_prune_failing_at_plan_write_back_keeps_the_plan,
+        ]);
+    };
+    (@catalogue $fixture:block; [$($law:ident),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, registry, probe) = $fixture;
+                $crate::$law(registry, probe).await;
+            }
+        )*
+    };
+}
+
 /// Register the process-prune referrer law. The fixture yields
 /// `(guard, process registry, process-environment store)`.
 #[macro_export]
