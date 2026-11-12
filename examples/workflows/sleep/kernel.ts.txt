@@ -1,10 +1,10 @@
 kernel 1
 numbers float
 import 0 operation typescript.sleep(milliseconds: Int) -> Null
+library @3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
-library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
 library @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"870763c8f2f121b439cceb050143a4bb3839810440a4b08d26bbea12224470bf\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"870763c8f2f121b439cceb050143a4bb3839810440a4b08d26bbea12224470bf\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501\"}}},\"asynchronous\":true,\"rest\":false}}"
 definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nuse ts.sleep_duration = @ed7e1df186c1c990614358425e96e242a365f3698c014c4f0a08a59c17741fc0\nbody {\n  do let(t1 = perform 0(invoke ts.sleep_duration(5.0)) as Null then yield, absent)\n  return \"awake\" via ts.promise.adopt\n}\n"
 main {
   let demo = &demo

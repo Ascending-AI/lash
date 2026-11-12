@@ -1,16 +1,16 @@
 kernel 1
 numbers float
 library @1203889fd9d77b5a84dcfa66d861799477160913c465f2c0bcbbcc437cd8c6ba
-library @382f03c4bfd70b1a957a2348b5f08a680738e82b82d48230ece968b374a4a9eb
+library @3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501
+library @5367184c0e6f60ad94f7a898240cd57ecf4ecf90e5352341308409946eb8a824
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
-library @8c1d2bb3db77494c6b3e7f75e1cb09ff36ca4ee0373727aa5a8763573adf82dd
-library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
+library @a65aaff2f6c4ee09c8b2d814b589e9563240f90b2596bf02dcff2d8af02e221c
 library @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5
 library @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef
-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"b76a5de6590ad67a5b21ecb85f99b974cbe8d724b56d2e1776905f7d04867618\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"number\"}}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
-definition "function demo(items: Any) -> Any\nkernel 1\nmetering statements\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse ts.for_of.item = @1203889fd9d77b5a84dcfa66d861799477160913c465f2c0bcbbcc437cd8c6ba\nuse ts.for_of.next = @8c1d2bb3db77494c6b3e7f75e1cb09ff36ca4ee0373727aa5a8763573adf82dd\nuse ts.for_of.open = @382f03c4bfd70b1a957a2348b5f08a680738e82b82d48230ece968b374a4a9eb\nuse ts.number.checked = @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let total = 0.0\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set total = num.add(total, ts.number.checked(item))\n  }\n  return total via ts.promise.adopt\n}\n"
+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"5cc040265d033f512589a9e88b3ca0337656d990e2f814d80ebc63bbe6e3d302\",\"signature\":{\"params\":[{\"name\":\"items\",\"ty\":{\"list\":\"number\"}}],\"result\":\"number\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501\"}}},\"asynchronous\":true,\"rest\":false}}"
+definition "function demo(items: Any) -> Any\nkernel 1\nmetering statements\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse ts.for_of.item = @1203889fd9d77b5a84dcfa66d861799477160913c465f2c0bcbbcc437cd8c6ba\nuse ts.for_of.next = @a65aaff2f6c4ee09c8b2d814b589e9563240f90b2596bf02dcff2d8af02e221c\nuse ts.for_of.open = @5367184c0e6f60ad94f7a898240cd57ecf4ecf90e5352341308409946eb8a824\nuse ts.number.checked = @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let total = 0.0\n  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {\n    set total = num.add(total, ts.number.checked(item))\n  }\n  return total via ts.promise.adopt\n}\n"
 main {
   let demo = &demo
 }
 
-unit Library(FunctionId(b76a5de6590ad67a5b21ecb85f99b974cbe8d724b56d2e1776905f7d04867618)): statements=4 scopes=2 sites=5
+unit Library(FunctionId(5cc040265d033f512589a9e88b3ca0337656d990e2f814d80ebc63bbe6e3d302)): statements=4 scopes=2 sites=5

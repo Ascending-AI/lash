@@ -1669,3 +1669,144 @@ fn cenote_signature_refusal_explains_the_accepted_signature() {
         "{diagnostic}"
     );
 }
+
+/// FIG-7711: printing block-local functions retains main's private bindings
+/// and reads back to the complete original document.
+#[test]
+fn block_local_functions_print_with_the_same_private_bindings() {
+    let lowered = module(
+        "export const entry = async (): Promise<number> => 1; if (true) { async function local() { return 2; } const alsoLocal = async () => 3; }",
+    )
+    .unwrap();
+    let printed = crate::print(
+        &lowered.document,
+        Some(&lowered.captions),
+        super::library(),
+        lash_kernel_dialect::PrintOptions {
+            source_map: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let read = module(&printed.source).unwrap();
+    assert_eq!(
+        read.document.canonical_bytes(),
+        lowered.document.canonical_bytes()
+    );
+    printed
+        .source_map
+        .unwrap()
+        .validate(&lowered.document, &printed.source)
+        .unwrap();
+}
+
+/// FIG-7711: an older private-name list remains executable, but source is
+/// admitted only against the identity produced by this build's lowering.
+#[test]
+fn retained_documents_execute_but_source_requires_current_lowering_identity() {
+    use lash_kernel_dialect::{PrintError, PrintOptions, UnprintableReason};
+    use lash_kernel_doc::{Datum, Document};
+    use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, SessionEditor, Step, Target};
+    use std::sync::Arc;
+
+    struct Quiet;
+    impl Host for Quiet {
+        fn print(&mut self, _: &Datum) {}
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    let run = |document: &Document| {
+        lash_kernel_doc::validate_document(document, super::library()).unwrap();
+        let pages = super::pages::Source::default();
+        let program = crate::tests::linked::program(
+            Arc::new(document.clone()),
+            super::machine::prepared().clone(),
+        );
+        let mut machine = super::pages::with_source(
+            program,
+            Bounds {
+                charge_limit: 10_000_000,
+                memory: 64 << 20,
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: lash_kernel_vm::Charge::Exact,
+                call_depth: Bounds::DEFAULT_CALL_DEPTH,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            CellStart {
+                target: Target::Main,
+                args: vec![],
+                session: None,
+                owner: super::pages::OWNER,
+                modes: Default::default(),
+                host: vec![],
+            },
+            &pages,
+        )
+        .unwrap();
+        loop {
+            match machine.run(&mut Quiet, u64::MAX).unwrap() {
+                Step::Slice => {}
+                Step::Ended(End::Finished(finished)) => {
+                    let mut session =
+                        SessionEditor::open(finished.carry.as_ref(), Box::new(pages.clone()))
+                            .unwrap();
+                    let bindings = session
+                        .names()
+                        .unwrap()
+                        .into_iter()
+                        .map(|name| {
+                            let value = session.get(&name).unwrap();
+                            (name, value)
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                    break (finished.result, bindings);
+                }
+                other => panic!("unexpected retained-document outcome: {other:?}"),
+            }
+        }
+    };
+    let source = "export const entry=async(): Promise<number>=>1; const result=[1,2].map(x=>x+1);";
+    let current = module(source).unwrap().document.into_document();
+    let expected = run(&current);
+    assert_eq!(
+        expected.1.get(&Name::new("result")),
+        Some(&Some(lash_kernel_vm::SessionValue::Data(Datum::List(
+            vec![Datum::Float(2.0.into()), Datum::Float(3.0.into())]
+        ),)))
+    );
+    for branch_private_names in [false, true] {
+        let mut retained = current.clone();
+        if branch_private_names {
+            // The parent review probe's reserved callback parameters.
+            retained
+                .private_bindings
+                .extend(["this2", "unused1", "unused2"].map(Name::new));
+        } else {
+            // Main before 38e6b37663 did not mark invented names private.
+            retained.private_bindings.clear();
+        }
+        let retained =
+            lash_kernel_doc::parse_document(&lash_kernel_doc::print_document(&retained)).unwrap();
+        assert_ne!(retained.identity(), current.identity());
+        assert_eq!(run(&retained), expected);
+        assert!(matches!(
+            crate::print(&retained, None, super::library(), PrintOptions::default()),
+            Err(PrintError::Unprintable {
+                reason: UnprintableReason::ReadbackMismatch,
+                ..
+            })
+        ));
+        let (imported, _) = crate::read(
+            source,
+            &retained,
+            super::library(),
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(imported.canonical_bytes(), current.canonical_bytes());
+    }
+}

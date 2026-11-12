@@ -2,9 +2,9 @@
 -kernel 1
 -numbers float
 -import 0 operation corpus.echo(input?: Json) -> Json
+-library @3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501
 -library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
--library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
--export demo "{\"kind\":\"function\",\"value\":{\"function\":\"565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
+-export demo "{\"kind\":\"function\",\"value\":{\"function\":\"565873aa708389f4c59bfab2f71fd027580dd06f0db7d2b02d5107c584fffbe6\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501\"}}},\"asynchronous\":true,\"rest\":false}}"
 -definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return perform 0(\"hello\") as Json then yield via ts.promise.adopt\n}\n"
 -main {
 -  let demo = &demo
@@ -13,9 +13,9 @@
 +kernel 1
 +numbers float
 +import 0 operation corpus.echo(input?: Json) -> Json
++library @3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501
 +library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
-+library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
-+export demo "{\"kind\":\"function\",\"value\":{\"function\":\"5220c6629902548e84488f23788ab2feb71206edaf9046e4a8a716f21814860e\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260\"}}},\"asynchronous\":true,\"rest\":false}}"
++export demo "{\"kind\":\"function\",\"value\":{\"function\":\"5220c6629902548e84488f23788ab2feb71206edaf9046e4a8a716f21814860e\",\"signature\":{\"result\":\"text\"},\"convention\":{\"kind\":\"ts_direct\",\"value\":{\"await_fn\":{\"kind\":\"local\",\"value\":\"3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501\"}}},\"asynchronous\":true,\"rest\":false}}"
 +definition "function demo() -> Any\nkernel 1\nmetering statements\nimport 0 operation corpus.echo(input?: Json) -> Json\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  return perform 0(\"edited λ\") as Json then yield via ts.promise.adopt\n}\n"
 +main {
 +  let demo = &demo
@@ -23,8 +23,8 @@
 
 Correspondence:
 {
-  "base": "fe8fc433e88169ab74133ef0fb6f4f5ccd551f91f56695b6d7c58c1c3f9d1992",
-  "result": "ccb16d661973032fade9baaaefc8835f9569941affc986b7cfa366fb531ef157",
+  "base": "329d77c46fbc0a41cf0fdf3817262df4d4aac284ade2c73818377e56ffb4247f",
+  "result": "0901696161649938e12274851b8ea6a1e4c5ab88fa8c639e0a3746c1c07b3f60",
   "entries": [
     {
       "from": {

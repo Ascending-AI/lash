@@ -463,6 +463,28 @@ fn lower_beside_result(
     // and frozen captures stay in heap pages; lowering never reconstructs
     // those payloads as source expressions.
     let mut document = Document::new(NumberPolicy::Float, main);
+    // Fresh names are also reserved before entering a function frame. Only
+    // names main actually declares can be its private bindings (K-SES-001).
+    // In particular, a nested function's unused `arguments` is not one.
+    let mut declared = BTreeSet::new();
+    let mut pending = vec![lash_kernel_doc::Node::Block(
+        document.main.as_deref().unwrap_or_default(),
+    )];
+    while let Some(node) = pending.pop() {
+        use lash_kernel_doc::Node;
+        match node {
+            Node::Stmt(Stmt::Let { name, .. } | Stmt::For { binding: name, .. })
+            | Node::Expr(Expr::Let { name, .. }) => {
+                declared.insert(name.clone());
+            }
+            Node::Stmt(Stmt::Try(scope)) => {
+                declared.extend(scope.catch.iter().map(|catch| catch.binding.clone()));
+            }
+            _ => {}
+        }
+        pending.extend(node.children());
+    }
+    lowerer.private.retain(|name| declared.contains(name));
     document.private_bindings = lowerer.private;
     document.functions = lowerer.local_functions;
     if let Some(module) = lowerer.module.take() {
