@@ -2055,10 +2055,8 @@ await build()
     }
 }
 
-// K-LIB-006 / K-CHG-001 / CONT-EXACT: the actual dialect's complete
-// read/update and allocating format paths leave the same end, effects, stop
-// kinds and charge with the helpers' natives as with their bodies, at every
-// stop, every cold reopen and every finite charge bound.
+// K-LIB-006 / K-CHG-001 / CONT-EXACT: within one image (7bcba3681b),
+// match end, effects, stops and charge across cold opens and charge bounds.
 fn whole_path_regions_agree() {
     let cases = [
         (
@@ -2078,7 +2076,9 @@ fn whole_path_regions_agree() {
             label,
             source,
             program(installed().prepared.clone()),
-            program(bodies()),
+            program(lash_kernel_conformance::declining_bodies(
+                &installed().prepared,
+            )),
         )
     });
     let observe = |program: &Program, bounds, rebuild| {

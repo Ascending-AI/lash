@@ -889,6 +889,23 @@ body {
   return null
 }
 
+# The numeric arm of py.truediv, selected only from source-proven numbers.
+function py.number.truediv(left: Number, right: Number) -> Float
+kernel 1
+charge sum(4, size(left), size(right))
+native
+body {
+  if eq(right, 0) {
+    if same(kind(left), "integer") {
+      if same(kind(right), "integer") {
+        do invoke py.fail("ZeroDivisionError", "division by zero")
+      }
+    }
+    do invoke py.fail("ZeroDivisionError", "float division by zero")
+  }
+  return div(left, right)
+}
+
 function py.truediv(left: Any, right: Any) -> Float
 kernel 1
 charge sum(4, size(left), size(right))
@@ -909,6 +926,23 @@ body {
     do invoke py.fail("ZeroDivisionError", "float division by zero")
   }
   return div(left, right)
+}
+
+# The numeric arm of py.floordiv, selected only from source-proven numbers.
+function py.number.floordiv(left: Number, right: Number) -> Number
+kernel 1
+charge sum(4, size(left), size(right))
+native
+body {
+  if eq(right, 0) {
+    if same(kind(left), "integer") {
+      if same(kind(right), "integer") {
+        do invoke py.fail("ZeroDivisionError", "integer division or modulo by zero")
+      }
+    }
+    do invoke py.fail("ZeroDivisionError", "float floor division by zero")
+  }
+  return div_floor(left, right)
 }
 
 function py.floordiv(left: Any, right: Any) -> Any

@@ -213,6 +213,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_EXC_MATCHES_PLAN,
     &PY_TOKEN_PLAN,
     &PY_REVERSED_PLAN,
+    &PY_NUMBER_FLOORDIV_PLAN,
     &PY_ITER_PLAN,
     &PY_METHOD_RJUST_PLAN,
     &PY_METHOD_INSERT_PLAN,
@@ -308,6 +309,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &LIST_INSERT_PLAN,
     &PY_RANGE_PLAN,
     &PY_CONTAINS_PLAN,
+    &PY_NUMBER_TRUEDIV_PLAN,
     &PY_METHOD_POP_PLAN,
     &PY_BYTES_REPR_PLAN,
     &PY_METHOD_REMOVE_PLAN,
@@ -6870,6 +6872,76 @@ fn py_mul(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
+const PY_NUMBER_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.truediv",
+    function: p::function("db28f098c4f72c818b08be983b155bff8e4a43e9b8d9c43840c47eff3fe125f9"),
+    callees: &[
+        p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"),
+        p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
+        p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
+        p::function("b96f274d69ccc9d982a4064bbeae6b5f952fd8d1d4aaff8eabdfd112ebfc68ba"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("ZeroDivisionError"),
+        p::PlanLiteral::Text("division by zero"),
+        p::PlanLiteral::Text("float division by zero"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_truediv,
+    template: None,
+};
+
+/// `py.number.truediv`.
+fn py_number_truediv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
 const PY_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.truediv",
     function: p::function("8365ade18145fbd529c751c2580b3fc271e03a3d619d5753ff6c3f41c698dcc9"),
@@ -6964,6 +7036,76 @@ fn py_truediv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     ctx.local(0, 0)?;
     ctx.local(1, 1)?;
     ctx.call(7, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const PY_NUMBER_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.floordiv",
+    function: p::function("90c9670975db592ce0f9bb3f8169857934852c65805901f02a76cd305ce931ec"),
+    callees: &[
+        p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"),
+        p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
+        p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
+        p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("ZeroDivisionError"),
+        p::PlanLiteral::Text("integer division or modulo by zero"),
+        p::PlanLiteral::Text("float floor division by zero"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_floordiv,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"), ], heap: None, forwards: p::Forwards { floats: None, ints: Some(1), texts: None, identity: None } }),
+};
+
+/// `py.number.floordiv`.
+fn py_number_floordiv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
     Ok(ctx.take(0))
 }
 

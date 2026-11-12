@@ -27,7 +27,9 @@ py.add	b13a5f50ad9ae53416b12a68a23c5e88498fb470397ab625ea4b7ce1751c81a3	closed	-
 py.number.iadd	a7d5ed92a8b90f21dd462f6786cada35cfa6ae6dab06df289b61b25dfe6e01b5	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.sub	a802f30e278ec571745d7e9b17ff53167137dfd03ebcb8d65d19d4887dd1ea5e	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.mul	607bffef9da8e40671edea11b1536d767f50cbb9575469e1663ff48021e08a32	closed	-	true	0	true	sum(4, size(left), size(right), size(result))	generated
+py.number.truediv	db28f098c4f72c818b08be983b155bff8e4a43e9b8d9c43840c47eff3fe125f9	closed	-	false	0	false	sum(4, size(left), size(right))	generated
 py.truediv	8365ade18145fbd529c751c2580b3fc271e03a3d619d5753ff6c3f41c698dcc9	closed	-	true	0	false	sum(4, size(left), size(right))	generated
+py.number.floordiv	90c9670975db592ce0f9bb3f8169857934852c65805901f02a76cd305ce931ec	closed	-	false	0	false	sum(4, size(left), size(right))	generated
 py.floordiv	3b31bcd890cc9c278aeb855c3d2a07b7b589fd65c38be344c5e2d01577fc1094	closed	-	true	0	false	sum(4, size(left), size(right))	generated
 py.number.mod	b4439b0b2b7203798525fc3fdf4a4b9ba16b2e8089a8e7e46142f48a3a892d05	closed	-	false	0	false	sum(4, size(left), size(right))	generated
 py.pow	38a4a9e01ccdce8bff8f1e69e4136f32a3201c661aa675879b75cd2572a3437e	closed	-	true	0	false	sum(4, size(left), product(size(left), magnitude(right)))	generated

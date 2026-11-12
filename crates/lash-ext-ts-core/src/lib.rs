@@ -153,6 +153,18 @@ natives!(name, kernel;
             native: kernel("num.sub")?,
             operation: lash_kernel_doc::scalar::ScalarOp::Sub,
         }),
+        "ts.mul" => Arc::new(FloatPair {
+            native: kernel("num.mul")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Mul,
+        }),
+        "ts.div" => Arc::new(FloatPair {
+            native: kernel("num.div")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Div,
+        }),
+        "ts.rem" => Arc::new(FloatPair {
+            native: kernel("num.rem_trunc")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::RemTrunc,
+        }),
         "ts.step" => Arc::new(FloatPair {
             native: kernel("num.add")?,
             operation: lash_kernel_doc::scalar::ScalarOp::Add,
@@ -379,7 +391,7 @@ impl NativeFunction for Add {
     }
 }
 
-/// `ts.sub` (`a - b`) and `ts.step` (`++` and `--` after ToNumeric) on two
+/// Numeric TypeScript operators whose bodies forward two
 /// floats, which each body answers by its kernel operation alone. Every other
 /// pair declines to the body.
 struct FloatPair {

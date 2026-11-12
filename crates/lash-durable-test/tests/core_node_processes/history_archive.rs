@@ -332,6 +332,46 @@ impl Raw {
         }
     }
 
+    /// Run `statements` against the process's tables, in order: `{p}` is
+    /// the table prefix, `{owner}`, `{session}` and `{actor}` the process's
+    /// owner key, model session and actor key, as quoted literals, and
+    /// `{big}` a text of [`BIG`] bytes.
+    async fn alter(&self, process: &ProcessId, statements: &[&str]) {
+        let quote = |text: &str| format!("'{}'", text.replace('\'', "''"));
+        let actor = lash_durable::ActorKey::process(process.as_str()).unwrap();
+        let render = |prefix: &str, statement: &str| {
+            let big = if prefix.is_empty() {
+                format!("printf('%.*c', {BIG}, 'x')")
+            } else {
+                format!("repeat('x', {BIG})")
+            };
+            statement
+                .replace("{big}", &big)
+                .replace("{p}", prefix)
+                .replace(
+                    "{owner}",
+                    &quote(&OwnerKey::Process(process.clone()).stored()),
+                )
+                .replace("{session}", &quote(model_session(process).as_str()))
+                .replace("{actor}", &quote(actor.as_str()))
+        };
+        for statement in statements {
+            match self {
+                Self::Sqlite(path) => {
+                    Self::sqlite(path)
+                        .execute_batch(&render("", statement))
+                        .unwrap();
+                }
+                Self::Postgres(url) => {
+                    sqlx::raw_sql(&render("lash_", statement))
+                        .execute(&mut Self::pg(url).await)
+                        .await
+                        .unwrap();
+                }
+            }
+        }
+    }
+
     async fn set_archive(&self, process: &ProcessId, bytes: &[u8]) {
         match self {
             Self::Sqlite(path) => {
@@ -1082,6 +1122,142 @@ async fn a_history_over_the_cap_keeps_its_rows(tier: Tier) {
 }
 
 on_every_tier!(a_history_over_the_cap_keeps_its_rows: sqlite_memory, postgres);
+
+/// A finished history packs only once nothing can write it again: its
+/// actor ended, every call has its outcome and every model call its record
+/// (review finding 5). Short of that, a call's answer, a reservation's
+/// attempt or record, or a revived actor could still write a row the
+/// archive would hide, so the history keeps its rows, reads as before and
+/// is not retried.
+async fn a_history_that_could_still_change_keeps_its_rows(tier: Tier) {
+    let cases: [(&str, &[&str]); 3] = [
+        (
+            "a call with no outcome",
+            &[
+                "UPDATE {p}tool_calls SET answer_outcome = NULL, body_ref = NULL \
+               WHERE owner_key = {owner} AND call_id = \
+                 (SELECT min(call_id) FROM {p}tool_calls WHERE owner_key = {owner})",
+            ],
+        ),
+        (
+            "a model reservation",
+            &["UPDATE {p}model_call_records \
+               SET record_ref = NULL, ended_at_ms = NULL, written_epoch = NULL, attempt = 1 \
+               WHERE session_id = {session} AND call_id = \
+                 (SELECT min(call_id) FROM {p}model_call_records WHERE session_id = {session})"],
+        ),
+        (
+            "no actor",
+            &[
+                "DELETE FROM {p}actor_mail WHERE actor_key = {actor}",
+                "DELETE FROM {p}environment_owners WHERE actor_key = {actor}",
+                "DELETE FROM {p}actors WHERE actor_key = {actor}",
+            ],
+        ),
+    ];
+    for (case, statements) in cases {
+        let (stores, raw, _keep) = raw_stores(tier).await;
+        let (backend, core) = core_over(stores, 1024);
+        let process = Box::pin(run_one(&core, 2)).await;
+        let durable = Arc::clone(backend.durable());
+        raw.alter(&process, statements).await;
+        let model_keys = raw.model_keys(&process).await;
+        let before = answers(durable.as_ref(), &process, &model_keys).await;
+        let held = raw.rows(&process).await;
+        assert!(held > 0, "{case}: the history has rows");
+        let kept = Some((Some("rows".to_owned()), None));
+
+        assert_eq!(
+            durable.pack_finished_histories(16).await.unwrap(),
+            0,
+            "{case}: nothing packs"
+        );
+        assert_eq!(
+            raw.history(&process).await,
+            kept,
+            "{case}: the history is decided as rows"
+        );
+        assert_eq!(raw.rows(&process).await, held, "{case}: every row stays");
+        same(
+            &before,
+            &answers(durable.as_ref(), &process, &model_keys).await,
+            case,
+        );
+        assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 0);
+        core.shutdown().await.unwrap();
+    }
+}
+
+on_every_tier!(a_history_that_could_still_change_keeps_its_rows: sqlite_memory, postgres);
+
+/// One value longer than the archive cap.
+const BIG: usize = PROCESS_ARCHIVE_CAP_BYTES + 1;
+
+/// Run `work` in its own SQL window: its answer and the bytes its
+/// statements returned.
+async fn result_bytes<T>(tier: Tier, work: impl std::future::Future<Output = T>) -> (T, u64) {
+    let backend = match tier {
+        Tier::Postgres => "postgres",
+        Tier::SqliteMemory => "sqlite",
+    };
+    let window = lash_core_ids::operational_metrics::sql::Window::new("pack-bytes", backend);
+    let answer = window.within(work).await;
+    (answer, window.snapshot().result_bytes)
+}
+
+/// The text a history's rows would put in the archive is sized before any
+/// row is read (review finding 5): a call reason or a model call's
+/// enclosing call id longer than the cap keeps the history as rows, and
+/// packing reads fewer bytes than that one value. (Both columns are
+/// unindexed: PostgreSQL refuses a value this long in an indexed one.)
+async fn an_oversized_value_keeps_its_rows_unread(tier: Tier) {
+    let cases: [(&str, &str); 2] = [
+        (
+            "a call reason",
+            "UPDATE {p}tool_calls SET reason = {big} \
+             WHERE owner_key = {owner} AND call_id = \
+               (SELECT min(call_id) FROM {p}tool_calls WHERE owner_key = {owner})",
+        ),
+        (
+            "a model call's enclosing call id",
+            "UPDATE {p}model_call_records \
+             SET enclosing_owner = 'enclosing', enclosing_run = 0, enclosing_call = {big} \
+             WHERE session_id = {session} AND call_id = \
+               (SELECT min(call_id) FROM {p}model_call_records WHERE session_id = {session})",
+        ),
+    ];
+    for (case, statement) in cases {
+        let (stores, raw, _keep) = raw_stores(tier).await;
+        let (backend, core) = core_over(stores, 1024);
+        let process = Box::pin(run_one(&core, 2)).await;
+        let durable = Arc::clone(backend.durable());
+        raw.alter(&process, &[statement]).await;
+        let model_keys = raw.model_keys(&process).await;
+        let before = answers(durable.as_ref(), &process, &model_keys).await;
+        let held = raw.rows(&process).await;
+
+        let (packed, fetched) = result_bytes(tier, durable.pack_finished_histories(16)).await;
+        assert_eq!(packed.unwrap(), 0, "{case}: nothing packs");
+        assert!(
+            fetched < BIG as u64,
+            "{case}: packing read {fetched} bytes, the value alone is {BIG}"
+        );
+        assert_eq!(
+            raw.history(&process).await,
+            Some((Some("rows".to_owned()), None)),
+            "{case}: the history is decided as rows"
+        );
+        assert_eq!(raw.rows(&process).await, held, "{case}: every row stays");
+        same(
+            &before,
+            &answers(durable.as_ref(), &process, &model_keys).await,
+            case,
+        );
+        core.shutdown().await.unwrap();
+    }
+}
+
+on_every_tier!(an_oversized_value_keeps_its_rows_unread: sqlite_memory, postgres);
 
 /// The page store's retirement, run until a step does nothing.
 async fn drain(pages: &dyn lash_durable::domain::pages::PageStore) {
