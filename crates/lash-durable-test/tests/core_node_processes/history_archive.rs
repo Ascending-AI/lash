@@ -636,6 +636,81 @@ async fn answers(
     out
 }
 
+/// Run `read` in its own SQL window: its answer and how many times it
+/// fetched a process's history archive.
+async fn archive_fetches<T>(tier: Tier, read: impl std::future::Future<Output = T>) -> (T, u64) {
+    let backend = match tier {
+        Tier::Postgres => "postgres",
+        Tier::SqliteMemory => "sqlite",
+    };
+    let window = lash_core_ids::operational_metrics::sql::Window::new("archive-fetches", backend);
+    let answer = window.within(read).await;
+    let fetches = window
+        .snapshot()
+        .shapes
+        .iter()
+        .filter(|(shape, _)| shape.starts_with("select history_archive from"))
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    (answer, fetches)
+}
+
+/// One read call takes a packed history's archive once, however many
+/// nodes it serves: the whole value comes back on every fetch, so a read
+/// that fetched it per node or per row would multiply its bytes by them.
+async fn each_read_fetches_the_archive_once(
+    tier: Tier,
+    store: &dyn lash_durable::DurableStore,
+    process: &ProcessId,
+    model_keys: &[(String, String)],
+) {
+    let owner = OwnerKey::Process(process.clone());
+    let (facts, fetches) = archive_fetches(tier, store.run_facts(&owner)).await;
+    let facts = facts.expect("read every run fact");
+    assert_eq!(
+        fetches,
+        1,
+        "the run facts and their {} nodes take one archive fetch",
+        facts.nodes.len()
+    );
+    let (calls, fetches) = archive_fetches(
+        tier,
+        store.tool_calls(
+            &CallOwner::Process(process.clone()),
+            &ToolCallSelection::List {
+                after: None,
+                limit: 100,
+            },
+        ),
+    )
+    .await;
+    let calls = calls.expect("read every tool call");
+    assert_eq!(
+        fetches,
+        1,
+        "the tool calls and their {} nodes take one archive fetch",
+        calls.graph.nodes.len()
+    );
+    let session = model_session(process);
+    let (run, _) = &model_keys[0];
+    let (models, fetches) = archive_fetches(tier, store.model_calls(&session, run)).await;
+    let models = models.expect("read the model calls");
+    assert_eq!(
+        fetches,
+        1,
+        "the {} model call records take one archive fetch",
+        models.len()
+    );
+    eprintln!(
+        "archive fetches: run facts 1 for {} rows / {} nodes, tool calls 1 for {} rows / {} nodes, model calls 1 for {} records",
+        facts.rows.len(),
+        facts.nodes.len(),
+        calls.rows.len(),
+        calls.graph.nodes.len(),
+        models.len()
+    );
+}
+
 fn same(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>, when: &str) {
     assert_eq!(
         before.keys().collect::<Vec<_>>(),
@@ -680,6 +755,7 @@ async fn a_packed_history_reads_as_its_rows(tier: Tier) {
         &answers(durable.as_ref(), &process, &model_keys).await,
         "after the pack",
     );
+    each_read_fetches_the_archive_once(tier, durable.as_ref(), &process, &model_keys).await;
     assert_eq!(
         durable.pack_finished_histories(16).await.unwrap(),
         0,
