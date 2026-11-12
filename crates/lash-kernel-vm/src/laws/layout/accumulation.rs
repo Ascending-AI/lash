@@ -429,3 +429,81 @@ fn a_shared_tip_chain_holds_and_refuses_as_a_copying_one() {
         );
     }
 }
+
+/// K-BND-003 / K-CHG-002..004 / K-LIB-007 (FIG-7688, the shared-tip
+/// ruling's condition 7): under every memory bound, a chain of appends
+/// refuses at the concatenation and the total charge derived by hand for
+/// the copying path, and finishes from the bound that path needs.
+///
+/// The `k`th concatenation makes a text of `L(k) = 16 + 6k` bytes, held
+/// as an object of `24 + L(k)` (the meter's schedule: `meter::OBJECT` and one
+/// per byte) while its left operand, the `k-1`th, is still held; every
+/// earlier text is unreachable and reclaimed before a refusal. So with
+/// `base` held before any text, the `k`th needs `base + 24 + L(1)` for
+/// `k = 1` and `base + 48 + L(k-1) + L(k)` after. A shared buffer's spare
+/// capacity is never in it. A refused allocation reports the charge
+/// before its statement: the `k+1`th's is the `k`th's plus the statement
+/// `set s = law.native_concat(s, "é😀")` (1, and 3 nodes), the formula
+/// `1 + deep(a) + deep(b) + deep(result) = 10 + L(k-1) + L(k)`, then the
+/// counter's `set i = flat.add(i, 1)` (1, 3 nodes, and `3 + size(i) +
+/// size(1) + size(i + 1)`) and the loop's test `flat.lt(i, 40)` (1, 3
+/// nodes, and `3 + size(i) + size(40) + size(bool)`); before the loop,
+/// `let i = 0` (2) and the `while` statement (1) stand in place of the
+/// counter's step. A word's size is 2, 1 for zero (K-CHG-004).
+#[test]
+fn a_shared_tip_chain_refuses_at_the_hand_derived_copying_event() {
+    let source = scalar_document(
+        r#"let s = law.native_concat("abcdefghijklmnop", "é😀") let i = 0 while flat.lt(i, 40) { set s = law.native_concat(s, "é😀") set i = flat.add(i, 1) } return i"#,
+    );
+    let roomy = super::super::embedder::ROOMY;
+    let run = |memory| {
+        let (end, _, stops, ..) = run_selected(
+            &source,
+            true,
+            u64::MAX,
+            Bounds { memory, ..roomy },
+            false,
+            true,
+        );
+        (end, stops.last().unwrap().1.charged.unwrap())
+    };
+    // What the run holds before any text, and its charge when the first
+    // concatenation starts: the two figures the oracle builds on.
+    let base = run_selected(&source, true, 1, roomy, false, true).2[0]
+        .1
+        .memory;
+    let first = run(base).1;
+    let len = |k: u64| 16 + 6 * k;
+    let size = |word: u64| if word == 0 { 1 } else { 2 };
+    let need = |k: u64| match k {
+        1 => base + 24 + len(1),
+        _ => base + 48 + len(k - 1) + len(k),
+    };
+    let mut charge = vec![0, first];
+    for k in 1..=40 {
+        let concat = 4 + 10 + len(k - 1) + len(k);
+        let counter = match k {
+            1 => 2 + 1,
+            _ => 4 + 3 + size(k - 2) + 2 + size(k - 1),
+        };
+        let test = 4 + 3 + size(k - 1) + 2 + 1;
+        charge.push(charge[k as usize] + concat + counter + test);
+    }
+    for memory in base..=need(41) {
+        let (end, charged) = run(memory);
+        match (1..=41).find(|&k| need(k) > memory) {
+            Some(k) => {
+                assert!(
+                    end.contains("bound: Memory")
+                        && end.contains("FunctionName(\"law.native_concat\")"),
+                    "memory {memory}: {end}"
+                );
+                assert_eq!(
+                    charged, charge[k as usize],
+                    "memory {memory}: concatenation {k}"
+                );
+            }
+            None => assert_eq!(end, "finished Int(Integer(40))", "memory {memory}"),
+        }
+    }
+}

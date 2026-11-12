@@ -238,8 +238,15 @@ impl SharedText {
     /// Another text on this buffer, of `len` written bytes.
     fn share(&self, len: usize) -> Self {
         let count = &self.header().count;
-        // Each count names a live text, which takes memory: it cannot reach
-        // `usize::MAX`.
+        // A text forgotten without its drop keeps its count, so the count
+        // is not bounded by the texts alive. At `isize::MAX`, `Rc`'s limit,
+        // a new text is refused before the count changes: a wrapped count
+        // would free the buffer under its other texts. The refusal panics,
+        // leaving every text and the count as they were.
+        assert!(
+            count.get() < isize::MAX as usize,
+            "a shared text buffer's count is at its limit"
+        );
         count.set(count.get() + 1);
         Self {
             buffer: self.buffer,
@@ -346,6 +353,24 @@ mod tests {
         roomy.freeze();
         assert!(roomy.append("d").is_none());
         assert!(roomy.append("").is_none());
+    }
+
+    /// The count is refused at its limit, before it changes, so that no
+    /// sequence of forgotten clones wraps it and frees the buffer under
+    /// another text.
+    #[test]
+    fn a_count_at_its_limit_refuses_the_next_text() {
+        let left = SharedText::new(&["abc"], 3).unwrap();
+        let limit = isize::MAX as usize;
+        left.header().count.set(limit - 1);
+        std::mem::forget(left.clone());
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::mem::forget(left.clone());
+        }));
+        assert!(refused.is_err(), "a text past the limit");
+        assert_eq!((left.header().count.get(), left.as_str()), (limit, "abc"));
+        // Dropping `left` leaves the forgotten texts' counts: the buffer
+        // leaks, as a forgotten `Rc` does, and is never freed.
     }
 
     #[test]
