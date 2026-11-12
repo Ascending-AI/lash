@@ -49,9 +49,18 @@ impl<H: Heap> Vm<H> {
     /// frame below the top stands past its call, the top past its op or,
     /// not `past`, at it.
     fn authored_statement(&self, past: bool) -> Option<(&crate::bytecode::program::Unit, Site)> {
-        let top = self.cx.frames.len();
-        self.cx
-            .frames
+        self.authored_below(self.cx.frames.len(), past)
+    }
+
+    /// The nearest authored function among the frames below `top` and
+    /// the statement it stands in, the frame at `top - 1` past its op or,
+    /// not `past`, at it; those below past their calls.
+    fn authored_below(
+        &self,
+        top: usize,
+        past: bool,
+    ) -> Option<(&crate::bytecode::program::Unit, Site)> {
+        self.cx.frames[..top]
             .iter()
             .enumerate()
             .rev()
@@ -70,17 +79,21 @@ impl<H: Heap> Vm<H> {
 
     /// Where a raise the running op made stands in document code, for an
     /// uncaught end (`RunError::Uncaught`): the nearest authored
-    /// statement, none once a run-root cleanup holds the raise.
+    /// statement. One an entry's run-root cleanup held stands nowhere in
+    /// the entry: the statement its caller stands past names it, as it
+    /// names any raise its call leaves with, and none does when the entry
+    /// is the run's root.
     pub(super) fn raise_site(&self) -> Option<Site> {
-        if let [root] = self.cx.frames.as_slice()
+        if let Some(entry) = self.cx.frames.last()
             && self.cx.inline.is_none()
             && self
                 .program
-                .unit(root.unit)
+                .unit(entry.unit)
                 .cleanup
-                .is_some_and(|cleanup| root.pc > cleanup.body)
+                .is_some_and(|cleanup| entry.pc > cleanup.body)
         {
-            return None;
+            let below = self.cx.frames.len() - 1;
+            return self.authored_below(below, true).map(|(_, site)| site);
         }
         if let Some(site) = self.wait_site() {
             return Some(site);

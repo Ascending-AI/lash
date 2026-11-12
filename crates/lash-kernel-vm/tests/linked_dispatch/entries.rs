@@ -665,3 +665,184 @@ fn an_adapted_import_checks_results_by_its_own_signature() {
         "{end:?}"
     );
 }
+
+/// What a start of `target` of `program` ends with, sliced one unit at a
+/// time and, `cold`, sealed and reopened at every slice.
+fn started_end(program: &Program, target: Target, cold: bool) -> End {
+    let pages = Pages::default();
+    let start = CellStart {
+        owner: PageId([8; 32]),
+        target,
+        args: vec![],
+        session: None,
+        modes: BTreeMap::new(),
+        host: vec![],
+    };
+    let mut machine =
+        KernelMachine::start(program.clone(), bounds(), start, Box::new(pages.clone()))
+            .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"));
+    loop {
+        match machine
+            .run(&mut Passive, 1)
+            .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"))
+        {
+            Step::Ended(end) => return end,
+            Step::Slice if cold => {
+                let saved = machine
+                    .checkpoint()
+                    .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"));
+                machine = KernelMachine::open(
+                    program.clone(),
+                    bounds(),
+                    &saved.checkpoint(),
+                    Box::new(pages.clone()),
+                )
+                .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"));
+            }
+            Step::Slice => {}
+            Step::Parked(park) => panic!("entry law fixture parked: {park:?}"),
+        }
+    }
+}
+
+/// K-TASK-019, FIG-6810, K-DOC-003: a raise an entry's run-root cleanup
+/// held and let go of again stands nowhere in the entry: started
+/// directly, the run ends with no site; called through an import, the
+/// caller's statement names it, as it names any raise a call leaves
+/// with. A raise of the cleanup itself, and a TypeScript body's raise a
+/// `finally` held, stand where they do either way. Warm and reopened cold
+/// at every slice.
+#[test]
+fn an_imported_entry_raises_from_the_site_a_plain_call_does() {
+    use lash_kernel_value::sites::{Site, Unit as SiteUnit};
+    let public = Signature {
+        params: vec![],
+        result: Type::Bool,
+    };
+    let throw = |value: bool| Stmt::Throw {
+        value: Expr::Literal(Literal::Bool(value)),
+    };
+    let caller = Site::new(SiteUnit::Main, vec![0]);
+    for python in [true, false] {
+        for cleanup_raises in [false, true] {
+            let (functions, export, sites) = if python {
+                let body = function(
+                    "entry.raising",
+                    public.clone(),
+                    BTreeMap::new(),
+                    vec![throw(true)],
+                );
+                let cleanup = function(
+                    "entry.cleanup",
+                    signature(vec![]),
+                    BTreeMap::new(),
+                    match cleanup_raises {
+                        true => vec![throw(false)],
+                        false => vec![Stmt::Return { value: null() }],
+                    },
+                );
+                let raised = Site::new(SiteUnit::Library(cleanup.identity()), vec![0]);
+                let export = FunctionExport {
+                    function: body.identity(),
+                    signature: public.clone(),
+                    convention: StartConvention::PyDirect {
+                        cleanup: lash_kernel_doc::FunctionTarget::Local(cleanup.identity()),
+                    },
+                    asynchronous: false,
+                    rest: false,
+                };
+                // (direct, imported)
+                let sites = match cleanup_raises {
+                    false => (None, Some(caller.clone())),
+                    true => (Some(raised.clone()), Some(raised)),
+                };
+                (vec![body, cleanup], export, sites)
+            } else {
+                let finally = match cleanup_raises {
+                    true => vec![throw(false)],
+                    false => vec![bound("z")],
+                };
+                let body = function(
+                    "entry.raising",
+                    public.clone(),
+                    BTreeMap::new(),
+                    vec![tried(vec![throw(true)], None, Some(finally))],
+                );
+                let held = Site::new(
+                    SiteUnit::Library(body.identity()),
+                    match cleanup_raises {
+                        false => vec![0],
+                        true => vec![0, 1, 0],
+                    },
+                );
+                let hook = function(
+                    "entry.settle",
+                    Signature {
+                        params: vec![Param {
+                            name: Name::new("value"),
+                            ty: Type::Any,
+                            optional: false,
+                        }],
+                        result: Type::Any,
+                    },
+                    BTreeMap::new(),
+                    vec![Stmt::Return {
+                        value: Expr::Variable(Name::new("value")),
+                    }],
+                );
+                let export = FunctionExport {
+                    function: body.identity(),
+                    signature: public.clone(),
+                    convention: StartConvention::TsDirect {
+                        await_fn: lash_kernel_doc::FunctionTarget::Local(hook.identity()),
+                    },
+                    asynchronous: true,
+                    rest: false,
+                };
+                (vec![body, hook], export, (Some(held.clone()), Some(held)))
+            };
+            let program = entry_world(
+                functions,
+                vec![("entry", export)],
+                vec![("entry", public.clone())],
+                vec![],
+                vec![
+                    called(0, "a", vec![]),
+                    Stmt::Return {
+                        value: Expr::Variable(Name::new("a")),
+                    },
+                ],
+            );
+            let mut direct = program.clone();
+            let Some((link, instance)) = program
+                .instances
+                .iter()
+                .find(|(link, _)| **link != program.link)
+            else {
+                panic!("entry law fixture: no defining Link")
+            };
+            direct.link = *link;
+            direct.document = Arc::clone(&program.documents[&instance.document]);
+            let error = Datum::Bool(!cleanup_raises);
+            for cold in [false, true] {
+                let case = format!("python {python}, cleanup raises {cleanup_raises}, cold {cold}");
+                for (end, site) in [
+                    (
+                        started_end(&direct, Target::Entry(Name::new("entry")), cold),
+                        &sites.0,
+                    ),
+                    (started_end(&program, Target::Main, cold), &sites.1),
+                ] {
+                    let End::Error(lash_kernel_vm::RunError::Uncaught {
+                        error: raised,
+                        site: at,
+                    }) = &end
+                    else {
+                        panic!("{case}: {end:?}")
+                    };
+                    assert_eq!((raised, at.as_ref()), (&error, site.as_ref()), "{case}");
+                }
+            }
+        }
+    }
+}

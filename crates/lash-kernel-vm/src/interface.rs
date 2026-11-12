@@ -766,8 +766,9 @@ pub enum RunError {
         /// statement whose evaluation raised, a library call's included.
         /// A raise out of library code names the first document statement
         /// it unwinds into, and one a `finally` held names its `try`
-        /// statement. `None` when a run-root cleanup held it, or no
-        /// document statement was left to name it.
+        /// statement. `None` when the run's root entry's cleanup held it
+        /// (an imported entry's caller names its call's statement), or
+        /// no document statement was left to name it.
         site: Option<lash_kernel_value::sites::Site>,
     },
     /// The run reached its end with tasks that were unfinished, or that
