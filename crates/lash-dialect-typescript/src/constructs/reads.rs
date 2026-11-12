@@ -111,15 +111,16 @@ pub(crate) const KIND: E = E::Call {
         E::Input(1),
     ],
 };
+pub(crate) const BRANDED: E = E::Call {
+    function: "record.contains",
+    args: &[
+        E::Input(0),
+        E::Atom(Atom::Text(lash_kernel_dialect::BRAND_FIELD)),
+    ],
+};
 pub(crate) const UNBRANDED: E = E::Call {
     function: "bool.not",
-    args: &[E::Call {
-        function: "record.contains",
-        args: &[
-            E::Input(0),
-            E::Atom(Atom::Text(lash_kernel_dialect::BRAND_FIELD)),
-        ],
-    }],
+    args: &[BRANDED],
 };
 pub(crate) const OWN: E = E::Call {
     function: "record.contains",

@@ -947,3 +947,24 @@ fn defined_var_records_need_no_brand_admission() {
         );
     }
 }
+
+/// K-CHG-002: a constant field read needs no extra boolean negation when
+/// swapping its arms preserves the membership test and both outcomes.
+#[test]
+fn record_guards_test_membership_without_a_negation() {
+    let source = "function read(o) { return o.value; } let rejected = false; try { read(null); } catch { rejected = true; } await control.finish([read({value: 7}), read({}), read({__lash_brand: {}, value: 9}), read([]), rejected]);";
+    let not = super::library()
+        .iter()
+        .find(|(name, _)| *name == "bool.not")
+        .expect("bool.not installed")
+        .1;
+    let text = super::main_text_with_effects(source);
+    assert!(!text.contains(&not.to_string()), "{text}");
+    let plain = super::machine::plain_record_resume(source, u64::MAX, false);
+    assert_eq!(
+        super::machine::end("await control.finish([7, undefined, 9, undefined, true]);"),
+        super::machine::Ended::Finished(plain.0.clone())
+    );
+    let sliced = super::machine::plain_record_resume(source, 1, true);
+    assert_eq!((&plain.0, plain.1), (&sliced.0, sliced.1));
+}

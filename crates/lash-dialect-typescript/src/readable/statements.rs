@@ -455,6 +455,25 @@ impl Lifter<'_> {
         }
     }
 
+    fn unbranded_branch<'a>(
+        &self,
+        condition: &'a k::Expr,
+        then_block: &'a [k::Stmt],
+        else_block: &'a [k::Stmt],
+    ) -> Option<(&'a k::Expr, &'a [k::Stmt], &'a [k::Stmt])> {
+        for (test, direct, guarded) in [
+            (crate::constructs::reads::UNBRANDED, then_block, else_block),
+            (crate::constructs::reads::BRANDED, else_block, then_block),
+        ] {
+            if let Some(values) = test.recognize(condition, &|id, name| self.is(id, name))
+                && let [target] = values.as_slice()
+            {
+                return Some((*target, direct, guarded));
+            }
+        }
+        None
+    }
+
     /// `x.field`, its record read guarded by the brand check.
     fn field_ladder(
         &mut self,
@@ -477,25 +496,22 @@ impl Lifter<'_> {
                 else {
                     return Ok(None);
                 };
-                let values = crate::constructs::reads::UNBRANDED
-                    .recognize(test, &|id, name| self.is(id, name));
-                if values.is_none_or(|values| values.as_slice() != [target]) {
+                let Some((held, direct, guarded)) = self.unbranded_branch(test, direct, guarded)
+                else {
+                    return Ok(None);
+                };
+                if held != target {
                     return Ok(None);
                 }
-                (
-                    target,
-                    direct.as_slice(),
-                    guarded.as_slice(),
-                    Some(else_block),
-                )
+                (target, direct, guarded, Some(else_block))
             }
             None => {
-                let values = crate::constructs::reads::UNBRANDED
-                    .recognize(condition, &|id, name| self.is(id, name));
-                match values.as_deref() {
-                    Some([target]) => (*target, then_block, else_block, None),
-                    _ => return Ok(None),
-                }
+                let Some((target, direct, guarded)) =
+                    self.unbranded_branch(condition, then_block, else_block)
+                else {
+                    return Ok(None);
+                };
+                (target, direct, guarded, None)
             }
         };
         // A name some built-in has is the record's own only where the record
