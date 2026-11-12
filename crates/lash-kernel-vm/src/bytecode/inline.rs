@@ -348,6 +348,7 @@ fn expand(
         entry,
         end,
         steps,
+        element: false,
         folds: (0, 0),
     });
     Some(())

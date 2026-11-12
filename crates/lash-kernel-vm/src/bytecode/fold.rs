@@ -49,9 +49,12 @@ pub(crate) fn fold(program: &mut Program) {
     for at in 0..program.units.len() {
         for n in 0..program.units[at].inlines.len() {
             let folds = derive(program, &program.units[at], n as u32);
+            let element = matches!(folds.as_slice(), [fold]
+                if fold.len == 1 && matches!(fold.steps[0], Step::Element { .. }));
             let unit = &mut program.units[at];
             let start = unit.folds.len() as u32;
             unit.folds.extend(folds);
+            unit.inlines[n].element = element;
             unit.inlines[n].folds = (start, unit.folds.len() as u32);
         }
     }
@@ -217,6 +220,7 @@ fn walk(
                 };
                 kind_tests(program, &mut path.steps, &mut result);
                 lookups(&mut path.steps, &mut result);
+                elements(program, &mut path.steps, &mut result);
                 let mut steps = [Step::Guard {
                     value: result,
                     holds: true,
@@ -311,7 +315,9 @@ fn slots(step: &mut Step, mut each: impl FnMut(&mut Slot)) {
     match step {
         Step::Answer { args, argc, .. } => args[..usize::from(*argc)].iter_mut().for_each(each),
         Step::KindIs { value, .. } | Step::Guard { value, .. } => each(value),
-        Step::Index { target, index } | Step::Lookup { target, key: index } => {
+        Step::Index { target, index }
+        | Step::Lookup { target, key: index }
+        | Step::Element { target, index } => {
             each(target);
             each(index);
         }
@@ -398,6 +404,76 @@ fn lookups(steps: &mut Vec<Step>, result: &mut Slot) {
         }
         return;
     }
+}
+
+/// Collapses the complete path `0 <= i; i < list.len(xs); xs[i]`.
+/// Every operation is an uncharged declared answer or a read. No other
+/// step may depend on the removed answers, and the length must fit the
+/// word domain in which both comparisons answer.
+fn elements(program: &Program, steps: &mut Vec<Step>, result: &mut Slot) {
+    use lash_kernel_doc::plan::Collection;
+    use lash_kernel_doc::scalar::ScalarOp;
+
+    let [
+        Step::Answer {
+            operation:
+                InlineOperation::Scalar {
+                    operation: ScalarOp::Le,
+                    domain: ScalarDomain::Words | ScalarDomain::WordsOrFloats,
+                },
+            args: [Slot::Const(zero), index],
+            argc: 2,
+        },
+        Step::Guard {
+            value: Slot::Made(0),
+            holds: true,
+        },
+        Step::Answer {
+            operation: InlineOperation::Length(Collection::List),
+            args: [target, _],
+            argc: 1,
+        },
+        Step::Answer {
+            operation:
+                InlineOperation::Scalar {
+                    operation: ScalarOp::Lt,
+                    domain: ScalarDomain::Words | ScalarDomain::WordsOrFloats,
+                },
+            args: [upper_index, Slot::Made(1)],
+            argc: 2,
+        },
+        Step::Guard {
+            value: Slot::Made(2),
+            holds: true,
+        },
+        Step::Index {
+            target: read_target,
+            index: read_index,
+        },
+    ] = steps.as_slice()
+    else {
+        return;
+    };
+    if *result != Slot::Made(3)
+        || index != upper_index
+        || index != read_index
+        || target != read_target
+        || !matches!(index, Slot::Local(_) | Slot::Const(_))
+        || !matches!(target, Slot::Local(_) | Slot::Const(_))
+        || !matches!(
+            program.get_constant(*zero),
+            Some(Constant::Immediate(Value::Int(0)))
+        )
+    {
+        return;
+    }
+    let element = Step::Element {
+        target: *target,
+        index: *index,
+    };
+    steps.clear();
+    steps.push(element);
+    *result = Slot::Made(0);
 }
 
 /// Whether op `pc` bills, tests and shows nothing.

@@ -287,6 +287,8 @@ pub struct InlineSite {
     /// slice falls due in it only where it is due at the region's entry,
     /// and there the body runs as its own frame instead.
     pub steps: bool,
+    /// Its only fold is one body-derived guarded element read.
+    pub element: bool,
     /// Its guard paths' folds (`fold`): where they start in the unit's
     /// folds and where they end, an empty span when no path folds.
     pub folds: (u32, u32),
@@ -359,6 +361,9 @@ pub enum Step {
     /// value: it declines where the membership answer declines or finds
     /// no entry, and otherwise makes what the index read would.
     Lookup { target: Slot, key: Slot },
+    /// A list's nonnegative-index and length guards followed by its
+    /// element read, with the same decline outside that guarded path.
+    Element { target: Slot, index: Slot },
 }
 
 /// A run of one prepaid block's ops that dispatches at once (`fuse`): up

@@ -1007,8 +1007,40 @@ fn huge_charges(
                 ))
         }
     }
-    let mut registered: Vec<(&'static str, lash_kernel_value::FunctionId)> = Vec::new();
+    struct Length;
+    impl lash_kernel_doc::NativeFunction for Length {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::Length(lash_kernel_doc::plan::Collection::List),
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            use lash_kernel_doc::arena::native::InlineOperation;
+            InlineOperation::Length(lash_kernel_doc::plan::Collection::List)
+                .answer_read(call.args)?
+                .ok_or_else(|| lash_kernel_doc::NativeError::refused("type_error", "expected list"))
+        }
+    }
+    let (definition, native) = lash_kernel_lib::numbers()
+        .into_iter()
+        .find(|(definition, _)| definition.name.as_str() == "le")
+        .unwrap();
+    let mut registered = vec![("le", registry.register(definition, Some(native)).unwrap())];
     for (name, source, native) in [
+        (
+            "law.length",
+            "function law.length(xs: Any) -> Int\nkernel 1\ncharge 1\nnative\n",
+            true,
+        ),
         (
             "law.wide",
             "function law.wide(x: Any) -> Any\nkernel 1\ncharge product(size(x), 9223372036854775807)\nnative\n",
@@ -1074,6 +1106,16 @@ fn huge_charges(
             "function law.get(m: Any, k: Any) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return 0 }",
             false,
         ),
+        (
+            "law.element",
+            "function law.element(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(6, deep(i), size(result))\n{uses}body { if le(0, i) { if num.lt(i, law.length(xs)) { return xs[i] } } return -9 }",
+            false,
+        ),
+        (
+            "law.nonzero_element",
+            "function law.nonzero_element(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(6, deep(i), size(result))\n{uses}body { if le(1, i) { if num.lt(i, law.length(xs)) { return xs[i] } } return -9 }",
+            false,
+        ),
     ] {
         let mut uses = format!(
             "use list.len = @{}\nuse text.concat = @{}\nuse num.add = @{}\nuse num.lt = @{}\n",
@@ -1086,6 +1128,8 @@ fn huge_charges(
         let definition = lash_kernel_doc::parse_definition(&source).unwrap();
         let native =
             native.then(|| match name {
+                "law.length" => std::sync::Arc::new(Length)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
                 "law.holds" => std::sync::Arc::new(Holds)
                     as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
                 "law.digits" => std::sync::Arc::new(Digits)
@@ -1265,6 +1309,70 @@ fn a_folded_map_read_answers_each_maps_current_entry_at_its_site() {
         assert_eq!(seen.printed, expected, "{seen:?}");
     }
     assert!(crate::vm::inline::held() > held, "no region's fold held");
+}
+
+#[test]
+fn a_folded_element_keeps_its_bounds_current_value_and_completion_events() {
+    let text = r#"main {
+  let xs = [10, 20]
+  for i in [-1, 0, 1, 2, 9223372036854775807, -9223372036854775808] {
+    print invoke law.element(xs, i)
+  }
+  print invoke law.nonzero_element(xs, 0)
+  print invoke law.element(xs, 0)
+  set xs[0] = 30
+  print invoke law.element(xs, 0)
+  remove xs[1]
+  print invoke law.element(xs, 1)
+  for xs in [[], [40], [[70, 71]], (50,), map{0: 60}, null] {
+    try { print invoke law.element(xs, 0) } catch e { print "caught" }
+  }
+  for i in [0.0, true, "x", 9223372036854775808] {
+    try { print invoke law.element(xs, i) } catch e { print "caught" }
+  }
+  return xs
+}"#;
+    let whole = inlined(text, Drive::default());
+    let expected = [-9, 10, 20, -9, -9, -9, -9, 10, 30, -9];
+    assert_eq!(&whole.printed[..expected.len()], expected.map(int));
+    let total = whole.charged.unwrap();
+    for cold in [false, true] {
+        for exact in [false, true] {
+            for slice in [u64::MAX, 1, 7] {
+                let how = Drive {
+                    cold,
+                    exact,
+                    slice,
+                    ..Drive::default()
+                };
+                assert_eq!(inlined(text, how), reference(text, how));
+            }
+        }
+        for limit in 0..=total {
+            let how = Drive {
+                cold,
+                limit,
+                ..Drive::default()
+            };
+            assert_eq!(
+                inlined(text, how),
+                reference(text, how),
+                "limit {limit}, cold {cold}"
+            );
+        }
+        for memory in (800..8000).step_by(97) {
+            let how = Drive {
+                cold,
+                memory,
+                ..Drive::default()
+            };
+            assert_eq!(
+                inlined(text, how),
+                reference(text, how),
+                "memory {memory}, cold {cold}"
+            );
+        }
+    }
 }
 
 /// Astra cold path, items 1-10: a run whose objects are paged out at

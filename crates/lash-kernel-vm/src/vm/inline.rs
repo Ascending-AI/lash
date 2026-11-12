@@ -71,6 +71,9 @@ impl<H: Heap> Vm<H> {
         n: u32,
         folds: &[Fold],
     ) -> Run<Option<usize>> {
+        if unit.inlines[n as usize].element && self.inline_element_fast(unit, n)? {
+            return Ok(None);
+        }
         let (charge, argc) = self.activate(unit, n)?;
         let base = self.cx.stack.len() - argc;
         let mut held = None;
@@ -127,6 +130,36 @@ impl<H: Heap> Vm<H> {
     /// fee fits the limit, so it is billed whole. Gives whether it ran;
     /// where it did not, nothing is done.
     pub(super) fn inline_fast(&mut self, unit: &Unit, n: u32, folds: &[Fold]) -> Run<bool> {
+        self.inline_answer_fast(unit, n, |vm, base| {
+            folds
+                .iter()
+                .find_map(|fold| vm.folded(fold, base).map(|value| (value, fold.leave)))
+        })
+    }
+
+    fn inline_element_fast(&mut self, unit: &Unit, n: u32) -> Run<bool> {
+        let site = unit.inlines[n as usize];
+        let fold = &unit.folds[site.folds.0 as usize];
+        let Step::Element { target, index } = fold.steps[0] else {
+            return Ok(false);
+        };
+        self.inline_answer_fast(unit, n, |vm, base| {
+            let read = |slot: Slot| match slot {
+                Slot::Local(n) => vm.cx.stack[base + usize::from(n)],
+                Slot::Const(n) => vm.konst(n),
+                Slot::Made(_) => Value::Absent,
+            };
+            vm.element(read(target), read(index))
+                .map(|value| (value, fold.leave))
+        })
+    }
+
+    fn inline_answer_fast(
+        &mut self,
+        unit: &Unit,
+        n: u32,
+        answer: impl FnOnce(&Self, usize) -> Option<(Value, u32)>,
+    ) -> Run<bool> {
         let site = unit.inlines[n as usize];
         let call = &unit.calls[site.call as usize];
         let Callee::Unit { charge, .. } = call.callee else {
@@ -145,10 +178,7 @@ impl<H: Heap> Vm<H> {
             return Ok(false);
         }
         let base = self.cx.stack.len() - usize::from(call.argc);
-        let Some((fold, value)) = folds
-            .iter()
-            .find_map(|fold| self.folded(fold, base).map(|value| (fold, value)))
-        else {
+        let Some((value, leave)) = answer(self, base) else {
             return Ok(false);
         };
         if let Some(checked) = &call.checked
@@ -169,7 +199,7 @@ impl<H: Heap> Vm<H> {
             return Ok(false);
         }
         if let Some(frame) = self.cx.frames.last_mut() {
-            frame.pc = fold.leave + 1;
+            frame.pc = leave + 1;
         }
         self.meter.leave();
         self.exact = true;
@@ -306,6 +336,9 @@ impl<H: Heap> Vm<H> {
                         _ => return None,
                     }
                 }
+                Step::Element { target, index } => {
+                    self.element(read(&made, target), read(&made, index))?
+                }
             };
             made[count] = value;
             count += 1;
@@ -313,6 +346,17 @@ impl<H: Heap> Vm<H> {
         #[cfg(test)]
         HELD.with(|held| held.set(held.get() + 1));
         Some(read(&made, fold.result))
+    }
+
+    #[inline]
+    fn element(&self, target: Value, index: Value) -> Option<Value> {
+        let (Value::List(object), Value::Int(index)) = (target, index) else {
+            return None;
+        };
+        let index = u64::try_from(index).ok()?;
+        let arena = self.heap.arena();
+        i64::try_from(arena.len(object).ok()?).ok()?;
+        arena.item(object, index).ok()?
     }
 
     /// The inline region returns the top value, as its body's frame
