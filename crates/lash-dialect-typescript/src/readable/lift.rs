@@ -383,20 +383,24 @@ impl<'a> Lifter<'a> {
     }
 
     /// [`Self::operand`] of `target` already lifted as `value`.
+    /// Whether `target` reads a binding something reassigns, as a capture
+    /// cell is, which readback holds of no known kind: the exact style
+    /// spells the operation applied to it.
+    pub(super) fn cell_read(&self, target: &k::Expr) -> bool {
+        matches!(target, k::Expr::Variable(name)
+            if self.style.exact
+                && self.reassigned(name.as_str())
+                && !self.templates.contains_key(name)
+                && self.pending_at(name).is_none())
+    }
+
     pub(super) fn spell_operand(
         &self,
         target: &k::Expr,
         value: source::Expr,
         spelling: &str,
     ) -> source::Expr {
-        let k::Expr::Variable(name) = target else {
-            return value;
-        };
-        if !self.style.exact
-            || !self.reassigned(name.as_str())
-            || self.templates.contains_key(name)
-            || self.pending_at(name).is_some()
-        {
+        if !self.cell_read(target) {
             return value;
         }
         let spelled = |value| super::expressions::constructor(spelling, vec![value]);

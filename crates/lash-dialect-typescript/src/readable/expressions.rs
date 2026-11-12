@@ -300,7 +300,7 @@ impl Lifter<'_> {
                     k::Expr::List(parts),
                     k::Expr::Literal(k::Literal::Text(separator)),
                 ],
-            ) if separator.is_empty() => self.template(parts),
+            ) if separator.is_empty() => self.joined(parts),
             (name, [left, right]) => match crate::constructs::operators::native_inverse(name) {
                 Some(op) => self.binary(op, left, right),
                 None if builtin => self.helper(name, args),
@@ -405,6 +405,23 @@ impl Lifter<'_> {
         let left = operand(left)?;
         let right = operand(right)?;
         Ok(Expr::Binary(op, Box::new(left), Box::new(right)))
+    }
+
+    /// A template's join. A part read from a capture cell, of no known kind
+    /// on readback, would gain a conversion as a template's part: the join
+    /// is spelled `value.text_join`, its parts as they are.
+    fn joined(&mut self, parts: &[k::Expr]) -> Lift<Expr> {
+        if !parts.iter().any(|part| self.cell_read(part)) {
+            return self.template(parts);
+        }
+        let parts = parts
+            .iter()
+            .map(|part| self.expr(part))
+            .collect::<Lift<_>>()?;
+        Ok(constructor(
+            "value.text_join",
+            vec![Expr::Array(parts), Expr::Text(String::new())],
+        ))
     }
 
     fn template(&mut self, parts: &[k::Expr]) -> Lift<Expr> {

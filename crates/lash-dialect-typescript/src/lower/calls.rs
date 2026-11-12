@@ -870,7 +870,8 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         // `value.initialized(k)` and the operand spellings are the read of
         // `k` they name, whose check stands before the expression reading
-        // it, as a read's does.
+        // it, as a read's does. `value.text_join` is a template's join,
+        // which lowers where the expression stands, as the template does.
         if let Some((root, path)) = static_path(callee)
             && !self.is_bound(root)
             && let Some(
@@ -878,7 +879,8 @@ impl Lowerer<'_> {
                 | exact::Exact::Operand
                 | exact::Exact::ListOperand
                 | exact::Exact::RecordOperand
-                | exact::Exact::TextOperand),
+                | exact::Exact::TextOperand
+                | exact::Exact::TextJoin),
             ) = exact::Exact::named(&path)
         {
             return self.call_exact(exact, args, span, discard_result, false);

@@ -16,6 +16,7 @@ mod controls;
 mod core;
 mod deviations;
 mod guarded_text;
+pub(crate) mod helper;
 mod hoisting;
 mod hot_helpers;
 mod json;

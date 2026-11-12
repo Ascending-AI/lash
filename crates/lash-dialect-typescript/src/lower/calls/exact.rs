@@ -70,6 +70,12 @@
 //!   the generic helper the kind's lowering calls (a list's `ts.read`, a
 //!   text's `ts.text_index`).
 //!
+//! - `value.text_join([p, ...], separator)` is the join a template literal
+//!   lowers to, `text.join` of exactly those parts and that separator: each
+//!   part evaluated in order and joined as it is, with no `ts.to_string`
+//!   conversion added (a conversion already among the parts stays). A part
+//!   that is no text fails the join's own check where it runs.
+//!
 //! None infers, pins, forwards or converts anything else: each lowers to
 //! the nodes, helpers and order of the ordinary lowering it names, and keeps
 //! that operation's kind and bounds failures at its own site. Their roots
@@ -79,6 +85,7 @@
 use super::{Key, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use lash_kernel_doc::Expr;
 
 #[derive(Clone, Copy)]
 pub(in crate::lower) enum Exact {
@@ -98,6 +105,7 @@ pub(in crate::lower) enum Exact {
     ListOperand,
     RecordOperand,
     TextOperand,
+    TextJoin,
 }
 
 impl Exact {
@@ -119,6 +127,7 @@ impl Exact {
             "list.operand" => Self::ListOperand,
             "record.operand" => Self::RecordOperand,
             "value.text_operand" => Self::TextOperand,
+            "value.text_join" => Self::TextJoin,
             _ => return None,
         };
         debug_assert!(path.split_once('.').is_some_and(|(root, _)| {
@@ -312,6 +321,35 @@ impl Lowerer<'_> {
                     text_prefix: None,
                     ..read
                 })
+            }
+            Exact::TextJoin => {
+                let [
+                    ast::CallArg::Value(ast::Expr::Array(elements)),
+                    ast::CallArg::Value(separator),
+                ] = args
+                else {
+                    return refuse("value.text_join takes a list of parts and a separator");
+                };
+                // A template's order: each part where the source evaluates
+                // it, then the separator, held only before later statements.
+                let mut parts = Vec::with_capacity(elements.len() + 1);
+                for element in elements {
+                    let ast::ArrayElement::Value(part) = element else {
+                        return refuse("value.text_join takes its parts one by one");
+                    };
+                    parts.push(self.aside(|this| this.lower_expr(part))?);
+                }
+                parts.push(self.aside(|this| this.lower_expr(separator))?);
+                let mut parts = self.ordered(parts);
+                let Some(separator) = parts.pop() else {
+                    return refuse("value.text_join takes a separator");
+                };
+                let parts = self.inline(
+                    Expr::List(parts.iter().map(Operand::expr).collect()),
+                    Ty::Unknown,
+                );
+                let joined = self.native("text.join", vec![parts.expr(), separator.expr()])?;
+                Ok(self.inline(joined, Ty::Text))
             }
             Exact::ListLength
             | Exact::ListField

@@ -115,6 +115,10 @@ that kind's lowering (`list.operand(xs)?.[i]`, `record.operand(r)?.name`,
 `value.text_operand(t)?.[i]`, `const {a} = list.operand(xs)`). None checks
 the operand's kind; a value of another kind fails where the kind's operation
 fails, or gets the generic helper the kind's lowering calls.
+`value.text_join([p, ...], separator)` is a template literal's join over a
+capture cell: `text.join` of exactly those parts, each evaluated in order and
+joined as it is. It adds no `ts.to_string` (a conversion already among the
+parts stays), so a part that is no text fails the join's own check.
 A materialized capture's factory declares its cell with the declared type the
 captured binding's evidence carries, so an annotated binding (`xs: unknown[]`)
 keeps the lowering its annotation chose. Python prints an in-place update of

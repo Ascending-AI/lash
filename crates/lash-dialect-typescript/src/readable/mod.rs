@@ -524,20 +524,15 @@ console.log(JSON.stringify(created));
         out
     }
 
-    /// Captured template literals over a known text, stopped for the lead:
-    /// the template joins the text without `ts.to_string`, which no source
-    /// spelling reproduces yet.
-    const STOPPED: &[(&[&str], &str)] = &[
-        (&["text"], "return `a\\n${x}\\`${x}`;"),
-        (&["text"], "return `hello ${x}!`;"),
-    ];
     const ALL: &[&str] = &["list", "map", "record", "set", "text"];
 
     /// Captured forms applying an operator to the capture itself, which the
     /// original reads in place as a value of its known kind: they print
     /// through the operand spellings (`value.operand(x)`, `list.operand`,
-    /// `record.operand`, `value.text_operand`). Each must lower, materialize,
-    /// print and import: a skip is a failure, not an acceptance.
+    /// `record.operand`, `value.text_operand`), and templates over it, which
+    /// the original joins unconverted, through `value.text_join`. Each must
+    /// lower, materialize, print and import: a skip is a failure, not an
+    /// acceptance.
     const OPERAND_FORMS: &[(&[&str], &str)] = &[
         (ALL, "const {a = 1, ...rest} = x; return rest;"),
         (ALL, "const {a, b: [c]} = x; return a + c;"),
@@ -559,17 +554,19 @@ console.log(JSON.stringify(created));
         (ALL, "return x?.a;"),
         (ALL, "return x in y;"),
         (&["record"], "return x.f(...[1, 2]);"),
+        (&["text"], "return `a\\n${x}\\`${x}`;"),
+        (&["text"], "return `hello ${x}!`;"),
     ];
 
     /// FIG-7711: every enumerated form over a known receiver that lowers
     /// prints and reads back to the same document, in a plain module and as
-    /// a published arrow capturing `x`, except the captured forms
-    /// [`STOPPED`] names. The [`OPERAND_FORMS`] print, import, and run as
+    /// a published arrow capturing `x`. The [`OPERAND_FORMS`] print, import, and run as
     /// the original runs: with fills of another kind, with a later operand
     /// that mutates the receiver, and with optional-chain operands that
     /// throw when evaluated. The operand spellings keep the operator's
     /// helper identity: a missing or re-identified helper and a namespace
-    /// claiming the spelling's root refuse.
+    /// claiming the spelling's root refuse, and a template's join keeps
+    /// `text.join`'s identity and adds no conversion.
     #[test]
     fn enumerated_forms_over_known_receivers_print() {
         use k::CaptureValue as C;
@@ -616,9 +613,6 @@ console.log(JSON.stringify(created));
                 prefix,
                 body,
             } = &form;
-            let stopped = STOPPED
-                .iter()
-                .any(|(kinds, stopped)| *stopped == body && kinds.contains(kind));
             let operand = OPERAND_FORMS
                 .iter()
                 .any(|(kinds, form)| *form == body && kinds.contains(kind));
@@ -638,9 +632,6 @@ console.log(JSON.stringify(created));
             }
             let cell =
                 format!("{prefix}const demo = async (y: any): Promise<unknown> => {{ {body} }};\n");
-            if stopped {
-                continue;
-            }
             let lowered = match crate::lower(&cell, &environment, cell_mode()) {
                 Ok(lowered) => lowered,
                 Err(error) if operand => {
@@ -726,6 +717,8 @@ console.log(JSON.stringify(created));
             (end.ok(), ended)
         };
         let reading_k = "Cannot read properties of undefined or null (reading 'k')";
+        // `text.join`'s own check of its members.
+        const JOIN_REFUSAL: &str = "join requires text members";
         let record_y = k::Datum::Record(vec![("7,8,9".into(), k::Datum::Bool(true))]);
         // (x's literal, its fill, body, y, the result JavaScript gives or
         // the failure message it raises, where the case has one).
@@ -832,6 +825,38 @@ console.log(JSON.stringify(created));
                 k::Datum::Null,
                 Some(Ok(k::Datum::Null)),
             ),
+            // A template over a text joins it as it is, escapes kept; one
+            // over another kind fails the join's text check where the
+            // original's does, with no conversion to succeed by.
+            (
+                TEXT,
+                text("q"),
+                "return `a\\n${x}\\`${x}`;",
+                k::Datum::Null,
+                Some(Ok(k::Datum::Text("a\nq`q".into()))),
+            ),
+            (
+                TEXT,
+                int(3),
+                "return `hello ${x}!`;",
+                k::Datum::Null,
+                Some(Err(JOIN_REFUSAL)),
+            ),
+            (
+                TEXT,
+                list(),
+                "return `a\\n${x}\\`${x}`;",
+                k::Datum::Null,
+                Some(Err(JOIN_REFUSAL)),
+            ),
+            // A part the original converts keeps its conversion.
+            (
+                TEXT,
+                text("q"),
+                "return `${x}-${y}`;",
+                k::Datum::Int(3i64.into()),
+                Some(Ok(k::Datum::Text("q-3".into()))),
+            ),
         ];
         for (literal, value, body, y, expected) in cases {
             let cell = format!(
@@ -889,7 +914,7 @@ console.log(JSON.stringify(created));
             "{}",
             printed.source
         );
-        let missing = Helper {
+        let missing = crate::tests::helper::Helper {
             library,
             name: "ts.in",
             id: None,
@@ -917,7 +942,7 @@ console.log(JSON.stringify(created));
             "{refused:?}"
         );
         // The same name for another helper is not the original's identity.
-        let renamed = Helper {
+        let renamed = crate::tests::helper::Helper {
             library,
             name: "ts.in",
             id: library.resolve("ts.has"),
@@ -926,6 +951,48 @@ console.log(JSON.stringify(created));
         let refused = print(
             &opened.document,
             Some(&opened.captions),
+            &renamed,
+            Default::default(),
+        );
+        assert!(
+            matches!(refused, Err(PrintError::Unprintable { .. })),
+            "{refused:?}"
+        );
+        // A template's join keeps `text.join`'s identity: the printed
+        // callable spells it, and a library naming another helper so does
+        // not print it.
+        let lowered = crate::lower(
+            &format!(
+                "const x = {TEXT};\nconst demo = async (y: any): Promise<unknown> => {{ return `hello ${{x}}!`; }};\n"
+            ),
+            &environment,
+            cell_mode(),
+        )
+        .unwrap();
+        let joined = materialize_callable_as(&lowered, fill(text("q")));
+        let printed = print(
+            &joined.document,
+            Some(&joined.captions),
+            library,
+            Default::default(),
+        )
+        .unwrap();
+        assert!(
+            printed
+                .source
+                .contains("value.text_join([\"hello \", x, \"!\"], \"\")"),
+            "{}",
+            printed.source
+        );
+        let renamed = crate::tests::helper::Helper {
+            library,
+            name: "text.join",
+            id: library.resolve("text.concat"),
+        };
+        assert!(renamed.id.is_some());
+        let refused = print(
+            &joined.document,
+            Some(&joined.captions),
             &renamed,
             Default::default(),
         );
@@ -949,61 +1016,6 @@ console.log(JSON.stringify(created));
             ),
             "{claimed:?}"
         );
-    }
-
-    /// A library whose `name` resolves to `id` instead of its own helper.
-    struct Helper<'a> {
-        library: &'a lash_kernel_dialect::NamedLibrary,
-        name: &'static str,
-        id: Option<lash_kernel_value::FunctionId>,
-    }
-
-    impl k::FunctionCatalog for Helper<'_> {
-        fn named_helper(&self, name: &str) -> Option<lash_kernel_value::FunctionId> {
-            self.resolve(name)
-        }
-        fn projection_helper(
-            &self,
-            role: k::ProjectionRole,
-        ) -> Option<lash_kernel_value::FunctionId> {
-            self.library.projection_helper(role)
-        }
-        fn helper_library(&self) -> Option<&k::BuildHelpers> {
-            self.library.helper_library()
-        }
-        fn definition(
-            &self,
-            function: &lash_kernel_value::FunctionId,
-        ) -> Option<&k::FunctionDefinition> {
-            self.library.definition(function)
-        }
-        fn registered(
-            &self,
-            function: &lash_kernel_value::FunctionId,
-        ) -> Option<&k::RegisteredFunction> {
-            self.library.registered(function)
-        }
-        fn header(
-            &self,
-            function: &lash_kernel_value::FunctionId,
-        ) -> Option<std::sync::Arc<k::FunctionHeader>> {
-            self.library.header(function)
-        }
-        fn registration(
-            &self,
-            definition: &k::FunctionDefinition,
-        ) -> Option<&k::RegisteredFunction> {
-            self.library.registration(definition)
-        }
-    }
-
-    impl Library for Helper<'_> {
-        fn resolve(&self, name: &str) -> Option<lash_kernel_value::FunctionId> {
-            if name == self.name {
-                return self.id;
-            }
-            self.library.resolve(name)
-        }
     }
 
     /// Materializes the callable of `lowered` as `saved` leaves its value.
