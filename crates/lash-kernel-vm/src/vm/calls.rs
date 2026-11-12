@@ -303,7 +303,7 @@ impl<H: Heap> Vm<H> {
             Callee::Entry {
                 unit: callee,
                 adapt,
-            } => self.enter_entry(callee, adapt, site.checked.as_deref(), argc),
+            } => self.enter_entry(callee, adapt, site.checked.as_deref(), &site.names, argc),
             Callee::Value => self.call_value(program, argc, site.checked.is_some()),
             Callee::Native { native, charged } => {
                 if let Some(checked) = &site.checked {
@@ -318,7 +318,8 @@ impl<H: Heap> Vm<H> {
     }
 
     /// A call through an import entering export entry `callee` with the
-    /// top `argc` arguments, adapted by `adapt` after `checked`.
+    /// top `argc` arguments, adapted by `adapt` after `checked`, its map
+    /// keyed by `names`.
     #[cold]
     #[inline(never)]
     fn enter_entry(
@@ -326,79 +327,114 @@ impl<H: Heap> Vm<H> {
         callee: crate::bytecode::program::UnitId,
         adapt: Adapt,
         checked: Option<&Checked>,
+        names: &[u32],
         argc: usize,
     ) -> Run<()> {
-        let argc = self.adapted(checked, adapt, argc)?;
+        let argc = self.adapted(checked, adapt, names, argc)?;
         self.meter.leave();
         self.exact = true;
         let link = self.running_link();
         self.enter(callee, argc, None, None, link)
     }
 
-    /// The top `argc` arguments of a call through an import, held to
-    /// `checked` and made the export body's by its start convention as a
-    /// start makes them (`K-DOC-003`): how many the body is passed. A
+    /// The top `operands` of a call through an import, held to `checked`
+    /// and made the export body's by its start convention as a start
+    /// makes them (`K-DOC-003`): how many the body is passed. A
     /// TypeScript export's callers may pass fewer or more than it
-    /// declares. What the adaptation builds is built over copies of the
-    /// arguments, which stay rooted below until it is placed.
+    /// declares. The arguments are checked where they stand before
+    /// anything is built, as main checks an imported call's arguments
+    /// before it packs them. The adaptation then builds in their place,
+    /// within the slots the caller's frame reserved for it
+    /// ([`Adapt::peak`]): what it packs stays rooted where it stands until
+    /// what it builds takes its place.
     #[cold]
     #[inline(never)]
-    fn adapted(&mut self, checked: Option<&Checked>, adapt: Adapt, argc: usize) -> Run<usize> {
+    fn adapted(
+        &mut self,
+        checked: Option<&Checked>,
+        adapt: Adapt,
+        names: &[u32],
+        operands: usize,
+    ) -> Run<usize> {
         let Some(checked) = checked else {
             return Err(fault("an export's entry is called without its contract"));
         };
-        match adapt {
-            Adapt::Python { .. } => self.check_arguments(checked, argc)?,
-            Adapt::Slots(_) | Adapt::Listed => self.check_fits(checked, argc)?,
-        }
-        let from = self.cx.stack.len() - argc;
-        let copy = |vm: &mut Self, range: std::ops::Range<usize>| {
-            for at in range {
-                vm.push(vm.cx.stack[from + at]);
-            }
-        };
+        let from = self.cx.stack.len() - operands;
         match adapt {
             Adapt::Slots(arity) => {
+                self.check_fits(checked, operands)?;
                 let arity = usize::from(arity);
-                self.cx.stack.truncate(from + argc.min(arity));
-                for _ in argc..arity {
+                self.cx.stack.truncate(from + operands.min(arity));
+                for _ in operands..arity {
                     self.push(Value::Absent);
                 }
-                return Ok(arity);
+                self.reserved()?;
+                Ok(arity)
             }
             Adapt::Listed => {
-                self.push(Value::Absent);
-                copy(self, 0..argc);
-                let values = self.top(argc).to_vec();
-                self.place(argc, NewObject::List(values))?;
+                self.check_fits(checked, operands)?;
+                self.cx.stack.insert(from, Value::Absent);
+                self.reserved()?;
+                let values = self.top(operands).to_vec();
+                self.place(operands, NewObject::List(values))?;
+                self.reserved()?;
+                Ok(2)
             }
             Adapt::Python { positional } => {
-                let positional = usize::from(positional).min(argc);
-                copy(self, 0..positional);
-                let values = self.top(positional).to_vec();
-                self.place(positional, NewObject::List(values))?;
-                for (at, keyword) in checked.keywords.iter().enumerate().take(argc) {
-                    if at >= positional {
-                        let name = self.text(keyword.as_str())?;
-                        self.push(name);
-                        self.push(self.cx.stack[from + at]);
-                    }
-                }
-                let named = 2 * (argc - positional);
-                let pairs = self
-                    .top(named)
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|&[key, value]| (key, value))
-                    .collect();
-                self.place(named, NewObject::Map(pairs))?;
+                self.check_arguments(checked, operands)?;
+                // The names are the caller's constants, read only now
+                // that the arguments fit ([`CallSite::names`]).
+                let keys = (names.iter())
+                    .map(|name| self.read_constant(*name))
+                    .collect::<Run<Vec<Value>>>()?;
+                let positional = usize::from(positional).min(operands);
+                let pairs = |values: &[Value]| -> Vec<(Value, Value)> {
+                    keys.iter().copied().zip(values.iter().copied()).collect()
+                };
+                let (list, map) = if positional == 0 && operands > 0 {
+                    // The map where the keyword values stand, then the
+                    // empty list beside it.
+                    let pairs = pairs(&self.cx.stack[from..]);
+                    let map = self.alloc(NewObject::Map(pairs))?;
+                    self.cx.stack.truncate(from);
+                    self.push(map);
+                    (self.alloc(NewObject::List(Vec::new()))?, map)
+                } else {
+                    // The list where the positional values stand, then the
+                    // map where the keyword values stand above it.
+                    let values = self.cx.stack[from..from + positional].to_vec();
+                    let list = self.alloc(NewObject::List(values))?;
+                    self.cx.stack.splice(from..from + positional, [list]);
+                    let pairs = pairs(&self.cx.stack[from + 1..]);
+                    (list, self.alloc(NewObject::Map(pairs))?)
+                };
+                self.cx.stack.truncate(from);
+                self.push(list);
+                self.push(map);
                 self.push(Value::Absent);
+                self.reserved()?;
+                Ok(3)
             }
         }
-        let adapted = self.cx.stack.len() - from - argc;
-        self.cx.stack.drain(from..from + argc);
-        Ok(adapted)
+    }
+
+    /// Faults when the calling frame's operands stand above the height
+    /// the validator gave its unit, which the frame reserved at entry
+    /// (`K-BND-003`): an adaptation holds nothing its caller's frame did
+    /// not reserve.
+    fn reserved(&self) -> Run<()> {
+        let Some(frame) = self.cx.frames.last() else {
+            return Ok(());
+        };
+        let slots =
+            (self.frame_cost(frame.unit) - crate::heap::meter::FRAME) / crate::heap::meter::VALUE;
+        let held = (self.cx.stack.len() - frame.base as usize) as u64;
+        if held > slots {
+            return Err(fault(format!(
+                "an adaptation holds {held} of its frame's {slots} reserved slots"
+            )));
+        }
+        Ok(())
     }
 
     /// The bill a call of formula `charge` owes, over its top `argc`

@@ -602,6 +602,11 @@ pub struct CallSite {
     /// The contract an authored call of a typed build helper's body
     /// holds its arguments to (`function_argument`), as an export's are.
     pub checked: Option<Arc<Checked>>,
+    /// Through an import of a `PyArgsList` export ([`Adapt::Python`]): the
+    /// constants of the caller's code that name the arguments past
+    /// `positional`, in order, which key the map the adaptation builds.
+    /// Empty for every other call.
+    pub names: Box<[u32]>,
     /// A call action of document code (a call or an await): the
     /// program-wide number of the task's counter of its entries, which the
     /// call op advances before the call reads its arguments, and which a
@@ -620,10 +625,6 @@ pub struct Checked {
     /// What each parameter's type holds a value to by its kind alone
     /// (`Shallow`), in order.
     pub shallow: Box<[Shallow]>,
-    /// The names a packed Python export takes its keyword arguments by,
-    /// from the export's own signature: packing, apart from the contract
-    /// a call holds to (empty for any other callee).
-    pub keywords: Box<[lash_kernel_value::Name]>,
 }
 
 impl Checked {
@@ -637,7 +638,6 @@ impl Checked {
                 .map(|param| Shallow::of(&param.ty))
                 .collect(),
             signature,
-            keywords: Box::default(),
         }
     }
 }
@@ -653,8 +653,40 @@ pub enum Adapt {
     /// `TsArgsList`: an absent `this`, and every argument in a list.
     Listed,
     /// `PyArgsList`: the first `positional` arguments in a list, the rest
-    /// in a map by their parameters' names, and no active exception.
+    /// in a map by their parameters' names, and no active exception. The
+    /// call's operands are its arguments in authored order, and nothing
+    /// else: the names are constants of the caller's code that the site
+    /// refers to ([`CallSite::names`]), read when the map is built. The
+    /// adaptation checks the arguments before it builds either
+    /// collection, as main does.
     Python { positional: u16 },
+}
+
+impl Adapt {
+    /// The most operand slots a call's `operands` take while they are
+    /// adapted, the operands counted. Each adaptation builds where its
+    /// operands stand, and what it packs stays rooted there until what it
+    /// builds takes its place: `Slots` pads to the body's arity, `Listed`
+    /// adds `this` beside the arguments before their list replaces them,
+    /// and `Python` builds its list where the positional arguments stand
+    /// and its map where the keyword values stand (the map first when
+    /// none is positional, so the empty list needs no slot of its own),
+    /// then puts the list, the map and the absent exception in their
+    /// place: no more than the arguments' slots, or three.
+    ///
+    /// The validator counts this peak in the calling frame's operand
+    /// height, which the frame reserves for its whole life as it does a
+    /// plain call's operands (`K-BND-003`); there is no reservation of its
+    /// own, released at the callee's admission, that a plain call would
+    /// not have.
+    pub fn peak(self, operands: u16) -> u32 {
+        let operands = u32::from(operands);
+        match self {
+            Self::Slots(arity) => operands.max(u32::from(arity)),
+            Self::Listed => operands.max(1) + 1,
+            Self::Python { .. } => operands.max(3),
+        }
+    }
 }
 
 /// What a parameter's type decides of a value by its kind alone. A value

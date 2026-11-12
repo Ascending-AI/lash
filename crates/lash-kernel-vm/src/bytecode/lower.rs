@@ -18,7 +18,7 @@ use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::types::Type;
 
-use super::compile::{Compiler, Fun, LoopCtx, Result, Scope, Var, unsupported};
+use super::compile::{Compiler, Fun, LoopCtx, Packing, Result, Scope, Var, unsupported, within};
 use super::op::Op;
 use super::program::{ActionSite, Callee, LoopMark, LoopSite, Point};
 
@@ -669,7 +669,7 @@ impl Compiler<'_> {
                 then_yield,
             } => {
                 self.atoms(f, args, true)?;
-                self.perform(f, slot, args.len(), result, *then_yield, site);
+                self.perform(f, slot, args.len(), result, *then_yield, site)?;
             }
             Action::Join { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
@@ -729,6 +729,16 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// How a call of `callee` names the arguments its adaptation packs
+    /// ([`Compiler::keywords`]): only through an import of a `PyArgsList`
+    /// export.
+    fn packing(&mut self, callee: &DocCallee) -> Result<Option<Packing>> {
+        match callee {
+            DocCallee::Import(slot) => self.python_packing(*slot),
+            DocCallee::Local(_) | DocCallee::Value(_) => Ok(None),
+        }
+    }
+
     /// A value callee is read before the arguments (`K-EVAL-004`).
     fn callee_value(&mut self, f: &mut Fun, callee: &DocCallee) {
         if let DocCallee::Value(name) = callee {
@@ -752,10 +762,13 @@ impl Compiler<'_> {
             }
             DocCallee::Import(slot) => self.import_call(f, *slot)?,
         };
+        let packing = self.packing(callee)?;
+        let names = self.keywords(packing.as_ref(), argc);
         f.point(f.here(), Point::Action(site.clone()));
-        self.entered_call(f, target, argc as u16, site);
+        self.entered_call(f, target, passed(argc)?, site);
         if let Some(call) = f.calls.last_mut() {
             call.checked = checked;
+            call.names = names;
         }
         Ok(())
     }
@@ -768,18 +781,20 @@ impl Compiler<'_> {
         result: &Type,
         then_yield: bool,
         site: Site,
-    ) {
+    ) -> Result<()> {
+        let argc = within(argc, "arguments of one effect")?;
         self.task_action(
             f,
             ActionSite::Perform {
                 owner: f.owner,
                 slot: *slot,
-                argc: argc as u16,
+                argc,
                 result: result.clone(),
                 then_yield,
                 site,
             },
         );
+        Ok(())
     }
 
     fn spawn(&mut self, f: &mut Fun, callee: &DocCallee, argc: usize, site: Site) -> Result<()> {
@@ -797,8 +812,9 @@ impl Compiler<'_> {
                 (Some(callable), Some(self.import_call(f, *slot)?))
             }
         };
-        let unit = self.stub(f, target, resolved, argc as u16)?;
-        let values = argc as u16 + u16::from(target.is_none());
+        let packing = self.packing(callee)?;
+        let values = passed(argc + usize::from(target.is_none()))?;
+        let unit = self.stub(f, target, resolved, packing.as_ref(), passed(argc)?)?;
         self.task_action(
             f,
             ActionSite::Spawn {
@@ -892,7 +908,7 @@ impl Compiler<'_> {
                 }
                 let site = f.site();
                 let callee = self.callee(f, *function)?;
-                self.call(f, callee, args.len() as u16, site);
+                self.call(f, callee, passed(args.len())?, site);
             }
             Expr::If { cond, then, r#else } => {
                 self.child(f, 0, cond)?;
@@ -928,7 +944,7 @@ impl Compiler<'_> {
                         slot,
                         result,
                         then_yield,
-                    } => self.perform(f, slot, argc, result, *then_yield, site),
+                    } => self.perform(f, slot, argc, result, *then_yield, site)?,
                     ActKind::Spawn(callee) => self.spawn(f, callee, argc, site)?,
                     ActKind::Join => self.task_action(f, ActionSite::Join { site }),
                     ActKind::JoinMany(mode) => {
@@ -948,4 +964,10 @@ impl Compiler<'_> {
         }
         Ok(())
     }
+}
+
+/// A call's or a spawn's argument count as its site holds it
+/// ([`within`]).
+fn passed(argc: usize) -> Result<u16> {
+    within(argc, "arguments of one call or spawn")
 }

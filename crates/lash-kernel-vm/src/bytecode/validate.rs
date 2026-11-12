@@ -577,7 +577,7 @@ impl Unit {
                 return Err(at(format!("{op:?} pops {pops} of {d} operands")));
             };
             let after = after + pushes;
-            height = height.max(d).max(after);
+            height = height.max(d).max(after).max(self.adapting(op, d - pops));
             let mut go = |to: usize, d: u32| work.push((to, d));
             match op {
                 Op::Return | Op::Fall | Op::Raise | Op::Finish | Op::Fail | Op::Unavailable(_) => {}
@@ -697,6 +697,22 @@ impl Unit {
     }
 
     /// What `op` pops and then pushes (`ProtoGuard` as when it guards).
+    /// The operand depth a call through an import reaches while it
+    /// adapts its arguments, its callee and arguments popped to `under`:
+    /// the frame holds them as it holds an authored call's operands.
+    fn adapting(&self, op: Op, under: u32) -> u32 {
+        let call = match op {
+            Op::Call(n) => n,
+            Op::Inline(n) => self.inlines[n as usize].call,
+            _ => return 0,
+        };
+        let site = &self.calls[call as usize];
+        match site.callee {
+            Callee::Entry { adapt, .. } => under + adapt.peak(site.argc),
+            _ => 0,
+        }
+    }
+
     pub(super) fn effect(&self, op: Op) -> (u32, u32) {
         match op {
             Op::Block(_)

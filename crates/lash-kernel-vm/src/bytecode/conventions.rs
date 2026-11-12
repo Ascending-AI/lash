@@ -11,7 +11,7 @@ use lash_kernel_value::Type;
 use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot};
 use lash_kernel_value::sites::Unit as SiteUnit;
 
-use super::compile::{Compiler, Entry, Fun, Result, unsupported};
+use super::compile::{Compiler, Entry, Fun, Packing, Result, unsupported, within};
 use super::op::Op;
 use super::program::{
     Adapt, Block, CallSite, Callee, Checked, Event, RootCleanup, Unit, UnitId, UnitKind,
@@ -59,6 +59,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
         site: site.statement.clone(),
         mark,
         checked: None,
+        names: Box::default(),
         entry: None,
     });
     // Settlement runs after the body's handlers have left, like its return:
@@ -89,9 +90,7 @@ fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
     let id = entry.function;
     if entry.captures.is_none() && called(compiler, id) {
         let params = compiler.def(&id)?.signature.params.len();
-        let Ok(argc) = u16::try_from(params) else {
-            return unsupported("a native entry with more parameters than a call passes");
-        };
+        let argc = within(params, "parameters of one function")?;
         let site = Fun::new(SiteUnit::Library(id), false, false, None);
         if compiler.def(&id)?.body().is_some() {
             return billed(compiler, id, site, argc);
@@ -100,7 +99,7 @@ fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
             link: compiler.link,
             function: id,
         };
-        return compiler.stub(&site, Some(callable), None, argc);
+        return compiler.stub(&site, Some(callable), None, None, argc);
     }
     let at = compiler.reserve();
     let kind = match entry.captures {
@@ -131,7 +130,7 @@ fn billed(compiler: &mut Compiler<'_>, id: FunctionId, mut g: Fun, argc: u16) ->
     let site = g.site();
     compiler.call(&mut g, callee, argc, site);
     g.emit(Op::Return);
-    compiler.seal(g, at, UnitKind::Spawn, argc, Arc::from("spawn"));
+    compiler.seal(g, at, UnitKind::Spawn, argc, Arc::from("spawn"))?;
     Ok(at)
 }
 
@@ -179,6 +178,7 @@ fn clean_up(
         site: site.statement.clone(),
         mark,
         checked: None,
+        names: Box::default(),
         entry: None,
     });
     let mut paths = [0u32; 3];
@@ -446,10 +446,7 @@ impl Compiler<'_> {
             StartConvention::PyDirect { .. } => None,
             StartConvention::TsDirect { .. } => {
                 let arity = self.def(&function)?.signature.params.len();
-                let Ok(arity) = u16::try_from(arity) else {
-                    return unsupported("an export with more parameters than a call passes");
-                };
-                Some(Adapt::Slots(arity))
+                Some(Adapt::Slots(within(arity, "parameters of one function")?))
             }
             StartConvention::TsArgsList { .. } => Some(Adapt::Listed),
             StartConvention::PyArgsList { positional } => Some(Adapt::Python {
@@ -472,12 +469,37 @@ impl Compiler<'_> {
                 unit
             }
         };
-        let mut checked = Checked::new(callable, contract);
-        if let Some(Adapt::Python { .. }) = adapt {
-            checked.keywords = (descriptor.signature.params.iter())
-                .map(|param| param.name.clone())
-                .collect();
-        }
-        Ok(Some((unit, adapt, Arc::new(checked))))
+        Ok(Some((
+            unit,
+            adapt,
+            Arc::new(Checked::new(callable, contract)),
+        )))
+    }
+
+    /// How a call through import `slot` passes its arguments when the
+    /// export packs them as Python does (`PyArgsList`): how many it passes
+    /// in its list, and the export's parameters' names, by which it passes
+    /// the rest ([`Adapt::Python`]). None for any other export, and for an
+    /// import [`Self::import_call`] refuses.
+    pub(crate) fn python_packing(&mut self, slot: ImportSlot) -> Result<Option<Packing>> {
+        use lash_kernel_doc::StartConvention;
+        let Some((callable, export)) = self.imports.get(&(self.link, slot)).cloned() else {
+            return Ok(None);
+        };
+        let home = self.link;
+        self.enter_link(callable.link)?;
+        let packing = crate::interface::exported(self.document, &export).and_then(|descriptor| {
+            let StartConvention::PyArgsList { positional } = descriptor.convention else {
+                return None;
+            };
+            Some(Packing {
+                positional: usize::try_from(positional).unwrap_or(usize::MAX),
+                names: (descriptor.signature.params.iter())
+                    .map(|param| param.name.clone())
+                    .collect(),
+            })
+        });
+        self.enter_link(home)?;
+        Ok(packing)
     }
 }

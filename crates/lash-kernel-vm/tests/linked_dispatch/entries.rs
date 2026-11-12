@@ -846,3 +846,725 @@ fn an_imported_entry_raises_from_the_site_a_plain_call_does() {
         }
     }
 }
+
+/// What a run of `program`'s main gives under memory bound `memory`,
+/// sliced one unit at a time and, `cold`, sealed and reopened at every
+/// slice and at every park, each request settled null: its end and the
+/// memory it holds there.
+fn bounded_run(program: &Program, memory: u64, cold: bool) -> (End, u64) {
+    let limits = Bounds { memory, ..bounds() };
+    let pages = Pages::default();
+    let start = CellStart {
+        owner: PageId([8; 32]),
+        target: Target::Main,
+        args: vec![],
+        session: None,
+        modes: BTreeMap::new(),
+        host: vec![],
+    };
+    let reopen = |mut machine: KernelMachine| {
+        let saved = machine
+            .checkpoint()
+            .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"));
+        KernelMachine::open(
+            program.clone(),
+            limits,
+            &saved.checkpoint(),
+            Box::new(pages.clone()),
+        )
+        .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"))
+    };
+    let mut machine = KernelMachine::start(program.clone(), limits, start, Box::new(pages.clone()))
+        .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"));
+    loop {
+        match machine
+            .run(&mut Passive, 1)
+            .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"))
+        {
+            Step::Ended(end) => return (end, machine.meters().memory),
+            Step::Slice if cold => machine = reopen(machine),
+            Step::Slice => {}
+            Step::Parked(park) => {
+                if cold {
+                    machine = reopen(machine);
+                }
+                for Request::Effect(request) in park.requests {
+                    machine
+                        .deliver(request.wait, Outcome::Completed(Datum::Null))
+                        .unwrap_or_else(|error| panic!("entry law fixture: {error:?}"));
+                }
+            }
+        }
+    }
+}
+
+/// How a bounded run ends, its bound's limit aside: finished with its
+/// result, refused naming the bound, function and site, or otherwise.
+#[derive(Clone, Debug, PartialEq)]
+enum Ending {
+    Finished(Datum),
+    Refused(String),
+    Other(String),
+}
+
+fn ending(end: &End) -> Ending {
+    match end {
+        End::Finished(done) => Ending::Finished(done.result.clone()),
+        End::Error(lash_kernel_vm::RunError::Bound(refused)) => Ending::Refused(format!(
+            "{:?} {:?} {:?}",
+            refused.bound, refused.function, refused.site
+        )),
+        other => Ending::Other(format!("{other:?}")),
+    }
+}
+
+/// The error kind a finished run caught, if its result is one.
+fn caught(ending: &Ending) -> Option<String> {
+    match ending {
+        Ending::Finished(Datum::Error(error)) => Some(error.kind.clone()),
+        _ => None,
+    }
+}
+
+/// A parameter of type `ty` named `name`.
+fn parameter(name: &str, ty: Type, optional: bool) -> Param {
+    Param {
+        name: Name::new(name),
+        ty,
+        optional,
+    }
+}
+
+/// A call of `callee` with `args`, as an expression.
+fn calling(callee: Callee, args: Vec<Expr>) -> Expr {
+    Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+        kind: lash_kernel_doc::ActKind::Call(callee),
+        args,
+    }))
+}
+
+/// A body taking a `PyArgsList` export's packed arguments that returns
+/// `value`.
+fn packed_body(value: bool) -> FunctionDefinition {
+    function(
+        "entry.packed",
+        Signature {
+            params: ["args", "kwargs", "exc"]
+                .into_iter()
+                .map(|name| parameter(name, Type::Any, false))
+                .collect(),
+            result: Type::Any,
+        },
+        BTreeMap::new(),
+        vec![returns(value)],
+    )
+}
+
+/// K-BND-003, K-DOC-003: a call through an import holds, while it checks
+/// and packs its arguments under the export's start convention, only
+/// what its caller's frame reserved for it: the validator counts the
+/// adaptation's peak in the caller's operand height, which the frame
+/// holds for its whole life, and the VM faults an adaptation standing
+/// above it (`reserved`), which this law reaches at every bound. Swept
+/// over memory bounds, warm and reopened cold at every slice, a run is
+/// refused only for a total past its bound (the meter counts the refused
+/// demand), finishes holding no more than it, is refused naming the same
+/// bound, function and site warm and cold, and a cold run never refuses
+/// where the warm run finishes. (A cold run may finish where the warm
+/// one is refused: a reopen keeps none of the garbage a loop left.)
+///
+/// The shapes: `Direct`; zero to four arguments to four optional
+/// parameters under `TsDirect` (omitted slots absent), `TsArgsList` with
+/// a rest parameter, and `PyArgsList` at every positional cutoff from
+/// zero to four, with and without keywords. Keyword names longer than an
+/// inline text, a call repeated in a loop, and an adapted call that is
+/// another's argument complete the law. A `TsDirect` or `TsArgsList`
+/// body raises, which main catches, so the settlement hook, which runs in
+/// the entry's frame, is not reached. `PyDirect` packs nothing: its call
+/// passes its arguments as any call.
+#[test]
+fn an_imported_call_holds_only_what_its_frame_reserved() {
+    #[derive(Clone, Copy)]
+    enum Kind {
+        Direct,
+        Slots,
+        Rest,
+        Python(u32),
+    }
+    #[derive(Clone, Copy, Debug)]
+    enum Shape {
+        Once,
+        Looped,
+        Nested,
+    }
+    let param = |name: &str, optional: bool| parameter(name, Type::Any, optional);
+    let yes = || Expr::Literal(Literal::Bool(true));
+    let list = |members: Vec<Expr>| Expr::List(members);
+    let hook = function(
+        "entry.settle",
+        Signature {
+            params: vec![param("value", false)],
+            result: Type::Any,
+        },
+        BTreeMap::new(),
+        vec![Stmt::Return {
+            value: Expr::Variable(Name::new("value")),
+        }],
+    );
+    let settle = || lash_kernel_doc::FunctionTarget::Local(hook.identity());
+    let names = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| param(name, false))
+            .collect::<Vec<_>>()
+    };
+    let short = ["k0", "k1", "k2", "k3"];
+    let long = [
+        "k0",
+        "keyword_name_longer_than_any_inline_text_one",
+        "keyword_name_longer_than_any_inline_text_two",
+        "k3",
+    ];
+    let mut cases = vec![(Kind::Direct, short, 1, Shape::Once)];
+    for argc in 0..=4 {
+        cases.push((Kind::Slots, short, argc, Shape::Once));
+        cases.push((Kind::Rest, short, argc, Shape::Once));
+        for positional in 0..=4 {
+            cases.push((Kind::Python(positional), short, argc, Shape::Once));
+        }
+    }
+    cases.extend([
+        (Kind::Python(0), long, 2, Shape::Once),
+        (Kind::Python(1), long, 3, Shape::Once),
+        (Kind::Python(3), short, 4, Shape::Looped),
+        (Kind::Python(1), long, 3, Shape::Looped),
+        (Kind::Slots, short, 1, Shape::Looped),
+        (Kind::Rest, short, 2, Shape::Looped),
+        (Kind::Python(1), short, 2, Shape::Nested),
+        (Kind::Python(3), short, 4, Shape::Nested),
+        (Kind::Python(0), long, 2, Shape::Nested),
+    ]);
+    // Every case that does not hold, with its first difference.
+    let mut failures = Vec::new();
+    'cases: for (kind, keys, argc, shape) in cases {
+        let case = match kind {
+            Kind::Direct => "Direct".to_owned(),
+            Kind::Slots => "TsDirect".to_owned(),
+            Kind::Rest => "TsArgsList rest".to_owned(),
+            Kind::Python(positional) => format!("PyArgsList positional {positional}"),
+        };
+        let case = format!(
+            "{case}, {argc} arguments, {} names, {shape:?}",
+            keys[1].len()
+        );
+        let optional = || keys.iter().map(|key| param(key, true)).collect::<Vec<_>>();
+        let (convention, params, block, mut import) = match kind {
+            Kind::Direct => (
+                StartConvention::Direct,
+                names(&["x"]),
+                vec![returns(true)],
+                names(&["x"]),
+            ),
+            Kind::Slots => (
+                StartConvention::TsDirect { await_fn: settle() },
+                optional(),
+                vec![Stmt::Throw { value: yes() }],
+                optional(),
+            ),
+            Kind::Rest => (
+                StartConvention::TsArgsList {
+                    await_fn: settle(),
+                    same_fn: settle(),
+                },
+                names(&["this", "args"]),
+                vec![Stmt::Throw { value: yes() }],
+                optional(),
+            ),
+            Kind::Python(positional) => (
+                StartConvention::PyArgsList { positional },
+                names(&["args", "kwargs", "exc"]),
+                vec![returns(true)],
+                optional(),
+            ),
+        };
+        let rest = matches!(kind, Kind::Rest);
+        if rest && let Some(last) = import.last_mut() {
+            last.ty = Type::List(Box::new(Type::Any));
+        }
+        // A rest parameter's argument is a list.
+        let args = (0..argc)
+            .map(|at| match rest && at == 3 {
+                true => list(vec![]),
+                false => yes(),
+            })
+            .collect::<Vec<_>>();
+        let body = function(
+            "entry.packed",
+            Signature {
+                params,
+                result: Type::Any,
+            },
+            BTreeMap::new(),
+            block,
+        );
+        let public = Signature {
+            params: import,
+            result: Type::Any,
+        };
+        let export = FunctionExport {
+            function: body.identity(),
+            signature: public.clone(),
+            convention,
+            asynchronous: false,
+            rest,
+        };
+        let call = |args: Vec<Expr>| calling(Callee::Import(ImportSlot(0)), args);
+        let main = match shape {
+            Shape::Once => vec![tried(
+                vec![Stmt::Return {
+                    value: call(args.clone()),
+                }],
+                Some(vec![returns(true)]),
+                None,
+            )],
+            Shape::Looped => vec![
+                Stmt::For {
+                    metered: 0,
+                    binding: Name::new("round"),
+                    iterable: list(vec![yes(), yes(), yes()]),
+                    via: None,
+                    body: vec![tried(
+                        vec![Stmt::Do {
+                            value: call(args.clone()),
+                        }],
+                        Some(vec![]),
+                        None,
+                    )],
+                    else_block: vec![],
+                },
+                returns(true),
+            ],
+            Shape::Nested => {
+                let mut outer = args.clone();
+                outer[0] = call(args.clone());
+                vec![Stmt::Return { value: call(outer) }]
+            }
+        };
+        let program = entry_world(
+            vec![body.clone(), hook.clone()],
+            vec![("entry", export)],
+            vec![("entry", public)],
+            vec![],
+            main,
+        );
+        let (mut warm_done, mut cold_done) = (false, false);
+        for memory in (0..=8192).step_by(8) {
+            let (warm, warm_held) = bounded_run(&program, memory, false);
+            let (cold, cold_held) = bounded_run(&program, memory, true);
+            let (warm, cold) = (ending(&warm), ending(&cold));
+            for (mode, end, held) in [("warm", &warm, warm_held), ("cold", &cold, cold_held)] {
+                // A refusal refuses only a demand past the bound; a
+                // finished run held no more than it.
+                if matches!(end, Ending::Refused(_)) == (held <= memory) {
+                    failures.push(format!(
+                        "{case}, memory {memory}, {mode}: {end:?} at {held}"
+                    ));
+                    continue 'cases;
+                }
+                if let Ending::Finished(result) = end
+                    && *result != Datum::Bool(true)
+                {
+                    failures.push(format!("{case}, memory {memory}, {mode}: {result:?}"));
+                    continue 'cases;
+                }
+            }
+            match (&warm, &cold) {
+                (Ending::Refused(_), Ending::Refused(_)) if warm != cold => {
+                    failures.push(format!(
+                        "{case}, memory {memory}: warm {warm:?}, cold {cold:?}"
+                    ));
+                    continue 'cases;
+                }
+                (Ending::Finished(_), Ending::Refused(_)) => {
+                    failures.push(format!(
+                        "{case}, memory {memory}: cold {cold:?} where warm finishes"
+                    ));
+                    continue 'cases;
+                }
+                (Ending::Other(_), _) | (_, Ending::Other(_)) => {
+                    failures.push(format!(
+                        "{case}, memory {memory}: warm {warm:?}, cold {cold:?}"
+                    ));
+                    continue 'cases;
+                }
+                _ => {}
+            }
+            warm_done |= matches!(warm, Ending::Finished(_));
+            cold_done |= matches!(cold, Ending::Finished(_));
+            if warm_done && cold_done {
+                break;
+            }
+        }
+        if !(warm_done && cold_done) {
+            failures.push(format!("{case}: no bound up to 8192 completes"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// K-DOC-003, K-BND-003: a call through an import checks its arguments
+/// against the import's signature before its adaptation builds anything,
+/// as main does, and before the check its caller's frame reserves no more
+/// than for the arguments themselves: the keyword names are constants of
+/// the caller's code, no operands. So an argument that does not fit
+/// raises `function_argument` at exactly the bounds where the adapter
+/// before L48 (301789fde0) did, warm and reopened cold at every slice:
+/// from 7392 bytes, for every positional cutoff, recorded on that commit
+/// (review/l48c-evidence/parent-invalid.json), and below it a refusal of
+/// a total past its bound. 128 `Bool` parameters, a null at the first or
+/// the last place, cutoffs 0, 124 and 128.
+#[test]
+fn an_imported_call_checks_its_arguments_before_it_packs_them() {
+    const PARAMS: usize = 128;
+    const PARENT_FIRST: u64 = 7392;
+    let public = Signature {
+        params: (0..PARAMS)
+            .map(|at| parameter(&format!("k{at}"), Type::Bool, false))
+            .collect(),
+        result: Type::Any,
+    };
+    for wrong in [0, PARAMS - 1] {
+        for positional in [0, 124, 128] {
+            let body = packed_body(false);
+            let export = FunctionExport {
+                function: body.identity(),
+                signature: public.clone(),
+                convention: StartConvention::PyArgsList { positional },
+                asynchronous: false,
+                rest: false,
+            };
+            let args = (0..PARAMS)
+                .map(|at| match at == wrong {
+                    true => null(),
+                    false => Expr::Literal(Literal::Bool(true)),
+                })
+                .collect();
+            let program = entry_world(
+                vec![body],
+                vec![("entry", export)],
+                vec![("entry", public.clone())],
+                vec![],
+                vec![tried(
+                    vec![Stmt::Return {
+                        value: calling(Callee::Import(ImportSlot(0)), args),
+                    }],
+                    Some(vec![Stmt::Return {
+                        value: Expr::Variable(Name::new("caught")),
+                    }]),
+                    None,
+                )],
+            );
+            for cold in [false, true] {
+                for memory in (8..=10304).step_by(8) {
+                    let (end, held) = bounded_run(&program, memory, cold);
+                    let end = ending(&end);
+                    let case = format!("null at {wrong}, positional {positional}, cold {cold}");
+                    match memory >= PARENT_FIRST {
+                        true => assert_eq!(
+                            caught(&end).as_deref(),
+                            Some("function_argument"),
+                            "{case}, memory {memory}: {end:?}"
+                        ),
+                        false => assert!(
+                            matches!(end, Ending::Refused(_)) && held > memory,
+                            "{case}, memory {memory}: {end:?} holding {held}"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A program whose main calls, or spawns and joins, an imported export
+/// of `count` `Bool` parameters with `count` arguments, all `true` but a
+/// null in the last place when `wrong`, inside a `try` that returns what
+/// it caught. The export is `Direct` when `direct`, its body taking the
+/// parameters, else `PyArgsList` packing every argument by name.
+fn counted(count: usize, direct: bool, wrong: bool, spawned: bool) -> Program {
+    let public = Signature {
+        params: (0..count)
+            .map(|at| parameter(&format!("k{at}"), Type::Bool, false))
+            .collect(),
+        result: Type::Any,
+    };
+    let (body, convention) = match direct {
+        true => (
+            function(
+                "entry.direct",
+                public.clone(),
+                BTreeMap::new(),
+                vec![returns(true)],
+            ),
+            StartConvention::Direct,
+        ),
+        false => (
+            packed_body(true),
+            StartConvention::PyArgsList { positional: 0 },
+        ),
+    };
+    let export = FunctionExport {
+        function: body.identity(),
+        signature: public.clone(),
+        convention,
+        asynchronous: false,
+        rest: false,
+    };
+    let argument = |at: usize| match wrong && at == count - 1 {
+        true => Literal::Null,
+        false => Literal::Bool(true),
+    };
+    let main = match spawned {
+        false => vec![Stmt::Return {
+            value: calling(
+                Callee::Import(ImportSlot(0)),
+                (0..count).map(|at| Expr::Literal(argument(at))).collect(),
+            ),
+        }],
+        true => vec![
+            Stmt::Let {
+                name: Name::new("child"),
+                value: Rhs::Action(Action::Spawn {
+                    callee: Callee::Import(ImportSlot(0)),
+                    args: (0..count).map(|at| Atom::Literal(argument(at))).collect(),
+                }),
+            },
+            Stmt::Let {
+                name: Name::new("answer"),
+                value: Rhs::Action(Action::Join {
+                    task: Atom::Variable(Name::new("child")),
+                }),
+            },
+            Stmt::Return {
+                value: Expr::Variable(Name::new("answer")),
+            },
+        ],
+    };
+    entry_world(
+        vec![body],
+        vec![("entry", export)],
+        vec![("entry", public)],
+        vec![],
+        vec![tried(
+            main,
+            Some(vec![Stmt::Return {
+                value: Expr::Variable(Name::new("caught")),
+            }]),
+            None,
+        )],
+    )
+}
+
+/// K-DOC-003: a call through an import passes every argument at every
+/// count up to the core's limit of 65,535, as a plain call does: the
+/// keyword names it packs are no operands, so no count of them is added
+/// to the arguments' and wrapped (a site counting 65,536 operands held
+/// none). A `Direct` export, whose body takes every parameter, and a
+/// `PyArgsList` one packing every argument by name, called and spawned,
+/// warm and cold: every argument `true` finishes `true`, and a null in
+/// the last place raises `function_argument`, which only a check of
+/// every argument finds.
+#[test]
+fn an_imported_call_passes_every_argument_at_every_count() {
+    for count in [32768, usize::from(u16::MAX)] {
+        for direct in [false, true] {
+            for wrong in [false, true] {
+                for spawned in [false, true] {
+                    let program = counted(count, direct, wrong, spawned);
+                    for cold in [false, true] {
+                        let (end, _) = bounded_run(&program, 1 << 30, cold);
+                        let end = ending(&end);
+                        let case = format!(
+                            "{count} arguments, direct {direct}, spawned {spawned}, cold {cold}"
+                        );
+                        match wrong {
+                            false => {
+                                assert_eq!(end, Ending::Finished(Datum::Bool(true)), "{case}")
+                            }
+                            true => assert_eq!(
+                                caught(&end).as_deref(),
+                                Some("function_argument"),
+                                "{case}: {end:?}"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The bytecode core holds at most 65,535 arguments of one call or
+/// spawn and parameters of one function (a documented limit, which main
+/// does not have). A document past it is refused as one the core cannot
+/// compile, a typed start error naming the count and the limit, never
+/// wrapped and never a panic: a `Direct` export of 65,536 parameters and
+/// a `PyArgsList` one, called or spawned with 65,536 arguments.
+#[test]
+fn a_count_past_the_cores_limit_is_refused_as_uncompilable() {
+    for direct in [true, false] {
+        for spawned in [false, true] {
+            let program = counted(65536, direct, false, spawned);
+            let start = CellStart {
+                owner: PageId([8; 32]),
+                target: Target::Main,
+                args: vec![],
+                session: None,
+                modes: BTreeMap::new(),
+                host: vec![],
+            };
+            let case = format!("direct {direct}, spawned {spawned}");
+            match KernelMachine::start(program, bounds(), start, Box::new(Pages::default())) {
+                Err(lash_kernel_vm::StartError::Linked { problem }) => assert!(
+                    problem.contains("65536") && problem.contains("limit of 65535"),
+                    "{case}: {problem}"
+                ),
+                Err(other) => panic!("{case}: {other:?}"),
+                Ok(_) => panic!("{case}: admitted"),
+            }
+        }
+    }
+}
+
+/// K-BND-003, K-DOC-003: a keyword argument whose expression parks,
+/// reopened cold at every slice and at the park, ends as it does warm at
+/// every memory bound, holding the same at a refusal: the arguments
+/// stand on the operand stack until the call checks and packs them in
+/// one operation, so no collection of them is saved and reloaded across
+/// the park. The keyword's name is longer than an inline text.
+#[test]
+fn a_parked_keyword_argument_ends_alike_warm_and_cold() {
+    let long = "keyword_name_longer_than_the_inline_text_limit";
+    let public = Signature {
+        params: vec![
+            parameter("a", Type::Any, false),
+            parameter(long, Type::Any, false),
+        ],
+        result: Type::Any,
+    };
+    let body = packed_body(true);
+    let pause = function(
+        "entry.pause",
+        signature(vec![]),
+        pause_import(),
+        vec![perform(), Stmt::Return { value: null() }],
+    );
+    let packed = FunctionExport {
+        function: body.identity(),
+        signature: public.clone(),
+        convention: StartConvention::PyArgsList { positional: 1 },
+        asynchronous: false,
+        rest: false,
+    };
+    let paused = FunctionExport {
+        function: pause.identity(),
+        signature: signature(vec![]),
+        convention: StartConvention::Direct,
+        asynchronous: false,
+        rest: false,
+    };
+    let call = calling(
+        Callee::Import(ImportSlot(0)),
+        vec![
+            Expr::Literal(Literal::Bool(true)),
+            calling(Callee::Import(ImportSlot(1)), vec![]),
+        ],
+    );
+    let program = entry_world(
+        vec![body, pause],
+        vec![("entry", packed), ("pause", paused)],
+        vec![("entry", public), ("pause", signature(vec![]))],
+        vec![],
+        vec![Stmt::Return { value: call }],
+    );
+    for memory in (0..=8192).step_by(8) {
+        let (warm, warm_held) = bounded_run(&program, memory, false);
+        let (cold, cold_held) = bounded_run(&program, memory, true);
+        let (warm, cold) = (ending(&warm), ending(&cold));
+        assert_eq!(warm, cold, "memory {memory}");
+        match warm {
+            Ending::Finished(result) => {
+                assert_eq!(result, Datum::Bool(true));
+                return;
+            }
+            Ending::Refused(_) => {
+                assert_eq!(warm_held, cold_held, "memory {memory}");
+                assert!(
+                    warm_held > memory,
+                    "memory {memory}: refused at {warm_held}"
+                );
+            }
+            Ending::Other(other) => panic!("memory {memory}: {other}"),
+        }
+    }
+    panic!("no bound up to 8192 completes");
+}
+
+/// K-BND-003: a call through an import of a `PyArgsList` export keys its
+/// map by names that are constants of the caller's code, read after the
+/// check, so a long name allocates nothing at the call: with names longer than an inline text
+/// the run ends as with short ones at every memory bound, warm and
+/// reopened cold, holding the same.
+#[test]
+fn a_long_keyword_name_allocates_nothing_at_the_call() {
+    let program = |names: [&str; 3]| {
+        let public = Signature {
+            params: names
+                .iter()
+                .map(|name| parameter(name, Type::Any, false))
+                .collect(),
+            result: Type::Any,
+        };
+        let body = packed_body(true);
+        let export = FunctionExport {
+            function: body.identity(),
+            signature: public.clone(),
+            convention: StartConvention::PyArgsList { positional: 1 },
+            asynchronous: false,
+            rest: false,
+        };
+        let yes = || Expr::Literal(Literal::Bool(true));
+        entry_world(
+            vec![body],
+            vec![("entry", export)],
+            vec![("entry", public)],
+            vec![],
+            vec![Stmt::Return {
+                value: calling(Callee::Import(ImportSlot(0)), vec![yes(), yes(), yes()]),
+            }],
+        )
+    };
+    let short = program(["k0", "k1", "k2"]);
+    let long = program([
+        "k0",
+        "keyword_name_longer_than_any_inline_text_one",
+        "keyword_name_longer_than_any_inline_text_two",
+    ]);
+    for memory in (0..=8192).step_by(8) {
+        let mut finished = true;
+        for cold in [false, true] {
+            let (end, held) = bounded_run(&short, memory, cold);
+            let (long_end, long_held) = bounded_run(&long, memory, cold);
+            let (end, long_end) = (ending(&end), ending(&long_end));
+            assert_eq!(long_end, end, "memory {memory}, cold {cold}");
+            if !matches!(end, Ending::Finished(_)) {
+                assert_eq!(long_held, held, "memory {memory}, cold {cold}");
+                finished = false;
+            }
+        }
+        if finished {
+            return;
+        }
+    }
+    panic!("no bound up to 8192 completes");
+}

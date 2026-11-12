@@ -51,6 +51,20 @@ pub(crate) fn unsupported<T>(what: impl Into<String>) -> Result<T> {
     Err(Unsupported(what.into()))
 }
 
+/// `count` as the core holds it: the bytecode core holds at most
+/// 65,535 of the arguments of one call or spawn and of the parameters,
+/// locals and temporaries of one function, and refuses a document past
+/// that as one it cannot compile, never wrapping the count.
+pub(crate) fn within(count: usize, what: &str) -> Result<u16> {
+    match u16::try_from(count) {
+        Ok(count) => Ok(count),
+        Err(_) => unsupported(format!(
+            "{count} {what}, more than the bytecode core's limit of {}",
+            u16::MAX
+        )),
+    }
+}
+
 /// Compiles `document`, whose library functions `registry` holds, as
 /// instance `link`: its `main`, or the declared function `entry`, is the
 /// unit a start runs. `linked` holds the other Links the run's build loads
@@ -106,6 +120,15 @@ pub(crate) fn compile(
         }
     }
     compiler.finish(main)
+}
+
+/// How a call through an import of a `PyArgsList` export names the
+/// arguments it packs ([`Compiler::keywords`]).
+pub(crate) struct Packing {
+    /// How many leading arguments it passes in its list.
+    pub positional: usize,
+    /// The export's parameters' names, by which it passes the rest.
+    pub names: Vec<Name>,
 }
 
 /// What a start runs instead of `main`: a declared or library function,
@@ -364,9 +387,11 @@ impl Fun {
     }
 
     /// A hidden local.
+    /// Past the core's limit the slot saturates, and the unit is refused
+    /// when it is sealed ([`Compiler::seal`]), never wrapped.
     pub(crate) fn temp(&mut self) -> u16 {
         let slot = self.locals;
-        self.locals += 1;
+        self.locals = self.locals.saturating_add(1);
         self.declared.push((Path::from(self.path.as_slice()), None));
         slot
     }
@@ -780,7 +805,7 @@ impl<'a> Compiler<'a> {
         f.leader();
         self.block(&mut f, block)?;
         self.fall_off(&mut f);
-        self.seal(f, at, UnitKind::Main, 0, "main".into());
+        self.seal(f, at, UnitKind::Main, 0, "main".into())?;
         Ok(at)
     }
 
@@ -888,7 +913,9 @@ impl<'a> Compiler<'a> {
         if let Some(at) = self.global_ids.get(name) {
             return *at;
         }
-        let at = self.globals.len() as u16;
+        // Past the core's limit the id saturates, and the unit naming it
+        // is refused when it is sealed ([`Compiler::seal`]).
+        let at = u16::try_from(self.globals.len()).unwrap_or(u16::MAX);
         self.globals.push(name.clone());
         self.global_ids.insert(name.clone(), at);
         at
@@ -996,16 +1023,16 @@ impl<'a> Compiler<'a> {
                     // A host binding of main, read where it is.
                     _ => continue,
                 };
-                f.captures
-                    .insert(name.clone(), f.capture_names.len() as u16);
+                let at = within(f.capture_names.len() + 1, "captures of one function")? - 1;
+                f.captures.insert(name.clone(), at);
                 f.capture_names.push(name);
                 captures.push(source);
             }
         }
         // A saved closure's captures are the ones its save froze, in order.
         for name in saved.into_iter().flatten() {
-            f.captures
-                .insert(name.clone(), f.capture_names.len() as u16);
+            let at = within(f.capture_names.len() + 1, "captures of one function")? - 1;
+            f.captures.insert(name.clone(), at);
             f.capture_names.push(name.clone());
         }
         self.declare(&mut f, &params, &body.block)?;
@@ -1013,9 +1040,9 @@ impl<'a> Compiler<'a> {
         self.block(&mut f, &body.block)?;
         self.fall_off(&mut f);
         let name: Arc<str> = Arc::from(definition.name.as_str());
-        let params = params.len() as u16;
+        let params = within(params.len(), "parameters of one function")?;
         let capture_names = f.capture_names.clone();
-        self.seal(f, at, kind, params, name);
+        self.seal(f, at, kind, params, name)?;
         Ok((captures, capture_names))
     }
 
@@ -1282,7 +1309,10 @@ impl<'a> Compiler<'a> {
         self.natives.push(NativeEntry {
             function: id,
             name: Arc::from(definition.name.as_str()),
-            params: definition.signature.params.len() as u16,
+            params: within(
+                definition.signature.params.len(),
+                "parameters of one function",
+            )?,
             charge,
             guard,
             body: None,
@@ -1369,20 +1399,23 @@ impl<'a> Compiler<'a> {
         definition: &FunctionDefinition,
         at: UnitId,
     ) -> Result<()> {
-        let argc = definition.signature.params.len();
+        let argc = within(
+            definition.signature.params.len(),
+            "parameters of one function",
+        )?;
         let mut f = Fun::new(SiteUnit::Library(id), false, false, None);
-        f.locals = argc as u16;
+        f.locals = argc;
         f.leader();
         for param in 0..argc {
-            f.emit(Op::Local(param as u16));
+            f.emit(Op::Local(param));
         }
         let site = f.site();
         let callee = self.callee(&f, id)?;
-        self.call(&mut f, callee, argc as u16, site);
+        self.call(&mut f, callee, argc, site);
         f.emit(Op::Return);
         let name = Arc::from(format!("&{}", definition.name.as_str()));
         // The value's call is the one its trampoline makes.
-        let mut unit = self.sealed(f, UnitKind::Body(id), argc as u16, name);
+        let mut unit = self.sealed(f, UnitKind::Body(id), argc, name);
         unit.call = false;
         self.put(at, unit);
         Ok(())
@@ -1440,6 +1473,7 @@ impl<'a> Compiler<'a> {
             site,
             mark,
             checked: None,
+            names: Box::default(),
             entry: None,
         });
         f.emit(Op::Call(at));
@@ -1489,14 +1523,39 @@ impl<'a> Compiler<'a> {
         at
     }
 
+    /// The names a call through an import of a `PyArgsList` export
+    /// (`packing`) keys its map by: those of its `argc` arguments past
+    /// `positional`, in order, as constants of the caller's code, held
+    /// with it as an authored literal is. They are no operands: the
+    /// adaptation reads them after it has checked the arguments
+    /// ([`Adapt::Python`]), so the call allocates no text and the frame
+    /// reserves nothing for them. An argument past the export's
+    /// parameters, which the import's contract refuses before any
+    /// collection is built, is named absent.
+    ///
+    /// [`Adapt::Python`]: super::program::Adapt::Python
+    pub(crate) fn keywords(&mut self, packing: Option<&Packing>, argc: usize) -> Box<[u32]> {
+        let Some(Packing { positional, names }) = packing else {
+            return Box::default();
+        };
+        ((*positional).min(argc)..argc)
+            .map(|at| match names.get(at) {
+                Some(name) => self.text(name.as_str()),
+                None => self.constant(&Literal::Absent),
+            })
+            .collect()
+    }
+
     /// `spawn`'s stub: its parameters are the call's arguments (a value
-    /// callee first), and it makes the call. A task is no part of its
+    /// callee first), and it makes the call, its names under `packing` as
+    /// [`Self::keywords`] gives them. A task is no part of its
     /// spawner's call, so a covered spawner's cover does not reach it.
     pub(crate) fn stub(
         &mut self,
         f: &Fun,
         callee: Option<CallableId>,
         resolved: Option<(Callee, Option<Arc<Checked>>)>,
+        packing: Option<&Packing>,
         argc: u16,
     ) -> Result<UnitId> {
         let site = f.site();
@@ -1511,20 +1570,26 @@ impl<'a> Compiler<'a> {
         g.path.clone_from(&site.path);
         g.locals = values;
         g.leader();
-        for value in 0..values {
-            g.emit(Op::Local(value));
+        let first = values - argc;
+        if first > 0 {
+            g.emit(Op::Local(0));
+        }
+        for at in 0..argc {
+            g.emit(Op::Local(first + at));
         }
         let (target, checked) = match (callee, resolved) {
             (_, Some(resolved)) => resolved,
             (None, None) => (Callee::Value, None),
             (Some(callable), None) => (self.callee_at(&g, callable)?, None),
         };
+        let names = self.keywords(packing, usize::from(argc));
         self.call(&mut g, target, argc, site);
         if let Some(call) = g.calls.last_mut() {
             call.checked = checked;
+            call.names = names;
         }
         g.emit(Op::Return);
-        self.seal(g, at, UnitKind::Spawn, values, Arc::from("spawn"));
+        self.seal(g, at, UnitKind::Spawn, values, Arc::from("spawn"))?;
         Ok(at)
     }
 
@@ -1582,10 +1647,22 @@ impl<'a> Compiler<'a> {
 
     // --- Sealing.
 
-    /// Cuts `f` into blocks and stores it at `at`.
-    pub(crate) fn seal(&mut self, f: Fun, at: UnitId, kind: UnitKind, params: u16, name: Arc<str>) {
+    /// Cuts `f` into blocks and stores it at `at`, refusing a unit past
+    /// the core's limit ([`within`]) in locals and temporaries, which
+    /// [`Fun::temp`] saturates, or global names ([`Compiler::global`]).
+    pub(crate) fn seal(
+        &mut self,
+        f: Fun,
+        at: UnitId,
+        kind: UnitKind,
+        params: u16,
+        name: Arc<str>,
+    ) -> Result<()> {
+        within(f.declared.len(), "parameters and locals of one function")?;
+        within(self.globals.len(), "global names of one program")?;
         let unit = self.sealed(f, kind, params, name);
         self.put(at, unit);
+        Ok(())
     }
 
     fn sealed(&mut self, f: Fun, kind: UnitKind, params: u16, name: Arc<str>) -> Unit {
