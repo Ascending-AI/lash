@@ -844,6 +844,7 @@ impl Objects {
 
     /// Reserves storage for a complete nursery batch without installing a body.
     /// Every target must still be reserved, distinct and in installation order.
+    #[inline]
     pub fn prepare_install(
         &mut self,
         handles: impl Iterator<Item = ArenaHandle> + Clone,

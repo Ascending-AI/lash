@@ -327,6 +327,7 @@ impl PreparedBatch {
         }
     }
 }
+#[inline]
 pub(super) fn raw_body(object: NewObject) -> Result<Body, NativeError> {
     let pairs = |entries: Vec<(Value, Value)>| -> Result<_, NativeError> {
         let mut values = Vec::new();
