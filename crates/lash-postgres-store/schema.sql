@@ -2762,7 +2762,8 @@ BEGIN
         ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
-        v_sealed := v_sealed OR current_setting('lash.artifacts_sealed', true) = 'on';
+        -- A backend that never sealed has no such setting: unsealed.
+        v_sealed := v_sealed OR COALESCE(current_setting('lash.artifacts_sealed', true) = 'on', FALSE);
         -- The result is assembled from the exact successful receipt write,
         -- including the transaction's clock, without a post-commit read.
         IF v_step->>'s' = 'turn_commit.insert_staged' THEN
@@ -2872,7 +2873,7 @@ BEGIN
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
         v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
     EXCEPTION WHEN lock_not_available THEN
-        IF NOT (v_sealed) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (v_sealed) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
             RAISE;
         END IF;
         RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
@@ -3027,7 +3028,7 @@ BEGIN
         END IF;
         RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
     EXCEPTION WHEN lock_not_available THEN
-        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
             RAISE;
         END IF;
         RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
@@ -3137,7 +3138,7 @@ BEGIN
         END IF;
         RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
     EXCEPTION WHEN lock_not_available THEN
-        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
             RAISE;
         END IF;
         RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
@@ -3179,7 +3180,7 @@ BEGIN
             ON CONFLICT DO NOTHING;
         RETURN NULL;
     EXCEPTION WHEN lock_not_available THEN
-        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
             RAISE;
         END IF;
         RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
@@ -3218,7 +3219,7 @@ BEGIN
             ON CONFLICT DO NOTHING;
         RETURN ARRAY['held', v_body];
     EXCEPTION WHEN lock_not_available THEN
-        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
             RAISE;
         END IF;
         RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';

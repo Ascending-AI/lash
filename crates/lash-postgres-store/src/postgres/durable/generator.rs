@@ -554,7 +554,8 @@ BEGIN
 {branches}        ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
-        v_sealed := v_sealed OR current_setting('lash.artifacts_sealed', true) = 'on';
+        -- A backend that never sealed has no such setting: unsealed.
+        v_sealed := v_sealed OR COALESCE(current_setting('lash.artifacts_sealed', true) = 'on', FALSE);
         -- The result is assembled from the exact successful receipt write,
         -- including the transaction's clock, without a post-commit read.
         IF v_step->>'s' = '{receipt_statement}' THEN
@@ -883,5 +884,117 @@ mod tests {
             "schema.sql's lash_owner_commit is stale: regenerate it with \
              python3 scripts/regenerate-postgres-artifact.py schema.sql"
         );
+    }
+
+    /// A lock wait that expires before an owner commit's seal spends a retry
+    /// attempt, whatever its backend ran before (FIG-7700). The owner commit
+    /// locks its session's writes, then its plan waits on the session's held
+    /// referrer lock, before any artifact lock. A backend that never sealed
+    /// has no `lash.artifacts_sealed` setting: the commit's seal record read
+    /// it as `NULL`, its handler took `NULL` for sealed and named the timeout
+    /// an after-seal expiry, and the retry loop retried it without spending an
+    /// attempt, while a backend that had sealed and rolled back spent it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_pre_seal_owner_commit_timeout_spends_an_attempt_on_any_backend() {
+        use sqlx::Connection as _;
+        let Some(database_url) = crate::postgres_test_support::database_url() else {
+            eprintln!("skipping the pre-seal law: database URL is not set");
+            return;
+        };
+        let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+        let mut setup = sqlx::PgConnection::connect(database.url())
+            .await
+            .expect("connect");
+        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
+            .execute(&mut setup)
+            .await
+            .expect("install the schema");
+        sqlx::query(
+            "INSERT INTO lash_actors (actor_key, kind, state, epoch, owner_node, owner_boot,
+                 formats, state_revision, mail_seq, acked_seq, created_at_ms)
+             VALUES ('s/probe', 'session', 'owned', 1, 'probe', 'boot', '{}', 0, 0, 0, 0)",
+        )
+        .execute(&mut setup)
+        .await
+        .expect("an owned session actor");
+        let mut holder = setup.begin().await.expect("begin the holder");
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:session:probe', 0))",
+        )
+        .execute(&mut *holder)
+        .await
+        .expect("hold the session's referrer lock");
+        let mut plan = vec![serde_json::json!([]); 15];
+        plan[6] = serde_json::json!(["session"]);
+        plan[7] = serde_json::json!(["probe"]);
+        // The production head-plan prefix: the session's writes, then its plan.
+        let steps = serde_json::json!({
+            "version": 1,
+            "expected_revision": 0,
+            "steps": [
+                {"s": "durable_postgres.lock_session_writes", "p": ["s/probe", "probe"]},
+                {"s": "durable_lock_plan_postgres.plan", "p": plan},
+            ],
+        });
+        let call = "SELECT * FROM lash_owner_commit($1, 's/probe', 1, NULL, 0, 2147483647,
+            'probe-token', '100ms', 5000, '250ms',
+            '{}'::bytea[], '{}'::bytea[], '{}'::bytea[], '{}'::bytea[],
+            '{}'::bytea[], '{}'::bytea[], '{}'::bytea[], '{}'::bytea[],
+            $2::jsonb, NULL, NULL, NULL, NULL, NULL, NULL, false)";
+        let policy = crate::host::RetryPolicy {
+            attempts: 1,
+            initial_delay: std::time::Duration::from_millis(5),
+            max_delay: std::time::Duration::from_millis(20),
+            jitter: false,
+        };
+        for (backend, prior) in [
+            ("a fresh backend", None),
+            (
+                "a backend that sealed and rolled back",
+                Some("SELECT lash_lock_artifacts('{}')"),
+            ),
+        ] {
+            let mut connection = sqlx::PgConnection::connect(database.url())
+                .await
+                .expect("connect");
+            if let Some(prior) = prior {
+                let mut sealed = connection.begin().await.expect("begin");
+                sqlx::query(prior)
+                    .execute(&mut *sealed)
+                    .await
+                    .expect("seal");
+                sealed.rollback().await.expect("roll the seal back");
+            }
+            let connection = tokio::sync::Mutex::new(connection);
+            let calls = std::sync::atomic::AtomicUsize::new(0);
+            // The attempt classifies its own failure, as the store's attempts
+            // do: the classification reads the attempt's seal record.
+            let answer = policy
+                .run(
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5)),
+                    |(_, contended): &(sqlx::Error, bool)| *contended,
+                    || async {
+                        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        sqlx::query(call)
+                            .bind(&*super::super::executor::REGISTRY)
+                            .bind(&steps)
+                            .execute(&mut *connection.lock().await)
+                            .await
+                            .map(|_| ())
+                            .map_err(|error| {
+                                let contended = crate::support::is_contention_error(&error);
+                                (error, contended)
+                            })
+                    },
+                )
+                .await;
+            assert!(matches!(answer, Err((_, true))), "{backend}: {answer:?}");
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "{backend}: the pre-seal timeout did not spend the one attempt"
+            );
+        }
+        holder.rollback().await.expect("release the referrer lock");
     }
 }

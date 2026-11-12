@@ -63,11 +63,12 @@ pub(crate) const DEFAULT_SEALED_LOCK_TIMEOUT: std::time::Duration =
 /// through unchanged. A block that holds only what follows the seal passes
 /// `TRUE` as `sealed`; one that may begin before it (the owner commit's
 /// steps) passes the variable that records whether a step has sealed, so a
-/// wait before the seal is never renamed.
+/// wait before the seal is never renamed. Only `TRUE` is sealed: a `NULL`
+/// record is not.
 pub(crate) fn after_seal_handler(sealed: &str) -> String {
     format!(
         "EXCEPTION WHEN lock_not_available THEN
-        IF NOT ({sealed}) OR SQLERRM = '{refused}' OR starts_with(SQLERRM, '{expired}') THEN
+        IF ({sealed}) IS NOT TRUE OR SQLERRM = '{refused}' OR starts_with(SQLERRM, '{expired}') THEN
             RAISE;
         END IF;
         RAISE EXCEPTION '{expired}: %', SQLERRM USING ERRCODE = '55P03';",
