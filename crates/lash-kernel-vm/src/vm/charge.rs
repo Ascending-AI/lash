@@ -64,6 +64,8 @@ pub(crate) struct Meter {
     reserved: Option<u64>,
     /// The charge at which the running slice ends.
     slice_end: u64,
+    /// Exclusive upper bound for a reservation, combining charge and slice.
+    prepay_end: u64,
     /// Of the reservation, the cost of the block a trace prepaid with
     /// the running one (`enter_two`), not yet entered; zero otherwise.
     ahead: u64,
@@ -76,6 +78,7 @@ impl Meter {
             limit,
             reserved: None,
             slice_end: u64::MAX,
+            prepay_end: limit.saturating_add(1),
             ahead: 0,
         }
     }
@@ -84,6 +87,7 @@ impl Meter {
     pub(crate) fn slice(&mut self, slice: u64) {
         debug_assert!(self.reserved.is_none(), "a slice starts outside a block");
         self.slice_end = self.used.saturating_add(slice);
+        self.prepay_end = self.limit.saturating_add(1).min(self.slice_end);
     }
 
     /// Whether the slice is spent: tested at a step op on the exact path.
@@ -103,9 +107,9 @@ impl Meter {
     #[inline]
     pub(crate) fn enter(&mut self, cost: Option<u64>) -> bool {
         debug_assert!(self.reserved.is_none(), "a block is entered once reserved");
-        match cost.and_then(|cost| self.used.checked_add(cost).map(|used| (cost, used))) {
-            Some((cost, used)) if used <= self.limit && used < self.slice_end => {
-                self.used = used;
+        match cost {
+            Some(cost) if cost < self.prepay_end.saturating_sub(self.used) => {
+                self.used += cost;
                 self.reserved = Some(cost);
                 true
             }
@@ -123,11 +127,9 @@ impl Meter {
         debug_assert!(self.reserved.is_none(), "a block is entered once reserved");
         if let (Some(cost), Some(ahead)) = (cost, ahead)
             && let Some(pair) = cost.checked_add(ahead)
-            && let Some(used) = self.used.checked_add(pair)
-            && used <= self.limit
-            && used < self.slice_end
+            && pair < self.prepay_end.saturating_sub(self.used)
         {
-            self.used = used;
+            self.used += pair;
             self.reserved = Some(pair);
             self.ahead = ahead;
             return true;
@@ -256,12 +258,11 @@ impl Meter {
         if self.reserved.is_none() {
             return false;
         }
-        match self.used.checked_add(units) {
-            Some(used) if used <= self.limit && used < self.slice_end => {
-                self.used = used;
-                true
-            }
-            _ => false,
+        if units < self.prepay_end.saturating_sub(self.used) {
+            self.used += units;
+            true
+        } else {
+            false
         }
     }
 
@@ -296,6 +297,7 @@ impl Meter {
     pub(crate) fn grow(&mut self, more: u64) {
         debug_assert!(self.reserved.is_none());
         self.limit = self.limit.saturating_add(more);
+        self.prepay_end = self.limit.saturating_add(1).min(self.slice_end);
     }
 }
 

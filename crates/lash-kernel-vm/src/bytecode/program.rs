@@ -189,6 +189,7 @@ pub struct Unit {
     pub traces: Vec<super::trace::Trace>,
     pub micros: Vec<super::trace::Step>,
     pub trace_steps: Vec<super::trace::Step>,
+    pub trace_operands: Vec<super::trace::Operands>,
     /// The library bodies expanded in place of their calls (`inline`),
     /// each a region of ops past the unit's own.
     pub inlines: Vec<InlineSite>,

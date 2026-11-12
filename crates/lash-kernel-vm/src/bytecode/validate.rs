@@ -842,6 +842,7 @@ mod tests {
             traces: Vec::new(),
             micros: Vec::new(),
             trace_steps: Vec::new(),
+            trace_operands: Vec::new(),
             inlines: Vec::new(),
             folds: Vec::new(),
             origin: Vec::new(),

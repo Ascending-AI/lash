@@ -22,8 +22,8 @@ use lash_kernel_doc::Value;
 use super::{Flow, Run, Vm, fused};
 use crate::bytecode::program::{Fused, Program, Then, Unit};
 use crate::bytecode::trace::{
-    BRANCH, GENERIC_BUNDLE, KINDS, Kind, NO_PASS, NONE, OPERATIONS, PLAIN_KINDS, POP, PUSH,
-    SET_LOCAL, SMALL_BUNDLE, SMALL_PREFIXES, Step, WORD_PREFIXES, word_kind,
+    BRANCH, GENERIC_BUNDLE, KINDS, Kind, NO_PASS, NONE, OPERATIONS, OTHER, PLAIN_KINDS, POP, PUSH,
+    SET_LOCAL, SMALL_BUNDLE, SMALL_PREFIXES, SMALL_STRIDE, Step, WORD_PREFIXES, word_kind,
 };
 use crate::heap::Heap;
 
@@ -107,43 +107,52 @@ impl<H: Heap> Vm<H> {
         table[Kind::Jump as usize] = Self::step_jump;
         table[Kind::Exit as usize] = Self::step_exit;
         macro_rules! word_prefixes {
-            ($op:literal $pushes:literal; $($prefix:literal)*) => {$(
-                word_prefixes!(@ $op $pushes $prefix PUSH);
-                word_prefixes!(@ $op $pushes $prefix SET_LOCAL);
-                word_prefixes!(@ $op $pushes $prefix POP);
-                word_prefixes!(@ $op $pushes $prefix BRANCH);
+            ($op:literal $shape:literal; $($prefix:literal)*) => {$(
+                word_prefixes!(@ $op $shape $prefix PUSH);
+                word_prefixes!(@ $op $shape $prefix SET_LOCAL);
+                word_prefixes!(@ $op $shape $prefix POP);
+                word_prefixes!(@ $op $shape $prefix BRANCH);
             )*};
-            (@ $op:literal $pushes:literal $prefix:literal $then:ident) => {
-                table[PLAIN_KINDS * ($prefix + 1) + word_kind($op, $pushes, $then)] =
-                    Self::step_bundle::<{word_kind($op, $pushes, $then)}, {WORD_PREFIXES[$prefix]}>;
+            (@ $op:literal $shape:literal $prefix:literal $then:ident) => {
+                table[PLAIN_KINDS * ($prefix + 1) + word_kind($op, $shape, $then)] =
+                    Self::step_bundle::<{word_kind($op, $shape, $then)}, {WORD_PREFIXES[$prefix]}>;
             };
         }
         macro_rules! words {
             ($($op:literal)*) => {$(
-                words!(@ $op 0); words!(@ $op 1); words!(@ $op 2);
+                words!(@ $op 0 2); words!(@ $op 1 2); words!(@ $op 2 2); words!(@ $op 3 2);
+                words!(@ $op 4 1); words!(@ $op 5 1); words!(@ $op 6 0);
             )*};
-            (@ $op:literal $pushes:literal) => {
-                word_prefixes!($op $pushes; 0 1 2 3 4 5 6 7 8 9 10 11 12);
-                table[GENERIC_BUNDLE + word_kind($op, $pushes, PUSH)] = Self::step_bundle::<{word_kind($op, $pushes, PUSH)}, {u64::MAX}>;
-                table[GENERIC_BUNDLE + word_kind($op, $pushes, SET_LOCAL)] = Self::step_bundle::<{word_kind($op, $pushes, SET_LOCAL)}, {u64::MAX}>;
-                table[GENERIC_BUNDLE + word_kind($op, $pushes, POP)] = Self::step_bundle::<{word_kind($op, $pushes, POP)}, {u64::MAX}>;
-                table[GENERIC_BUNDLE + word_kind($op, $pushes, BRANCH)] = Self::step_bundle::<{word_kind($op, $pushes, BRANCH)}, {u64::MAX}>;
-                table[word_kind($op, $pushes, PUSH)] = Self::step_words::<$op, $pushes, PUSH>;
-                table[word_kind($op, $pushes, SET_LOCAL)] =
-                    Self::step_words::<$op, $pushes, SET_LOCAL>;
-                table[word_kind($op, $pushes, POP)] = Self::step_words::<$op, $pushes, POP>;
-                table[word_kind($op, $pushes, BRANCH)] = Self::step_words::<$op, $pushes, BRANCH>;
+            (@ $op:literal $shape:literal $pushes:literal) => {
+                word_prefixes!($op $shape; 0 1 2 3 4 5 6 7 8 9 10 11 12);
+                words!(@@ $op $shape $pushes PUSH);
+                words!(@@ $op $shape $pushes SET_LOCAL);
+                words!(@@ $op $shape $pushes POP);
+                words!(@@ $op $shape $pushes BRANCH);
+            };
+            (@@ $op:literal $shape:literal $pushes:literal $then:ident) => {
+                table[GENERIC_BUNDLE + word_kind($op, $shape, $then)] =
+                    Self::step_bundle::<{word_kind($op, $shape, $then)}, {u64::MAX}>;
+                table[word_kind($op, $shape, $then)] = Self::step_words::<$op, $pushes, $then, $shape>;
             };
         }
         words!(0 1 2 3 4 5 6 7 8 9 10 11);
+        macro_rules! other {
+            ($($shape:literal $pushes:literal;)*) => {$(
+                table[OTHER + $shape] = Self::step_other_shape::<$pushes, $shape>;
+                table[GENERIC_BUNDLE + OTHER + $shape] =
+                    Self::step_bundle::<{OTHER + $shape}, {u64::MAX}>;
+            )*};
+        }
+        other!(0 2; 1 2; 2 2; 3 2; 4 1; 5 1; 6 0;);
         macro_rules! bundle { ($($kind:ident)*) => {$(
             table[GENERIC_BUNDLE + Kind::$kind as usize] = Self::step_bundle::<{Kind::$kind as usize}, {u64::MAX}>;
         )*}; }
         bundle!(Block Trip Then Pass Local Const SetLocal Copy Pop CaptureGet CellGet Fused Inline Branch Jump Exit);
         macro_rules! small_prefixes {
-            ($($prefix:literal)*) => {$( small_prefixes!(@ $prefix; 11 12 13 14 15); )*};
+            ($($prefix:literal)*) => {$( small_prefixes!(@ $prefix; 11 12 13 14 15 16 17 18 19 20 21 22); )*};
             (@ $prefix:literal; $($kind:literal)*) => {$(
-                table[SMALL_BUNDLE + $prefix * 16 + $kind] = Self::step_bundle::<$kind, {SMALL_PREFIXES[$prefix]}>;
+                table[SMALL_BUNDLE + $prefix * SMALL_STRIDE + $kind] = Self::step_bundle::<$kind, {SMALL_PREFIXES[$prefix]}>;
             )*};
         }
         small_prefixes!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57);
@@ -425,7 +434,7 @@ impl<H: Heap> Vm<H> {
         let len = self.cx.stack.len();
         let args = self.fused_args(fused, base, len);
         match self.fused_words(fused, args) {
-            Some(value) => self.fused_take(line, fused, step, value, len, at, base),
+            Some(value) => self.fused_take::<3>(line, fused, step, value, len, at, base),
             None => self.fused_miss(line, step, at, base),
         }
     }
@@ -441,7 +450,7 @@ impl<H: Heap> Vm<H> {
     /// its numbers form, each fee prepaid; any other pair goes on in
     /// [`Self::fused_miss`].
     #[inline(always)]
-    fn step_words<const OP: u8, const PUSHES: u8, const THEN: u8>(
+    fn step_words<const OP: u8, const PUSHES: u8, const THEN: u8, const SHAPE: u8>(
         &mut self,
         line: &mut Line<'_>,
         step: Step,
@@ -453,18 +462,21 @@ impl<H: Heap> Vm<H> {
         debug_assert!(fused.entry.is_none(), "a traced run counts no entry");
         debug_assert_eq!(fused.pushes, PUSHES);
         let len = self.cx.stack.len();
-        let args = self.fused_args(fused, base, len);
+        let args = self.trace_args::<PUSHES, SHAPE>(line.unit, step.a(), base, len);
         if let (Some(form), [Value::Int(a), Value::Int(b)]) = (&fused.words, args)
             && let Some(value) = lash_kernel_doc::scalar::ints(operation, a, b)
         {
             let paid = match &form.fee {
                 Some(table) if !self.off => {
                     let large = matches!(value, Value::Int(word) if word != 0);
-                    self.meter.prepay(
-                        table[usize::from(a != 0)
-                            | usize::from(b != 0) << 1
-                            | usize::from(large) << 2],
-                    )
+                    let mut index = step.fee_base() | usize::from(large) << 2;
+                    if SHAPE != 2 && SHAPE != 3 {
+                        index |= usize::from(a != 0);
+                    }
+                    if SHAPE != 1 && SHAPE != 3 && SHAPE != 5 {
+                        index |= usize::from(b != 0) << 1;
+                    }
+                    self.meter.prepay(table[index])
                 }
                 _ => true,
             };
@@ -478,6 +490,51 @@ impl<H: Heap> Vm<H> {
             return self.word_take::<PUSHES, THEN>(line, fused, step, value, len, at, base);
         }
         self.fused_miss(line, step, at, base)
+    }
+
+    /// The shape fixes both operand count and where each operand lives.
+    #[inline(always)]
+    fn trace_args<const PUSHES: u8, const SHAPE: u8>(
+        &self,
+        unit: &Unit,
+        n: u32,
+        base: usize,
+        len: usize,
+    ) -> [Value; 2] {
+        if PUSHES == 0 {
+            return [self.cx.stack[len - 2], self.cx.stack[len - 1]];
+        }
+        let inputs = &unit.trace_operands[n as usize];
+        let first = if SHAPE == 2 || SHAPE == 3 || SHAPE == 5 {
+            inputs.values[0]
+        } else {
+            self.cx.stack[base + usize::from(inputs.locals[0])]
+        };
+        if PUSHES == 1 {
+            return [self.cx.stack[len - 1], first];
+        }
+        let second = if SHAPE == 1 || SHAPE == 3 {
+            inputs.values[1]
+        } else {
+            self.cx.stack[base + usize::from(inputs.locals[1])]
+        };
+        [first, second]
+    }
+
+    /// Other fused answers retain their original native/body guard path,
+    /// with the operands already read by their build-time shape.
+    #[inline(always)]
+    fn step_other_shape<const PUSHES: u8, const SHAPE: u8>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        debug_assert!(line.unit.fused[step.a() as usize].words.is_none());
+        let len = self.cx.stack.len();
+        let args = self.trace_args::<PUSHES, SHAPE>(line.unit, step.a(), base, len);
+        self.fused_loaded::<PUSHES>(line, step, at, base, args, len)
     }
 
     /// The op after fused run `fused`, which pushed `PUSHES` operands,
@@ -533,13 +590,29 @@ impl<H: Heap> Vm<H> {
     /// enters it as its head.
     #[inline(never)]
     fn fused_miss(&mut self, line: &mut Line<'_>, step: Step, at: usize, base: usize) -> usize {
+        let fused = &line.unit.fused[step.a() as usize];
+        let len = self.cx.stack.len();
+        let args = self.fused_args(fused, base, len);
+        self.fused_loaded::<3>(line, step, at, base, args, len)
+    }
+
+    /// Runs the unchanged miss/answer handling with already-read operands.
+    /// PUSHES=3 retains the original dynamic reader's stack count.
+    #[inline(always)]
+    fn fused_loaded<const PUSHES: u8>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+        args: [Value; 2],
+        len: usize,
+    ) -> usize {
         let (program, unit, top) = (line.program, line.unit, line.top);
         let n = step.a();
         let fused = &unit.fused[n as usize];
-        let len = self.cx.stack.len();
-        let args = self.fused_args(fused, base, len);
         match self.fused_other(program, unit, fused, args) {
-            Ok(Some(value)) => self.fused_take(line, fused, step, value, len, at, base),
+            Ok(Some(value)) => self.fused_take::<PUSHES>(line, fused, step, value, len, at, base),
             Ok(None) => {
                 #[cfg(test)]
                 self.witness(unit, step);
@@ -564,7 +637,7 @@ impl<H: Heap> Vm<H> {
     /// the stack's height before the run.
     #[inline(always)]
     #[allow(clippy::too_many_arguments)]
-    fn fused_take(
+    fn fused_take<const PUSHES: u8>(
         &mut self,
         line: &mut Line<'_>,
         fused: &Fused,
@@ -576,7 +649,8 @@ impl<H: Heap> Vm<H> {
     ) -> usize {
         #[cfg(test)]
         self.witness(line.unit, step);
-        self.cx.stack.truncate(len + usize::from(fused.pushes) - 2);
+        let pushes = if PUSHES < 3 { PUSHES } else { fused.pushes };
+        self.cx.stack.truncate(len + usize::from(pushes) - 2);
         match fused.then {
             Then::Push => self.push(value),
             Then::SetLocal(k) => self.cx.stack[base + usize::from(k)] = value,

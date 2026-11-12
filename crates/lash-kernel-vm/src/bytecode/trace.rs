@@ -19,10 +19,10 @@
 //! code, and are never saved: a saved frame stands at an op, and the op
 //! a head's trace replaces is still `Unit::original`'s.
 
-use lash_kernel_doc::scalar::ScalarOp;
+use lash_kernel_doc::{Value, scalar::ScalarOp};
 
 use super::op::Op;
-use super::program::{LIB, Program, Then, Unit};
+use super::program::{Constant, Fused, LIB, Operand, Program, Then, Unit};
 
 /// The most micro-ops one trace runs before it gives control back.
 const LENGTH: usize = 64;
@@ -165,8 +165,8 @@ impl Micro {
 /// What a [`Step`] runs: the runner's handler for its micro-op, by the
 /// handler table's index (`vm::trace`). A fused run whose scalar form
 /// names its operation runs a handler made for that operation, the
-/// pushes and the op that takes its answer ([`word_kind`]); any other
-/// runs [`Kind::Fused`].
+/// operand shape and the op that takes its answer ([`word_kind`]). Other
+/// direct operands use a shape handler; the rest run [`Kind::Fused`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Kind {
@@ -191,13 +191,14 @@ pub enum Kind {
 /// The first fused run's kind made for its operation.
 pub const WORDS: usize = 32;
 
-/// The handler table's length: every kind's index is below it.
-pub const PLAIN_KINDS: usize = 256;
-pub const GENERIC_BUNDLE: usize = 4096;
+/// The number of slots reserved for primary operation handlers.
+pub const PLAIN_KINDS: usize = 512;
+pub const OTHER: usize = 16;
+pub const SMALL_STRIDE: usize = 32;
+pub const GENERIC_BUNDLE: usize = 8192;
 pub const SMALL_BUNDLE: usize = GENERIC_BUNDLE + PLAIN_KINDS;
-// Step::kind returns a u16 range, so every index fits and the runner
-// needs no bounds branch on its handler-table lookup.
-pub const KINDS: usize = 1 << 16;
+// The low fourteen bits select a handler; the next two hold fixed fee bits.
+pub const KINDS: usize = 1 << 14;
 
 /// A zero-terminated sequence of small kinds, four bits per kind. The
 /// constant is also the handler's template parameter, so its operations
@@ -514,9 +515,9 @@ pub const POP: u8 = 2;
 pub const BRANCH: u8 = 3;
 
 /// The kind of a fused run of operation `op` (by [`OPERATIONS`]) that
-/// pushes `pushes` operands and whose answer `then` takes.
-pub const fn word_kind(op: u8, pushes: u8, then: u8) -> usize {
-    WORDS + ((op as usize * 3 + pushes as usize) << 2 | then as usize)
+/// reads operand `shape` and whose answer `then` takes.
+pub const fn word_kind(op: u8, shape: u8, then: u8) -> usize {
+    WORDS + ((op as usize * 7 + shape as usize) << 2 | then as usize)
 }
 
 /// A micro-op as the runner reads it: its handler's kind and its
@@ -542,7 +543,19 @@ impl Step {
     /// The handler table's index.
     #[inline(always)]
     pub fn kind(self) -> usize {
-        (self.head & 0xffff) as usize
+        (self.head & (KINDS as u64 - 1)) as usize
+    }
+
+    /// The constant input-size bits of a word fee's table index.
+    #[inline(always)]
+    pub fn fee_base(self) -> usize {
+        ((self.head >> 14) & 3) as usize
+    }
+
+    fn with_fee_base(mut self, base: u8) -> Self {
+        debug_assert!(base < 4);
+        self.head = (self.head & !(3 << 14)) | u64::from(base) << 14;
+        self
     }
 
     /// The op the micro-op stands for, its first where it stands for two.
@@ -569,7 +582,66 @@ impl Step {
     /// The same step with kind `kind` and `small`.
     pub fn with(self, kind: Kind, small: u16) -> Self {
         Self::new(kind as usize, self.pc(), small, self.a(), self.b())
+            .with_fee_base(self.fee_base() as u8)
     }
+}
+
+/// A fused call's operands, decoded once when traces are built. A
+/// constant is held only when it is already an immediate value.
+#[derive(Clone, Copy, Debug)]
+pub struct Operands {
+    pub locals: [u16; 2],
+    pub values: [Value; 2],
+    shape: u8,
+    direct: bool,
+    fee_base: u8,
+}
+
+impl Operands {
+    fn new(fused: &Fused, immediate: &impl Fn(u32) -> Option<Value>) -> Self {
+        debug_assert!(fused.pushes <= 2);
+        let mut decoded = Self {
+            locals: [0; 2],
+            values: [Value::Absent; 2],
+            shape: match fused.pushes {
+                2 => {
+                    2 * u8::from(matches!(fused.operands[0], Operand::Const(_)))
+                        + u8::from(matches!(fused.operands[1], Operand::Const(_)))
+                }
+                1 => 4 + u8::from(matches!(fused.operands[0], Operand::Const(_))),
+                _ => 6,
+            },
+            direct: true,
+            fee_base: 0,
+        };
+        for (at, operand) in fused
+            .operands
+            .iter()
+            .take(usize::from(fused.pushes))
+            .enumerate()
+        {
+            match *operand {
+                Operand::Local(n) => decoded.locals[at] = n,
+                Operand::Const(n) => match immediate(n) {
+                    Some(value) => {
+                        decoded.values[at] = value;
+                        if matches!(value, Value::Int(word) if word != 0) {
+                            let argument = if fused.pushes == 1 { 1 } else { at };
+                            decoded.fee_base |= 1 << argument;
+                        }
+                    }
+                    None => decoded.direct = false,
+                },
+            }
+        }
+        decoded
+    }
+}
+
+fn is_fused(kind: usize) -> bool {
+    kind == Kind::Fused as usize
+        || (OTHER..OTHER + 7).contains(&kind)
+        || (WORDS..PLAIN_KINDS).contains(&kind)
 }
 
 /// `micro`'s step in `unit`.
@@ -601,11 +673,17 @@ fn step(unit: &Unit, micro: Micro) -> Step {
                 (Some(form), _) | (None, Some(form)) => Some(form.operation),
                 (None, None) => None,
             };
+            let inputs = &unit.trace_operands[n as usize];
             let kind = match operation.and_then(|op| OPERATIONS.iter().position(|&at| at == op)) {
-                Some(op) => word_kind(op as u8, fused.pushes, then),
-                None => Kind::Fused as usize,
+                Some(op) if inputs.direct => word_kind(op as u8, inputs.shape, then),
+                _ if inputs.direct && fused.words.is_none() => OTHER + usize::from(inputs.shape),
+                _ => Kind::Fused as usize,
             };
-            Step::new(kind, pc, small, n, next)
+            Step::new(kind, pc, small, n, next).with_fee_base(if kind >= WORDS {
+                inputs.fee_base
+            } else {
+                0
+            })
         }
         Micro::Inline { pc, n } => plain(Kind::Inline, pc, 0, n, 0),
         Micro::Branch {
@@ -634,15 +712,42 @@ pub(crate) fn trace(program: &mut Program) {
         .collect();
     let document = program.tag == 0;
     let readable = |n: u32| n & LIB == 0 && document || readable[(n & !LIB) as usize];
+    let scalar = |constant: &Constant| match constant {
+        Constant::Immediate(value) => Some(*value),
+        _ => None,
+    };
+    let constants: Vec<_> = program.constants.iter().map(scalar).collect();
+    let library: Vec<_> = program.lib.constants.iter().map(scalar).collect();
+    let tag = program.tag;
+    let base = if tag == LIB { library.len() } else { 0 };
+    let immediate = |id: u32| {
+        let at = (id & !LIB) as usize;
+        if id & LIB == tag && at >= base {
+            constants.get(at - base).copied().flatten()
+        } else if id & LIB != 0 {
+            library.get(at).copied().flatten()
+        } else {
+            None
+        }
+    };
     for unit in &mut program.units {
-        trace_unit(unit, &readable);
+        trace_unit(unit, &readable, &immediate);
     }
 }
 
 /// Builds `unit`'s traces and puts each in place of its head's op. A
 /// constant goes into a line only where it reads without placing
 /// (`Program::readable`).
-pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
+pub(crate) fn trace_unit(
+    unit: &mut Unit,
+    readable: &impl Fn(u32) -> bool,
+    immediate: &impl Fn(u32) -> Option<Value>,
+) {
+    unit.trace_operands = unit
+        .fused
+        .iter()
+        .map(|fused| Operands::new(fused, immediate))
+        .collect();
     let mut at = vec![NONE; unit.ops.len()];
     let mut traces = Vec::new();
     let mut micros = Vec::new();
@@ -733,7 +838,7 @@ fn bundle_kind(kind: usize, prefix: &[Step]) -> usize {
     };
     match code.and_then(|code| patterns.iter().position(|&pattern| pattern == code)) {
         Some(n) if kind >= WORDS => PLAIN_KINDS * (n + 1) + kind,
-        Some(n) => SMALL_BUNDLE + n * 16 + kind,
+        Some(n) => SMALL_BUNDLE + n * SMALL_STRIDE + kind,
         None => GENERIC_BUNDLE + kind,
     }
 }
@@ -755,7 +860,7 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
         // A jump after the answer uses this activation too. It can only
         // follow a successful fallthrough; a branch or bail skips it.
         let falls_through = steps[main].kind() == Kind::Inline as usize
-            || ((steps[main].kind() == Kind::Fused as usize || steps[main].kind() >= WORDS)
+            || (is_fused(steps[main].kind())
                 && !matches!(
                     unit.fused[steps[main].a() as usize].then,
                     Then::Branch { .. }
@@ -786,8 +891,7 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
     for step in &mut steps {
         if step.kind() == Kind::Jump as usize
             || step.kind() == Kind::Branch as usize
-            || step.kind() >= WORDS
-            || step.kind() == Kind::Fused as usize
+            || is_fused(step.kind())
         {
             *step = Step::new(
                 step.kind(),
@@ -795,7 +899,8 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
                 step.small(),
                 step.a(),
                 redirect(step.b()),
-            );
+            )
+            .with_fee_base(step.fee_base() as u8);
         }
     }
     unit.micros = groups
