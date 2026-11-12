@@ -443,7 +443,8 @@ fn word_form(steps: &[Step], result: Slot) -> Option<WordFold> {
         operation:
             InlineOperation::Scalar {
                 operation,
-                domain: ScalarDomain::Words | ScalarDomain::WordsOrFloats,
+                domain:
+                    ScalarDomain::Words | ScalarDomain::WordsOrFloats | ScalarDomain::WordsFloatsOrTexts,
             },
         args: operands @ [a, b],
         argc: 2,

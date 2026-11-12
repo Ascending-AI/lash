@@ -215,6 +215,20 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                     "{name} prepared/general"
                 );
             }
+            // K-LIB-011: inside its declared domain, the version-bound
+            // inline answer is the ordinary native's.
+            if let Some(inline) = registered.native().unwrap().specialization().inline
+                && let Some(answer) = inline.scalar_answer(definition.native_version, &args)
+            {
+                assert_eq!(
+                    Some(testsupport::datum(&heap, &answer)),
+                    result
+                        .as_ref()
+                        .ok()
+                        .map(|value| testsupport::datum(&heap, value)),
+                    "{name} inline/general"
+                );
+            }
             let outcome = &case["expected"]["outcome"];
             if let Some(datum) = outcome.get("returned") {
                 let expected: Datum = serde_json::from_value(datum.clone()).unwrap();

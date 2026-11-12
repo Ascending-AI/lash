@@ -42,6 +42,20 @@ pub(super) fn inline(
         operation => InlineOperation::Scalar {
             operation: kernel_of(operation)?,
             domain: match domain {
+                // Two inline texts compare as the native's scalar ordering
+                // and equality read them, with nothing to admit.
+                Domain::Any
+                    if matches!(
+                        operation,
+                        Operation::Eq
+                            | Operation::Lt
+                            | Operation::Le
+                            | Operation::Gt
+                            | Operation::Ge
+                    ) =>
+                {
+                    ScalarDomain::WordsFloatsOrTexts
+                }
                 Domain::Any | Domain::Number => ScalarDomain::WordsOrFloats,
                 Domain::Int => ScalarDomain::Words,
                 Domain::Float => ScalarDomain::Floats,

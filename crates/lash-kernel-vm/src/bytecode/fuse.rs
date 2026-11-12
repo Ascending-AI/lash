@@ -15,7 +15,7 @@
 //!
 //! It runs after validation, on validated code.
 
-use lash_kernel_doc::arena::native::{InlineOperation, ScalarDomain};
+use lash_kernel_doc::arena::native::InlineOperation;
 
 use super::op::Op;
 use super::program::{Callee, Fused, Operand, Program, Then, Unit, Words};
@@ -47,8 +47,8 @@ pub(crate) fn fuse(program: &mut Program) {
             false => None,
         };
         let named = match words {
-            true => matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats),
-            false => matches!(domain, ScalarDomain::Floats | ScalarDomain::WordsOrFloats),
+            true => domain.words(),
+            false => domain.floats(),
         };
         (entry.body.is_none() && named).then_some(Words {
             operation,

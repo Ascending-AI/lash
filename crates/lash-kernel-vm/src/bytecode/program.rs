@@ -412,7 +412,7 @@ impl Words {
             [Value::Float(a), Value::Float(b)] if self.domain != ScalarDomain::Words => {
                 (scalar::floats(self.operation, a, b)?, 0)
             }
-            [a, b] if self.domain == ScalarDomain::WordsOrFloats => {
+            [a, b] if self.domain.mixed() => {
                 let at = match (a, b) {
                     (Value::Int(a), _) => usize::from(a != 0),
                     (_, Value::Int(b)) => usize::from(b != 0) << 1,

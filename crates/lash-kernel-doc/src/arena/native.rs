@@ -1189,19 +1189,15 @@ impl InlineOperation {
                 (crate::plan::Table::Record, Value::Record(_)) => matches!(key, Value::Text(_)),
                 _ => false,
             },
-            (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => {
-                matches!(domain, ScalarDomain::Words | ScalarDomain::WordsOrFloats)
-            }
-            (Self::Scalar { domain, .. }, [Value::Float(_), Value::Float(_)]) => {
-                matches!(domain, ScalarDomain::Floats | ScalarDomain::WordsOrFloats)
+            (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => domain.words(),
+            (Self::Scalar { domain, .. }, [Value::Float(_), Value::Float(_)]) => domain.floats(),
+            (Self::Scalar { operation, domain }, [Value::Text(_), Value::Text(_)]) => {
+                domain == ScalarDomain::WordsFloatsOrTexts && operation.compares()
             }
             (
-                Self::Scalar {
-                    operation,
-                    domain: ScalarDomain::WordsOrFloats,
-                },
+                Self::Scalar { operation, domain },
                 [left @ (Value::Int(_) | Value::Float(_)), right],
-            ) => crate::scalar::mixed(operation, *left, *right).is_some(),
+            ) if domain.mixed() => crate::scalar::mixed(operation, *left, *right).is_some(),
             (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(_)]) => true,
             (Self::IntegerText(IntegerTextDomain::WholeFloat), [Value::Float(number)]) => {
                 whole_float(number.get()).is_some()
@@ -1257,13 +1253,14 @@ impl InlineOperation {
             {
                 crate::scalar::floats(operation, *a, *b)
             }
-            (
-                Self::Scalar {
-                    operation,
-                    domain: ScalarDomain::WordsOrFloats,
-                },
-                [left, right],
-            ) => crate::scalar::mixed(operation, *left, *right),
+            (Self::Scalar { operation, .. }, [Value::Text(a), Value::Text(b)])
+                if self.accepts(args) =>
+            {
+                crate::scalar::byte_texts(operation, a, b)
+            }
+            (Self::Scalar { operation, domain }, [left, right]) if domain.mixed() => {
+                crate::scalar::mixed(operation, *left, *right)
+            }
             _ => None,
         }
     }
@@ -1354,6 +1351,31 @@ pub enum ScalarDomain {
     /// order where the word is exactly a binary64 ([`crate::scalar::mixed`]).
     /// Other mixed pairs run normally.
     WordsOrFloats,
+    /// As [`Self::WordsOrFloats`]; a comparison also takes two inline
+    /// texts, ordered and equal by their UTF-8 bytes. Heap texts run
+    /// normally.
+    WordsFloatsOrTexts,
+}
+
+impl ScalarDomain {
+    /// Whether two word integers are in the domain.
+    #[inline(always)]
+    pub fn words(self) -> bool {
+        self != Self::Floats
+    }
+
+    /// Whether two floats are in the domain.
+    #[inline(always)]
+    pub fn floats(self) -> bool {
+        self != Self::Words
+    }
+
+    /// Whether a word and a float, in either order, are in the domain
+    /// where the word is exactly a binary64 ([`crate::scalar::mixed`]).
+    #[inline(always)]
+    pub fn mixed(self) -> bool {
+        matches!(self, Self::WordsOrFloats | Self::WordsFloatsOrTexts)
+    }
 }
 
 /// Integer formatting's word-only domains. Longer answers still need the

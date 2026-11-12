@@ -21,6 +21,216 @@
         "charged": 84,
         "work": 0
       }
+    },
+    {
+      "name": "gt: K-VAL-030 a later first byte orders first-different",
+      "function": "dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d",
+      "args": [
+        {
+          "text": "b"
+        },
+        {
+          "text": "ab"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 27,
+        "work": 0
+      }
+    },
+    {
+      "name": "lt: K-VAL-030 an upper-case letter before a lower-case one",
+      "function": "14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b",
+      "args": [
+        {
+          "text": "Z"
+        },
+        {
+          "text": "a"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "lt: K-VAL-030 code point order, not UTF-16 units, above U+FFFF",
+      "function": "14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b",
+      "args": [
+        {
+          "text": "｡"
+        },
+        {
+          "text": "😀"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 83,
+        "work": 0
+      }
+    },
+    {
+      "name": "gt: K-VAL-030 UTF-16 unit order would answer the other way",
+      "function": "dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d",
+      "args": [
+        {
+          "text": "😀"
+        },
+        {
+          "text": "｡"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 83,
+        "work": 0
+      }
+    },
+    {
+      "name": "le: K-VAL-030 equal texts",
+      "function": "7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e",
+      "args": [
+        {
+          "text": "ab"
+        },
+        {
+          "text": "ab"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 38,
+        "work": 0
+      }
+    },
+    {
+      "name": "ge: K-VAL-030 the empty text is a prefix of every text",
+      "function": "6177b8b5f44892be7160ce3f3b0829af35c52f4b40beec0653463bf266e1e162",
+      "args": [
+        {
+          "text": ""
+        },
+        {
+          "text": "a"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "lt: K-VAL-030 a prefix first",
+      "function": "14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b",
+      "args": [
+        {
+          "text": "ab"
+        },
+        {
+          "text": "abc"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 51,
+        "work": 0
+      }
+    },
+    {
+      "name": "gt: K-VAL-030 a later last byte",
+      "function": "dc385d728c963941f6f4e4c3320947cf538eb9167ce889b31eeb7e6cec9b270d",
+      "args": [
+        {
+          "text": "abd"
+        },
+        {
+          "text": "abc"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "eq: K-VAL-030 equal texts",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
+      "args": [
+        {
+          "text": "a"
+        },
+        {
+          "text": "a"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "eq: K-VAL-030 texts differing in one byte",
+      "function": "4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153",
+      "args": [
+        {
+          "text": "abc"
+        },
+        {
+          "text": "abd"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
     }
   ]
 }
