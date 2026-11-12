@@ -9,8 +9,8 @@ use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
 use lash_core_store::model_calls::ModelCallRecord;
 use lash_durable::domain::process_archive::{
     self as archive, ArchiveContents, ArchivedCall, ArchivedFact, ArchivedModelCall, ArchivedNode,
-    ModelSelection, PROCESS_ARCHIVE_CAP_BYTES, PROCESS_ARCHIVE_MAX_NODES, PROCESS_ARCHIVE_MAX_ROWS,
-    ProcessArchive,
+    ArchivedRecord, ModelRead, PROCESS_ARCHIVE_CAP_BYTES, PROCESS_ARCHIVE_MAX_NODES,
+    PROCESS_ARCHIVE_MAX_ROWS, ProcessArchive,
 };
 use lash_durable::domain::{CallOwner, OwnerKey, RunFacts, ToolCallSelection, ToolCalls};
 use lash_durable::{ActorKey, CommitLabel, DurableError};
@@ -172,24 +172,25 @@ pub(super) fn tool_calls(
     })())
 }
 
-/// Session `session`'s model calls `selection` reads for `owner`, from its
-/// process's archive, with the archive's bytes, when its history is packed
-/// (none while its rows hold it).
-pub(super) fn model_calls(
+/// An archive's bytes with the model-call rows a read selected from it.
+type Selected<Row> = (Vec<u8>, Vec<Row>);
+
+/// Session `session`'s model-call rows `read` selects, from its process's
+/// archive, with the archive's bytes, when its history is packed (none
+/// while its rows hold it). A read built here uses SQLite's `LIKE`, which
+/// ignores ASCII case.
+pub(super) fn model_calls<R: ModelRead>(
     tx: &Connection,
     session: &lash_kernel_value::identity::SessionId,
-    owner: &str,
-    selection: ModelSelection<'_>,
-) -> Answer<Option<(Vec<u8>, Vec<ArchivedModelCall>)>> {
+    read: &R,
+) -> Answer<Option<Selected<R::Row>>> {
     let Some(process) = archive::model_process(session) else {
         return Ok(Ok(None));
     };
     let Some(bytes) = archive_bytes(tx, process)? else {
         return Ok(Ok(None));
     };
-    // SQLite's `LIKE` folds ASCII case, as the row read's owner match does.
-    let models = ProcessArchive::open(&bytes)
-        .and_then(|view| archive::select_models(&view, owner, selection, true));
+    let models = ProcessArchive::open(&bytes).and_then(|view| view.models(read));
     Ok(match models {
         Ok(models) => Ok(Some((bytes, models))),
         Err(error) => Err(error.into()),
@@ -200,7 +201,7 @@ pub(super) fn model_calls(
 /// the same rows decodes them.
 pub(super) fn model_records(
     bytes: &[u8],
-    models: Vec<ArchivedModelCall>,
+    models: Vec<ArchivedRecord>,
     limits: DecodeLimits,
 ) -> Result<Vec<ModelCallRecord>, DurableError> {
     let archive = ProcessArchive::open(bytes)?;

@@ -450,10 +450,17 @@ impl<'a> ProcessArchive<'a> {
         })
     }
 
-    /// The `(admission sequence, call id)` key of call `at`.
-    fn call_key(&self, at: usize) -> Decoded<(i64, String)> {
+    /// Call `at`'s selection keys, framed but not decoded: the leading
+    /// columns every call statement filters or orders on.
+    fn call_keys(&self, at: usize) -> Decoded<CallKeys<'a>> {
         let mut row = self.row(1, at)?;
-        Ok((row.i64()?, row.string()?))
+        Ok(CallKeys {
+            admission_seq: row.i64()?,
+            call_id: row.raw_string()?,
+            owner_key: row.raw_string()?,
+            execution_owner: row.raw_string()?,
+            tail: row,
+        })
     }
 
     /// The calls whose ids are in `calls`, in stored order (by admission
@@ -469,11 +476,11 @@ impl<'a> ProcessArchive<'a> {
     ) -> Decoded<Vec<ArchivedCall>> {
         let mut found = Vec::new();
         for at in 0..self.counts[1] {
-            if calls.contains(self.call_key(at)?.1.as_str()) {
-                let call = self.call_at(at)?;
-                if call.owner_key == owner_key {
-                    found.push(call);
-                }
+            let keys = self.call_keys(at)?;
+            if keys.owner_key == owner_key.as_bytes()
+                && calls.iter().any(|call| keys.call_id == call.as_bytes())
+            {
+                found.push(self.call_at(at)?);
             }
         }
         Ok(found)
@@ -493,25 +500,21 @@ impl<'a> ProcessArchive<'a> {
         limit: usize,
         saved_reads: bool,
     ) -> Decoded<Vec<ArchivedCall>> {
+        let after = (after.0, after.1.as_bytes());
         let from = self.partition(self.counts[1], |at| {
-            let (sequence, call) = self.call_key(at)?;
-            Ok((sequence, call.as_str()) <= after)
+            let keys = self.call_keys(at)?;
+            Ok((keys.admission_seq, keys.call_id) <= after)
         })?;
         let mut page = Vec::new();
         for at in from..self.counts[1] {
             if page.len() >= limit {
                 break;
             }
-            let call = self.call_at(at)?;
-            if call.owner_key != owner_key {
+            let keys = self.call_keys(at)?;
+            if keys.owner_key != owner_key.as_bytes() || (saved_reads && !keys.saved_read()?) {
                 continue;
             }
-            if saved_reads
-                && (call.cancellable || call.answer_outcome.as_deref() != Some("\"Read\""))
-            {
-                continue;
-            }
-            page.push(call);
+            page.push(self.call_at(at)?);
         }
         Ok(page)
     }
@@ -523,11 +526,9 @@ impl<'a> ProcessArchive<'a> {
     /// [`ArchiveCorrupt`] for a row that does not decode.
     pub fn call_of(&self, execution: &str, call: &str) -> Decoded<Option<ArchivedCall>> {
         for at in 0..self.counts[1] {
-            if self.call_key(at)?.1 == call {
-                let found = self.call_at(at)?;
-                if found.execution_owner == execution {
-                    return Ok(Some(found));
-                }
+            let keys = self.call_keys(at)?;
+            if keys.call_id == call.as_bytes() && keys.execution_owner == execution.as_bytes() {
+                return self.call_at(at).map(Some);
             }
         }
         Ok(None)
@@ -552,21 +553,38 @@ impl<'a> ProcessArchive<'a> {
         Ok(model)
     }
 
-    /// The model-call rows `keep` selects, in stored order (by run, then
-    /// call).
+    /// Model call `at` framed through its record reference, its values
+    /// unread: its selection keys first, so a row another owner holds is
+    /// framed no further.
+    fn model_keys(&self, at: usize) -> Decoded<ModelKeys<'a>> {
+        let mut row = self.row(2, at)?;
+        Ok(ModelKeys {
+            run: row.raw_string()?,
+            call: row.raw_string()?,
+            call_id: row.raw_string()?,
+            tail: row,
+        })
+    }
+
+    /// The model-call rows `read` selects, in stored order (by run, then
+    /// call), each decoded to the columns `read` returns: a row is selected
+    /// on its stored keys alone, and nothing else of a row it does not
+    /// select is decoded.
     ///
     /// # Errors
     ///
-    /// [`ArchiveCorrupt`] for a row that does not decode.
-    pub fn models(
-        &self,
-        mut keep: impl FnMut(&ArchivedModelCall) -> bool,
-    ) -> Decoded<Vec<ArchivedModelCall>> {
+    /// [`ArchiveCorrupt`] for a selected row that does not decode, or a row
+    /// whose framing does not.
+    pub fn models<R: ModelRead>(&self, read: &R) -> Decoded<Vec<R::Row>> {
         let mut found = Vec::new();
         for at in 0..self.counts[2] {
-            let model = self.model_at(at)?;
-            if keep(&model) {
-                found.push(model);
+            let keys = self.model_keys(at)?;
+            if !read.wants(keys.run, keys.call, keys.call_id) {
+                continue;
+            }
+            let frame = keys.frame()?;
+            if (frame.record_ref != NONE_NODE) == R::SEALED {
+                found.push(read.row(self, frame)?);
             }
         }
         Ok(found)
@@ -708,7 +726,9 @@ impl<'a> ProcessArchive<'a> {
             calls: (0..self.counts[1])
                 .map(|at| self.call_at(at))
                 .collect::<Decoded<_>>()?,
-            models: self.models(|_| true)?,
+            models: (0..self.counts[2])
+                .map(|at| self.model_at(at))
+                .collect::<Decoded<_>>()?,
             nodes: Vec::with_capacity(self.counts[3]),
         };
         for index in 0..self.counts[3] {
@@ -759,8 +779,8 @@ pub fn is_heap_page(encoding: u8, bytes: &[u8]) -> bool {
 /// or a turn owner's owned calls. `ascii_case_like` is SQLite's `LIKE`,
 /// which ignores ASCII case.
 #[must_use]
-pub fn model_owner_matches(run: &str, owner: &str, ascii_case_like: bool) -> bool {
-    if run == owner {
+pub fn model_owner_matches(run: &[u8], owner: &str, ascii_case_like: bool) -> bool {
+    if run == owner.as_bytes() {
         return true;
     }
     let prefix = owner.get(..5);
@@ -769,15 +789,15 @@ pub fn model_owner_matches(run: &str, owner: &str, ascii_case_like: bool) -> boo
         Some(prefix) => prefix == "turn:",
         None => false,
     };
-    turn && run.strip_prefix("owned:") == owner.get(5..)
+    turn && run.strip_prefix(b"owned:") == owner.get(5..).map(str::as_bytes)
 }
 
 struct Reader<'a> {
     bytes: &'a [u8],
 }
 
-impl Reader<'_> {
-    fn take(&mut self, len: usize) -> Decoded<&[u8]> {
+impl<'a> Reader<'a> {
+    fn take(&mut self, len: usize) -> Decoded<&'a [u8]> {
         if self.bytes.len() < len {
             return Err(ArchiveCorrupt("row ends early"));
         }
@@ -806,8 +826,23 @@ impl Reader<'_> {
         self.bool()
     }
     fn string(&mut self) -> Decoded<String> {
+        text(self.raw_string()?)
+    }
+    /// A text column's stored bytes, its encoding unchecked.
+    fn raw_string(&mut self) -> Decoded<&'a [u8]> {
         let len = self.u32()? as usize;
-        String::from_utf8(self.take(len)?.to_vec()).map_err(|_| ArchiveCorrupt("text"))
+        self.take(len)
+    }
+    fn raw_opt_string(&mut self) -> Decoded<Option<&'a [u8]>> {
+        if self.present()? {
+            self.raw_string().map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+    /// A one-byte column's stored byte, its value unchecked.
+    fn byte(&mut self) -> Decoded<u8> {
+        Ok(self.take(1)?[0])
     }
     fn opt_string(&mut self) -> Decoded<Option<String>> {
         if self.present()? {
@@ -830,6 +865,107 @@ impl Reader<'_> {
             Err(ArchiveCorrupt("row has trailing bytes"))
         }
     }
+}
+
+fn text(bytes: &[u8]) -> Decoded<String> {
+    String::from_utf8(bytes.to_vec()).map_err(|_| ArchiveCorrupt("text"))
+}
+
+fn boolean(byte: u8) -> Decoded<bool> {
+    match byte {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(ArchiveCorrupt("boolean")),
+    }
+}
+
+/// A call row's selection keys, framed but not decoded, and the rest of
+/// the row after them.
+struct CallKeys<'a> {
+    admission_seq: i64,
+    call_id: &'a [u8],
+    owner_key: &'a [u8],
+    execution_owner: &'a [u8],
+    tail: Reader<'a>,
+}
+
+impl CallKeys<'_> {
+    /// Whether the saved-reads read selects this call: not cancellable and
+    /// answered `"Read"`, compared as stored, with no other column decoded.
+    fn saved_read(mut self) -> Decoded<bool> {
+        let row = &mut self.tail;
+        row.i64()?; // run
+        row.i64()?; // member
+        row.byte()?; // counted
+        row.i64()?; // admitted count
+        let cancellable = row.byte()?;
+        for _ in 0..6 {
+            row.raw_opt_string()?; // session, turn, request, origin, reason, decision
+        }
+        row.u32()?; // decision reference
+        Ok(cancellable == 0 && row.raw_opt_string()? == Some(&b"\"Read\""[..]))
+    }
+}
+
+/// A model-call row's selection keys, framed but not decoded, and the rest
+/// of the row after them.
+struct ModelKeys<'a> {
+    run: &'a [u8],
+    call: &'a [u8],
+    call_id: &'a [u8],
+    tail: Reader<'a>,
+}
+
+impl<'a> ModelKeys<'a> {
+    /// The row framed through its record reference, values unchecked.
+    fn frame(mut self) -> Decoded<ModelFrame<'a>> {
+        let row = &mut self.tail;
+        Ok(ModelFrame {
+            attempt: row.opt_i64()?,
+            answered: row.byte()?,
+            enclosing_owner: row.raw_opt_string()?,
+            enclosing_run: row.opt_i64()?,
+            enclosing_call: row.raw_opt_string()?,
+            record_ref: row.u32()?,
+            keys: ModelKeys {
+                run: self.run,
+                call: self.call,
+                call_id: self.call_id,
+                tail: self.tail,
+            },
+        })
+    }
+}
+
+/// A selected model-call row: framed through its record reference, its
+/// values unchecked until a read returns them. `keys.tail` holds the end
+/// instant and write epoch.
+pub struct ModelFrame<'a> {
+    keys: ModelKeys<'a>,
+    attempt: Option<i64>,
+    answered: u8,
+    enclosing_owner: Option<&'a [u8]>,
+    enclosing_run: Option<i64>,
+    enclosing_call: Option<&'a [u8]>,
+    record_ref: u32,
+}
+
+/// One model-call read over an archive: the rows its statement selects,
+/// by their stored keys and whether they are sealed, and the columns it
+/// returns for each.
+pub trait ModelRead {
+    /// What the read answers per row.
+    type Row;
+    /// Whether the read selects sealed records or open reservations.
+    const SEALED: bool;
+    /// Whether the read selects a row with these stored keys.
+    fn wants(&self, run: &[u8], call: &[u8], call_id: &[u8]) -> bool;
+    /// The columns the read returns for a selected row.
+    ///
+    /// # Errors
+    ///
+    /// [`ArchiveCorrupt`] for a returned column that does not decode.
+    fn row(&self, archive: &ProcessArchive<'_>, frame: ModelFrame<'_>) -> Decoded<Self::Row>;
 }
 
 fn u32_at(bytes: &[u8], at: usize) -> Decoded<u32> {
@@ -1047,49 +1183,123 @@ pub fn select_calls(
     }
 }
 
-/// What a model-call read selects from an archive.
-#[derive(Clone, Copy, Debug)]
-pub enum ModelSelection<'a> {
-    /// Sealed records, every one or those with the given ids.
-    Records(Option<&'a [lash_protocol_types::llm::types::LlmCallId]>),
-    /// Reservations, every one, those with the given ids, or the one at a
-    /// call key (matched on its exact run).
-    Pins {
-        ids: Option<&'a [lash_protocol_types::llm::types::LlmCallId]>,
-        call: Option<&'a str>,
-    },
+type LlmCallIds<'a> = Option<&'a [lash_protocol_types::llm::types::LlmCallId]>;
+
+/// Whether call id `stored` is among `ids` (every id when `None`).
+fn named(ids: LlmCallIds<'_>, stored: &[u8]) -> bool {
+    ids.is_none_or(|ids| ids.iter().any(|named| named.0.as_bytes() == stored))
 }
 
-/// The archived model calls of `owner` that `selection` reads, in stored
-/// order. `ascii_case_like` is the store's `LIKE`.
-///
-/// # Errors
-///
-/// [`ArchiveCorrupt`] for a row that does not decode.
-pub fn select_models(
-    archive: &ProcessArchive<'_>,
-    owner: &str,
-    selection: ModelSelection<'_>,
-    ascii_case_like: bool,
-) -> Result<Vec<ArchivedModelCall>, ArchiveCorrupt> {
-    let named = |ids: Option<&[lash_protocol_types::llm::types::LlmCallId]>, id: &str| {
-        ids.is_none_or(|ids| ids.iter().any(|named| named.0 == id))
-    };
-    archive.models(|model| match selection {
-        ModelSelection::Records(ids) => {
-            model.record_ref.is_some()
-                && model_owner_matches(&model.run, owner, ascii_case_like)
-                && named(ids, &model.call_id)
+/// The ids statement: the call ids of `owner`'s sealed records. `like` is
+/// the store's `LIKE` (SQLite's ignores ASCII case).
+pub struct ModelIds<'a> {
+    pub owner: &'a str,
+    pub like: bool,
+}
+
+impl ModelRead for ModelIds<'_> {
+    type Row = String;
+    const SEALED: bool = true;
+    fn wants(&self, run: &[u8], _: &[u8], _: &[u8]) -> bool {
+        model_owner_matches(run, self.owner, self.like)
+    }
+    fn row(&self, _: &ProcessArchive<'_>, frame: ModelFrame<'_>) -> Decoded<String> {
+        text(frame.keys.call_id)
+    }
+}
+
+/// The record statement: `owner`'s sealed records, every one or those
+/// with the given ids, as id, root and end instant.
+pub struct ModelRecords<'a> {
+    pub owner: &'a str,
+    pub ids: LlmCallIds<'a>,
+    pub like: bool,
+}
+
+/// A sealed record row as the record statement returns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArchivedRecord {
+    pub call_id: String,
+    pub record: NodeId,
+    pub ended_at_ms: Option<i64>,
+}
+
+impl ModelRead for ModelRecords<'_> {
+    type Row = ArchivedRecord;
+    const SEALED: bool = true;
+    fn wants(&self, run: &[u8], _: &[u8], call_id: &[u8]) -> bool {
+        model_owner_matches(run, self.owner, self.like) && named(self.ids, call_id)
+    }
+    fn row(&self, archive: &ProcessArchive<'_>, frame: ModelFrame<'_>) -> Decoded<ArchivedRecord> {
+        let mut rest = frame.keys.tail;
+        Ok(ArchivedRecord {
+            call_id: text(frame.keys.call_id)?,
+            record: archive.node_id(frame.record_ref)?,
+            ended_at_ms: rest.opt_i64()?,
+        })
+    }
+}
+
+/// The root statement: the record root of sealed call `call` of run `run`.
+pub struct ModelRoot<'a> {
+    pub run: &'a str,
+    pub call: &'a str,
+}
+
+impl ModelRead for ModelRoot<'_> {
+    type Row = NodeId;
+    const SEALED: bool = true;
+    fn wants(&self, run: &[u8], call: &[u8], _: &[u8]) -> bool {
+        run == self.run.as_bytes() && call == self.call.as_bytes()
+    }
+    fn row(&self, archive: &ProcessArchive<'_>, frame: ModelFrame<'_>) -> Decoded<NodeId> {
+        archive.node_id(frame.record_ref)
+    }
+}
+
+/// The pin statements: `owner`'s reservations, every one, those with the
+/// given ids, or the one at call key `call` (matched on its exact run).
+pub struct ModelPins<'a> {
+    pub owner: &'a str,
+    pub ids: LlmCallIds<'a>,
+    pub call: Option<&'a str>,
+    pub like: bool,
+}
+
+/// A reservation row as the pin statements return it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArchivedPin {
+    pub run: String,
+    pub call: String,
+    pub call_id: String,
+    pub attempt: Option<i64>,
+    pub answered: bool,
+    pub enclosing_owner: Option<String>,
+    pub enclosing_run: Option<i64>,
+    pub enclosing_call: Option<String>,
+}
+
+impl ModelRead for ModelPins<'_> {
+    type Row = ArchivedPin;
+    const SEALED: bool = false;
+    fn wants(&self, run: &[u8], call: &[u8], call_id: &[u8]) -> bool {
+        match self.call {
+            Some(key) => run == self.owner.as_bytes() && call == key.as_bytes(),
+            None => model_owner_matches(run, self.owner, self.like) && named(self.ids, call_id),
         }
-        ModelSelection::Pins {
-            call: Some(call), ..
-        } => model.record_ref.is_none() && model.run == owner && model.call == call,
-        ModelSelection::Pins { ids, call: None } => {
-            model.record_ref.is_none()
-                && model_owner_matches(&model.run, owner, ascii_case_like)
-                && named(ids, &model.call_id)
-        }
-    })
+    }
+    fn row(&self, _: &ProcessArchive<'_>, frame: ModelFrame<'_>) -> Decoded<ArchivedPin> {
+        Ok(ArchivedPin {
+            run: text(frame.keys.run)?,
+            call: text(frame.keys.call)?,
+            call_id: text(frame.keys.call_id)?,
+            attempt: frame.attempt,
+            answered: boolean(frame.answered)?,
+            enclosing_owner: frame.enclosing_owner.map(text).transpose()?,
+            enclosing_run: frame.enclosing_run,
+            enclosing_call: frame.enclosing_call.map(text).transpose()?,
+        })
+    }
 }
 
 /// An archived reservation as the pin read answers it.
@@ -1099,23 +1309,19 @@ pub fn select_models(
 /// The refusal a stored reservation row would give.
 pub fn pin_row(
     session: &lash_kernel_value::identity::SessionId,
-    model: ArchivedModelCall,
+    pin: ArchivedPin,
 ) -> Result<super::ModelCallPinRow, crate::DurableError> {
-    let attempt = model
+    let attempt = pin
         .attempt
         .ok_or_else(|| corrupt("model call reservation", "no attempt"))?;
     super::model_calls::pin_row(
         session,
-        &model.run,
-        model.call,
-        model.call_id,
+        &pin.run,
+        pin.call,
+        pin.call_id,
         attempt,
-        model.answered,
-        (
-            model.enclosing_owner,
-            model.enclosing_run,
-            model.enclosing_call,
-        ),
+        pin.answered,
+        (pin.enclosing_owner, pin.enclosing_run, pin.enclosing_call),
     )
 }
 
@@ -1125,12 +1331,10 @@ pub fn pin_row(
 /// # Errors
 ///
 /// A corruption refusal for a row a stored read could not select.
-pub fn record_parts(
-    model: ArchivedModelCall,
-) -> Result<(String, NodeId, i64), crate::DurableError> {
-    match (model.record_ref, model.ended_at_ms) {
-        (Some(root), Some(ended)) => Ok((model.call_id, root, ended)),
-        _ => Err(corrupt("model call", "a sealed record without its end")),
+pub fn record_parts(record: ArchivedRecord) -> Result<(String, NodeId, i64), crate::DurableError> {
+    match record.ended_at_ms {
+        Some(ended) => Ok((record.call_id, record.record, ended)),
+        None => Err(corrupt("model call", "a sealed record without its end")),
     }
 }
 
@@ -1182,11 +1386,25 @@ impl ArchiveContents {
                 .map_err(|_| Unpackable::Unsupported("a tool call does not decode"))?;
         }
         for model in &self.models {
-            if model.record_ref.is_some() {
-                record_parts(model.clone())
-                    .map_err(|_| Unpackable::Unsupported("a model call record does not decode"))?;
+            if let Some(record) = model.record_ref {
+                record_parts(ArchivedRecord {
+                    call_id: model.call_id.clone(),
+                    record,
+                    ended_at_ms: model.ended_at_ms,
+                })
+                .map_err(|_| Unpackable::Unsupported("a model call record does not decode"))?;
             } else {
-                pin_row(&session, model.clone()).map_err(|_| {
+                let pin = ArchivedPin {
+                    run: model.run.clone(),
+                    call: model.call.clone(),
+                    call_id: model.call_id.clone(),
+                    attempt: model.attempt,
+                    answered: model.answered,
+                    enclosing_owner: model.enclosing_owner.clone(),
+                    enclosing_run: model.enclosing_run,
+                    enclosing_call: model.enclosing_call.clone(),
+                };
+                pin_row(&session, pin).map_err(|_| {
                     Unpackable::Unsupported("a model call reservation does not decode")
                 })?;
             }
@@ -1319,12 +1537,12 @@ pub fn archived_root(
         super::RootOwner::ModelCall(key) => {
             let (run, call) = (key.call.owner_column(), key.call.call_column());
             archive
-                .models(|model| {
-                    model.record_ref.is_some() && model.run == run && model.call == call
+                .models(&ModelRoot {
+                    run: &run,
+                    call: &call,
                 })?
                 .into_iter()
                 .next()
-                .and_then(|model| model.record_ref)
         }
         _ => None,
     })

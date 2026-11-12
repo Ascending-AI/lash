@@ -9,8 +9,8 @@ use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal, NodeId};
 use lash_core_store::model_calls::ModelCallRecord;
 use lash_durable::domain::process_archive::{
     self as archive, ArchiveContents, ArchivedCall, ArchivedFact, ArchivedModelCall, ArchivedNode,
-    ModelSelection, PROCESS_ARCHIVE_CAP_BYTES, PROCESS_ARCHIVE_MAX_NODES, PROCESS_ARCHIVE_MAX_ROWS,
-    ProcessArchive,
+    ArchivedRecord, ModelRead, PROCESS_ARCHIVE_CAP_BYTES, PROCESS_ARCHIVE_MAX_NODES,
+    PROCESS_ARCHIVE_MAX_ROWS, ProcessArchive,
 };
 use lash_durable::domain::{CallOwner, OwnerKey, RunFacts, ToolCallSelection, ToolCalls};
 use lash_durable::{ActorKey, CommitLabel, DurableError};
@@ -203,21 +203,23 @@ pub(super) async fn tool_calls(
     }))
 }
 
-/// Session `session`'s model calls `selection` reads for `owner`, from its
-/// process's archive.
-pub(super) async fn model_calls(
+/// An archive's bytes with the model-call rows a read selected from it.
+type Selected<Row> = (Vec<u8>, Vec<Row>);
+
+/// Session `session`'s model-call rows `read` selects, from its process's
+/// archive. A read built here uses PostgreSQL's `LIKE`, which keeps case.
+pub(super) async fn model_calls<R: ModelRead + Sync>(
     connection: &mut PgConnection,
     session: &lash_kernel_value::identity::SessionId,
-    owner: &str,
-    selection: ModelSelection<'_>,
-) -> Result<Option<(Vec<u8>, Vec<ArchivedModelCall>)>, DurableError> {
+    read: &R,
+) -> Result<Option<Selected<R::Row>>, DurableError> {
     let Some(process) = archive::model_process(session) else {
         return Ok(None);
     };
     let Some(bytes) = archive_of(connection, process).await? else {
         return Ok(None);
     };
-    let models = archive::select_models(&ProcessArchive::open(&bytes)?, owner, selection, false)?;
+    let models = ProcessArchive::open(&bytes)?.models(read)?;
     Ok(Some((bytes, models)))
 }
 
@@ -225,7 +227,7 @@ pub(super) async fn model_calls(
 /// the same rows decodes them.
 pub(super) async fn model_records(
     bytes: &[u8],
-    models: Vec<ArchivedModelCall>,
+    models: Vec<ArchivedRecord>,
     limits: DecodeLimits,
 ) -> Result<Vec<ModelCallRecord>, DurableError> {
     let archive = ProcessArchive::open(bytes)?;

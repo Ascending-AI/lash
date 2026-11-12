@@ -146,12 +146,12 @@ impl super::PostgresDurableStore {
     ) -> Result<Vec<lash_protocol_types::llm::types::LlmCallId>, DurableError> {
         self.read(|tx| {
             Box::pin(async move {
-                let all = lash_durable::domain::process_archive::ModelSelection::Records(None);
+                let all = lash_durable::domain::process_archive::ModelIds { owner, like: false };
                 // The history discriminator chooses the representation
                 // before any row is read.
-                let archived = super::process_history::model_calls(tx, session, owner, all).await?;
+                let archived = super::process_history::model_calls(tx, session, &all).await?;
                 let mut ids: Vec<String> = match archived {
-                    Some((_, models)) => models.into_iter().map(|model| model.call_id).collect(),
+                    Some((_, ids)) => ids,
                     None => crate::observed_sql::query_scalar(SQL.ids.sql())
                         .bind(session.as_str())
                         .bind(owner)
@@ -164,10 +164,10 @@ impl super::PostgresDurableStore {
                 // the discriminator was read are answered by the
                 // discriminator read again.
                 if ids.is_empty()
-                    && let Some((_, models)) =
-                        super::process_history::model_calls(tx, session, owner, all).await?
+                    && let Some((_, archived)) =
+                        super::process_history::model_calls(tx, session, &all).await?
                 {
-                    ids = models.into_iter().map(|model| model.call_id).collect();
+                    ids = archived;
                 }
                 Ok(ids
                     .into_iter()
@@ -188,13 +188,13 @@ impl super::PostgresDurableStore {
             Box::pin(async move {
                 // The history discriminator chooses the representation
                 // first, in the read's one snapshot.
-                if let Some((bytes, models)) = super::process_history::model_calls(
-                    snapshot,
-                    session,
+                let read = lash_durable::domain::process_archive::ModelRecords {
                     owner,
-                    lash_durable::domain::process_archive::ModelSelection::Records(ids),
-                )
-                .await?
+                    ids,
+                    like: false,
+                };
+                if let Some((bytes, models)) =
+                    super::process_history::model_calls(snapshot, session, &read).await?
                 {
                     return super::process_history::model_records(&bytes, models, limits).await;
                 }
@@ -302,12 +302,16 @@ impl super::PostgresDurableStore {
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.read(|tx| {
             Box::pin(async move {
-                let pinned =
-                    lash_durable::domain::process_archive::ModelSelection::Pins { ids, call };
+                let pinned = lash_durable::domain::process_archive::ModelPins {
+                    owner,
+                    ids,
+                    call,
+                    like: false,
+                };
                 // The history discriminator chooses the representation
                 // before any row is read.
                 if let Some((_, models)) =
-                    super::process_history::model_calls(tx, session, owner, pinned).await?
+                    super::process_history::model_calls(tx, session, &pinned).await?
                 {
                     return models
                         .into_iter()
@@ -339,7 +343,7 @@ impl super::PostgresDurableStore {
                 // discriminator read again.
                 if rows.is_empty()
                     && let Some((_, models)) =
-                        super::process_history::model_calls(tx, session, owner, pinned).await?
+                        super::process_history::model_calls(tx, session, &pinned).await?
                 {
                     return models
                         .into_iter()

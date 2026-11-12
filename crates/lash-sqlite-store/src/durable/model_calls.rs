@@ -52,16 +52,12 @@ pub(super) fn ids(
     owner: &str,
 ) -> Answer<Vec<lash_protocol_types::llm::types::LlmCallId>> {
     // The history discriminator chooses the representation first.
-    match super::process_history::model_calls(
-        tx,
-        session,
-        owner,
-        lash_durable::domain::process_archive::ModelSelection::Records(None),
-    )? {
-        Ok(Some((_, models))) => {
-            return Ok(Ok(models
+    let read = lash_durable::domain::process_archive::ModelIds { owner, like: true };
+    match super::process_history::model_calls(tx, session, &read)? {
+        Ok(Some((_, ids))) => {
+            return Ok(Ok(ids
                 .into_iter()
-                .map(|model| lash_protocol_types::llm::types::LlmCallId(model.call_id))
+                .map(lash_protocol_types::llm::types::LlmCallId)
                 .collect()));
         }
         Ok(None) => {}
@@ -121,12 +117,12 @@ pub(super) fn read(
     limits: DecodeLimits,
 ) -> Answer<Vec<ModelCallRecord>> {
     // The history discriminator chooses the representation first.
-    match super::process_history::model_calls(
-        tx,
-        session,
+    let read = lash_durable::domain::process_archive::ModelRecords {
         owner,
-        lash_durable::domain::process_archive::ModelSelection::Records(ids),
-    )? {
+        ids,
+        like: true,
+    };
+    match super::process_history::model_calls(tx, session, &read)? {
         Ok(Some((bytes, models))) => {
             return Ok(super::process_history::model_records(
                 &bytes, models, limits,
@@ -260,12 +256,13 @@ pub(super) fn pins(
     call: Option<&str>,
 ) -> Answer<Vec<lash_durable::domain::ModelCallPinRow>> {
     // The history discriminator chooses the representation first.
-    match super::process_history::model_calls(
-        tx,
-        session,
+    let read = lash_durable::domain::process_archive::ModelPins {
         owner,
-        lash_durable::domain::process_archive::ModelSelection::Pins { ids, call },
-    )? {
+        ids,
+        call,
+        like: true,
+    };
+    match super::process_history::model_calls(tx, session, &read)? {
         Ok(Some((_, models))) => {
             return Ok(models
                 .into_iter()

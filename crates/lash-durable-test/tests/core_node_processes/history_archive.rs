@@ -581,6 +581,17 @@ async fn answers(
     process: &ProcessId,
     model_keys: &[(String, String)],
 ) -> BTreeMap<String, String> {
+    answers_naming(store, process, model_keys, None).await
+}
+
+/// [`answers`], with the point reads naming `calls` (the process's calls as
+/// its rows listed them) instead of the calls its listing answers.
+async fn answers_naming(
+    store: &dyn lash_durable::DurableStore,
+    process: &ProcessId,
+    model_keys: &[(String, String)],
+    calls: Option<&[lash_durable::domain::tool_calls::ToolCallRow]>,
+) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let limits = GraphReadPolicy::standard().owner();
     let owner = OwnerKey::Process(process.clone());
@@ -660,7 +671,10 @@ async fn answers(
         )
         .await;
     out.insert("calls".to_owned(), format!("{listed:?}"));
-    let calls = listed.map(|calls| calls.rows).unwrap_or_default();
+    let calls = match calls {
+        Some(calls) => calls.to_vec(),
+        None => listed.map(|calls| calls.rows).unwrap_or_default(),
+    };
     assert!(
         calls.len() >= 2,
         "the process admitted its reads: {calls:?}"
@@ -1581,3 +1595,146 @@ async fn a_corrupt_packed_history_refuses_as_its_rows(tier: Tier) {
 }
 
 on_every_tier!(a_corrupt_packed_history_refuses_as_its_rows: sqlite_memory, postgres);
+
+/// Text the law writes into an archived call row's reason, then makes
+/// invalid UTF-8 in the archive's bytes: a value no stored column holds.
+const MALFORMED_CALL: &str = "\u{1}a malformed call reason\u{1}";
+/// The same for a model-call row's enclosing owner; the law also sets that
+/// row's `answered` flag, the byte before the enclosing owner's presence
+/// tag and length, to 2 (the review's reproduction).
+const MALFORMED_MODEL: &str = "\u{1}a malformed enclosing owner\u{1}";
+
+/// `contents` encoded, with every malformed marker made invalid UTF-8 and
+/// each malformed model row's `answered` flag set to 2.
+fn malformed(contents: &lash_durable::domain::process_archive::ArchiveContents) -> Vec<u8> {
+    let mut bytes = contents.encode().unwrap();
+    let mut patched = 0;
+    for (marker, answered) in [(MALFORMED_CALL, false), (MALFORMED_MODEL, true)] {
+        let marker = marker.as_bytes();
+        while let Some(at) = bytes
+            .windows(marker.len())
+            .position(|window| window == marker)
+        {
+            bytes[at..at + marker.len()].fill(0xff);
+            if answered {
+                // answered, then the presence tag and the u32 length.
+                assert!(bytes[at - 6] <= 1, "the byte before is the answered flag");
+                bytes[at - 6] = 2;
+            }
+            patched += 1;
+        }
+    }
+    assert!(patched > 0, "the law corrupted the rows it added");
+    bytes
+}
+
+/// A packed history's reads select rows on their stored keys and decode
+/// only what they select. Malformed fields of rows a read does not select
+/// (another owner's calls and model calls, saved reads' excluded calls, a
+/// reservation a record read skips) leave every answer as the rows gave
+/// it: an unknown id, a good selected sibling, a named call, a key read.
+async fn a_packed_history_decodes_only_what_it_selects(tier: Tier) {
+    use lash_durable::domain::process_archive::{ArchivedCall, ArchivedModelCall, ProcessArchive};
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 400);
+    let process = Box::pin(run_one(&core, 2)).await;
+    let durable = Arc::clone(backend.durable());
+    let model_keys = raw.model_keys(&process).await;
+    let from_rows = answers(durable.as_ref(), &process, &model_keys).await;
+    let calls = durable
+        .tool_calls(
+            &CallOwner::Process(process.clone()),
+            &ToolCallSelection::List {
+                after: None,
+                limit: 100,
+            },
+        )
+        .await
+        .unwrap()
+        .rows;
+    assert_eq!(
+        durable.pack_finished_histories(16).await.unwrap(),
+        1,
+        "one history packs"
+    );
+    let archive = raw.archive(&process).await;
+    let contents = ProcessArchive::open(&archive).unwrap().contents().unwrap();
+    let model = contents
+        .models
+        .iter()
+        .find(|model| model.record_ref.is_some())
+        .expect("a sealed model call")
+        .clone();
+    let call = contents.calls[0].clone();
+    // Appended rows keep the stored order: last by admission sequence.
+    let last = |call_id: &str, cancellable: bool, outcome: &str| ArchivedCall {
+        admission_seq: i64::MAX,
+        call_id: call_id.to_owned(),
+        cancellable,
+        answer_outcome: Some(outcome.to_owned()),
+        reason: Some(MALFORMED_CALL.to_owned()),
+        ..call.clone()
+    };
+
+    // Another owner's rows, under keys this process's reads name: no read
+    // selects them.
+    let mut others = contents.clone();
+    others.calls.push(ArchivedCall {
+        owner_key: "another owner".to_owned(),
+        execution_owner: "another owner".to_owned(),
+        ..last(&call.call_id, false, "\"Read\"")
+    });
+    others.models.push(ArchivedModelCall {
+        run: "owned:another".to_owned(),
+        enclosing_owner: Some(MALFORMED_MODEL.to_owned()),
+        ..model.clone()
+    });
+    raw.set_archive(&process, &malformed(&others)).await;
+    same(
+        &from_rows,
+        &answers_naming(durable.as_ref(), &process, &model_keys, Some(&calls)).await,
+        "another owner's malformed rows",
+    );
+
+    // This process's own rows that some reads skip: a cancellable read and
+    // an uncancellable write, which saved reads exclude, and a reservation,
+    // which record reads exclude. Every read that does not select them
+    // answers as the rows did; one that selects them refuses.
+    let mut own = contents.clone();
+    own.calls.push(last("zz-cancellable", true, "\"Read\""));
+    own.calls.push(last("zz-written", false, "\"Write\""));
+    own.models.push(ArchivedModelCall {
+        call: "zz-reserved".to_owned(),
+        call_id: "zz-reserved".to_owned(),
+        attempt: Some(1),
+        record_ref: None,
+        ended_at_ms: None,
+        written_epoch: None,
+        enclosing_owner: Some(MALFORMED_MODEL.to_owned()),
+        ..model.clone()
+    });
+    raw.set_archive(&process, &malformed(&own)).await;
+    let selecting = [
+        "calls".to_owned(),
+        "calls after the first".to_owned(),
+        format!("model pins of {}", model.run),
+    ];
+    let answered = answers_naming(durable.as_ref(), &process, &model_keys, Some(&calls)).await;
+    for (label, answer) in &answered {
+        if selecting.contains(label) {
+            assert!(
+                answer.starts_with("Err(") && answer.contains("Corrupt"),
+                "`{label}` selects a malformed row and refuses: {answer}"
+            );
+        } else {
+            assert_eq!(
+                answer, &from_rows[label],
+                "this process's skipped malformed rows: `{label}` answers the same"
+            );
+        }
+    }
+    raw.set_archive(&process, &archive).await;
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(a_packed_history_decodes_only_what_it_selects: sqlite_memory, postgres);
