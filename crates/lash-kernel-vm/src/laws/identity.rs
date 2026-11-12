@@ -702,75 +702,88 @@ fn observation_attached_after_a_slice_keeps_prior_call_occurrences() {
     }
 
     const TEXT: &str = "main { let f = fn(x) { return x } let total = 0 for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] { set total = num.add(total, apply f(x)) } do perform 0(total) as Any return total }";
-    // Watch attachment and site-observer attachment are independent:
-    // the latter run has no Watch at any point.
-    for late_watch in [true, false] {
-        let run = |late: bool| {
-            let mut embedder = Embedder::with(TEXT, Setup::default());
-            let mut host = Later {
-                active: late_watch || !late,
-                ..Later::default()
-            };
-            if late_watch && !late {
-                embedder.machine.set_observe(ObservationMode::Counts);
-            }
-            loop {
-                assert_eq!(
-                    embedder.machine.run(&mut host, 5).unwrap(),
-                    Step::Slice,
-                    "the prefix ends at a slice before the effect"
+    const NESTED: &str = "main { let f = fn(x) { let answer = call helper.item(null, x) return answer } let total = 0 for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] { set total = num.add(total, apply f(x)) } do perform 0(total) as Any return total }";
+    for text in [TEXT, NESTED] {
+        // Watch attachment and site-observer attachment are independent:
+        // the latter run has no Watch at any point.
+        for late_watch in [true, false] {
+            let run = |late: bool| {
+                let mut embedder = Embedder::with(
+                    text,
+                    Setup {
+                        probes: Some(super::layout::helper_probes),
+                        ..Setup::default()
+                    },
                 );
-                if embedder.machine.meters().charged.unwrap() >= 60 {
-                    break;
+                let mut host = Later {
+                    active: late_watch || !late,
+                    ..Later::default()
+                };
+                if late_watch && !late {
+                    embedder.machine.set_observe(ObservationMode::Counts);
                 }
-            }
-            let prefix_charge = embedder.machine.meters().charged;
-            if !late {
-                assert!(
-                    !host.entered.is_empty(),
-                    "the prefix entered the repeated call"
-                );
-            }
-            host.entered.clear();
-            embedder.machine.take_counts();
-            if late_watch && late {
-                embedder.machine.set_observe(ObservationMode::Counts);
-            }
-            host.active = true;
-            let mut requests = Vec::new();
-            let end = loop {
-                match embedder.machine.run(&mut host, 5).unwrap() {
-                    Step::Slice => {}
-                    Step::Parked(park) => {
-                        for request in park.requests {
-                            embedder
-                                .machine
-                                .deliver(
-                                    super::embedder::wait_of(&request),
-                                    Outcome::Completed(Datum::Null),
-                                )
-                                .unwrap();
-                            requests.push(request);
-                        }
+                loop {
+                    assert_eq!(
+                        embedder.machine.run(&mut host, 5).unwrap(),
+                        Step::Slice,
+                        "the prefix ends at a slice before the effect"
+                    );
+                    if embedder.machine.meters().charged.unwrap() >= 60 {
+                        break;
                     }
-                    Step::Ended(end) => break end,
                 }
+                let prefix_charge = embedder.machine.meters().charged;
+                if !late {
+                    assert!(
+                        !host.entered.is_empty(),
+                        "the prefix entered the repeated call"
+                    );
+                }
+                host.entered.clear();
+                embedder.machine.take_counts();
+                if late_watch && late {
+                    embedder.machine.set_observe(ObservationMode::Counts);
+                }
+                host.active = true;
+                let mut requests = Vec::new();
+                let end = loop {
+                    match embedder.machine.run(&mut host, u64::MAX).unwrap() {
+                        Step::Slice => {}
+                        Step::Parked(park) => {
+                            for request in park.requests {
+                                embedder
+                                    .machine
+                                    .deliver(
+                                        super::embedder::wait_of(&request),
+                                        Outcome::Completed(Datum::Null),
+                                    )
+                                    .unwrap();
+                                requests.push(request);
+                            }
+                        }
+                        Step::Ended(end) => break end,
+                    }
+                };
+                assert_eq!(result(end), int(55));
+                let last = host.entered.last().expect("the suffix entered calls");
+                assert_eq!(effect_parts(&last.at).occurrence, 9);
+                let [Request::Effect(effect)] = requests.as_slice() else {
+                    panic!("one final effect: {requests:?}");
+                };
+                assert_eq!(effect.args, vec![int(55)]);
+                (
+                    prefix_charge,
+                    embedder.machine.meters().charged,
+                    embedder.machine.take_counts(),
+                    host.entered,
+                    requests,
+                )
             };
-            assert_eq!(result(end), int(55));
-            let last = host.entered.last().expect("the suffix entered calls");
-            assert_eq!(effect_parts(&last.at).occurrence, 9);
-            let [Request::Effect(effect)] = requests.as_slice() else {
-                panic!("one final effect: {requests:?}");
-            };
-            assert_eq!(effect.args, vec![int(55)]);
-            (
-                prefix_charge,
-                embedder.machine.meters().charged,
-                embedder.machine.take_counts(),
-                host.entered,
-                requests,
-            )
-        };
-        assert_eq!(run(true), run(false), "late Watch={late_watch}");
+            assert_eq!(
+                run(true),
+                crate::vm::calls::without_memo(|| run(false)),
+                "late Watch={late_watch}, {text}"
+            );
+        }
     }
 }

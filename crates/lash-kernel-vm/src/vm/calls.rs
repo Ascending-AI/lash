@@ -64,6 +64,7 @@ pub(crate) struct Direct {
 #[cfg(test)]
 thread_local! {
     static PLAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static RETRIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static LEAVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -88,6 +89,11 @@ pub(crate) fn hits() -> u64 {
 #[cfg(test)]
 pub(crate) fn leaves() -> u64 {
     LEAVES.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn retries() -> u64 {
+    RETRIES.with(std::cell::Cell::get)
 }
 
 fn small_leaf(program: &Program, unit: &Unit) -> bool {
@@ -116,8 +122,7 @@ fn small_leaf(program: &Program, unit: &Unit) -> bool {
             Op::Const(n) => program.readable(n),
             Op::Inline(n) => {
                 let site = &unit.inlines[n as usize];
-                let call = &unit.calls[site.call as usize];
-                call.entry.is_none() && call.checked.is_none() && site.folds.0 < site.folds.1
+                site.folds.0 < site.folds.1
             }
             _ => false,
         })
@@ -128,7 +133,7 @@ impl<H: Heap> Vm<H> {
     /// op goes back to dispatch before its start; a cold read leaves pc
     /// past the op, as dispatch does, so resume suppresses a second start.
     fn leaf_run(&mut self, program: &Program, entry: Entry, checked: bool) -> Run<()> {
-        if self.watch.is_some() {
+        if self.watch.is_some() || self.sites {
             return Ok(());
         }
         #[cfg(test)]
@@ -158,20 +163,30 @@ impl<H: Heap> Vm<H> {
                     None => return Ok(()),
                 },
                 Op::Inline(n) => {
-                    let site = &unit.inlines[n as usize];
-                    if site.steps && self.meter.spent() {
-                        self.cx.frames[top].pc = pc as u32;
-                        return Ok(());
-                    }
                     self.cx.frames[top].pc = pc as u32 + 1;
-                    let (start, end) = site.folds;
-                    if !self.inline_fast(unit, n, &unit.folds[start as usize..end as usize])? {
-                        self.cx.frames[top].pc = pc as u32;
-                        return Ok(());
-                    }
                     #[cfg(test)]
                     if unit.steps && unit.step[pc] {
                         crate::perf_witness::record(|work| work.vm_steps += 1);
+                    }
+                    let site = &unit.inlines[n as usize];
+                    let call = &unit.calls[site.call as usize];
+                    if let Some(entry) = call.entry {
+                        self.tasks.all[self.tasks.running].count(entry)?;
+                    }
+                    if let Some(checked) = &call.checked {
+                        self.check_arguments(checked, usize::from(call.argc))?;
+                    }
+                    // Meter::enter prepays only before the slice ends.
+                    debug_assert!(!self.meter.spent());
+                    let (start, end) = site.folds;
+                    let folds = &unit.folds[start as usize..end as usize];
+                    if !self.inline_fast(unit, n, folds)? {
+                        // Dispatch resumes this original op, whose start and
+                        // entry were counted, with its arguments still in place.
+                        self.retrying = true;
+                        #[cfg(test)]
+                        RETRIES.with(|retries| retries.set(retries.get() + 1));
+                        return Ok(());
                     }
                 }
                 _ => {

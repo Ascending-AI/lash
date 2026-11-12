@@ -431,18 +431,25 @@ fn a_direct_memo_resolves_rebound_closures_and_their_captures() {
 /// before its next unpaid op, preserving captures and the exact refusal.
 #[test]
 fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
-    for (body, answers) in [
+    for (body, answers, retries) in [
         (
             "set last = x return x",
             Datum::List((0..6).map(int).collect()),
+            false,
         ),
-        ("set last = x", Datum::List(vec![Datum::Null; 6])),
+        ("set last = x", Datum::List(vec![Datum::Null; 6]), false),
+        (
+            "let answer = call helper.item(null, x) set last = answer return answer",
+            Datum::List((0..6).map(int).collect()),
+            true,
+        ),
     ] {
         let source = format!(
             "main {{ let last = 0 let f = fn(x) {{ {body} }} let answers = [] let i = 0 while flat.lt(i, 6) {{ set answers[list.len(answers)] = apply f(i) set i = flat.add(i, 1) }} return (answers, last) }}"
         );
         let roomy = super::super::embedder::ROOMY;
         let before = crate::vm::calls::leaves();
+        let retried = crate::vm::calls::retries();
         let fast = observe(&source, u64::MAX, roomy, false);
         assert!(
             crate::vm::calls::leaves() > before,
@@ -453,6 +460,11 @@ fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
         let plain = crate::vm::calls::without_memo(|| observe(&source, u64::MAX, roomy, false));
         assert_eq!(fast.outcome(), plain.outcome());
         assert_eq!(fast.stops, plain.stops);
+        let watched = observe(&source, u64::MAX, roomy, true);
+        let watched_plain =
+            crate::vm::calls::without_memo(|| observe(&source, u64::MAX, roomy, true));
+        assert_eq!(watched.outcome(), watched_plain.outcome());
+        assert_eq!(watched.stops, watched_plain.stops);
         let charge = plain.stops.last().unwrap().1.charged.unwrap();
         for limit in 0..=charge {
             let bounds = Bounds {
@@ -479,6 +491,12 @@ fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
                     "{charge:?} slice {slice}"
                 );
             }
+        }
+        if retries {
+            assert!(
+                crate::vm::calls::retries() > retried,
+                "a counted helper declined before its body and resumed without a second start"
+            );
         }
     }
 }

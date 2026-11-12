@@ -357,7 +357,7 @@ impl Task {
     /// Counts an entry into document site `occurrence`, giving how many
     /// came before.
     #[inline]
-    fn count(&mut self, occurrence: u32) -> Run<u64> {
+    pub(super) fn count(&mut self, occurrence: u32) -> Run<u64> {
         let at = occurrence as usize;
         match self.occurrences.get_mut(at) {
             Some(count) => {

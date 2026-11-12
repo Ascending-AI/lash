@@ -297,9 +297,9 @@ pub(crate) struct Vm<H: Heap> {
     /// Where the last raise stood in document code, named by an uncaught
     /// end (`RunError::Uncaught`).
     pub(crate) raised_at: Option<Site>,
-    /// A cold load has just ended: the running frame's op before its `pc`
-    /// runs again, its fixed event already billed, its slice test, step
-    /// and points already passed.
+    /// The running frame's op before its `pc` resumes after a cold load
+    /// or a declined leaf helper: its fixed event is already billed and
+    /// its slice test, step, points and call entry already passed.
     pub(crate) retrying: bool,
     /// Whether the running slice's host observes sites (`Host::observes_sites`).
     pub(crate) sites: bool,
@@ -1067,8 +1067,8 @@ impl<H: Heap> Vm<H> {
         let program = Arc::clone(&self.program);
         // The run's first op ends no step: the slice was just started.
         let mut fresh = std::mem::take(&mut self.fresh);
-        // After a cold load the op it interrupted runs again, its start
-        // already passed: no event, slice test or point a second time.
+        // An interrupted op resumes after its start: no event, slice
+        // test, point or call entry a second time.
         let mut retrying = std::mem::take(&mut self.retrying);
         'frames: loop {
             let Some(frame) = self.cx.frames.last() else {
@@ -1277,6 +1277,9 @@ impl<H: Heap> Vm<H> {
                             && self.cx.frames.len() == top + 1
                         {
                             continue;
+                        }
+                        if matches!(call.callee, Callee::Value) {
+                            retrying = std::mem::take(&mut self.retrying);
                         }
                         continue 'frames;
                     }
