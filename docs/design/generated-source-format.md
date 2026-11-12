@@ -88,6 +88,12 @@ its own field by that name where it is unbranded and holds one, else the
 built-in row's helper read, applied to `r`, receiver and named arguments read
 as `callable.method` reads them. A receiver that is no record takes the same
 ladder, so a list fails its own-field test's kind check.
+`value.method(t, "name", ...args)` is that call on a text the source built:
+the text's own row (`charAt`, `trim`, `split`, ...) after the text receiver
+check a text binding's method takes, so a receiver that is no text fails that
+check. `list.field(xs, "name")` and `value.field(t, "name")` are a built
+list's or text's own member read (`size`, `flags`, ...), without the record
+ladder an unknown receiver takes.
 `list.set(xs, i, v)` is a built list's element write: `i`'s position test and
 the bound that admits an append, then the write in place, else `ts.set`, so
 `xs[i] += v` on a capture reads `list.element` and writes `list.set`.

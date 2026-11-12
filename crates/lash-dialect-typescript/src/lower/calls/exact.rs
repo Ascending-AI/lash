@@ -28,10 +28,20 @@
 //!   its receiver and named arguments read as `callable.method` reads them.
 //!   A receiver that is no record gets the same ladder: a branded or
 //!   fieldless value takes the helper's read, which fails where it runs.
+//! - `value.method(t, "name", ...args)` is that call on a text the source
+//!   built: the text's own row (`charAt`, `trim`, ...) as a text binding
+//!   reads it, the receiver's check first, its receiver and named arguments read as `callable.method`
+//!   reads them. A receiver that is no text gets the text row, which fails
+//!   its own kind check where it runs.
 //! - `list.length(xs)` is `xs.length` of a list the source built: its
 //!   length as a float, with no kind test.
 //! - `record.field(r, "name")` is `r.name` of a record the source built:
 //!   its own field where it is unbranded, else the helper read.
+//! - `list.field(xs, "name")` and `value.field(t, "name")` are `xs.name`
+//!   of a list and `t.name` of a text the source built: the kind's own
+//!   member read (`size` reads its helper), without the record ladder an
+//!   unknown receiver takes. A receiver of another kind fails that read's
+//!   own check where it runs.
 //! - `value.length(t)` is `t.length` of a text the source built: the
 //!   length helper's read, a number. (`text` is no reserved root.)
 //! - `list.set(xs, i, v)` is the element write `xs[i] = v` of a list the
@@ -55,13 +65,16 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 #[derive(Clone, Copy)]
 pub(in crate::lower) enum Exact {
     ListElement,
+    ListField,
     ListLength,
     ListMethod,
     ListSet,
     Method,
     RecordField,
     RecordMethod,
+    TextField,
     TextLength,
+    TextMethod,
     Initialized,
 }
 
@@ -69,6 +82,8 @@ impl Exact {
     pub(in crate::lower) fn named(path: &str) -> Option<Self> {
         let exact = match path {
             "list.element" => Self::ListElement,
+            "list.field" => Self::ListField,
+            "value.field" => Self::TextField,
             "list.length" => Self::ListLength,
             "list.method" => Self::ListMethod,
             "list.set" => Self::ListSet,
@@ -77,6 +92,7 @@ impl Exact {
             "record.field" => Self::RecordField,
             "record.method" => Self::RecordMethod,
             "value.length" => Self::TextLength,
+            "value.method" => Self::TextMethod,
             _ => return None,
         };
         debug_assert!(path.split_once('.').is_some_and(|(root, _)| {
@@ -127,10 +143,11 @@ impl Lowerer<'_> {
                 };
                 self.get_member(&object, &key)
             }
-            Exact::Method | Exact::ListMethod | Exact::RecordMethod => {
+            Exact::Method | Exact::ListMethod | Exact::RecordMethod | Exact::TextMethod => {
                 let (name, ty) = match exact {
                     Exact::Method => ("callable.method", Ty::Unknown),
                     Exact::RecordMethod => ("record.method", Ty::Object),
+                    Exact::TextMethod => ("value.method", Ty::Text),
                     _ => ("list.method", Ty::Array),
                 };
                 let [
@@ -171,9 +188,12 @@ impl Lowerer<'_> {
                             ty,
                             ..self.pin(object)
                         };
+                        // A text the source built is of its binding's
+                        // type, not proven: its row checks the receiver.
+                        let proven = !matches!(exact, Exact::TextMethod);
                         self.call_method_on(
                             object,
-                            true,
+                            proven,
                             super::MethodCall {
                                 property: &property,
                                 args: rest,
@@ -238,7 +258,11 @@ impl Lowerer<'_> {
                 };
                 Ok(Operand::variable(read, Ty::Unknown))
             }
-            Exact::ListLength | Exact::RecordField | Exact::TextLength => {
+            Exact::ListLength
+            | Exact::ListField
+            | Exact::RecordField
+            | Exact::TextField
+            | Exact::TextLength => {
                 let (object, key, ty) = match (exact, args) {
                     (Exact::ListLength, [ast::CallArg::Value(object)]) => {
                         (object, "length".to_owned(), Ty::Array)
@@ -253,8 +277,23 @@ impl Lowerer<'_> {
                             ast::CallArg::Value(ast::Expr::String(name)),
                         ],
                     ) => (object, name.clone(), Ty::Object),
-                    (Exact::RecordField, _) => {
-                        return refuse("record.field takes a record and a field name");
+                    (
+                        Exact::ListField | Exact::TextField,
+                        [
+                            ast::CallArg::Value(object),
+                            ast::CallArg::Value(ast::Expr::String(name)),
+                        ],
+                    ) => (
+                        object,
+                        name.clone(),
+                        if matches!(exact, Exact::ListField) {
+                            Ty::Array
+                        } else {
+                            Ty::Text
+                        },
+                    ),
+                    (Exact::RecordField | Exact::ListField | Exact::TextField, _) => {
+                        return refuse("a field read takes its receiver and a field name");
                     }
                     _ => return refuse("a length read takes its receiver alone"),
                 };

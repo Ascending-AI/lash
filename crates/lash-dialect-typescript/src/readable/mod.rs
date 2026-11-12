@@ -536,8 +536,7 @@ console.log(JSON.stringify(created));
     /// FIG-7711: every enumerated form over a known receiver that lowers
     /// prints and reads back to the same document, in a plain module and as
     /// a published arrow capturing `x`. The captured arm is admitted for
-    /// members of maps, sets and records; members of lists and texts and
-    /// operators applied to `x` are still open.
+    /// members of every kind; operators applied to `x` are still open.
     #[test]
     fn enumerated_forms_over_known_receivers_print() {
         let library = crate::tests::library();
@@ -595,7 +594,7 @@ console.log(JSON.stringify(created));
                 Default::default(),
             ) {
                 let refusal = format!("captured {kind}: {body} :: {error}");
-                if *member && !matches!(*kind, "list" | "text") {
+                if *member {
                     refusals.push(refusal);
                 }
             }

@@ -155,19 +155,15 @@ impl Lifter<'_> {
                 _ => return Ok(None),
             }
         };
-        let receiver = self.expr(receiver)?;
         let mut args = vec![literal(needle)?];
         args.extend(end);
-        Ok(Some((
-            result.clone(),
-            Expr::Call(
-                Box::new(Expr::Field(
-                    Box::new(receiver),
-                    methods::source_method(Kind::EndsWith).into(),
-                )),
-                args,
-            ),
-        )))
+        let call = self.own_method(
+            receiver,
+            "value.method",
+            methods::source_method(Kind::EndsWith),
+            args,
+        )?;
+        Ok(Some((result.clone(), call)))
     }
 
     /// A method a primitive text region lowered to natives, as its call.
@@ -187,10 +183,9 @@ impl Lifter<'_> {
         {
             let mut args = vec![start];
             args.extend(end);
-            return Ok(Some(Expr::Call(
-                Box::new(Expr::Field(Box::new(self.expr(receiver)?), "slice".into())),
-                args,
-            )));
+            return self
+                .own_method(receiver, "list.method", "slice", args)
+                .map(Some);
         }
         for declaration in methods::METHODS {
             let Some(recipe) = declaration.expression() else {
@@ -229,13 +224,39 @@ impl Lifter<'_> {
                 }
                 _ => continue,
             };
-            let receiver = self.expr(receiver)?;
-            return Ok(Some(Expr::Call(
-                Box::new(Expr::Field(Box::new(receiver), declaration.name.into())),
-                args,
-            )));
+            return self
+                .own_method(receiver, "value.method", declaration.name, args)
+                .map(Some);
         }
         Ok(None)
+    }
+
+    /// `receiver.method(args)`, or under [`super::lift::Style::exact`] on a
+    /// receiver binding the kind's own row, `spelling(receiver, "method",
+    /// args)`: a capture cell is of no known kind.
+    fn own_method(
+        &mut self,
+        receiver: &k::Expr,
+        spelling: &str,
+        method: &str,
+        args: Vec<Expr>,
+    ) -> Lift<Expr> {
+        let exact = self.style.exact && self.reads_binding(receiver);
+        let receiver = self.expr(receiver)?;
+        Ok(if exact {
+            super::expressions::constructor(
+                spelling,
+                [receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )
+        } else {
+            Expr::Call(
+                Box::new(Expr::Field(Box::new(receiver), method.to_owned())),
+                args,
+            )
+        })
     }
 
     /// A relative bound (`slice`) of `receiver`, as the source wrote it:

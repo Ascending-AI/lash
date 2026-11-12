@@ -980,6 +980,8 @@ export async function ships(): Promise<string> {
     const measured = async (x: number): Promise<number> => x + t.length;
     const fielded = async (x: number): Promise<number> => x + r.a;
     const owned = async (key: string): Promise<boolean> => r.hasOwnProperty(key);
+    const u = " ab ";
+    const trimmed = async (x: number): Promise<unknown> => [x, u.trim()];
     const zs = [1];
     const pushed = async (x: number): Promise<number> => { zs.push(x); return zs.length + zs[1]; };
     const ws = [1, 2];
@@ -1000,6 +1002,7 @@ export async function ships(): Promise<string> {
     await tools.capture({value: "collection-measured", nested: {fact: measured}});
     await tools.capture({value: "collection-fielded", nested: {fact: fielded}});
     await tools.capture({value: "collection-owned", nested: {fact: owned}});
+    await tools.capture({value: "collection-trimmed", nested: {fact: trimmed}});
     await tools.capture({value: "collection-pushed", nested: {fact: pushed}});
     await tools.capture({value: "collection-bumped", nested: {fact: bumped}});
     await tools.capture({value: "collection-later", nested: {fact: later}});
@@ -1036,6 +1039,11 @@ export async function ships(): Promise<string> {
             "owned",
             serde_json::json!({"key": "a"}),
             serde_json::json!(true),
+        ),
+        (
+            "trimmed",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([1, "ab"]),
         ),
         ("found", serde_json::json!({"x": 8}), serde_json::json!(1)),
         ("pushed", serde_json::json!({"x": 5}), serde_json::json!(7)),
@@ -1160,6 +1168,17 @@ export async function ships(): Promise<string> {
             Some("type_error".to_owned()),
             "collection has the wrong kind".to_owned()
         )),
+    );
+    // `[7, 8].trim()` would fail as a missing method's call; the text's
+    // own row checks its receiver's length first, which fails.
+    assert_eq!(
+        run_source(
+            edited("trimmed", "\" ab \"", "[7, 8]"),
+            "trimmed-list",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        Err((Some("type_error".to_owned()), "expected text".to_owned())),
     );
     // A push onto a text would dispatch the text's member; the
     // list's own push reads the list's length first, whose kind check

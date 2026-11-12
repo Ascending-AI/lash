@@ -180,6 +180,9 @@ pub(super) struct Lifter<'a> {
     /// materialized factory has none of its own; it takes the agreeing union
     /// of the functions it contains, whose captures it declares.
     pub(super) evidence: BTreeMap<Name, lash_kernel_value::Type>,
+    /// The bindings a primitive text method's receiver check tested: a row
+    /// both a list and a text have is the text's on them.
+    pub(super) text_checked: BTreeSet<Name>,
 }
 
 impl<'a> Lifter<'a> {
@@ -298,6 +301,7 @@ impl<'a> Lifter<'a> {
                 Unit::Library(id) => declared_locals(document, *id),
                 _ => BTreeMap::new(),
             },
+            text_checked: BTreeSet::new(),
         };
         if let Some(body) = body {
             lifter.labels = lifter.label_tokens(body);
@@ -906,6 +910,14 @@ impl<'a> Lifter<'a> {
         // A primitive text method's receiver check, and its slice bounds:
         // the method call they precede writes and lowers them again.
         if self.receiver_check(&block[0]) || self.typed_receiver_check(block) {
+            if let k::Stmt::Do {
+                value: k::Expr::Call { function, args },
+            } = &block[0]
+                && self.is(function, "text.len")
+                && let [k::Expr::Variable(receiver)] = args.as_slice()
+            {
+                self.text_checked.insert(receiver.clone());
+            }
             self.taken_captions.extend(caption);
             return Ok(1);
         }

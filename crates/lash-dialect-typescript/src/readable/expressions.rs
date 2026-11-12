@@ -923,12 +923,19 @@ impl Lifter<'_> {
                     .strip_prefix("ts.property.")
                     .or_else(|| name.strip_prefix("ts.member."))
                     .unwrap_or_else(|| unreachable!("a member helper"));
-                let exact = property == "length" && self.style.exact && self.reads_binding(target);
+                let exact = self.style.exact && self.reads_binding(target);
+                let text =
+                    matches!(target, k::Expr::Variable(name) if self.text_checked.contains(name));
                 let target = self.expr(target)?;
-                Ok(if exact {
-                    constructor("value.length", vec![target])
-                } else {
-                    Expr::Field(Box::new(target), property.to_owned())
+                Ok(match (exact, property, text) {
+                    (true, "length", _) => constructor("value.length", vec![target]),
+                    (true, _, true) => {
+                        constructor("value.field", vec![target, Expr::Text(property.to_owned())])
+                    }
+                    (true, _, false) => {
+                        constructor("list.field", vec![target, Expr::Text(property.to_owned())])
+                    }
+                    (false, ..) => Expr::Field(Box::new(target), property.to_owned()),
                 })
             }
             ("ts.get_numeric" | "ts.get_computed" | "ts.text_index", [target, key]) => {
@@ -1002,18 +1009,29 @@ impl Lifter<'_> {
                         .find(|(_, rows)| implements(rows))
                         .map_or(method, |(member, _)| member)
                 };
-                // A list's own row on a receiver binding is `list.method`
-                // under the exact style: a capture cell is of no known kind.
-                if binding
-                    && table.methods.get(method).is_some_and(|rows| {
+                // A list's or text's own row on a receiver binding is
+                // `list.method` or `value.method` under the exact style: a
+                // capture cell is of no known kind.
+                let own = |receiver| {
+                    table.methods.get(method).is_some_and(|rows| {
                         rows.iter().any(|(kind, path)| {
-                            *kind == lash_ext_ts_helpers::builtins::Receiver::List
-                                && table.functions.get(path) == Some(&name)
+                            *kind == receiver && table.functions.get(path) == Some(&name)
                         })
                     })
-                {
+                };
+                use lash_ext_ts_helpers::builtins::Receiver;
+                let text =
+                    matches!(receiver, k::Expr::Variable(name) if self.text_checked.contains(name));
+                let spelling = if own(Receiver::Text) && (text || !own(Receiver::List)) {
+                    Some("value.method")
+                } else if own(Receiver::List) {
+                    Some("list.method")
+                } else {
+                    None
+                };
+                if binding && let Some(spelling) = spelling {
                     return Ok(self::constructor(
-                        "list.method",
+                        spelling,
                         [target, Expr::Text(method.to_owned())]
                             .into_iter()
                             .chain(args)
