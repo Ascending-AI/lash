@@ -987,8 +987,9 @@ async fn outcome(
 /// literal or computed index or its length, maps over it or calls another
 /// of its rows, pushes onto it or adds into its element, calls a captured
 /// map's or set's methods, indexes a captured list it reassigns, reads a
-/// captured text's length or record's field, or reads a `const` declared
-/// after it, publishes: its printed source
+/// captured text's length or record's field, reads a `const` declared
+/// after it, or is an anonymous arrow another arrow returns (FIG-7711),
+/// publishes: its printed source
 /// re-imports to the same kernel document (publication proves it), and
 /// both answer alike. The printed operations keep their own checks: a list
 /// read or length of an edited fill that is no list fails the list's kind
@@ -1024,6 +1025,7 @@ export async function ships(): Promise<string> {
     const mapped = async (key: string): Promise<unknown> => { m.set(key, 2); return m.has(key) ? m.get(key) : 0; };
     const sets = async (x: number): Promise<boolean> => { s.add(x); return s.has(x); };
     const reassigned = async (x: number): Promise<number> => { ys = [x, x + 1]; return ys[1]; };
+    const make = async (): Promise<unknown> => { const vs = [1, 2]; return async (x: number): Promise<unknown> => [x, vs[1]]; };
     await tools.capture({value: "collection-listed", nested: {fact: listed}});
     await tools.capture({value: "collection-mapped", nested: {fact: mapped}});
     await tools.capture({value: "collection-sets", nested: {fact: sets}});
@@ -1039,6 +1041,7 @@ export async function ships(): Promise<string> {
     await tools.capture({value: "collection-pushed", nested: {fact: pushed}});
     await tools.capture({value: "collection-bumped", nested: {fact: bumped}});
     await tools.capture({value: "collection-later", nested: {fact: later}});
+    await tools.capture({value: "collection-returned", nested: {fact: await make()}});
     return "shipped";
 }
 "#;
@@ -1085,6 +1088,11 @@ export async function ships(): Promise<string> {
             "later",
             serde_json::json!({"x": 1}),
             serde_json::json!([1, 4]),
+        ),
+        (
+            "returned",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([1, 2]),
         ),
     ];
     let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
