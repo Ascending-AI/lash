@@ -72,12 +72,26 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         cover("impl TokenCodec for Row", "impl TokenCodec for DirectoryRoot"),
 ///     ),
 ///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/continuation.rs",
+///         cover("macro_rules! record", "macro_rules! tags", "impl TokenCodec for UnitKind", "impl TokenCodec for RunStart"),
+///     ),
+///     items(path = "crates/lash-kernel-value/src/names.rs", ExportName),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/chunked.rs",
+///         cover("impl TokenCodec for Chunked", "impl TokenCodec for IndexPage", "impl TokenCodec for ChunkPage"),
+///     ),
+///     file(path = "crates/lash-kernel-state/src/paged/checkpoint.rs", cover("impl TokenCodec for Checkpoint")),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/session.rs",
+///         cover("impl TokenCodec for NoteRecord", "impl TokenCodec for SessionNotes"),
+///     ),
 ///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode, key_digest, sha256, text_summary),
 ///     file(path = "crates/lash-checkpoint-encoder/src/registry.rs", cover("SEMANTIC_REGISTRY")),
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "the page grammar beneath the parked-state and code mode snapshot surfaces, which the manifest reports; a semantic admission records it beside the kernel version"
-pub const PAGE_FORMAT: u32 = 17;
+pub const PAGE_FORMAT: u32 = 18;
 
 /// A semantic page kind: a generic envelope kind number in the range the
 /// node registry reserved for a complete object graph, 1000 to 1999.

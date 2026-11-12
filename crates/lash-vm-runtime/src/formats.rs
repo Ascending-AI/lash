@@ -78,6 +78,11 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 ///     file(path = "crates/lash-kernel-state/src/paged/codec.rs", cover("record!(CheckpointRoot")),
 ///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
 ///     items(path = "crates/lash-kernel-state/src/paged/source.rs", PAGE_FORMAT),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/continuation.rs",
+///         cover("macro_rules! record", "macro_rules! tags", "impl TokenCodec for UnitKind", "impl TokenCodec for RunStart"),
+///     ),
+///     items(path = "crates/lash-kernel-value/src/names.rs", ExportName),
 ///     file(path = "crates/lash-kernel-vm/src/bytecode/site_tables.rs"),
 ///     file(path = "crates/lash-kernel-vm/src/bytecode/charge_tables.rs"),
 /// )
@@ -85,13 +90,13 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 18;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 19;
 /// The synthetic successor's parked-run format.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 19;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 20;
 
 /// A saved function: a function a session keeps between cells, held in an
 /// immutable FunctionBundle node with every saved function it uses. Its
@@ -119,7 +124,7 @@ pub const KERNEL_PARKED_STATE_VERSION: u32 = 19;
 /// format_manifest = "KernelSavedFunction"
 /// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"
 /// version_surface = "migrate"
-pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 7;
+pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 8;
 
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored

@@ -940,6 +940,13 @@ fn a_root_stated_under_another_format_is_refused() {
             FormatValue::Number(16),
             FormatValue::Number(15),
         ),
+        // A page this build's continuation codec cannot read: written
+        // before an entry named its export (FIG-7694).
+        (
+            "PAGE_FORMAT",
+            FormatValue::Number(lash_kernel_state::paged::source::PAGE_FORMAT),
+            FormatValue::Number(lash_kernel_state::paged::source::PAGE_FORMAT - 1),
+        ),
         (
             "PAGE_DIGEST_DOMAIN",
             FormatValue::Text("successor-domain".into()),

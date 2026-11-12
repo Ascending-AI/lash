@@ -1470,5 +1470,33 @@ class RealRepository(unittest.TestCase):
         self.assertEqual(len(result.failures), 1, result)
         self.assertIn("MachineInput", result.failures[0].detail)
 
+    def test_paged_run_codecs_owe_the_page_and_parked_witnesses(self) -> None:
+        # FIG-7694: a saved unit kind tag changed (dc07f6f163) and an entry
+        # gained its export name, and neither moved a witness because no
+        # guard named these codecs. Each edit below changes stored bytes.
+        page = "crates/lash-kernel-state/src/paged/source.rs:PAGE_FORMAT"
+        parked = "crates/lash-vm-runtime/src/formats.rs:KERNEL_PARKED_STATE_VERSION"
+        for path, before, after, owed in [
+            ("crates/lash-kernel-state/src/paged/run/continuation.rs",
+             "one(out, 5, export)", "one(out, 6, export)", {page, parked}),
+            ("crates/lash-kernel-value/src/package.rs",
+             "record_codec!(ExportName { name, member });",
+             "record_codec!(ExportName { member, name });", {page, parked}),
+            ("crates/lash-kernel-state/src/paged/run/chunked.rs",
+             "out.unsigned(self.len);\n        out.unsigned(self.next);",
+             "out.unsigned(self.next);\n        out.unsigned(self.len);", {page}),
+            ("crates/lash-kernel-state/src/paged/session.rs",
+             "self.not_carried.encode(out);\n        self.saved.encode(out);",
+             "self.saved.encode(out);\n        self.not_carried.encode(out);", {page}),
+        ]:
+            with self.subTest(path=path):
+                source = self.view.content(path)
+                self.assertEqual(source.count(before), 1, before)
+                planted = PlantedView(self.view, {path: source.replace(before, after)})
+                result = gate.check_views(self.view, planted, only=frozenset({page, parked}),
+                                          strict=False)
+                self.assertFalse(result.errors, result)
+                self.assertTrue(owed <= {f.surface.key for f in result.failures}, result)
+
 if __name__ == "__main__":
     unittest.main()
