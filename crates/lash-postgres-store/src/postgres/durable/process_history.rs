@@ -347,9 +347,12 @@ pub(super) enum Packed {
 
 /// Pack `process`'s history in `tx`: after its actor ended, under the
 /// actor's lock then the process's, with every check made before any
-/// write. Over the cap or unsupported, it keeps its rows, and is not
-/// retried. The rows are read with bounded counts and the closure is sized
-/// before its content is read, so the work stays within the cap.
+/// write. A history is packed only when its actor is terminal and every
+/// call has its outcome and every model call its record, so nothing can
+/// write it again; otherwise, over the cap or unsupported, it keeps its
+/// rows, and is not retried. The rows' text is sized and counted before any
+/// row is read and the closure is sized before its content is read, so the
+/// work stays within the cap.
 pub(super) async fn pack(
     tx: &mut PgConnection,
     process: &lash_vocabulary::identity::ProcessId,
@@ -362,7 +365,7 @@ pub(super) async fn pack(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    if state.is_some_and(|state| state != "terminal") {
+    if state.as_deref().is_some_and(|state| state != "terminal") {
         return Ok(Packed::Skipped);
     }
     let undecided: Option<i32> = crate::observed_sql::query_scalar(POSTGRES.lock_process.sql())
@@ -373,7 +376,14 @@ pub(super) async fn pack(
     if undecided.is_none() {
         return Ok(Packed::Skipped);
     }
-    match contents(tx, process, limits).await? {
+    // No actor ever ended this process, so nothing shows its history is
+    // finished: it keeps its rows.
+    let packable = if state.is_some() {
+        contents(tx, process, limits).await?
+    } else {
+        None
+    };
+    match packable {
         Some((contents, bytes)) => {
             write(tx, process, &contents, &bytes).await?;
             Ok(Packed::Archived(bytes.len()))
@@ -407,6 +417,18 @@ async fn contents(
         return Ok(None);
     }
     let bound = i64::try_from(PROCESS_ARCHIVE_MAX_ROWS + 1).unwrap_or(i64::MAX);
+    let (unsettled, payload): (i32, i64) = crate::observed_sql::query_as(SQL.preflight.sql())
+        .bind(&owner)
+        .bind(session.as_str())
+        .bind(bound)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    if unsettled != 0
+        || usize::try_from(payload).map_or(true, |payload| payload > PROCESS_ARCHIVE_CAP_BYTES)
+    {
+        return Ok(None);
+    }
     let Some(mut contents) = rows(tx, &owner, session.as_str(), bound).await? else {
         return Ok(None);
     };

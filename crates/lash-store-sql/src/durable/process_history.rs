@@ -43,6 +43,30 @@ crate::statements! {
              FROM tool_calls WHERE owner_key = ?1
              ORDER BY admission_seq, call_id LIMIT ?2";
 
+        /// Before any row is fetched: whether owner `?1` holds a call with
+        /// no outcome or session `?2` a model reservation with no record
+        /// (1 when either does), and the bytes of the text columns of up to
+        /// `?3` of each of owner `?1`'s run facts and tool calls and session
+        /// `?2`'s model calls. The archive stores every one of those bytes,
+        /// so the sum never exceeds the archive's size.
+        preflight = "SELECT CASE WHEN EXISTS (SELECT 1 FROM tool_calls WHERE owner_key = ?1 AND answer_outcome IS NULL)
+                    OR EXISTS (SELECT 1 FROM model_call_records WHERE session_id = ?2 AND record_ref IS NULL)
+                  THEN 1 ELSE 0 END AS unsettled,
+                (SELECT COALESCE(SUM(octet_length(kind) + COALESCE(octet_length(call_id), 0)), 0)
+                   FROM (SELECT kind, call_id FROM run_records WHERE owner_key = ?1 LIMIT ?3) AS f)
+                + (SELECT COALESCE(SUM(octet_length(owner_key) + octet_length(call_id) + octet_length(execution_owner)
+                      + COALESCE(octet_length(session_id), 0) + COALESCE(octet_length(turn_id), 0)
+                      + COALESCE(octet_length(request_id), 0) + COALESCE(octet_length(origin), 0)
+                      + COALESCE(octet_length(reason), 0) + COALESCE(octet_length(decision), 0)
+                      + COALESCE(octet_length(answer_outcome), 0)), 0)
+                   FROM (SELECT owner_key, call_id, execution_owner, session_id, turn_id, request_id, origin,
+                             reason, decision, answer_outcome
+                         FROM tool_calls WHERE owner_key = ?1 LIMIT ?3) AS c)
+                + (SELECT COALESCE(SUM(octet_length(run) + octet_length(call) + octet_length(call_id)
+                      + COALESCE(octet_length(enclosing_owner), 0) + COALESCE(octet_length(enclosing_call), 0)), 0)
+                   FROM (SELECT run, call, call_id, enclosing_owner, enclosing_call
+                         FROM model_call_records WHERE session_id = ?2 LIMIT ?3) AS m) AS payload";
+
         /// Whether a call another owner admitted is executed by `?1`.
         foreign_calls = "SELECT 1 FROM tool_calls WHERE execution_owner = ?1 AND owner_key <> ?1 LIMIT 1";
 

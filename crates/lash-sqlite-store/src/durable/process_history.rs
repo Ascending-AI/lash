@@ -286,9 +286,12 @@ pub(super) enum Packed {
 
 /// Pack `process`'s history in write transaction `tx`, which excludes
 /// every other writer: after its actor ended, with every check made before
-/// any write. Over the cap or unsupported, it keeps its rows, and is not
-/// retried. The rows are read with bounded counts and the closure is sized
-/// before its content is read, so the work stays within the cap.
+/// any write. A history is packed only when its actor is terminal and every
+/// call has its outcome and every model call its record, so nothing can
+/// write it again; otherwise, over the cap or unsupported, it keeps its
+/// rows, and is not retried. The rows' text is sized and counted before any
+/// row is read and the closure is sized before its content is read, so the
+/// work stays within the cap.
 pub(super) fn pack(
     tx: &Connection,
     process: &lash_vocabulary::identity::ProcessId,
@@ -301,7 +304,7 @@ pub(super) fn pack(
         .statement(SQLITE.actor_state.sql())?
         .query_row([actor.as_str()], |row| row.get(0))
         .optional()?;
-    if state.is_some_and(|state| state != "terminal") {
+    if state.as_deref().is_some_and(|state| state != "terminal") {
         return Ok(Ok(Packed::Skipped));
     }
     let undecided: Option<i64> = tx
@@ -311,7 +314,14 @@ pub(super) fn pack(
     if undecided.is_none() {
         return Ok(Ok(Packed::Skipped));
     }
-    match contents(tx, process, limits)? {
+    // No actor ever ended this process, so nothing shows its history is
+    // finished: it keeps its rows.
+    let packable = if state.is_some() {
+        contents(tx, process, limits)?
+    } else {
+        None
+    };
+    match packable {
         Some((contents, bytes)) => {
             if let Err(error) = write(tx, process, &contents, &bytes)? {
                 return Ok(Err(error));
@@ -343,6 +353,16 @@ fn contents(
         return Ok(None);
     }
     let bound = i64::try_from(PROCESS_ARCHIVE_MAX_ROWS + 1).unwrap_or(i64::MAX);
+    let (unsettled, payload): (i64, i64) = tx
+        .statement(SQL.preflight.sql())?
+        .query_row(rusqlite::params![owner, session.as_str(), bound], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+    if unsettled != 0
+        || usize::try_from(payload).map_or(true, |payload| payload > PROCESS_ARCHIVE_CAP_BYTES)
+    {
+        return Ok(None);
+    }
     let Some(mut contents) = rows(tx, &owner, session.as_str(), bound)? else {
         return Ok(None);
     };
