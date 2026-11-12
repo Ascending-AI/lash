@@ -9,6 +9,7 @@
 
 mod conversions;
 mod numeric;
+mod numeric_slices;
 
 use crate::projection::{Projector, Recorded};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle};

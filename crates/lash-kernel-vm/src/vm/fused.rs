@@ -192,7 +192,8 @@ impl<H: Heap> Vm<H> {
         let value = match fee {
             Some(units) if !self.meter.prepay(units) => {
                 self.push(value);
-                self.fee(units)?;
+                self.fee(units)
+                    .map_err(|flow| self.billed_by(flow, native))?;
                 self.pop()
             }
             _ => value,

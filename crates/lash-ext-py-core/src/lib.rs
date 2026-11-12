@@ -70,13 +70,27 @@ pub fn implement(
     Ok(())
 }
 
-/// Constructs a measured total leaf; Unicode membership is build-generated
-/// from the dialect's kernel bodies, shared with their reference execution.
+/// Constructs a native leaf. Numeric specializations decline outside their
+/// declared domain; Unicode membership comes from the shared kernel bodies.
 pub fn native(name: &str) -> Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> {
     use std::sync::Arc;
     match name {
         "py.bytes_len" => Some(Arc::new(text::BytesLength)),
-        "py.number.mod" => Some(Arc::new(numbers::Mod)),
+        "py.number.mod" => Some(Arc::new(numbers::Pair::words(
+            lash_kernel_doc::scalar::ScalarOp::RemFloor,
+        ))),
+        "py.number.floordiv" => Some(Arc::new(numbers::Pair::words(
+            lash_kernel_doc::scalar::ScalarOp::FloorDiv,
+        ))),
+        "py.number.truediv" => Some(Arc::new(numbers::TrueDiv)),
+        "py.number.iadd" => Some(Arc::new(numbers::Pair::numbers(
+            lash_kernel_doc::scalar::ScalarOp::Add,
+            lash_kernel_doc::FIRST_NATIVE_VERSION,
+        ))),
+        "py.add" => Some(Arc::new(numbers::Pair::numbers(
+            lash_kernel_doc::scalar::ScalarOp::Add,
+            2,
+        ))),
         "py.text_repr" => Some(Arc::new(text::Repr)),
         "py.text.printable" => Some(Arc::new(text::Predicate::Printable)),
         "py.text.whitespace" => Some(Arc::new(text::Predicate::Whitespace)),

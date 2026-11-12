@@ -1191,8 +1191,7 @@ impl<H: Heap> Vm<H> {
                         None => continue 'frames,
                     },
                     Op::Nop => {}
-                    // A library constant is read out of line, placed at
-                    // its first read.
+                    // A library constant is placed at its first read.
                     Op::Const(n) if n & LIB != 0 => check!(self.library_read(n)),
                     Op::Const(n) => self.push(self.constants[n as usize]),
                     Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
@@ -1266,7 +1265,8 @@ impl<H: Heap> Vm<H> {
                                 self.push(value);
                                 if let Some(units) = fee {
                                     sync!(pc);
-                                    self.fee(units)?;
+                                    self.fee(units)
+                                        .map_err(|flow| self.billed_by(flow, native))?;
                                 }
                                 continue;
                             }

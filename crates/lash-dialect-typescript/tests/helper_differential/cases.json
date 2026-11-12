@@ -8224,5 +8224,90 @@
     "id": "typescript/boundary/external-integers-are-numbers",
     "dialect": "typescript",
     "source": "const x = await host.echo({version:0n,count:3n,large:9007199254740993n}); await host.observe([typeof x.version, typeof x.count, JSON.stringify({version:x.version,count:x.count}), x.count+1.5===4.5, x.large===JSON.parse('9007199254740993'), String(x.large), typeof 1n, String(2n**64n), typeof BigInt(x.count), JSON.parse(\"1e400\") === Infinity, JSON.parse(\"-1e400\") === -Infinity]);"
+  },
+  {
+    "id": "python/numeric-native/add",
+    "dialect": "python",
+    "source": "def combine(a, b):\n    return a + b\nawait host.observe([combine(7, 3), combine(-7, 3), combine(7.5, 3), combine(7, 3.5), combine(9223372036854775807, 1), combine(\"x\", \"y\"), combine([1], [2])])\n"
+  },
+  {
+    "id": "python/numeric-native/iadd",
+    "dialect": "python",
+    "source": "def accumulate(right):\n    value = 7\n    value += right\n    return value\nawait host.observe([accumulate(3), accumulate(3.5), accumulate(9223372036854775808)])\n"
+  },
+  {
+    "id": "python/numeric-native/iadd/wrong-kind",
+    "dialect": "python",
+    "source": "def accumulate(right):\n    value = 7\n    value += right\n    return value\nawait host.observe(accumulate(\"x\"))\n"
+  },
+  {
+    "id": "python/numeric-native/floordiv",
+    "dialect": "python",
+    "source": "await host.observe([7 // 3, -7 // 3, 7 // -3, -7 // -3, 0 // 3, 7.0 // 3.0, -7.0 // 3.0, 7 // 3.0, 7.0 // 3, float('nan') // 3.0, 7.0 // float('inf')])\nawait host.observe([-9223372036854775808 // -1, 9223372036854775808 // 3])\n"
+  },
+  {
+    "id": "python/numeric-native/floordiv/zero/7/0",
+    "dialect": "python",
+    "source": "await host.observe(7 // 0)"
+  },
+  {
+    "id": "python/numeric-native/floordiv/zero/7.0/0.0",
+    "dialect": "python",
+    "source": "await host.observe(7.0 // 0.0)"
+  },
+  {
+    "id": "python/numeric-native/floordiv/zero/7/-0.0",
+    "dialect": "python",
+    "source": "await host.observe(7 // -0.0)"
+  },
+  {
+    "id": "python/numeric-native/truediv",
+    "dialect": "python",
+    "source": "await host.observe([7 / 3, -7 / 3, 7 / -3, -7 / -3, 0 / 3, 7.0 / 3.0, -7.0 / 3.0, 7 / 3.0, 7.0 / 3, float('nan') / 3.0, 7.0 / float('inf')])\n"
+  },
+  {
+    "id": "python/numeric-native/truediv/zero/7/0",
+    "dialect": "python",
+    "source": "await host.observe(7 / 0)"
+  },
+  {
+    "id": "python/numeric-native/truediv/zero/7.0/0.0",
+    "dialect": "python",
+    "source": "await host.observe(7.0 / 0.0)"
+  },
+  {
+    "id": "python/numeric-native/truediv/zero/7/-0.0",
+    "dialect": "python",
+    "source": "await host.observe(7 / -0.0)"
+  },
+  {
+    "id": "typescript/numeric-native/mul",
+    "dialect": "typescript",
+    "source": "function operate(left, right) { return left * right; } const pairs = [[7,3],[-7,3],[7,-3],[-7,-3],[0,3],[-0,3],[7,0],[7,-0],[0,0],[7.5,2],[NaN,3],[7,Infinity],[Infinity,3]]; for (const pair of pairs) { await host.observe(operate(pair[0], pair[1])); } await host.observe(operate(\"6\", 2)); await host.observe(String(operate(7n, 3n)));"
+  },
+  {
+    "id": "typescript/numeric-native/div",
+    "dialect": "typescript",
+    "source": "function operate(left, right) { return left / right; } const pairs = [[7,3],[-7,3],[7,-3],[-7,-3],[0,3],[-0,3],[7,0],[7,-0],[0,0],[7.5,2],[NaN,3],[7,Infinity],[Infinity,3]]; for (const pair of pairs) { await host.observe(operate(pair[0], pair[1])); } await host.observe(operate(\"6\", 2)); await host.observe(String(operate(7n, 3n)));"
+  },
+  {
+    "id": "typescript/numeric-native/rem",
+    "dialect": "typescript",
+    "source": "function operate(left, right) { return left % right; } const pairs = [[7,3],[-7,3],[7,-3],[-7,-3],[0,3],[-0,3],[7,0],[7,-0],[0,0],[7.5,2],[NaN,3],[7,Infinity],[Infinity,3]]; for (const pair of pairs) { await host.observe(operate(pair[0], pair[1])); } await host.observe(operate(\"6\", 2)); await host.observe(String(operate(7n, 3n)));"
+  },
+  {
+    "id": "typescript/numeric-native/mul/mixed-kind",
+    "dialect": "typescript",
+    "source": "await host.observe(7n * 3);"
+  },
+  {
+    "id": "typescript/numeric-native/div/mixed-kind",
+    "dialect": "typescript",
+    "source": "await host.observe(7n / 3);"
+  },
+  {
+    "id": "typescript/numeric-native/rem/mixed-kind",
+    "dialect": "typescript",
+    "source": "await host.observe(7n % 3);"
   }
 ]
