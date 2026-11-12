@@ -35,7 +35,7 @@ lash_store_sql::statements! {
     struct SessionDeleteStatements @ "durable_session_delete_postgres" {
         /// Lock session `?1`'s referrers in key order: the frame its head's
         /// leaf names, then the session.
-        lock_referrers = "SELECT pg_advisory_xact_lock(hashtextextended(ordered.key, 0))
+        lock_referrers = "SELECT lash_advisory_xact_lock(hashtextextended(ordered.key, 0), false)
              FROM (
                  SELECT named.key FROM (
                      SELECT 'lash-artifact-referrer:session:' || CAST(?1 AS TEXT) AS key

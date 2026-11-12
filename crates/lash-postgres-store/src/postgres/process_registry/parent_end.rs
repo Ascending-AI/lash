@@ -55,6 +55,30 @@ fn decode_plan(
     })
 }
 
+/// `scope`'s admission lock, as [`lock_parent_scope_tx`] takes it: a
+/// turn's run rows, any other scope's advisory key. The artifact lock plan
+/// takes it in its scope class (FIG-7700).
+pub(crate) fn scope_lock(scope: &ScopeId) -> crate::artifact_store::ScopeLock {
+    if let Some(EffectOpener::Turn {
+        session_id,
+        turn_id,
+    }) = scope.opener()
+    {
+        return crate::artifact_store::ScopeLock::Turn {
+            session: session_id.as_str().to_owned(),
+            turn: turn_id.as_str().to_owned(),
+        };
+    }
+    let (kind, id) = ledger_key(scope);
+    crate::artifact_store::ScopeLock::Key(format!("lash-parent-end:{kind}:{id}"))
+}
+
+/// The advisory key of consumer hold `key`, as [`lock_consumer_hold_tx`]
+/// takes it.
+pub(crate) fn hold_lock_key(key: &str) -> String {
+    format!("lash-consumer-hold:{key}")
+}
+
 /// Serialize registration with the scope's close for this transaction. A
 /// turn locks its run row, the same row its terminal writes: taking a turn
 /// advisory lock before updating the hold marker would reverse the terminal
@@ -63,30 +87,27 @@ pub(crate) async fn lock_parent_scope_tx(
     tx: &mut sqlx::PgConnection,
     parent: &ScopeId,
 ) -> Result<(), PluginError> {
-    if let Some(EffectOpener::Turn {
-        session_id,
-        turn_id,
-    }) = parent.opener()
-    {
-        crate::observed_sql::query(process_sql().plan_postgres.lock_turn.sql())
-            .bind(session_id.as_str())
-            .bind(turn_id.as_str())
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(plugin_sqlx_error)?;
-        return Ok(());
+    match scope_lock(parent) {
+        crate::artifact_store::ScopeLock::Turn { session, turn } => {
+            crate::observed_sql::query(process_sql().plan_postgres.lock_turn.sql())
+                .bind(session)
+                .bind(turn)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map(drop)
+                .map_err(plugin_sqlx_error)
+        }
+        crate::artifact_store::ScopeLock::Key(key) => crate::observed_sql::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(key)
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map(drop)
+        .map_err(plugin_sqlx_error),
     }
-    let (kind, id) = ledger_key(parent);
-    crate::observed_sql::query(
-        crate::connection_sql::connection_sql()
-            .lock_xact_by_text
-            .sql(),
-    )
-    .bind(format!("lash-parent-end:{kind}:{id}"))
-    .execute(crate::observed_sql::executor(&mut *tx))
-    .await
-    .map(drop)
-    .map_err(plugin_sqlx_error)
 }
 
 /// Record that `parent` ended at `ended_at_ms`, in the caller's
@@ -176,7 +197,7 @@ pub(crate) async fn lock_consumer_hold_tx(
             .lock_xact_by_text
             .sql(),
     )
-    .bind(format!("lash-consumer-hold:{key}"))
+    .bind(hold_lock_key(key))
     .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map(drop)

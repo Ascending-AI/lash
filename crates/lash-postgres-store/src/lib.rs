@@ -874,6 +874,8 @@ impl PostgresStore {
     }
 }
 
+#[path = "postgres/advisory_lock.rs"]
+pub(crate) mod advisory_lock;
 #[path = "postgres/artifact_store.rs"]
 mod artifact_store;
 #[path = "postgres/attachments.rs"]

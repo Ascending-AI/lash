@@ -23,15 +23,32 @@ struct Answer {
     plans: Vec<(String, String, String)>,
 }
 
-/// One transaction's artifact lock plan (FIG-7700): every artifact any
-/// end, carry or environment acquisition it runs can lock, taken in the one
-/// sorted order before the transaction takes any of them. Referrers lock
-/// first, then (a statement after those waits) what the ended referrers'
-/// edges in [`NAMESPACES`] name and hold, transitively, joined with the
-/// carried artifacts and each acquired environment's head, closure and the
-/// closure's modules. Each end, carry or acquisition the transaction then
-/// runs takes locks it already holds, so a publisher's sorted set never
-/// waits on a lock this transaction took out of order.
+/// One transaction's lock plan (FIG-7700).
+///
+/// **The class order.** Every PostgreSQL transaction takes its waiting
+/// locks in this order of classes, all of one class before any of the
+/// next, sorted inside a class:
+/// 1. session actor rows;
+/// 2. session write locks (`PostgresDurableStore::lock_session_writes`, in
+///    actor order);
+/// 3. scope locks, as registration admission takes them: each closing
+///    scope in ledger-key order, then each consumer hold
+///    ([`ScopeLock`]);
+/// 4. referrer locks of every kind (execution, process, package, pin,
+///    frame, session);
+/// 5. the artifact locks, once, last.
+///
+/// A transaction that needs more than one class takes classes 3 to 5
+/// through this plan, after the caller took classes 1 and 2. The artifact
+/// locks are every artifact any end, carry or environment acquisition the
+/// transaction runs can lock: what the ended referrers' edges in
+/// [`NAMESPACES`] name and hold, transitively, joined with the carried
+/// artifacts and each acquired environment's head, closure and the
+/// closure's modules. They are taken in one sorted acquisition, which
+/// seals the transaction ([`crate::advisory_lock`]). Each admission, end,
+/// carry or acquisition the transaction runs afterwards takes locks it
+/// already holds. A lock the plan missed is refused as contention, never
+/// waited for.
 #[derive(Default)]
 pub(crate) struct LockPlan {
     /// Referrers whose ends the transaction runs.
@@ -44,10 +61,29 @@ pub(crate) struct LockPlan {
     /// each session's write authority, which the caller takes first
     /// (`PostgresDurableStore::lock_session_writes`, in actor order).
     pub(crate) sessions: Vec<lash_kernel_value::identity::SessionId>,
+    /// Sessions whose write authority a later step takes without the plan
+    /// reading their leaf (a head that opens no frame): the caller takes
+    /// it before the plan with the `sessions`', and the plan statement
+    /// never sees them.
+    pub(crate) writers: Vec<lash_kernel_value::identity::SessionId>,
     /// Artifacts the transaction carries.
     pub(crate) carries: Vec<(&'static str, String)>,
     /// Environment heads the transaction acquires.
     pub(crate) envs: Vec<String>,
+    /// Admission locks, in the order the plan takes them.
+    pub(crate) scopes: Vec<ScopeLock>,
+    /// Executions whose stored referrer the transaction locks without
+    /// ending it (a seed's), which the durable plan statement reads.
+    pub(crate) executions: Vec<String>,
+}
+
+/// One admission lock of the plan's scope class.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ScopeLock {
+    /// A turn's run rows (`parent_end::lock_parent_scope_tx`).
+    Turn { session: String, turn: String },
+    /// An advisory lock by its text key: a scope's or a consumer hold's.
+    Key(String),
 }
 
 /// What a taken [`LockPlan`] covers: the referrers it ended, its stored
@@ -74,16 +110,22 @@ impl Planned {
 }
 
 impl LockPlan {
+    /// Whether the transaction needs no plan: it locks no referrer and no
+    /// artifact. Scope locks alone are one class, which their own paths
+    /// take in order.
     pub(crate) fn is_empty(&self) -> bool {
         self.ended.is_empty()
             && self.held.is_empty()
             && self.sessions.is_empty()
             && self.carries.is_empty()
             && self.envs.is_empty()
+            && self.executions.is_empty()
     }
 
-    /// The plan's arguments, in the server function's order.
-    pub(crate) fn arguments(&self) -> [Vec<String>; 11] {
+    /// The plan's arguments, in the plan statement's order: the server
+    /// function's fourteen, then the executions whose stored referrers the
+    /// statement adds to the held ones.
+    pub(crate) fn arguments(&self) -> [Vec<String>; 15] {
         let kinds = |referrers: &[ArtifactReferrer]| {
             referrers
                 .iter()
@@ -123,6 +165,28 @@ impl LockPlan {
                 .collect(),
             self.envs.clone(),
             Vec::new(),
+            self.scopes
+                .iter()
+                .map(|scope| match scope {
+                    ScopeLock::Turn { .. } => "turn".to_owned(),
+                    ScopeLock::Key(_) => "key".to_owned(),
+                })
+                .collect(),
+            self.scopes
+                .iter()
+                .map(|scope| match scope {
+                    ScopeLock::Turn { session, .. } => session.clone(),
+                    ScopeLock::Key(key) => key.clone(),
+                })
+                .collect(),
+            self.scopes
+                .iter()
+                .map(|scope| match scope {
+                    ScopeLock::Turn { turn, .. } => turn.clone(),
+                    ScopeLock::Key(_) => String::new(),
+                })
+                .collect(),
+            self.executions.clone(),
         ]
     }
 }
@@ -188,10 +252,9 @@ pub(crate) async fn lock_plan_tx(
 
 async fn call_plan(
     tx: &mut sqlx::PgConnection,
-    arguments: &[Vec<String>; 11],
+    arguments: &[Vec<String>; 15],
 ) -> Result<PlanAnswer, StoreError> {
-    let mut query =
-        crate::observed_sql::query_scalar(super::artifact_sql().postgres.lock_plan.sql());
+    let mut query = crate::observed_sql::query_scalar(crate::durable::lock_plan_sql());
     for argument in arguments {
         query = query.bind(argument);
     }
@@ -330,7 +393,7 @@ BEGIN
     END IF;
     FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
         FROM jsonb_array_elements(v_refs) ORDER BY kind, id LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
+        PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0), false);
     END LOOP;
     SELECT COALESCE(jsonb_agg(jsonb_build_array(namespace, artifact_ref)
         ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_artifacts
@@ -349,10 +412,8 @@ BEGIN
         JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
     SELECT COALESCE(jsonb_agg(jsonb_build_array(namespace, artifact_ref)
         ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_locked FROM reach;
-    FOR held IN SELECT value->>0 AS namespace, value->>1 AS artifact_ref
-        FROM jsonb_array_elements(v_locked) ORDER BY namespace, artifact_ref LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
-    END LOOP;
+    PERFORM lash_lock_artifacts(ARRAY(SELECT 'lash-artifact:' || (value->>0) || ':' || (value->>1)
+        FROM jsonb_array_elements(v_locked) ORDER BY value->>0, value->>1));
     -- This statement starts after every lock wait. Include all remaining
     -- readers in the answer so the client validates their canonical pairs.
     SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(edge.referrer_kind, edge.referrer_id)), '[]'::jsonb)
@@ -396,7 +457,15 @@ END
 $lash_artifact_end_local$;
 "#
     .replace("{PEEL}", &crate::durable::retire_graph())
-        + LOCK_PLAN_DDL
+        + &LOCK_PLAN_DDL.replace(
+            "{LOCK_TURN}",
+            &crate::process_sql::process_sql()
+                .plan_postgres
+                .lock_turn
+                .sql()
+                .replace("$1", "scope.a")
+                .replace("$2", "scope.b"),
+        )
 }
 
 /// [`lock_plan_tx`]'s server function. Its gated frames are the ones an
@@ -406,7 +475,8 @@ $lash_artifact_end_local$;
 const LOCK_PLAN_DDL: &str = r#"CREATE OR REPLACE FUNCTION lash_artifact_lock_plan(
     p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[],
     p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[],
-    p_sessions text[], p_envs text[], p_supplied text[]
+    p_sessions text[], p_envs text[], p_supplied text[],
+    p_scope_kinds text[], p_scope_a text[], p_scope_b text[]
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_plan$
 DECLARE
     v_refs jsonb;
@@ -414,7 +484,17 @@ DECLARE
     v_envs jsonb;
     v_missing jsonb;
     held record;
+    scope record;
 BEGIN
+    -- The scope class, in the caller's order: registration admission's.
+    FOR scope IN SELECT kind, a, b FROM unnest(p_scope_kinds, p_scope_a, p_scope_b)
+        WITH ORDINALITY AS named(kind, a, b, ordinal) ORDER BY ordinal LOOP
+        IF scope.kind = 'turn' THEN
+            PERFORM 1 FROM ({LOCK_TURN}) AS turn_rows;
+        ELSE
+            PERFORM lash_advisory_xact_lock(hashtextextended(scope.a, 0), false);
+        END IF;
+    END LOOP;
     -- The caller holds each session's write authority: its leaf frame is
     -- the one its head names until this transaction commits.
     SELECT COALESCE(jsonb_agg(jsonb_build_array(ended.kind, ended.id)), '[]'::jsonb) INTO v_refs
@@ -437,7 +517,7 @@ BEGIN
         FROM unnest(p_held_kinds, p_held_ids) AS named(kind, id);
     FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
         FROM jsonb_array_elements(v_refs || v_held) ORDER BY kind, id LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
+        PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0), false);
     END LOOP;
     -- This statement starts after the referrer lock waits: each acquired
     -- environment's head, the body it names and whether that body's
@@ -458,7 +538,8 @@ BEGIN
     IF jsonb_array_length(v_missing) > 0 THEN
         RETURN jsonb_build_object('ended', v_refs, 'missing', v_missing);
     END IF;
-    FOR held IN WITH RECURSIVE reach(namespace, artifact_ref) AS (
+    -- The artifact class, once, last: this seals the transaction.
+    PERFORM lash_lock_artifacts(ARRAY(WITH RECURSIVE reach(namespace, artifact_ref) AS (
             SELECT edge.namespace, edge.artifact_ref FROM lash_artifact_referrer_edges edge
             JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
                 AND edge.referrer_id = ref.value->>1
@@ -472,13 +553,12 @@ BEGIN
             UNION
             SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
             JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
-        SELECT namespace, artifact_ref FROM reach
-        UNION
-        SELECT carried.namespace, carried.artifact_ref
-        FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)
-        ORDER BY namespace, artifact_ref LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
-    END LOOP;
+        SELECT 'lash-artifact:' || planned.namespace || ':' || planned.artifact_ref
+        FROM (SELECT namespace, artifact_ref FROM reach
+            UNION
+            SELECT carried.namespace, carried.artifact_ref
+            FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)) planned
+        ORDER BY planned.namespace, planned.artifact_ref));
     -- This statement starts after every artifact lock wait. An environment
     -- whose head or closure moved before its locks were taken would lock
     -- out of this plan: the transaction retries as contended.

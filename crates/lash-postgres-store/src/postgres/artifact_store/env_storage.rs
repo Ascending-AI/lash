@@ -463,7 +463,7 @@ impl CarriedClosures {
             .values()
             .map(|body| (PROCESS_ENV_CLOSURE_NAMESPACE.to_owned(), body.clone()))
             .collect();
-        lock_artifact_set_tx(tx, &closures).await?;
+        lock_artifact_prefix_tx(tx, &closures).await?;
         let wanted: Vec<&str> = closures.iter().map(|(_, body)| body.as_str()).collect();
         let stored: BTreeSet<String> =
             crate::observed_sql::query_scalar(artifact_sql().postgres.select_stored_refs.sql())

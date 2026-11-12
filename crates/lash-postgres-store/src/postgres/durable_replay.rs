@@ -104,6 +104,9 @@ impl PostgresDurableStore {
                                 &self.pools.session_hints,
                                 self.fence.fleet(),
                             );
+                            // The rule-2 seam sits in the explicit path.
+                            #[cfg(any(test, feature = "testing"))]
+                            let call = call.filter(|_| self.lock_after_plan.is_none());
                             let call = &call;
                             self.replay(label, deadline, || async move {
                                 if let Some(candidate) = ahead {
@@ -126,6 +129,8 @@ impl PostgresDurableStore {
                                     now,
                                     self.fence.fleet(),
                                     &self.pools,
+                                    #[cfg(any(test, feature = "testing"))]
+                                    self.lock_after_plan.as_deref(),
                                 ))
                                 .await;
                                 // The orphan audit took the root the
@@ -351,7 +356,16 @@ impl PostgresDurableStore {
 /// first statement ran ([`super::PostgresDurableStatements::owner_envelope`]):
 /// `fence` is what it read under the fence, `None` when the epoch was not
 /// current. The roots the commit retired are held for retirement steps
-/// (D-RET).
+/// (D-RET). In test builds `lock_after_plan` names one more advisory lock
+/// the write takes after its plan: the seam that makes a sealed
+/// transaction need a lock its plan missed.
+#[cfg_attr(
+    any(test, feature = "testing"),
+    expect(
+        clippy::too_many_arguments,
+        reason = "the eighth argument is the test-only lock-after-plan seam"
+    )
+)]
 pub(super) async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
@@ -360,6 +374,7 @@ pub(super) async fn apply_owner(
     now: DurableInstant,
     fleet: lash_core_store::store::FleetFormat,
     pools: &crate::host::RolePools,
+    #[cfg(any(test, feature = "testing"))] lock_after_plan: Option<&str>,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let Some(fence) = fence else {
@@ -423,9 +438,8 @@ pub(super) async fn apply_owner(
         graph::install(tx, &checked).await?;
     }
     let (process_view, locked) = super::process_view::refresh_preimage(tx, write).await?;
-    let ending = crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
-        .await
-        .map_err(store_failure)?;
+    let ending =
+        crate::obligation_ledger::ending_journals(write.domain()).map_err(store_failure)?;
     // Every artifact lock the transaction's ends, carries and environment
     // acquisitions take, in one sorted acquisition before any of them,
     // read off the whole write (FIG-7700).
@@ -444,7 +458,19 @@ pub(super) async fn apply_owner(
     let planned = crate::artifact_store::lock_plan_tx(tx, &plan)
         .await
         .map_err(store_failure)?;
-    let mut committing = Committing {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(key) = lock_after_plan {
+        crate::observed_sql::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(key)
+        .execute(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(super::sqlx_failure)?;
+    }
+    let committing = Committing {
         process_views: lash_durable::domain::processes::ProcessPostimages::from_view(process_view),
         checkpoint_ref_chunk: pools.maintenance.checkpoint_ref_chunk as usize,
         actor: write.actor(),

@@ -1565,9 +1565,9 @@ DECLARE
     v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 60d035997862f9b4); a call
+    -- Generated from this build's statements (registry bad6811304bd104e); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '60d035997862f9b4'
+    IF p_registry IS DISTINCT FROM 'bad6811304bd104e'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1725,7 +1725,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_resolutions_postgres.lock_execution_referrer' THEN
             v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock(hashtextextended( 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0)) FROM lash_package_executions WHERE execution = (v_p->>0) LOOP
+            FOR v_row IN SELECT lash_advisory_xact_lock(hashtextextended( 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0), false) FROM lash_package_executions WHERE execution = (v_p->>0) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2011,15 +2011,15 @@ BEGIN
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'postgres_connection.lock_xact_by_text' THEN
             v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock(hashtextextended((v_p->>0), 0)) LOOP
+            FOR v_row IN SELECT lash_advisory_xact_lock(hashtextextended((v_p->>0), 0), false) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
-        WHEN 'artifact_referrer_edge.lock_plan' THEN
+        WHEN 'durable_lock_plan_postgres.plan' THEN
             v_rows := 0;
-            FOR v_row IN SELECT lash_artifact_lock_plan((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->6) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->7) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->8) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->9) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->10) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) LOOP
+            FOR v_row IN SELECT lash_artifact_lock_plan((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->6) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[] || ARRAY(SELECT e.referrer_kind FROM lash_package_executions e WHERE e.execution = ANY((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->14) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) ORDER BY e.execution), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->7) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[] || ARRAY(SELECT e.referrer_id FROM lash_package_executions e WHERE e.execution = ANY((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->14) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) ORDER BY e.execution), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->8) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->9) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->10) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->11) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->12) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->13) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2255,7 +2255,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_postgres.lock_session_writes' THEN
             v_rows := 0;
-            FOR v_row IN SELECT held.locked, pg_advisory_xact_lock(hashtextextended((v_p->>1), 1::bigint)) FROM ( SELECT count(*) AS locked FROM ( SELECT 1 FROM lash_actors WHERE actor_key = (v_p->>0) FOR NO KEY UPDATE ) AS actor ) AS held WHERE held.locked > 0 LOOP
+            FOR v_row IN SELECT held.locked, lash_advisory_xact_lock(hashtextextended((v_p->>1), 1::bigint), false) FROM ( SELECT count(*) AS locked FROM ( SELECT 1 FROM lash_actors WHERE actor_key = (v_p->>0) FOR NO KEY UPDATE ) AS actor ) AS held WHERE held.locked > 0 LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2394,7 +2394,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_head_commit.lock_attachment' THEN
             v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock(CAST(((v_p->>0)::BIGINT) AS INTEGER), hashtext((v_p->>1))) LOOP
+            FOR v_row IN SELECT lash_advisory_xact_lock_pair(CAST(((v_p->>0)::BIGINT) AS INTEGER), hashtext((v_p->>1)), false) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2544,7 +2544,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_session_delete_postgres.lock_referrers' THEN
             v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock(hashtextextended(ordered.key, 0)) FROM ( SELECT named.key FROM ( SELECT 'lash-artifact-referrer:session:' || CAST((v_p->>0) AS TEXT) AS key UNION ALL SELECT 'lash-artifact-referrer:frame_environment:[' || to_json(CAST((v_p->>0) AS TEXT))::TEXT || ',' || to_json(leaf.frame_node_id)::TEXT || ']' FROM lash_session_head AS head JOIN lash_session_revisions AS revision ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision JOIN lash_graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id WHERE head.session_id = (v_p->>0) ) AS named ORDER BY named.key COLLATE "C" ) AS ordered LOOP
+            FOR v_row IN SELECT lash_advisory_xact_lock(hashtextextended(ordered.key, 0), false) FROM ( SELECT named.key FROM ( SELECT 'lash-artifact-referrer:session:' || CAST((v_p->>0) AS TEXT) AS key UNION ALL SELECT 'lash-artifact-referrer:frame_environment:[' || to_json(CAST((v_p->>0) AS TEXT))::TEXT || ',' || to_json(leaf.frame_node_id)::TEXT || ']' FROM lash_session_head AS head JOIN lash_session_revisions AS revision ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision JOIN lash_graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id WHERE head.session_id = (v_p->>0) ) AS named ORDER BY named.key COLLATE "C" ) AS ordered LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2864,6 +2864,57 @@ BEGIN
         v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
 END
 $lash_owner_commit$;
+CREATE OR REPLACE FUNCTION lash_advisory_xact_lock(p_key bigint, p_shared boolean)
+RETURNS void LANGUAGE plpgsql VOLATILE AS $lash_advisory_xact_lock$
+
+BEGIN
+    IF current_setting('lash.artifacts_sealed', true) IS DISTINCT FROM 'on' THEN
+        IF p_shared THEN PERFORM pg_advisory_xact_lock_shared(p_key); ELSE PERFORM pg_advisory_xact_lock(p_key); END IF;
+        RETURN;
+    END IF;
+    IF to_regclass('lash_unplanned_advisory_locks') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory'
+            AND pid = pg_backend_pid() AND granted AND objsubid = 1 AND classid = ((p_key >> 32) & 4294967295)::oid AND objid = (p_key & 4294967295)::oid
+            AND (mode = 'ExclusiveLock' OR (p_shared AND mode = 'ShareLock'))) THEN
+        PERFORM nextval('lash_unplanned_advisory_locks');
+    END IF;
+    IF NOT (CASE WHEN p_shared THEN pg_try_advisory_xact_lock_shared(p_key) ELSE pg_try_advisory_xact_lock(p_key) END) THEN
+        RAISE EXCEPTION 'an advisory lock this transaction needs after its artifact locks is held elsewhere'
+            USING ERRCODE = '55P03';
+    END IF;
+END
+$lash_advisory_xact_lock$;
+CREATE OR REPLACE FUNCTION lash_advisory_xact_lock_pair(p_class integer, p_key integer, p_shared boolean)
+RETURNS void LANGUAGE plpgsql VOLATILE AS $lash_advisory_xact_lock_pair$
+
+BEGIN
+    IF current_setting('lash.artifacts_sealed', true) IS DISTINCT FROM 'on' THEN
+        IF p_shared THEN PERFORM pg_advisory_xact_lock_shared(p_class, p_key); ELSE PERFORM pg_advisory_xact_lock(p_class, p_key); END IF;
+        RETURN;
+    END IF;
+    IF to_regclass('lash_unplanned_advisory_locks') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory'
+            AND pid = pg_backend_pid() AND granted AND objsubid = 2 AND classid = (p_class::bigint & 4294967295)::oid AND objid = (p_key::bigint & 4294967295)::oid
+            AND (mode = 'ExclusiveLock' OR (p_shared AND mode = 'ShareLock'))) THEN
+        PERFORM nextval('lash_unplanned_advisory_locks');
+    END IF;
+    IF NOT (CASE WHEN p_shared THEN pg_try_advisory_xact_lock_shared(p_class, p_key) ELSE pg_try_advisory_xact_lock(p_class, p_key) END) THEN
+        RAISE EXCEPTION 'an advisory lock this transaction needs after its artifact locks is held elsewhere'
+            USING ERRCODE = '55P03';
+    END IF;
+END
+$lash_advisory_xact_lock_pair$;
+CREATE OR REPLACE FUNCTION lash_lock_artifacts(p_keys text[])
+RETURNS void LANGUAGE plpgsql VOLATILE AS $lash_lock_artifacts$
+DECLARE
+    v_key text;
+BEGIN
+    FOREACH v_key IN ARRAY p_keys LOOP
+        PERFORM lash_advisory_xact_lock(hashtextextended(v_key, 0), false);
+    END LOOP;
+    PERFORM set_config('lash.artifacts_sealed', 'on', true);
+END
+$lash_lock_artifacts$;
 CREATE OR REPLACE FUNCTION lash_artifact_end_local(
     p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_end_local$
@@ -2894,7 +2945,7 @@ BEGIN
     END IF;
     FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
         FROM jsonb_array_elements(v_refs) ORDER BY kind, id LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
+        PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0), false);
     END LOOP;
     SELECT COALESCE(jsonb_agg(jsonb_build_array(namespace, artifact_ref)
         ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_artifacts
@@ -2913,10 +2964,8 @@ BEGIN
         JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
     SELECT COALESCE(jsonb_agg(jsonb_build_array(namespace, artifact_ref)
         ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_locked FROM reach;
-    FOR held IN SELECT value->>0 AS namespace, value->>1 AS artifact_ref
-        FROM jsonb_array_elements(v_locked) ORDER BY namespace, artifact_ref LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
-    END LOOP;
+    PERFORM lash_lock_artifacts(ARRAY(SELECT 'lash-artifact:' || (value->>0) || ':' || (value->>1)
+        FROM jsonb_array_elements(v_locked) ORDER BY value->>0, value->>1));
     -- This statement starts after every lock wait. Include all remaining
     -- readers in the answer so the client validates their canonical pairs.
     SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(edge.referrer_kind, edge.referrer_id)), '[]'::jsonb)
@@ -2961,7 +3010,8 @@ $lash_artifact_end_local$;
 CREATE OR REPLACE FUNCTION lash_artifact_lock_plan(
     p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[],
     p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[],
-    p_sessions text[], p_envs text[], p_supplied text[]
+    p_sessions text[], p_envs text[], p_supplied text[],
+    p_scope_kinds text[], p_scope_a text[], p_scope_b text[]
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_plan$
 DECLARE
     v_refs jsonb;
@@ -2969,7 +3019,17 @@ DECLARE
     v_envs jsonb;
     v_missing jsonb;
     held record;
+    scope record;
 BEGIN
+    -- The scope class, in the caller's order: registration admission's.
+    FOR scope IN SELECT kind, a, b FROM unnest(p_scope_kinds, p_scope_a, p_scope_b)
+        WITH ORDINALITY AS named(kind, a, b, ordinal) ORDER BY ordinal LOOP
+        IF scope.kind = 'turn' THEN
+            PERFORM 1 FROM (SELECT run FROM lash_session_runs WHERE session_id = scope.a AND (run = scope.b OR run IN ( SELECT admitted_run FROM lash_pending_turn_inputs WHERE session_id = scope.a AND COALESCE(source_key, input_id) = scope.b)) ORDER BY run FOR UPDATE) AS turn_rows;
+        ELSE
+            PERFORM lash_advisory_xact_lock(hashtextextended(scope.a, 0), false);
+        END IF;
+    END LOOP;
     -- The caller holds each session's write authority: its leaf frame is
     -- the one its head names until this transaction commits.
     SELECT COALESCE(jsonb_agg(jsonb_build_array(ended.kind, ended.id)), '[]'::jsonb) INTO v_refs
@@ -2992,7 +3052,7 @@ BEGIN
         FROM unnest(p_held_kinds, p_held_ids) AS named(kind, id);
     FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
         FROM jsonb_array_elements(v_refs || v_held) ORDER BY kind, id LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
+        PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0), false);
     END LOOP;
     -- This statement starts after the referrer lock waits: each acquired
     -- environment's head, the body it names and whether that body's
@@ -3013,7 +3073,8 @@ BEGIN
     IF jsonb_array_length(v_missing) > 0 THEN
         RETURN jsonb_build_object('ended', v_refs, 'missing', v_missing);
     END IF;
-    FOR held IN WITH RECURSIVE reach(namespace, artifact_ref) AS (
+    -- The artifact class, once, last: this seals the transaction.
+    PERFORM lash_lock_artifacts(ARRAY(WITH RECURSIVE reach(namespace, artifact_ref) AS (
             SELECT edge.namespace, edge.artifact_ref FROM lash_artifact_referrer_edges edge
             JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
                 AND edge.referrer_id = ref.value->>1
@@ -3027,13 +3088,12 @@ BEGIN
             UNION
             SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
             JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
-        SELECT namespace, artifact_ref FROM reach
-        UNION
-        SELECT carried.namespace, carried.artifact_ref
-        FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)
-        ORDER BY namespace, artifact_ref LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
-    END LOOP;
+        SELECT 'lash-artifact:' || planned.namespace || ':' || planned.artifact_ref
+        FROM (SELECT namespace, artifact_ref FROM reach
+            UNION
+            SELECT carried.namespace, carried.artifact_ref
+            FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)) planned
+        ORDER BY planned.namespace, planned.artifact_ref));
     -- This statement starts after every artifact lock wait. An environment
     -- whose head or closure moved before its locks were taken would lock
     -- out of this plan: the transaction retries as contended.
@@ -3053,7 +3113,7 @@ $lash_artifact_lock_plan$;
 CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
 RETURNS boolean LANGUAGE plpgsql VOLATILE AS $lash_lock_referrer$
 BEGIN
-    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || p_kind || ':' || p_id, 0));
+    PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || p_kind || ':' || p_id, 0), false);
     -- This statement starts after the lock wait.
     RETURN EXISTS (SELECT 1 FROM lash_referrer_fences
         WHERE referrer_kind = p_kind AND referrer_id = p_id);
@@ -3064,12 +3124,11 @@ CREATE OR REPLACE FUNCTION lash_acquire_holds(
     p_kind text, p_id text, p_edge_namespaces text[], p_edge_refs text[]
 ) RETURNS text LANGUAGE plpgsql VOLATILE AS $lash_acquire_holds$
 DECLARE
-    v_key text;
     v_missing text;
 BEGIN
-    FOREACH v_key IN ARRAY p_locks LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended(v_key, 0));
-    END LOOP;
+    IF cardinality(p_locks) > 0 THEN
+        PERFORM lash_lock_artifacts(p_locks);
+    END IF;
     -- These statements start after every lock wait.
     SELECT wanted.artifact_ref INTO v_missing
     FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
@@ -3096,13 +3155,13 @@ BEGIN
     IF v_body IS NULL THEN
         RETURN ARRAY['absent', NULL];
     END IF;
-    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0));
+    PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0), false);
     -- This statement starts after the closure's lock wait.
     IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
         WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
         RETURN ARRAY['closure', v_body];
     END IF;
-    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:process_execution_env:' || p_env, 0));
+    PERFORM lash_lock_artifacts(ARRAY['lash-artifact:process_execution_env:' || p_env]);
     IF NOT p_write THEN
         RETURN ARRAY['locked', v_body];
     END IF;
@@ -3218,7 +3277,7 @@ DECLARE
     v_when JSONB;
     v_debts TEXT[];
 BEGIN
-    IF p_registry IS DISTINCT FROM '60d035997862f9b4'
+    IF p_registry IS DISTINCT FROM 'bad6811304bd104e'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_register_process_execution: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -3241,7 +3300,7 @@ BEGIN
             CASE v_step->>'s'
         WHEN 'postgres_connection.lock_xact_by_text' THEN
             v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock(hashtextextended((v_p->>0), 0)) LOOP
+            FOR v_row IN SELECT lash_advisory_xact_lock(hashtextextended((v_p->>0), 0), false) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -3285,7 +3344,7 @@ BEGIN
             END LOOP;
         WHEN 'durable_resolutions_postgres.lock_execution_referrer' THEN
             v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock(hashtextextended( 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0)) FROM lash_package_executions WHERE execution = (v_p->>0) LOOP
+            FOR v_row IN SELECT lash_advisory_xact_lock(hashtextextended( 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0), false) FROM lash_package_executions WHERE execution = (v_p->>0) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;

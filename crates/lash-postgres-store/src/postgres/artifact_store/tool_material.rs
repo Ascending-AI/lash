@@ -21,14 +21,16 @@ async fn lock_bundle_tx(
     tx: &mut Transaction<'_, Postgres>,
     artifact_ref: &str,
 ) -> Result<(), StoreError> {
+    // The bundle is the transaction's artifact set: it seals it.
     crate::observed_sql::query(
         crate::connection_sql::connection_sql()
-            .lock_xact_by_text
+            .lock_xact_artifacts
             .sql(),
     )
-    .bind(format!(
-        "lash-artifact:{TOOL_MATERIAL_NAMESPACE}:{artifact_ref}"
-    ))
+    .bind(vec![artifact_lock_key(
+        TOOL_MATERIAL_NAMESPACE,
+        artifact_ref,
+    )])
     .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
@@ -91,45 +93,49 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
         holder: &MaterialHolder,
         bundle: &MaterialBundle,
     ) -> Result<RetainedBundle, MaterialRetentionError> {
-        let referrer = holder.referrer();
-        let artifact_ref = &bundle.artifact().artifact_ref;
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        lock_referrer_tx(&mut tx, &referrer)
-            .await
-            .map_err(store_sqlx_error)?;
-        if holder_ended_tx(&mut tx, &referrer).await? {
-            return Err(MaterialRetentionError::HolderEnded {
-                holder: Box::new(holder.clone()),
-            });
-        }
-        lock_bundle_tx(&mut tx, artifact_ref).await?;
-        crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
-            .bind(TOOL_MATERIAL_NAMESPACE)
-            .bind(artifact_ref)
-            .bind(bundle.bytes())
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(store_sqlx_error)?;
-        let stored: Vec<u8> =
-            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
-                .bind(TOOL_MATERIAL_NAMESPACE)
-                .bind(artifact_ref)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
+        crate::guarded_tx::retry_contended(&self.fence, || async {
+            let referrer = holder.referrer();
+            let artifact_ref = &bundle.artifact().artifact_ref;
+            let mut tx = begin_guarded(&self.pool, &self.fence).await?;
+            lock_referrer_tx(&mut tx, &referrer)
                 .await
                 .map_err(store_sqlx_error)?;
-        if stored != bundle.bytes() {
-            return Err(MaterialRetentionError::Store(
-                StoreError::StoredDataCorrupt {
-                    record_kind: "tool material bundle",
-                    message: format!(
-                        "bundle `{artifact_ref}` is stored with bytes of another name"
-                    ),
-                },
-            ));
-        }
-        insert_lease_tx(&mut tx, artifact_ref, &referrer).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(bundle.retained_by(holder.clone()))
+            if holder_ended_tx(&mut tx, &referrer).await? {
+                return Err(MaterialRetentionError::HolderEnded {
+                    holder: Box::new(holder.clone()),
+                });
+            }
+            lock_bundle_tx(&mut tx, artifact_ref).await?;
+            crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
+                .bind(TOOL_MATERIAL_NAMESPACE)
+                .bind(artifact_ref)
+                .bind(bundle.bytes())
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?;
+            let stored: Vec<u8> = crate::observed_sql::query_scalar(
+                artifact_sql().lash_vm_artifacts.select_bytes.sql(),
+            )
+            .bind(TOOL_MATERIAL_NAMESPACE)
+            .bind(artifact_ref)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
+            if stored != bundle.bytes() {
+                return Err(MaterialRetentionError::Store(
+                    StoreError::StoredDataCorrupt {
+                        record_kind: "tool material bundle",
+                        message: format!(
+                            "bundle `{artifact_ref}` is stored with bytes of another name"
+                        ),
+                    },
+                ));
+            }
+            insert_lease_tx(&mut tx, artifact_ref, &referrer).await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(bundle.retained_by(holder.clone()))
+        })
+        .await
     }
 
     async fn acquire_material(

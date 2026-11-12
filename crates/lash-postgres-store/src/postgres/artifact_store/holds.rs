@@ -81,7 +81,7 @@ pub(crate) fn function_ddl() -> String {
     r#"CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
 RETURNS boolean LANGUAGE plpgsql VOLATILE AS $lash_lock_referrer$
 BEGIN
-    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || p_kind || ':' || p_id, 0));
+    PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || p_kind || ':' || p_id, 0), false);
     -- This statement starts after the lock wait.
     RETURN EXISTS (SELECT 1 FROM lash_referrer_fences
         WHERE referrer_kind = p_kind AND referrer_id = p_id);
@@ -92,12 +92,11 @@ CREATE OR REPLACE FUNCTION lash_acquire_holds(
     p_kind text, p_id text, p_edge_namespaces text[], p_edge_refs text[]
 ) RETURNS text LANGUAGE plpgsql VOLATILE AS $lash_acquire_holds$
 DECLARE
-    v_key text;
     v_missing text;
 BEGIN
-    FOREACH v_key IN ARRAY p_locks LOOP
-        PERFORM pg_advisory_xact_lock(hashtextextended(v_key, 0));
-    END LOOP;
+    IF cardinality(p_locks) > 0 THEN
+        PERFORM lash_lock_artifacts(p_locks);
+    END IF;
     -- These statements start after every lock wait.
     SELECT wanted.artifact_ref INTO v_missing
     FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
@@ -124,13 +123,13 @@ BEGIN
     IF v_body IS NULL THEN
         RETURN ARRAY['absent', NULL];
     END IF;
-    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0));
+    PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0), false);
     -- This statement starts after the closure's lock wait.
     IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
         WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
         RETURN ARRAY['closure', v_body];
     END IF;
-    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:process_execution_env:' || p_env, 0));
+    PERFORM lash_lock_artifacts(ARRAY['lash-artifact:process_execution_env:' || p_env]);
     IF NOT p_write THEN
         RETURN ARRAY['locked', v_body];
     END IF;

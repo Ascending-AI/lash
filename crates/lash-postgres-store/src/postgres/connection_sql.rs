@@ -13,6 +13,10 @@
 //! statement that names a lash table does
 //! **not** belong here — it belongs to that table's family.
 //!
+//! Every transaction lock here except the fleet fence's is
+//! `lash_advisory_xact_lock` ([`crate::advisory_lock`]), which never waits
+//! once the transaction's artifact locks sealed it.
+//!
 //! The lock *keys* stay with their callers: what a key is built from is the
 //! caller's decision about what it is serialising, and two callers that share
 //! this statement share only the lock's shape, never its key space. The seed
@@ -35,27 +39,23 @@ lash_store_sql::statements! {
         /// locks and the session-execution-lease lock are all this statement:
         /// one lock shape, six key spaces distinguished by what the caller
         /// binds, not by six copies of the text.
-        lock_xact_by_text = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 0))";
+        lock_xact_by_text = "SELECT lash_advisory_xact_lock(hashtextextended(?1, 0), false)";
 
-        /// Acquire the caller's sorted text keys in exactly that order,
-        /// independent of the database's text collation.
-        lock_xact_by_ordered_texts =
-            "SELECT pg_advisory_xact_lock(hashtextextended(ordered.text_key, 0))
-             FROM (
-                 SELECT text_key FROM unnest(?1::TEXT[]) WITH ORDINALITY AS keys(text_key, ordinal)
-                 ORDER BY ordinal
-             ) AS ordered";
+        /// Lock the caller's sorted artifact keys in exactly that order,
+        /// independent of the database's text collation, then seal the
+        /// transaction ([`crate::advisory_lock`]).
+        lock_xact_artifacts = "SELECT lash_lock_artifacts(?1::TEXT[])";
 
         /// The same lock with the caller choosing the seed, which is how the
         /// await-event waiters partition their key space per wait kind
         /// without hashing the kind into the key string.
-        lock_xact_by_text_seeded = "SELECT pg_advisory_xact_lock(hashtextextended(?1, ?2))";
+        lock_xact_by_text_seeded = "SELECT lash_advisory_xact_lock(hashtextextended(?1, ?2), false)";
 
         /// The same lock in a caller-supplied classification (`?1`) keyed on
         /// text `?2`, which is `pg_advisory_xact_lock`'s two-integer form
         /// rather than its one-bigint form: the attachment GC wants its class
         /// visible in `pg_locks` as its own `classid`.
-        lock_xact_by_class_and_text = "SELECT pg_advisory_xact_lock(?1, hashtext(?2))";
+        lock_xact_by_class_and_text = "SELECT lash_advisory_xact_lock_pair(?1, hashtext(?2), false)";
 
         /// Serialise one session's history mutations (seed `1`).
         ///
@@ -65,7 +65,7 @@ lash_store_sql::statements! {
         /// would queue behind each other. A session writer takes it after
         /// the session's actor row (the durable `lock_session_writes`), and
         /// alone only while the session has no actor.
-        lock_xact_session_history = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 1::bigint))";
+        lock_xact_session_history = "SELECT lash_advisory_xact_lock(hashtextextended(?1, 1::bigint), false)";
 
         /// The savepoint a session writer takes history in while the
         /// session has no actor, and backs off to when the actor appeared
@@ -86,7 +86,7 @@ lash_store_sql::statements! {
         /// statement rather than a loop: two callers holding overlapping
         /// session sets acquire the shared members in the same order.
         lock_xact_session_history_batch =
-            "SELECT pg_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT))
+            "SELECT lash_advisory_xact_lock(hashtextextended(ordered.session_id, 1::BIGINT), false)
              FROM (
                  SELECT DISTINCT session_id
                  FROM unnest(?1::TEXT[]) AS target(session_id)
@@ -96,38 +96,42 @@ lash_store_sql::statements! {
         /// Content-address locks preserve the same seed and hexadecimal lock
         /// identity while binding and sorting the raw digest keys.
         lock_xact_by_keys_seeded =
-            "SELECT pg_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), ?2))
+            "SELECT lash_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), ?2), false)
              FROM (SELECT DISTINCT key FROM unnest(?1::BYTEA[]) AS target(key) ORDER BY key) AS ordered";
         lock_xact_shared_by_keys_seeded =
-            "SELECT pg_advisory_xact_lock_shared(hashtextextended(encode(ordered.key, 'hex'), ?2))
+            "SELECT lash_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), ?2), true)
              FROM (SELECT DISTINCT key FROM unnest(?1::BYTEA[]) AS target(key) ORDER BY key) AS ordered";
 
         /// Lock the pair `(?1, ?2)` in the general key space, length-prefixing
         /// each part so that `("ab", "c")` and `("a", "bc")` are two locks
         /// rather than one.
-        lock_xact_by_text_pair = "SELECT pg_advisory_xact_lock(
+        lock_xact_by_text_pair = "SELECT lash_advisory_xact_lock(
              hashtextextended(
                  length(?1)::TEXT || ':' || ?1 || length(?2)::TEXT || ':' || ?2,
                  0
              )
-         )";
+         , false)";
 
         /// The single fixed key the evidence-retention sweep serialises on.
         ///
         /// A literal key rather than a hashed one: there is exactly one sweep,
         /// so there is nothing to derive the key from.
-        lock_xact_evidence_retention = "SELECT pg_advisory_xact_lock(715423, 0)";
+        lock_xact_evidence_retention = "SELECT lash_advisory_xact_lock_pair(715423, 0, false)";
 
         /// The evidence-retention key, shared: a tool-intent submission holds
         /// it while it checks its owner's fence and claims its identity, so
         /// it either commits before a sweep reclaims the owner or reads the
         /// fence that sweep installed (FIG-1509).
-        lock_xact_evidence_retention_shared = "SELECT pg_advisory_xact_lock_shared(715423, 0)";
+        lock_xact_evidence_retention_shared = "SELECT lash_advisory_xact_lock_pair(715423, 0, true)";
 
         /// The writer fence's lock (ADR 0115 §2.2), shared: every guarded
         /// transaction takes it before it reads the fleet epoch `F`, so a
         /// move of `F` waits for every writer that read the old one. A
         /// literal key: there is one fleet record to order writers against.
+        /// The one raw transaction lock here: it is every guarded
+        /// transaction's first statement, before any seal can exist, and it
+        /// runs before a host has proved the schema (and so the
+        /// `lash_advisory_xact_lock` function) is there.
         lock_xact_fleet_fence_shared = "SELECT pg_advisory_xact_lock_shared(715425, 0)";
 
         /// The writer fence's lock, exclusive: a move of `F` takes it in its

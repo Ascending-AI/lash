@@ -400,25 +400,31 @@ impl PostgresStore {
         planner: &lash_core_store::store::RuntimeCommitPlanner,
         encoded_under: lash_core_store::store::FleetFormat,
     ) -> Result<Result<RuntimeCommitReceipt, FleetMoved>, StoreError> {
-        let now = self.clock.timestamp_ms();
-        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
-        if let Err(moved) = tx.require_encoded_under(encoded_under) {
-            return Ok(Err(moved));
-        }
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
+        // The head's left frames take artifact locks, which seal the
+        // transaction: contention runs the identical commit again, and a
+        // replay is adjudicated by its receipt (FIG-7700).
+        crate::guarded_tx::retry_contended(&self.fence, || async {
+            let now = self.clock.timestamp_ms();
+            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = begin_guarded(connection, &self.fence).await?;
+            if let Err(moved) = tx.require_encoded_under(encoded_under) {
+                return Ok(Err(moved));
+            }
+            #[cfg(any(test, feature = "testing"))]
+            self.set_transaction_lease_clock_for_testing(&mut tx)
+                .await?;
+            let result = crate::durable::apply_store_commit(
+                &mut tx,
+                planner,
+                now,
+                self.pools.maintenance.checkpoint_ref_chunk as usize,
+                &self.pools.configs,
+            )
             .await?;
-        let result = crate::durable::apply_store_commit(
-            &mut tx,
-            planner,
-            now,
-            self.pools.maintenance.checkpoint_ref_chunk as usize,
-            &self.pools.configs,
-        )
-        .await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Ok(result))
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(Ok(result))
+        })
+        .await
     }
 }
 

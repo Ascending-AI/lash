@@ -655,7 +655,8 @@ BEGIN
 END
 $lash_owner_commit$;
 "
-    ) + &crate::artifact_store::local_end_function_ddl()
+    ) + &crate::advisory_lock::function_ddl()
+        + &crate::artifact_store::local_end_function_ddl()
         + &crate::artifact_store::holds_function_ddl()
         + &crate::artifact_store::env_over_body_function_ddl()
         + &renewal_ddl()

@@ -738,11 +738,14 @@ table lash_waits
   primary-key (wait_id)
 function lash_acquire_env (p_env text, p_kind text, p_id text, p_write boolean) -> text[]
 function lash_acquire_holds (p_locks text[], p_check_namespaces text[], p_check_refs text[], p_kind text, p_id text, p_edge_namespaces text[], p_edge_refs text[]) -> text
+function lash_advisory_xact_lock (p_key bigint, p_shared boolean) -> void
+function lash_advisory_xact_lock_pair (p_class integer, p_key integer, p_shared boolean) -> void
 function lash_artifact_end_local (p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]) -> jsonb
-function lash_artifact_lock_plan (p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[], p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[], p_sessions text[], p_envs text[], p_supplied text[]) -> jsonb
+function lash_artifact_lock_plan (p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[], p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[], p_sessions text[], p_envs text[], p_supplied text[], p_scope_kinds text[], p_scope_a text[], p_scope_b text[]) -> jsonb
 function lash_graph_peel_delete (p_gone bytea[]) -> bytea[]
 function lash_graph_peel_plan (p_roots bytea[], p_limit bigint, p_closure boolean) -> TABLE(candidates bytea[], locked bytea[], gone bytea[], deferred bytea[])
 function lash_graph_retire (p_roots bytea[], p_limit bigint, p_now bigint) -> void
+function lash_lock_artifacts (p_keys text[]) -> void
 function lash_lock_referrer (p_kind text, p_id text) -> boolean
 function lash_node_renew (p_node text, p_boot text, p_ttl bigint, p_fleet_low integer, p_fleet_high integer, p_lock_timeout text, p_statement_ms bigint, p_now bigint) -> TABLE(o_fleet integer, o_expires bigint)
 function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint, p_requires text, p_profile boolean) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text, o_session_heads jsonb, o_inserted bytea[], o_root_leases bigint[], o_answered jsonb)

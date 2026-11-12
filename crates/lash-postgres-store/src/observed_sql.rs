@@ -245,6 +245,8 @@ impl Statement {
             "LOCK TABLE",
             "PG_ADVISORY",
             "PG_TRY_ADVISORY",
+            "LASH_ADVISORY_XACT_LOCK(",
+            "LASH_LOCK_ARTIFACTS(",
             // The one-call owner commit takes the commit's locks and writes.
             "LASH_OWNER_COMMIT(",
         ]

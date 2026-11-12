@@ -135,8 +135,8 @@ lash_store_sql::statements! {
                AND e.ended = 0 AND e.actor_key = ?4 AND u.requested = ?5";
         /// Lock execution `?1`'s referrer, as `lock_xact_by_text` locks the
         /// key `crate::artifact_store::referrer_lock_key` spells.
-        lock_execution_referrer = "SELECT pg_advisory_xact_lock(hashtextextended(
-                 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0))
+        lock_execution_referrer = "SELECT lash_advisory_xact_lock(hashtextextended(
+                 'lash-artifact-referrer:' || referrer_kind || ':' || referrer_id, 0), false)
              FROM package_executions WHERE execution = ?1";
         /// Whether execution `?1`'s referrer ended.
         execution_fenced = "SELECT EXISTS (

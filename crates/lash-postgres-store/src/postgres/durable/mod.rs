@@ -73,6 +73,10 @@ pub(crate) mod environment;
 mod graph;
 mod head_commit;
 mod lock_plan;
+/// The lock plan's statement ([`crate::artifact_store::LockPlan`]).
+pub(crate) fn lock_plan_sql() -> &'static str {
+    lock_plan::plan_statement().sql()
+}
 pub(crate) mod packages;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
@@ -301,6 +305,9 @@ pub struct PostgresDurableStore {
     /// Where a test holds a transaction inside its SQL.
     #[cfg(any(test, feature = "testing"))]
     storage_gates: Option<crate::testing::StorageGates>,
+    /// An advisory lock key an owner commit takes after its lock plan.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) lock_after_plan: Option<Arc<str>>,
 }
 
 impl std::fmt::Debug for PostgresDurableStore {
@@ -492,6 +499,8 @@ impl PostgresDurableStore {
             commit_fault: None,
             #[cfg(any(test, feature = "testing"))]
             storage_gates: None,
+            #[cfg(any(test, feature = "testing"))]
+            lock_after_plan: None,
         }
     }
 
@@ -513,6 +522,16 @@ impl PostgresDurableStore {
         fault: Arc<crate::testing::CommitFault>,
     ) -> Self {
         self.commit_fault = Some(fault);
+        self
+    }
+
+    /// Take advisory lock `key` in every owner commit right after its lock
+    /// plan, as a path the plan missed would: the rule-2 seam
+    /// ([`crate::advisory_lock`]). Owner commits then take the explicit
+    /// path, which the seam sits in.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_lock_after_plan_for_testing(mut self, key: &str) -> Self {
+        self.lock_after_plan = Some(Arc::from(key));
         self
     }
 

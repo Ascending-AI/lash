@@ -83,37 +83,41 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         digest: &[u8; 32],
         json: &str,
     ) -> Result<(), lash_durable::DurableError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(ArtifactStoreError::from)?;
-        let referrer = claim.referrer();
-        lock_admitted_referrer_tx(&mut tx, &referrer).await?;
-        lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
-        let held: bool =
-            crate::observed_sql::query_scalar(artifact_sql().dependencies.select_reaches.sql())
+        crate::guarded_tx::retry_contended::<_, ArtifactStoreError, _, _>(&self.fence, || async {
+            let mut tx = begin_guarded(&self.pool, &self.fence)
+                .await
+                .map_err(ArtifactStoreError::from)?;
+            let referrer = claim.referrer();
+            lock_admitted_referrer_tx(&mut tx, &referrer).await?;
+            lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
+            let held: bool =
+                crate::observed_sql::query_scalar(artifact_sql().dependencies.select_reaches.sql())
+                    .bind(MODULE_ARTIFACT_NAMESPACE)
+                    .bind(referrer.kind().as_str())
+                    .bind(referrer.canonical_id())
+                    .bind(reference)
+                    .fetch_one(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(backend)?;
+            if !held {
+                return Err(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: reference.to_owned(),
+                });
+            }
+            let sql =
+                lash_store_sql::durable::packages::PackageStatements::render(Dialect::postgres());
+            crate::observed_sql::query(sql.insert_labels.sql())
                 .bind(MODULE_ARTIFACT_NAMESPACE)
-                .bind(referrer.kind().as_str())
-                .bind(referrer.canonical_id())
                 .bind(reference)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .bind(digest.as_slice())
+                .bind(json)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
-        if !held {
-            return Err(ArtifactStoreError::ArtifactMissing {
-                artifact_ref: reference.to_owned(),
-            }
-            .into());
-        }
-        let sql = lash_store_sql::durable::packages::PackageStatements::render(Dialect::postgres());
-        crate::observed_sql::query(sql.insert_labels.sql())
-            .bind(MODULE_ARTIFACT_NAMESPACE)
-            .bind(reference)
-            .bind(digest.as_slice())
-            .bind(json)
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(backend)?;
-        tx.commit().await.map_err(backend).map_err(Into::into)
+            tx.commit().await.map_err(backend)
+        })
+        .await
+        .map_err(Into::into)
     }
     async fn package_labels(
         &self,

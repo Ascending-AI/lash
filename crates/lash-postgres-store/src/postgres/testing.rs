@@ -20,6 +20,11 @@ use sqlx::{Connection, PgConnection};
 mod database_url;
 pub use database_url::required_database_url;
 
+/// The sequence a test creates to count unplanned advisory locks: each
+/// lock a transaction takes after its artifact locks that it did not
+/// already hold advances it ([`crate::advisory_lock`]).
+pub use crate::advisory_lock::UNPLANNED_LOCKS;
+
 /// The nodes a fixture may serve over one storage: a failover deployment's
 /// primary and standby, a drain law's nodes.
 pub const FIXTURE_SERVED_NODES: u32 = 4;

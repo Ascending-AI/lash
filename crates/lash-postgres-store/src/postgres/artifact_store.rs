@@ -19,15 +19,6 @@ use crate::*;
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
         end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5)";
-        /// One transaction's artifact lock plan (FIG-7700): the write
-        /// authority of sessions `?9`/`?10`, then referrers `?1`/`?2`, the
-        /// frames gated on `?3`, the leaf frames of `?10` and held referrers
-        /// `?7`/`?8`, then, in one sorted acquisition, what the ended ones
-        /// can delete in namespaces `?4`, the carried `?5`/`?6` and each
-        /// acquired environment of `?11`; an environment whose closure is
-        /// not stored and not among `?12` is answered before any artifact
-        /// lock.
-        lock_plan = "SELECT lash_artifact_lock_plan(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4::TEXT[], ?5::TEXT[], ?6::TEXT[], ?7::TEXT[], ?8::TEXT[], ?9::TEXT[], ?10::TEXT[], ?11::TEXT[])";
         /// Lock referrer `?1`/`?2`, then whether it ended (FIG-7701 R3).
         lock_referrer = "SELECT lash_lock_referrer(?1, ?2)";
         /// Lock keys `?1` in order, then the first of `?2`/`?3` not stored,
@@ -220,7 +211,7 @@ pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 #[path = "artifact_store/local_end.rs"]
 mod local_end;
 pub(crate) use local_end::{
-    EndArguments as LocalEndArguments, LockPlan, Planned, failure as end_local_failure,
+    EndArguments as LocalEndArguments, LockPlan, Planned, ScopeLock, failure as end_local_failure,
     lock_plan_tx, validate as validate_local_end,
 };
 
@@ -327,7 +318,9 @@ pub(crate) async fn lock_referrer_tx(
 
 /// Lock every `(namespace, reference)` of `artifacts` in one statement, in
 /// key order: no namespace prefixes another, so the pairs' order is the
-/// keys' order, the one every writer and the server-side end follow.
+/// keys' order, the one every writer and the server-side end follow. The
+/// set seals the transaction: a single publisher's set is its artifact
+/// locks, last ([`crate::advisory_lock`]).
 async fn lock_artifact_set_tx(
     tx: &mut sqlx::PgConnection,
     artifacts: &BTreeSet<(String, String)>,
@@ -341,13 +334,36 @@ async fn lock_artifact_set_tx(
         .collect();
     crate::observed_sql::query(
         crate::connection_sql::connection_sql()
-            .lock_xact_by_ordered_texts
+            .lock_xact_artifacts
             .sql(),
     )
     .bind(&lock_keys)
     .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(backend)?;
+    Ok(())
+}
+
+/// Lock the first artifacts of a sorted acquisition whose remainder the
+/// caller learns only under these locks, without sealing the transaction:
+/// the carried closures an end reads its modules under, as
+/// `lash_acquire_env` locks a closure before its head. Every key must sort
+/// before every key of the [`lock_artifact_set_tx`] that follows.
+async fn lock_artifact_prefix_tx(
+    tx: &mut sqlx::PgConnection,
+    artifacts: &BTreeSet<(String, String)>,
+) -> Result<(), ArtifactStoreError> {
+    for (namespace, reference) in artifacts {
+        crate::observed_sql::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(artifact_lock_key(namespace, reference))
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(backend)?;
+    }
     Ok(())
 }
 
@@ -370,22 +386,17 @@ fn artifact_lock_key(namespace: &str, artifact_ref: &str) -> String {
     format!("lash-artifact:{namespace}:{artifact_ref}")
 }
 
+/// Lock one artifact: a set of one, which seals the transaction.
 async fn lock_artifact_tx(
     tx: &mut sqlx::PgConnection,
     namespace: &str,
     artifact_ref: &str,
 ) -> Result<(), ArtifactStoreError> {
-    let key = artifact_lock_key(namespace, artifact_ref);
-    crate::observed_sql::query(
-        crate::connection_sql::connection_sql()
-            .lock_xact_by_text
-            .sql(),
+    lock_artifact_set_tx(
+        tx,
+        &BTreeSet::from([(namespace.to_owned(), artifact_ref.to_owned())]),
     )
-    .bind(key)
-    .execute(crate::observed_sql::executor(&mut *tx))
     .await
-    .map_err(backend)?;
-    Ok(())
 }
 
 pub(crate) async fn is_fenced_tx(
@@ -585,7 +596,7 @@ impl PostgresLashVmArtifactStore {
         bytes: Option<&[u8]>,
         claim: &ReferrerClaim,
     ) -> Result<(), ArtifactStoreError> {
-        crate::guarded_tx::retry_artifact_contended(&self.fence, || {
+        crate::guarded_tx::retry_contended(&self.fence, || {
             self.write_namespaced_once(namespace, artifact_ref, bytes, claim)
         })
         .await
@@ -722,6 +733,17 @@ impl PostgresLashVmArtifactStore {
         claim: &ReferrerClaim,
         artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError> {
+        crate::guarded_tx::retry_contended(&self.fence, || {
+            self.hold_module_artifact_batch_once(claim, artifacts)
+        })
+        .await
+    }
+
+    async fn hold_module_artifact_batch_once(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[lash_execution_contracts::module_artifacts::ModuleArtifactHold<'_>],
+    ) -> Result<(), ArtifactStoreError> {
         if !claim.referrer().kind().holds_artifacts() {
             return Err(ArtifactStoreError::ReferrerKindRefused {
                 kind: claim.referrer().kind(),
@@ -773,15 +795,18 @@ impl PostgresLashVmArtifactStore {
                     } => unheld.contains(*module_ref),
                 })
                 .collect();
-        let mut locked: Vec<&str> = artifacts
+        // Every module the batch holds, in one sorted acquisition that seals
+        // the transaction (FIG-7700).
+        let locked: BTreeSet<(String, String)> = artifacts
             .iter()
-            .map(|artifact| artifact.module_ref())
+            .map(|artifact| {
+                (
+                    MODULE_ARTIFACT_NAMESPACE.to_owned(),
+                    artifact.module_ref().to_owned(),
+                )
+            })
             .collect();
-        locked.sort_unstable();
-        locked.dedup();
-        for artifact_ref in &locked {
-            lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, artifact_ref).await?;
-        }
+        lock_artifact_set_tx(&mut tx, &locked).await?;
         if let Some(cleanup) = claim.guard_cleanup() {
             crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, self.clock.timestamp_ms())
                 .await
@@ -928,6 +953,19 @@ impl PostgresLashVmArtifactStore {
         descriptor: Option<&[u8]>,
         manifest: &[(&'static str, String)],
     ) -> Result<(), ArtifactStoreError> {
+        crate::guarded_tx::retry_contended(&self.fence, || {
+            self.hold_definition_closure_once(claim, id, descriptor, manifest)
+        })
+        .await
+    }
+
+    async fn hold_definition_closure_once(
+        &self,
+        claim: &ReferrerClaim,
+        id: &str,
+        descriptor: Option<&[u8]>,
+        manifest: &[(&'static str, String)],
+    ) -> Result<(), ArtifactStoreError> {
         if !claim.referrer().kind().holds_artifacts() {
             return Err(ArtifactStoreError::ReferrerKindRefused {
                 kind: claim.referrer().kind(),
@@ -1006,6 +1044,17 @@ impl PostgresLashVmArtifactStore {
     }
 
     async fn end_namespaced(
+        &self,
+        namespace: &str,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        crate::guarded_tx::retry_contended(&self.fence, || {
+            self.end_namespaced_once(namespace, cleanup)
+        })
+        .await
+    }
+
+    async fn end_namespaced_once(
         &self,
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,

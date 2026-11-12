@@ -102,57 +102,63 @@ pub(super) async fn prune_terminal_processes(
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = crate::support::clamp_epoch_ms(registry.clock.timestamp_ms());
     let max_change_seq = watermark_change_seq(watermark);
-    let mut tx = begin_guarded(&registry.pool, &registry.fence)
+    // A batch's ends take artifact locks, which seal it: the whole batch is
+    // retried on contention under the store's retry policy and deadline
+    // (FIG-7700). Each attempt selects its candidates afresh.
+    crate::guarded_tx::retry_contended(&registry.fence, || async {
+        let mut tx = begin_guarded(&registry.pool, &registry.fence)
+            .await
+            .map_err(plugin_store_error)?;
+        // Reclaiming packed plans locks retained process rows beyond the
+        // candidates; one prune at a time keeps two prunes from locking each
+        // other's rows in opposite orders.
+        crate::observed_sql::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind("lash-process-prune")
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
-        .map_err(plugin_store_error)?;
-    // Reclaiming packed plans locks retained process rows beyond the
-    // candidates; one prune at a time keeps two prunes from locking each
-    // other's rows in opposite orders.
-    crate::observed_sql::query(
-        crate::connection_sql::connection_sql()
-            .lock_xact_by_text
-            .sql(),
-    )
-    .bind("lash-process-prune")
-    .execute(crate::observed_sql::executor(&mut **tx))
-    .await
-    .map_err(plugin_sqlx_error)?;
-    let prunable = select_prunable(
-        &mut **tx,
-        process_sql()
-            .process_postgres
-            .list_prunable_terminal_for_update
-            .sql(),
-        cutoff,
-        max_change_seq,
-        filter.as_ref(),
-    )
-    .await?;
+        .map_err(plugin_sqlx_error)?;
+        let prunable = select_prunable(
+            &mut **tx,
+            process_sql()
+                .process_postgres
+                .list_prunable_terminal_for_update
+                .sql(),
+            cutoff,
+            max_change_seq,
+            filter.as_ref(),
+        )
+        .await?;
 
-    let reclaimed_plans = reclaim_settled_parent_end_plans_tx(&mut tx, cutoff).await?;
-    if reclaimed_plans > 0 {
-        tracing::debug!(
-            reclaimed_plans,
-            "retention reclaimed settled parent-end ledger rows"
-        );
-    }
+        let reclaimed_plans = reclaim_settled_parent_end_plans_tx(&mut tx, cutoff).await?;
+        if reclaimed_plans > 0 {
+            tracing::debug!(
+                reclaimed_plans,
+                "retention reclaimed settled parent-end ledger rows"
+            );
+        }
 
-    if prunable.is_empty() {
+        if prunable.is_empty() {
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            return Ok(ProcessPruneReport {
+                pruned_processes: 0,
+                pruned_events: 0,
+            });
+        }
+
+        // The candidates stay locked from selection through the prune. The same
+        // transaction fences each pruned process record and writes its cleanup.
+        let mut process_ids = prunable
+            .iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+        process_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        return Ok(ProcessPruneReport {
-            pruned_processes: 0,
-            pruned_events: 0,
-        });
-    }
-
-    // The candidates stay locked from selection through the prune. The same
-    // transaction fences each pruned process record and writes its cleanup.
-    let mut process_ids = prunable
-        .iter()
-        .map(|record| record.id.clone())
-        .collect::<Vec<_>>();
-    process_ids.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-    let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
-    tx.commit().await.map_err(plugin_sqlx_error)?;
-    Ok(report)
+        Ok(report)
+    })
+    .await
 }

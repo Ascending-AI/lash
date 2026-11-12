@@ -176,6 +176,12 @@ DROP TABLE IF EXISTS lash_owner_commit_latches CASCADE;
 
 DROP FUNCTION IF EXISTS lash_owner_commit CASCADE;
 
+DROP FUNCTION IF EXISTS lash_advisory_xact_lock CASCADE;
+
+DROP FUNCTION IF EXISTS lash_advisory_xact_lock_pair CASCADE;
+
+DROP FUNCTION IF EXISTS lash_lock_artifacts CASCADE;
+
 DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
 
 DROP FUNCTION IF EXISTS lash_artifact_lock_plan CASCADE;

@@ -7,7 +7,6 @@
 
 use std::sync::LazyLock;
 
-use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::store::HeadWriter;
 use lash_core_store::store::RunAdmissionRecord;
@@ -262,23 +261,10 @@ pub(super) static TERMINAL_STATE: Entry = Entry::new(
 .collecting(Collect::PhaseEnd("checkpoint_ref"))
 .collecting(Collect::Closure("working_execution_ref"))
 .collecting(Collect::Closures("closure_roots"));
-/// A transaction's artifact lock plan, in one sorted acquisition
-/// (FIG-7700).
+/// A transaction's lock plan, in the class order it states (FIG-7700).
 pub(super) static LOCK_PLAN: Entry = Entry::new(
-    || &crate::artifact_store::artifact_sql().postgres.lock_plan,
-    &[
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-        Ty::Texts,
-    ],
+    super::lock_plan::plan_statement,
+    &[Ty::Texts; 15],
     Shape::Select,
 );
 /// A referrer's or an artifact's advisory lock, by its key.
@@ -311,36 +297,19 @@ pub(super) fn end_local_step(
     ))
 }
 
-/// The locks of the executions `writes` end, as steps, in key order:
-/// taken before a head commit takes frame and artifact locks, as
-/// publication takes them referrer first. Then the transaction's artifact
-/// lock plan, read off the whole of `writes` committed by `actor`
-/// (FIG-7700): a one-call commit carries nothing and acquires no
-/// environment, so the plan never asks for an environment's modules.
-pub(super) fn lock_ending_executions(
+/// The transaction's lock plan, read off the whole of `writes` committed
+/// by `actor` (FIG-7700), as steps: each affected session's write
+/// authority, then the plan, which takes the ended executions' referrers
+/// with every other referrer. A one-call commit carries nothing and
+/// acquires no environment, so the plan never asks for an environment's
+/// modules.
+pub(super) fn lock_plan_steps(
     actor: &lash_durable::ActorKey,
     writes: &[lash_durable::DomainWrite],
 ) -> Result<Vec<Step>, lash_core_store::store::StoreError> {
-    let ending = crate::obligation_ledger::ending_executions(writes)?;
-    let mut steps: Vec<Step> = ending
-        .iter()
-        .map(|referrer| {
-            Step::any(
-                &LOCK_KEY,
-                vec![Value::text(crate::artifact_store::referrer_lock_key(
-                    referrer,
-                ))],
-            )
-        })
-        .collect();
-    let journals: Vec<_> = ending
-        .into_iter()
-        .filter_map(|referrer| match referrer {
-            ArtifactReferrer::Execution(journal) => Some(journal),
-            _ => None,
-        })
-        .collect();
+    let journals = crate::obligation_ledger::ending_journals(writes)?;
     let (plan, _) = super::lock_plan::of_writes(actor, writes, &journals);
+    let mut steps = Vec::new();
     if !plan.is_empty() {
         for (actor, session) in super::lock_plan::session_writes(&plan)? {
             steps.push(Step::any(

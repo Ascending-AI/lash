@@ -183,24 +183,18 @@ pub(crate) async fn arm_cleanup_tx(
     Ok(id)
 }
 
-/// Take terminal executions' referrer locks before a head commit takes
-/// frame and artifact locks, and answer their journals. Publication follows
-/// the same referrer-first order, so a publisher cannot hold an execution
-/// lock while the terminal holds the artifact it needs.
-pub(crate) async fn lock_ending_executions_tx(
-    tx: &mut sqlx::PgConnection,
+/// The journals of the executions `writes` end, whose referrer locks the
+/// transaction's lock plan takes (FIG-7700).
+pub(crate) fn ending_journals(
     writes: &[lash_durable::DomainWrite],
 ) -> Result<Vec<lash_protocol_types::EffectJournalIdentity>, StoreError> {
-    let mut journals = Vec::new();
-    for referrer in ending_executions(writes)? {
-        crate::artifact_store::lock_referrer_tx(tx, &referrer)
-            .await
-            .map_err(store_sqlx_error)?;
-        if let ArtifactReferrer::Execution(journal) = referrer {
-            journals.push(journal);
-        }
-    }
-    Ok(journals)
+    Ok(ending_executions(writes)?
+        .into_iter()
+        .filter_map(|referrer| match referrer {
+            ArtifactReferrer::Execution(journal) => Some(journal),
+            _ => None,
+        })
+        .collect())
 }
 
 /// The executions `writes` end, as referrers in lock order.
@@ -545,10 +539,15 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
         cleanup: &ArtifactCleanup,
         now_ms: u64,
     ) -> Result<ObligationId, StoreError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        let id = arm_cleanup_tx(&mut tx, cleanup, now_ms).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(id)
+        // An ended cleanup ends its local share: artifact locks, so the
+        // write is retried on contention (FIG-7700).
+        crate::guarded_tx::retry_contended(&self.fence, || async {
+            let mut tx = begin_guarded(&self.pool, &self.fence).await?;
+            let id = arm_cleanup_tx(&mut tx, cleanup, now_ms).await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(id)
+        })
+        .await
     }
 
     async fn nudge(&self, referrer: &ArtifactReferrer, now_ms: u64) -> Result<bool, StoreError> {

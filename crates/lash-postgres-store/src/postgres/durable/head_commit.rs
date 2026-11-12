@@ -69,7 +69,7 @@ lash_store_sql::statements! {
                  SELECT * FROM unnest(?1::TEXT[], ?2::INTEGER[], ?3::INTEGER[]))";
 
         /// Take attachment `?2`'s fence lock in class `?1`.
-        lock_attachment = "SELECT pg_advisory_xact_lock(CAST(?1 AS INTEGER), hashtext(?2))";
+        lock_attachment = "SELECT lash_advisory_xact_lock_pair(CAST(?1 AS INTEGER), hashtext(?2), false)";
 
         /// Session `?1`'s head as the explicit form plans over it: its
         /// revision's config root, revision, leaf and checkpoint, the frame

@@ -1138,29 +1138,96 @@ fn referrer_lock(referrer: &ArtifactReferrer) -> String {
     )
 }
 
-/// Race `committing`, stalled on `blocker`'s lock, against a publisher
-/// that republishes `env` under an unrelated pin, then release the
-/// blocker. A commit that takes every artifact lock of its transaction in
-/// one sorted acquisition before its first holds none while it stalls on
-/// a lock that is not an artifact's, so the publisher finishes first; one
-/// that took an artifact lock early holds it, and the publisher, holding
-/// the environment's closure, waits on it: a deadlock once the blocker
-/// lets the commit go on.
-async fn race_a_publisher<A: std::fmt::Debug, B: std::fmt::Debug>(
+/// Count, from now on, the advisory locks a transaction asks for after
+/// its artifact locks that it does not already hold (FIG-7700).
+async fn count_unplanned_locks(storage: &PostgresStorage) {
+    sqlx::query(&format!(
+        "CREATE SEQUENCE {}",
+        lash_postgres_store::testing::UNPLANNED_LOCKS
+    ))
+    .execute(storage.pool())
+    .await
+    .expect("count unplanned locks");
+}
+
+/// The unplanned lock requests counted so far.
+async fn unplanned_locks(storage: &PostgresStorage) -> i64 {
+    sqlx::query_scalar(&format!(
+        "SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM {}",
+        lash_postgres_store::testing::UNPLANNED_LOCKS
+    ))
+    .fetch_one(storage.pool())
+    .await
+    .expect("read the unplanned lock count")
+}
+
+/// The deadlocks PostgreSQL has detected in this law's database.
+async fn deadlocks(storage: &PostgresStorage) -> i64 {
+    sqlx::query_scalar("SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()")
+        .fetch_one(storage.pool())
+        .await
+        .expect("read the deadlock count")
+}
+
+/// PostgreSQL detects no deadlock beyond `before`. A backend reports its
+/// statistics within ten seconds of going idle, so the count is watched
+/// that long.
+async fn assert_no_deadlock(storage: &PostgresStorage, before: i64) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(11);
+    while std::time::Instant::now() < until {
+        assert_eq!(
+            deadlocks(storage).await,
+            before,
+            "PostgreSQL detected a deadlock"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
+/// Republish environment `env` under an unrelated pin: its closure, the
+/// closure's modules and its head, in one sorted set.
+fn republish_env(
     storage: &PostgresStorage,
-    blocker: sqlx::Transaction<'_, sqlx::Postgres>,
-    holder: i32,
-    committing: tokio::task::JoinHandle<Result<A, B>>,
     env: lash_execution_contracts::process::ProcessEnvRef,
     bytes: Vec<u8>,
-) {
-    use lash_execution_contracts::process::ProcessEnvStore as _;
-    wait_until_mutations_wait(storage, holder, 1).await;
-    let publishing = tokio::spawn({
-        let artifacts = storage.lash_vm_artifact_store();
-        let (_, pin) = host_pin();
-        async move { artifacts.publish_process_env(&pin, &env, &bytes).await }
-    });
+) -> impl FnOnce() -> tokio::task::JoinHandle<
+    Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>,
+> {
+    let artifacts = storage.lash_vm_artifact_store();
+    move || {
+        tokio::spawn(async move {
+            use lash_execution_contracts::process::ProcessEnvStore as _;
+            let (_, pin) = host_pin();
+            artifacts.publish_process_env(&pin, &env, &bytes).await
+        })
+    }
+}
+
+/// Republish module `module` under an unrelated pin: its lock alone.
+fn republish_module(
+    storage: &PostgresStorage,
+    module: String,
+) -> impl FnOnce() -> tokio::task::JoinHandle<
+    Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>,
+> {
+    let artifacts = storage.lash_vm_artifact_store();
+    move || {
+        tokio::spawn(async move {
+            let (_, pin) = host_pin();
+            artifacts
+                .publish_module_artifact(&pin, &module, b"linked document")
+                .await
+        })
+    }
+}
+
+/// Wait until `publishing` finishes or waits on a lock: the publisher
+/// finished while the blocker held its lock.
+async fn published_while_stalled<T>(
+    storage: &PostgresStorage,
+    stalled: i64,
+    publishing: &tokio::task::JoinHandle<T>,
+) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let waits: i64 = sqlx::query_scalar(
@@ -1170,8 +1237,8 @@ async fn race_a_publisher<A: std::fmt::Debug, B: std::fmt::Debug>(
         .fetch_one(storage.pool())
         .await
         .expect("inspect lock waits");
-        if publishing.is_finished() || waits >= 2 {
-            break;
+        if publishing.is_finished() || waits > stalled {
+            return publishing.is_finished();
         }
         assert!(
             std::time::Instant::now() < deadline,
@@ -1179,7 +1246,28 @@ async fn race_a_publisher<A: std::fmt::Debug, B: std::fmt::Debug>(
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    let published_while_stalled = publishing.is_finished();
+}
+
+/// Race `committing`, stalled on `blocker`'s lock, against `publish`, a
+/// publisher under an unrelated pin, then release the blocker. A commit
+/// that takes every artifact lock of its transaction in one sorted
+/// acquisition, after its other locks, holds none while it stalls on a
+/// lock that is not an artifact's, so the publisher finishes first; one
+/// that took an artifact lock early holds it, and the publisher waits on
+/// it, or deadlocks with it once the blocker lets the commit go on. Every
+/// lock the commit asks for after its artifact locks it already holds.
+async fn race_a_publisher<A: std::fmt::Debug, B: std::fmt::Debug>(
+    storage: &PostgresStorage,
+    blocker: sqlx::Transaction<'_, sqlx::Postgres>,
+    holder: i32,
+    committing: tokio::task::JoinHandle<Result<A, B>>,
+    publish: impl FnOnce() -> tokio::task::JoinHandle<
+        Result<(), lash_execution_contracts::module_artifacts::ArtifactStoreError>,
+    >,
+) {
+    wait_until_mutations_wait(storage, holder, 1).await;
+    let publishing = publish();
+    let published_while_stalled = published_while_stalled(storage, 1, &publishing).await;
     blocker.commit().await.expect("release the blocker");
     let within = std::time::Duration::from_secs(60);
     let committed = tokio::time::timeout(within, committing)
@@ -1196,6 +1284,7 @@ async fn race_a_publisher<A: std::fmt::Debug, B: std::fmt::Debug>(
         published_while_stalled,
         "the publisher waited on an artifact lock the stalled commit held"
     );
+    assert_eq!(unplanned_locks(storage).await, 0, "unplanned locks");
 }
 
 const LOCK_PLAN_LAW: lash_durable::CommitLabel = lash_durable::CommitLabel::new("law.lock-plan");
@@ -1218,6 +1307,7 @@ async fn postgres_an_execution_end_beside_a_registration_locks_its_environment_w
         return;
     };
     reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
     let session = SessionId::fixture("lock-plan-registration");
     session_store(&storage, session.clone()).await;
     let (_, keeper) = host_pin();
@@ -1272,7 +1362,14 @@ async fn postgres_an_execution_end_beside_a_registration_locks_its_environment_w
         lash_durable::domain::ProcessWrite::Register(rows),
     ));
     let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
-    race_a_publisher(&storage, blocker, holder, committing, env, bytes).await;
+    race_a_publisher(
+        &storage,
+        blocker,
+        holder,
+        committing,
+        republish_env(&storage, env, bytes),
+    )
+    .await;
 }
 
 /// An owner write ordered [execution end, head] takes the artifact locks
@@ -1288,6 +1385,7 @@ async fn postgres_an_execution_end_before_a_head_locks_the_frame_it_leaves_with_
         return;
     };
     reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
     let mut state = frame_state("lock-plan-head");
     let session = state.session_id.clone();
     let store = session_store(&storage, session.clone()).await;
@@ -1319,7 +1417,14 @@ async fn postgres_an_execution_end_before_a_head_locks_the_frame_it_leaves_with_
     tx.write(operation_end(&session, operation));
     write_head(&mut tx, &head);
     let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
-    race_a_publisher(&storage, blocker, holder, committing, env, bytes).await;
+    race_a_publisher(
+        &storage,
+        blocker,
+        holder,
+        committing,
+        republish_env(&storage, env, bytes),
+    )
+    .await;
     assert!(
         frame_end(&storage, &left).await.0,
         "the head ends the frame it leaves"
@@ -1340,6 +1445,7 @@ async fn postgres_executions_ended_beside_a_recorded_head_lock_their_artifacts_o
         return;
     };
     reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
     let mut state = frame_state("lock-plan-recorded");
     let session = state.session_id.clone();
     let store = session_store(&storage, session.clone()).await;
@@ -1400,8 +1506,7 @@ async fn postgres_executions_ended_beside_a_recorded_head_lock_their_artifacts_o
         blocker,
         holder,
         committing,
-        later_env,
-        later_bytes,
+        republish_env(&storage, later_env, later_bytes),
     )
     .await;
 }
@@ -1420,6 +1525,7 @@ async fn postgres_an_execution_end_beside_a_session_delete_locks_the_deleted_fra
         return;
     };
     reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
     let mut state = frame_state("lock-plan-delete");
     let session = state.session_id.clone();
     let store = session_store(&storage, session.clone()).await;
@@ -1491,7 +1597,14 @@ async fn postgres_an_execution_end_beside_a_session_delete_locks_the_deleted_fra
             .commit(tx, lash_durable::CommitLabel::SESSION_CLOSE_ARTIFACTS)
             .await
     });
-    race_a_publisher(&storage, blocker, holder, committing, env, bytes).await;
+    race_a_publisher(
+        &storage,
+        blocker,
+        holder,
+        committing,
+        republish_env(&storage, env, bytes),
+    )
+    .await;
     assert!(
         frame_end(&storage, &frame).await.0,
         "the delete ends the session's frame"
@@ -1501,11 +1614,12 @@ async fn postgres_an_execution_end_beside_a_session_delete_locks_the_deleted_fra
 /// A publisher that loses a lock race publishes on its retry (FIG-7700).
 /// A raw transaction holds module `M`'s lock; a publisher of environment
 /// `H`, whose closure `C` holds `M`, takes `C` and waits on `M`; the raw
-/// transaction then asks for `C`. PostgreSQL aborts one side of the
-/// cycle; the publication still succeeds once the raw transaction ends.
+/// transaction then asks for `C`. The publisher has waited longest, so
+/// its backend detects the cycle and aborts its own first attempt: the
+/// raw transaction is granted `C`, which only that abort releases, and the
+/// publication succeeds on its retry once the raw transaction ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_a_publisher_that_loses_a_lock_race_publishes_on_its_retry() {
-    use lash_execution_contracts::process::ProcessEnvStore as _;
     let Some((_lock, storage)) = storage().await else {
         return;
     };
@@ -1514,23 +1628,405 @@ async fn postgres_a_publisher_that_loses_a_lock_race_publishes_on_its_retry() {
     let (env, bytes, module) = environment_over_document(&storage, &keeper, 56).await;
     let closure = closure_holding(&storage, &module).await;
     let (mut blocker, holder) = lock_artifact_mutations(&storage, &module).await;
-    let publishing = tokio::spawn({
-        let artifacts = storage.lash_vm_artifact_store();
-        let (_, pin) = host_pin();
-        async move { artifacts.publish_process_env(&pin, &env, &bytes).await }
-    });
+    let publishing = republish_env(&storage, env, bytes)();
     wait_until_mutations_wait(&storage, holder, 1).await;
-    let raw = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!("lash-artifact:env_closure:{closure}"))
         .execute(&mut *blocker)
-        .await;
-    match raw {
-        Ok(_) => blocker.commit().await.expect("end the raw transaction"),
-        Err(_) => blocker.rollback().await.expect("end the raw transaction"),
-    }
+        .await
+        .expect("the publisher's first attempt is the one aborted, not the raw transaction");
+    assert!(
+        !publishing.is_finished(),
+        "the publisher finished while the raw transaction held its module"
+    );
+    blocker.commit().await.expect("end the raw transaction");
     let republished = tokio::time::timeout(std::time::Duration::from_secs(60), publishing)
         .await
         .expect("the publisher finishes")
         .expect("publish task");
     assert!(republished.is_ok(), "publisher: {republished:?}");
+}
+
+/// A publisher's retry is bounded as a whole operation by the store
+/// profile's deadline (FIG-7700): an attempt that starts inside it and
+/// waits on a lock whose timeout runs past it ends at the deadline, with
+/// the store's contention answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_publisher_ends_at_its_operation_deadline_with_contention() {
+    let Some((database, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let (_, keeper) = host_pin();
+    let (env, bytes, module) = environment_over_document(&storage, &keeper, 57).await;
+    let deadline = std::time::Duration::from_millis(1_500);
+    let mut config = lash_postgres_store::testing::fixture_config();
+    // Each attempt waits a second on the module, so the second attempt
+    // starts inside the deadline and would run past it.
+    config.guards.ordinary.lock =
+        lash_postgres_store::host::ServerTimeout::Limit(std::time::Duration::from_millis(1_000));
+    config.guards.ordinary.statement = lash_postgres_store::host::ServerTimeout::Limit(deadline);
+    config.guards.ordinary.operation_deadline = Some(deadline);
+    let bounded = lash_postgres_store::testing::connect_with(database.url(), &config)
+        .await
+        .expect("connect under a short deadline");
+    let (blocker, holder) = lock_artifact_mutations(&storage, &module).await;
+    let started = std::time::Instant::now();
+    let publishing = republish_env(&bounded, env, bytes)();
+    wait_until_mutations_wait(&storage, holder, 1).await;
+    let published = tokio::time::timeout(std::time::Duration::from_secs(30), publishing)
+        .await
+        .expect("the publisher answers")
+        .expect("publish task");
+    let elapsed = started.elapsed();
+    blocker.rollback().await.expect("release the module");
+    assert!(
+        matches!(
+            published,
+            Err(
+                lash_execution_contracts::module_artifacts::ArtifactStoreError::StoreFault(
+                    lash_core_store::store::StoreFault::Contended
+                )
+            )
+        ),
+        "publisher: {published:?}"
+    );
+    assert!(
+        elapsed >= deadline && elapsed < deadline + std::time::Duration::from_millis(300),
+        "the publisher answered after {elapsed:?}, not at its {deadline:?} deadline"
+    );
+}
+
+/// An owner write that ends an execution holding module `M` and registers
+/// execution `R` takes `R`'s referrer lock in its plan, before any
+/// artifact lock (FIG-7700). A publisher under `R` holds `R`, then locks
+/// `M`; the blocker holds `R` as it would. Taking `R` after the plan's `M`
+/// leaves the stalled commit holding `M`, so an unrelated publisher of
+/// `M` waits on it, and the publisher under `R` would deadlock with it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_execution_registration_beside_an_execution_end_locks_its_referrer_first() {
+    use lash_durable::DurableStore as _;
+    use lash_durable::resolutions::{ExecutionId, ExecutionRegistration};
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
+    let before = deadlocks(&storage).await;
+    let session = SessionId::fixture("lock-plan-package");
+    session_store(&storage, session.clone()).await;
+    let operation = "o/lock-plan-package";
+    let module = "lock-plan-package-module".to_owned();
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            &module,
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    let run = lash_vocabulary::identity::TurnId::from("lock-plan-package-turn");
+    let registered = ArtifactReferrer::Execution(
+        lash_protocol_types::ExecutionScope::turn(session.clone(), run.clone())
+            .journal_identity()
+            .expect("turn journal"),
+    );
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let (blocker, holder) = hold_lock(&storage, referrer_lock(&registered)).await;
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, operation));
+    tx.register_execution(ExecutionRegistration {
+        execution: ExecutionId::cell(&session, &run, "cell"),
+        uses: Default::default(),
+        referrer: registered,
+        requirements: Default::default(),
+    });
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    race_a_publisher(
+        &storage,
+        blocker,
+        holder,
+        committing,
+        republish_module(&storage, module),
+    )
+    .await;
+    assert_no_deadlock(&storage, before).await;
+}
+
+/// A detached process on environment `env`, registered directly and
+/// completed: terminal, so a prune takes it.
+async fn terminal_process(
+    storage: &PostgresStorage,
+    env: &lash_execution_contracts::process::ProcessEnvRef,
+) -> lash_vocabulary::identity::ProcessId {
+    use lash_execution_contracts::process::{ProcessLifecycle as _, ProcessRegistrar as _};
+    let registry = storage.process_registry();
+    let registered = registry
+        .register_process(lash_execution_contracts::process::ProcessRegistration::new(
+            lash_execution_contracts::process::ProcessInput::Engine {
+                kind: "lock-plan-prune".into(),
+                payload: serde_json::json!({}),
+                launch: lash_execution_contracts::process::EngineLaunch::new(env.clone(), None),
+            },
+            lash_execution_contracts::process::ProcessProvenance::host(),
+            lash_execution_contracts::process::Lifetime::Detached,
+        ))
+        .await
+        .expect("register the process");
+    registry
+        .complete_process(
+            &registered.id,
+            lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+                lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(format!(
+                "lock-plan-prune-{}",
+                registered.id.as_str()
+            )),
+        )
+        .await
+        .expect("complete the process");
+    registered.id
+}
+
+/// A batch prune takes the artifact locks of every process it ends in one
+/// sorted acquisition, after their referrer locks (FIG-7700). Processes
+/// `P1` before `P2` hold environments whose closures hold documents `D1`
+/// and `D2`; the blocker holds `P2`'s closure. Ending `P1` alone first
+/// holds `D1` while `P2`'s end waits on its closure, so an unrelated
+/// publisher of `D1` waits on the prune, and one that holds the closure
+/// and then locks `D1` would deadlock with it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_batch_prune_locks_every_ended_process_artifact_at_once() {
+    use lash_execution_contracts::process::ProcessRetention as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
+    let before = deadlocks(&storage).await;
+    let (_, keeper) = host_pin();
+    let mut processes = Vec::new();
+    for round in [61, 62] {
+        let (env, _, document) = environment_over_document(&storage, &keeper, round).await;
+        let closure = closure_holding(&storage, &document).await;
+        let process = terminal_process(&storage, &env).await;
+        processes.push((process.as_str().to_owned(), closure, document));
+    }
+    processes.sort();
+    let (_, _, first_document) = processes[0].clone();
+    let (_, later_closure, _) = processes[1].clone();
+    let (blocker, holder) = hold_lock(
+        &storage,
+        format!("lash-artifact:env_closure:{later_closure}"),
+    )
+    .await;
+    let pruning = tokio::spawn({
+        let registry = storage.process_registry();
+        async move {
+            registry
+                .prune_terminal_processes(
+                    u64::MAX,
+                    None,
+                    lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+                )
+                .await
+        }
+    });
+    race_a_publisher(
+        &storage,
+        blocker,
+        holder,
+        pruning,
+        republish_module(&storage, first_document),
+    )
+    .await;
+    assert_no_deadlock(&storage, before).await;
+}
+
+/// The registration of a process that closes with session `S`, as an
+/// engine start on `env`.
+fn session_scoped(
+    session: &SessionId,
+    env: &lash_execution_contracts::process::ProcessEnvRef,
+) -> lash_execution_contracts::process::ProcessRegistration {
+    lash_execution_contracts::process::ProcessRegistration::new(
+        lash_execution_contracts::process::ProcessInput::Engine {
+            kind: "lock-plan-scope".into(),
+            payload: serde_json::json!({}),
+            launch: lash_execution_contracts::process::EngineLaunch::new(env.clone(), None),
+        },
+        lash_execution_contracts::process::ProcessProvenance::host(),
+        lash_execution_contracts::process::Lifetime::Until(
+            lash_execution_contracts::process::ScopeRef::host_session_lookup(session.clone()),
+        ),
+    )
+}
+
+/// An owner write that registers a process under session `S` on
+/// environment `H` takes `S`'s scope lock in its plan, before `H`'s
+/// artifact locks (FIG-7700). A direct registrar of another process under
+/// `S` holds `S`, then locks `H`'s closure `C`. With the blocker on `S`,
+/// the registrar queues first, then the owner write. Taking `C` before
+/// `S` leaves the stalled owner write holding `C`: an unrelated publisher
+/// of `H` waits on it, and once the blocker goes the registrar, granted
+/// `S`, waits on `C` while the owner write waits on `S`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_registration_owner_write_takes_its_scope_lock_before_a_direct_registrar_closure()
+ {
+    use lash_durable::DurableStore as _;
+    use lash_execution_contracts::process::{ProcessRegistrar as _, StagedRegistration};
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
+    let before = deadlocks(&storage).await;
+    let session = SessionId::fixture("lock-plan-scope");
+    session_store(&storage, session.clone()).await;
+    let (_, keeper) = host_pin();
+    let (env, bytes, _) = environment_over_document(&storage, &keeper, 63).await;
+    let prepared = storage
+        .process_registry()
+        .prepare_process_registration(session_scoped(&session, &env), &[])
+        .await
+        .expect("prepare the owner write's registration");
+    let (registration, observers, process_id, _, prepared_at_ms) = prepared.into_commit();
+    let rows = StagedRegistration {
+        execution: None,
+        initial_resolutions: Vec::new(),
+        registration,
+        observers,
+        process_id,
+        prepared_at_ms,
+    }
+    .rows()
+    .expect("the start's rows");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let scope = lash_core_store::scope_identity::ScopeId::Session(session.clone());
+    let (blocker, holder) = hold_lock(
+        &storage,
+        format!(
+            "lash-parent-end:{}:{}",
+            scope.storage_kind(),
+            scope.storage_id()
+        ),
+    )
+    .await;
+    let registering = tokio::spawn({
+        let registry = storage.process_registry();
+        let registration = session_scoped(&session, &env);
+        async move { registry.register_process(registration).await }
+    });
+    wait_until_mutations_wait(&storage, holder, 1).await;
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(lash_durable::DomainWrite::Process(
+        lash_durable::domain::ProcessWrite::Register(rows),
+    ));
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    wait_until_mutations_wait(&storage, holder, 2).await;
+    let publishing = republish_env(&storage, env, bytes)();
+    let published_while_stalled = published_while_stalled(&storage, 2, &publishing).await;
+    blocker.commit().await.expect("release the scope");
+    let within = std::time::Duration::from_secs(60);
+    let registered = tokio::time::timeout(within, registering)
+        .await
+        .expect("the direct registrar finishes")
+        .expect("registrar task");
+    let committed = tokio::time::timeout(within, committing)
+        .await
+        .expect("the owner write finishes")
+        .expect("commit task");
+    let republished = tokio::time::timeout(within, publishing)
+        .await
+        .expect("the publisher finishes")
+        .expect("publish task");
+    assert!(registered.is_ok(), "direct registrar: {registered:?}");
+    assert!(committed.is_ok(), "owner write: {committed:?}");
+    assert!(republished.is_ok(), "publisher: {republished:?}");
+    assert!(
+        published_while_stalled,
+        "the publisher waited on an artifact lock the stalled owner write held"
+    );
+    assert_eq!(unplanned_locks(&storage).await, 0, "unplanned locks");
+    assert_no_deadlock(&storage, before).await;
+}
+
+/// After its artifact locks a transaction never waits for an advisory
+/// lock (FIG-7700): an owner write whose seam asks for one more lock after
+/// its plan, held elsewhere, is answered contention at once and runs
+/// again, never queueing on it, and commits on the attempt after the lock
+/// is free. The count records each attempt's unplanned request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_sealed_owner_write_retries_an_unplanned_lock_instead_of_waiting() {
+    use lash_durable::DurableStore as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    count_unplanned_locks(&storage).await;
+    let before = deadlocks(&storage).await;
+    let session = SessionId::fixture("lock-plan-seal");
+    session_store(&storage, session.clone()).await;
+    let operation = "o/lock-plan-seal";
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            "lock-plan-seal-module",
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let unplanned = "lash-law:after-the-plan";
+    let (blocker, holder) = hold_lock(&storage, unplanned.to_owned()).await;
+    let durable = storage
+        .durable_store()
+        .with_lock_after_plan_for_testing(unplanned);
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, operation));
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while unplanned_locks(&storage).await == 0 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_locks waiting JOIN pg_locks held
+               ON held.locktype = waiting.locktype AND held.database = waiting.database
+              AND held.classid = waiting.classid AND held.objid = waiting.objid
+              AND held.objsubid = waiting.objsubid
+             WHERE waiting.locktype = 'advisory' AND NOT waiting.granted
+               AND held.pid = $1 AND held.granted",
+        )
+        .bind(holder)
+        .fetch_one(storage.pool())
+        .await
+        .expect("inspect lock waits");
+        assert_eq!(
+            waiting, 0,
+            "the sealed owner write waited on the unplanned lock"
+        );
+        assert!(
+            !committing.is_finished(),
+            "the owner write finished past the held lock"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the owner write never asked for the unplanned lock"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    blocker.commit().await.expect("release the unplanned lock");
+    let committed = tokio::time::timeout(std::time::Duration::from_secs(60), committing)
+        .await
+        .expect("the owner write finishes")
+        .expect("commit task");
+    assert!(committed.is_ok(), "owner write: {committed:?}");
+    assert!(
+        unplanned_locks(&storage).await >= 2,
+        "the owner write committed without retrying its contended attempt"
+    );
+    assert_no_deadlock(&storage, before).await;
 }

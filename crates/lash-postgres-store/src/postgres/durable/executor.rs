@@ -522,7 +522,7 @@ impl Call {
         // The executions the commit ends are locked next, as publication
         // locks them: referrer, then artifact.
         steps.extend(
-            turns::lock_ending_executions(tx.actor(), tx.domain())
+            turns::lock_plan_steps(tx.actor(), tx.domain())
                 .ok()?
                 .iter()
                 .map(step_json),
