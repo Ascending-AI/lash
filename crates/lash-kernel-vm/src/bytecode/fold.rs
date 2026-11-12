@@ -58,6 +58,7 @@ pub(crate) fn fold(program: &mut Program) {
             unit.inlines[n].folds = (start, unit.folds.len() as u32);
         }
     }
+    super::lookup::derive(program);
 }
 
 /// What a path holds at an op: where each operand above the body's

@@ -273,6 +273,13 @@ impl Meter {
         self.used.saturating_add(units) <= self.limit
     }
 
+    /// Every prefix of this additional cost fits, before the slice ends.
+    pub(crate) fn fits_before_slice(&self, units: u64) -> bool {
+        self.used
+            .checked_add(units)
+            .is_some_and(|used| used <= self.limit && used < self.slice_end)
+    }
+
     /// A dynamic fee at an op that has billed `through` of its block: the
     /// reservation is cancelled and the fee billed on the exact path; the
     /// block continues event by event (contract §3).

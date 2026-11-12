@@ -2,6 +2,8 @@
 //! bound, its host's limiter grows the limit or refuses; a grown limit is
 //! saved with the run, and a run resumed from before the save asks again.
 
+mod lookup;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -598,6 +600,7 @@ struct Drive<'a> {
     /// Cancellation is latched from the start.
     cancel: bool,
     memory: u64,
+    typed: bool,
 }
 
 impl Default for Drive<'_> {
@@ -612,6 +615,7 @@ impl Default for Drive<'_> {
             cold: false,
             cancel: false,
             memory: ROOMY.memory,
+            typed: false,
         }
     }
 }
@@ -638,7 +642,12 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
         memory: how.memory,
         ..ROOMY
     };
-    let mut machine = match super::embedder::core_machine(text, bounds, Some(huge_charges)) {
+    let started = if how.typed {
+        lookup::machine(text, bounds)
+    } else {
+        super::embedder::core_machine(text, bounds, Some(huge_charges))
+    };
+    let mut machine = match started {
         Ok(machine) => machine,
         Err(refused) => {
             return Observed {
@@ -1104,6 +1113,26 @@ fn huge_charges(
         (
             "law.get",
             "function law.get(m: Any, k: Any) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return 0 }",
+            false,
+        ),
+        (
+            "law.word",
+            "function law.word(a: Any, b: Any, pad0?: Any, pad1?: Any, pad2?: Any, pad3?: Any, pad4?: Any, pad5?: Any, pad6?: Any, pad7?: Any, pad8?: Any, pad9?: Any, pad10?: Any, pad11?: Any, pad12?: Any, pad13?: Any, pad14?: Any, pad15?: Any) -> Any\nkernel 1\ncharge sum(4, size(a), size(b))\nnative\n{uses}body { return num.add(a, b) }",
+            false,
+        ),
+        (
+            "law.lookup",
+            "function law.lookup(m: Map(Any, Any), k: Text) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return invoke law.oops(m) }",
+            false,
+        ),
+        (
+            "law.strict_lookup",
+            "function law.strict_lookup(m: Map(Int, Int), k: Text) -> Any\nkernel 1\ncharge sum(6, deep(k))\n{uses}body { if law.holds(m, k) { return m[k] } return invoke law.oops(m) }",
+            false,
+        ),
+        (
+            "law.magnitude_lookup",
+            "function law.magnitude_lookup(m: Any, k: Any) -> Any\nkernel 1\ncharge magnitude(result)\n{uses}body { if law.holds(m, k) { return m[k] } return invoke law.oops(m) }",
             false,
         ),
         (

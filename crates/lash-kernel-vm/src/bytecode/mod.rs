@@ -17,6 +17,7 @@ pub(crate) mod fold;
 pub(crate) mod fuse;
 pub(crate) mod inline;
 pub(crate) mod library;
+mod lookup;
 pub(crate) mod lower;
 pub(crate) mod names;
 pub(crate) mod op;

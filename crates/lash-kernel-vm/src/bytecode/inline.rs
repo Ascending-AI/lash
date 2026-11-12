@@ -350,6 +350,7 @@ fn expand(
         steps,
         element: false,
         folds: (0, 0),
+        lookup_words: None,
     });
     Some(())
 }

@@ -23,6 +23,7 @@ mod frozen;
 mod fused;
 pub(crate) mod inline;
 mod library;
+pub(crate) mod lookup;
 pub(crate) mod loops;
 pub(crate) mod machine;
 pub(crate) mod members;
@@ -1288,6 +1289,15 @@ impl<H: Heap> Vm<H> {
                         let site = &unit.inlines[n as usize];
                         let call = &unit.calls[site.call as usize];
                         enter!(call, pc, rerun);
+                        // This recipe proves the map/text input check from the
+                        // declared signature. A miss takes every ordinary check.
+                        if let Some(recipe) = site.lookup_words
+                            && !(site.steps && self.meter.spent())
+                            && self.lookup_words(unit, recipe, top)?
+                        {
+                            pc = unit.lookup_words[recipe as usize].resume as usize;
+                            continue;
+                        }
                         if let Some(checked) = &call.checked {
                             self.check_arguments(checked, usize::from(call.argc))?;
                         }

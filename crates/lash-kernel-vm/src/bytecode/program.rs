@@ -195,6 +195,8 @@ pub struct Unit {
     pub inlines: Vec<InlineSite>,
     /// The guard paths' folds the inline sites name (`fold`).
     pub folds: Vec<Fold>,
+    /// A constant-key lookup followed by a word helper and a local store.
+    pub lookup_words: Vec<LookupWords>,
     /// The expression each op lowers, by its path under `site`. Ops added
     /// after sealing have none, and stand for the unit's root.
     pub origin: Vec<super::site_tables::Path>,
@@ -297,6 +299,24 @@ pub struct InlineSite {
     /// Its guard paths' folds (`fold`): where they start in the unit's
     /// folds and where they end, an empty span when no path folds.
     pub folds: (u32, u32),
+    pub lookup_words: Option<u32>,
+}
+
+/// Two body-derived folds with their original completion bills and blocks.
+#[derive(Clone, Copy)]
+pub struct LookupWords {
+    pub key: lash_kernel_doc::arena::ShortText,
+    pub lookup: u32,
+    pub words: u32,
+    pub get_callee: UnitId,
+    pub word_callee: UnitId,
+    pub get_fees: [u64; 2],
+    pub word_fees: [u64; 8],
+    pub operation: scalar::ScalarOp,
+    pub between: u64,
+    pub after: u64,
+    pub resume: u32,
+    pub destination: u16,
 }
 
 /// The most steps, and values made, of one fold.

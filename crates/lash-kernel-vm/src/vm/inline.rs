@@ -455,7 +455,7 @@ const LOOKUPS: usize = 32;
 impl Lookups {
     /// The proof cell of the read at `step`.
     #[inline]
-    fn cell(&self, step: &Step) -> &Cell<Option<PropertySlot>> {
+    pub(super) fn cell(&self, step: &Step) -> &Cell<Option<PropertySlot>> {
         let at = (std::ptr::from_ref(step) as usize).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         &self.0[at >> (usize::BITS - LOOKUPS.trailing_zeros())]
     }

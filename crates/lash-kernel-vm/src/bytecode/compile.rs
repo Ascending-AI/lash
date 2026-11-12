@@ -1707,6 +1707,7 @@ impl<'a> Compiler<'a> {
             trace_operands: Vec::new(),
             inlines: Vec::new(),
             folds: Vec::new(),
+            lookup_words: Vec::new(),
             origin,
             stated,
             declared,
