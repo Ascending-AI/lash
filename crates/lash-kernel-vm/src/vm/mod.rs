@@ -892,9 +892,14 @@ impl<H: Heap> Vm<H> {
     /// (`K-BND-002`): the top frame's [`Frame::depth`], read once.
     #[inline(always)]
     pub(crate) fn depth_full(&self) -> bool {
+        self.frame_depth() >= self.call_depth
+    }
+
+    #[inline(always)]
+    fn frame_depth(&self) -> u32 {
         #[cfg(test)]
         DEPTH_READS.with(|reads| reads.set(reads.get() + 1));
-        self.cx.depth() >= self.call_depth
+        self.cx.depth()
     }
 
     /// Pushes a frame of `unit` whose `argc` arguments are the top of the
@@ -942,21 +947,28 @@ impl<H: Heap> Vm<H> {
     ) -> Run<()> {
         // A frame that is no call takes no unit; the call it makes is
         // checked where it is made.
-        if self.depth_full() && entry.call {
+        let depth = self.frame_depth();
+        if depth >= self.call_depth && entry.call {
             return Err(Flow::from(Stop::bound(
                 self.exceeded(Bound::CallDepth, u64::from(self.call_depth)),
             )));
         }
-        self.admit(entry.cost)?;
+        self.admit_frame(entry.cost, closure)?;
         let base = self.cx.stack.len() - argc;
         let height = base + usize::from(entry.locals.max(argc as u16));
         if height > self.cx.stack.len() {
             self.cx.stack.resize(height, Value::Absent);
         }
         if entry.boxes {
-            self.box_locals(entry.unit, base)?;
+            let mark = self.held.len();
+            if let Some(closure) = closure {
+                self.held.push(Value::Closure(closure));
+            }
+            let boxed = self.box_locals(entry.unit, base);
+            self.held.truncate(mark);
+            boxed?;
         }
-        let depth = self.cx.depth() + u32::from(entry.call);
+        let depth = depth + u32::from(entry.call);
         self.cx.frames.push(Frame {
             unit: entry.unit,
             pc: 0,

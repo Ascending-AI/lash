@@ -243,14 +243,24 @@ impl<H: Heap> Vm<H> {
         }
         self.meter.leave();
         self.exact = true;
-        // The frame holds the closure only once entered.
+        self.push_frame(entry, argc, closure, None)
+    }
+
+    /// The frame holds its closure after entry. Until then only an
+    /// admission that collects needs a temporary root; a successful
+    /// admission reads no heap object and calls nobody.
+    #[inline(always)]
+    pub(super) fn admit_frame(&mut self, cost: u64, closure: Option<ArenaHandle>) -> Run<()> {
+        if self.heap.admit(cost).is_ok() {
+            return Ok(());
+        }
         let mark = self.held.len();
         if let Some(closure) = closure {
             self.held.push(Value::Closure(closure));
         }
-        let entered = self.push_frame(entry, argc, closure, None);
+        let admitted = self.admit_collected(cost);
         self.held.truncate(mark);
-        entered
+        admitted
     }
 
     /// Keeps the emptied list a call's nursery built into for the next
