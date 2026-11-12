@@ -435,7 +435,9 @@ async fn a_saved_cell_callable_has_a_checked_view_of_its_frozen_environment() {
                         Datum::Text("ts.function".into()),
                         Datum::Text(String::new()),
                         Datum::Text("saved".into()),
-                        Datum::Float(lash::workflow::document::Float::new(1.0)),
+                        Datum::Float(lash::workflow::document::Float::new(
+                            presentation.signature.params.len() as f64,
+                        )),
                         Datum::Null,
                         Datum::Record(Vec::new()),
                     ]),
