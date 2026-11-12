@@ -56,6 +56,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 packages: Arc::new(open_storage.lash_vm_artifact_store()),
+                package_storage: Arc::new(open_storage.lash_vm_artifact_store()),
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
@@ -74,6 +75,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                         packages: Arc::new(reopened.lash_vm_artifact_store()),
+                        package_storage: Arc::new(reopened.lash_vm_artifact_store()),
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<
                                 dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,
@@ -84,6 +86,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
                             as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
                     }
                 }),
+                interrupt: None,
             }
         })
     })

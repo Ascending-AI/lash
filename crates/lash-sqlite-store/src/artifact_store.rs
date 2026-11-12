@@ -84,8 +84,7 @@ lash_store_sql::statements! {
         /// Whether `?1`/`?2` is stored.
         select_exists = "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)";
 
-        /// A head `?1`/`?2`'s body offset and the blob its body points at;
-        /// no row for an artifact stored whole.
+        /// A head `?1`/`?2`'s body offset and the blob its body points at.
         select_env_body = "SELECT refs.body_at, (SELECT hash FROM blobs WHERE id = body.blob_ref)
              FROM artifact_refs AS refs
              LEFT JOIN artifact_refs AS body ON body.namespace = 'process_env_body'

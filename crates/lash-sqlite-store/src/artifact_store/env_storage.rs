@@ -128,11 +128,11 @@ pub(super) fn env_closure_tx(
     tx: &rusqlite::Connection,
     env_ref: &str,
 ) -> rusqlite::Result<Option<String>> {
-    let body_ref: Option<String> = tx
+    let body_ref: Option<Option<String>> = tx
         .statement(artifact_sql().refs.select_head_body_ref.sql())?
         .query_row(params![PROCESS_ENV_NAMESPACE, env_ref], |row| row.get(0))
         .optional()?;
-    let Some(body_ref) = body_ref else {
+    let Some(body_ref) = body_ref.flatten() else {
         return Ok(None);
     };
     hold_closure_tx(tx, &body_ref, || {
@@ -188,8 +188,7 @@ fn hold_closure_tx(
     Ok(())
 }
 
-/// A head's bytes with its body spliced back; `head` itself for an
-/// environment stored whole, none when its body is missing.
+/// A head's bytes with its body spliced back; none when its body is missing.
 pub(super) fn splice_env_body_conn(
     conn: &rusqlite::Connection,
     env_ref: &str,
@@ -204,10 +203,7 @@ pub(super) fn splice_env_body_conn(
         })
         .optional()
         .map_err(sqlite_error)?;
-    let Some((at, body)) = body else {
-        return Ok(Some(head));
-    };
-    let Some(body) = body else {
+    let Some((at, Some(body))) = body else {
         return Ok(None);
     };
     let Some(body) = SqliteStore::get_blob_conn(conn, &BlobRef(body))? else {

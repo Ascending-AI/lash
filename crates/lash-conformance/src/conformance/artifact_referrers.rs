@@ -1454,8 +1454,18 @@ impl ShareRun {
                 format!("{unheld} {labels}")
             });
         }
+        // A referrer has ended for package authority once it is fenced
+        // and reaches no module: its module share alone keeps it holding.
+        let ended = match handles
+            .package_storage
+            .package_referrer_ended(&self.publisher)
+            .await
+        {
+            Ok(ended) => ended.to_string(),
+            other => format!("{other:?}"),
+        };
         format!(
-            "env {environment}, publication {publication}, publisher {publisher}, first {}, second {}",
+            "env {environment}, publication {publication}, publisher {publisher}, first {}, second {}, ended {ended}",
             holders[0], holders[1]
         )
     }
@@ -1472,6 +1482,11 @@ enum ShareCut {
     SecondLost,
     /// The second end commits and its reply is lost; recovery replays it.
     SecondCommitted,
+    /// A crash takes the store while the first end's transaction is open;
+    /// recovery replays the end over what the crash left.
+    FirstInFlight,
+    /// A crash takes the store while the second end's transaction is open.
+    SecondInFlight,
 }
 
 /// End the publisher's two shares in `order`, reopening the store between
@@ -1482,6 +1497,7 @@ where
 {
     let fixture = make();
     let mut handles = fixture.open;
+    let mut reopen = fixture.reopen;
     let run = ShareRun::new(&handles).await;
     let mut seen = Vec::new();
     for (index, environment) in match order {
@@ -1499,18 +1515,38 @@ where
             (index, cut),
             (0, Some(ShareCut::FirstCommitted)) | (1, Some(ShareCut::SecondCommitted))
         );
-        if !lost {
+        let in_flight = matches!(
+            (index, cut),
+            (0, Some(ShareCut::FirstInFlight)) | (1, Some(ShareCut::SecondInFlight))
+        );
+        if in_flight {
+            #[expect(
+                clippy::expect_used,
+                reason = "the cut law runs in-flight cuts only where the fixture can cut"
+            )]
+            let interrupt = fixture
+                .interrupt
+                .as_ref()
+                .expect("the fixture cuts a transaction in flight");
+            // The end goes on over the original store; the crash's store
+            // replaces it.
+            let (_, crashed) = tokio::join!(
+                run.end_share(&handles, environment, index == 1),
+                interrupt()
+            );
+            reopen = crashed;
+        } else if !lost {
             let answer = run.end_share(&handles, environment, index == 1).await;
             if !committed {
                 seen.push(answer);
             }
         }
         // A reopen between the two ends, and after every cut.
-        if index == 0 || lost || committed {
+        if index == 0 || lost || committed || in_flight {
             drop(handles);
-            handles = (fixture.reopen)();
+            handles = reopen();
         }
-        if lost || committed {
+        if lost || committed || in_flight {
             seen.push(run.end_share(&handles, environment, index == 1).await);
         }
         seen.push(run.observe(&handles).await);
@@ -1527,27 +1563,27 @@ where
 /// environment's closure until that share ends, whatever its environment
 /// share does, and its environment share alone holds no module.
 fn share_answers(order: ShareOrder) -> Vec<String> {
-    let line = |environment: &str, publication: &str, first: &str, second: &str| {
+    let line = |environment: &str, publication: &str, first: &str, second: &str, ended: bool| {
         format!(
-            "env {environment}, publication {publication}, publisher ended, first {first}, second {second}"
+            "env {environment}, publication {publication}, publisher ended, first {first}, second {second}, ended {ended}"
         )
     };
     match order {
         ShareOrder::EnvironmentFirst => vec![
             "Ok(())".into(),
-            line("Ok(None)", "exact", "-", "-"),
+            line("Ok(None)", "exact", "-", "-", false),
             "carried".into(),
-            line("Ok(None)", "exact", "holds", "-"),
+            line("Ok(None)", "exact", "holds", "-", false),
             "Ok(())".into(),
-            line("Ok(None)", "exact", "holds", "holds"),
+            line("Ok(None)", "exact", "holds", "holds", true),
         ],
         ShareOrder::ModulesFirst => vec![
             "Ok(())".into(),
-            line("exact", "Ok(None)", "-", "-"),
+            line("exact", "Ok(None)", "-", "-", true),
             "refused".into(),
-            line("exact", "Ok(None)", "-", "-"),
+            line("exact", "Ok(None)", "-", "-", true),
             "Ok(())".into(),
-            line("Ok(None)", "Ok(None)", "-", "-"),
+            line("Ok(None)", "Ok(None)", "-", "-", true),
         ],
     }
 }
@@ -1571,18 +1607,27 @@ where
 }
 
 /// A crash at either end of [`module_share_outlives_environment_share_in_either_order`],
-/// recovered by replaying that end, answers as the uncut run (FIG-7700).
+/// recovered by replaying that end, answers as the uncut run (FIG-7700):
+/// before the end, after it commits, and, where the fixture can cut one,
+/// while its transaction is open.
 pub async fn module_share_survives_a_cut_between_its_ends<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
+    let in_flight = make().interrupt.is_some();
     for order in [ShareOrder::EnvironmentFirst, ShareOrder::ModulesFirst] {
         for cut in [
             ShareCut::FirstLost,
             ShareCut::FirstCommitted,
             ShareCut::SecondLost,
             ShareCut::SecondCommitted,
-        ] {
+            ShareCut::FirstInFlight,
+            ShareCut::SecondInFlight,
+        ]
+        .into_iter()
+        .filter(|cut| {
+            in_flight || !matches!(cut, ShareCut::FirstInFlight | ShareCut::SecondInFlight)
+        }) {
             assert_eq!(
                 share_run(&make, order, Some(cut)).await,
                 share_answers(order),

@@ -18,6 +18,7 @@ fn artifact_store_handles(
     let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
         packages: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStore>,
+        package_storage: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStorage>,
         artifacts: Arc::clone(&store)
             as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         process_env: Arc::clone(&store) as Arc<dyn ProcessEnvStore>,
@@ -89,6 +90,7 @@ lash_conformance::artifact_store_reopenable_tests!(@catalogue {
                 keep_reopen.keep(&reopened);
                 artifact_store_handles(&reopened)
             }),
+            interrupt: None,
         }
     })
 }; [
@@ -277,3 +279,132 @@ lash_conformance::attachment_condemnation_recovery_tests!({
         move || async move { reopen.reopen().await.store().await as Arc<dyn DeploymentStore> },
     )
 });
+
+/// Handles over a file store set opened on `path` alone, with `pauses` in
+/// its connections. Nothing else keeps the store set, so dropping the
+/// handles closes the database.
+fn file_artifact_handles(
+    path: &std::path::Path,
+    pauses: &lash_sqlite_store::testing::SqlitePauses,
+) -> lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+    let path = path.to_owned();
+    let pauses = pauses.clone();
+    let store = sync_await(async move {
+        lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
+            path,
+            lash_sqlite_store::SqliteStoreSetOptions {
+                pauses: Some(pauses),
+                ..lash_sqlite_store::SqliteStoreSetOptions::standard(
+                    lash_sqlite_store::SqliteSynchronous::Normal,
+                )
+            },
+            Arc::new(lash_core_ids::clock::SystemClock),
+        )
+        .await
+        .expect("open the file store set")
+        .open_store()
+        .await
+        .expect("open the file store")
+    });
+    lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+        packages: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStore>,
+        package_storage: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStorage>,
+        artifacts: Arc::clone(&store)
+            as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
+        process_env: Arc::clone(&store) as Arc<dyn ProcessEnvStore>,
+        turn_preludes: store as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
+    }
+}
+
+/// Wait until this process holds no descriptor on the database at `path`
+/// or its write-ahead log: the dropped store set has closed them.
+fn await_closed(path: &std::path::Path) {
+    let names: Vec<std::path::PathBuf> = ["", "-wal", "-shm"]
+        .iter()
+        .map(|suffix| {
+            let mut name = path.as_os_str().to_owned();
+            name.push(suffix);
+            std::path::PathBuf::from(name)
+        })
+        .collect();
+    let open = || {
+        std::fs::read_dir("/proc/self/fd")
+            .expect("list this process's descriptors")
+            .filter_map(|entry| std::fs::read_link(entry.ok()?.path()).ok())
+            .any(|target| names.contains(&target))
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while open() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the store set never closed {}",
+            path.display()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// A reopen of the file at `path`: the previous handles' database is
+/// closed first, so the reopened store reads only what the file holds.
+fn reopen_file(
+    path: std::path::PathBuf,
+    pauses: lash_sqlite_store::testing::SqlitePauses,
+) -> lash_conformance::fused_artifact_store::Reopen {
+    Arc::new(move || {
+        await_closed(&path);
+        file_artifact_handles(&path, &pauses)
+    })
+}
+
+// The module-share laws over a real file close and reopen between the two
+// ends, and a crash while an end's transaction is open: the store's writer
+// pauses with its transaction begun and fenced, the database and its log are
+// copied as a crash there leaves them, and the recovery opens the copy
+// (FIG-7700).
+lash_conformance::artifact_referrer_tests!(@catalogue {
+    let kept: Retained<Arc<tempfile::TempDir>> = Retained::default();
+    (kept.clone(), move || {
+        let dir = Arc::new(tempfile::tempdir().expect("file store tempdir"));
+        kept.keep(&dir);
+        let path = dir.path().join("lash.db");
+        let pauses = lash_sqlite_store::testing::SqlitePauses::default();
+        let kept = kept.clone();
+        let interrupt_pauses = pauses.clone();
+        let interrupt_path = path.clone();
+        lash_conformance::fused_artifact_store::ReopenableArtifactStore {
+            open: file_artifact_handles(&path, &pauses),
+            reopen: reopen_file(path, pauses),
+            interrupt: Some(Arc::new(move || {
+                let pause = interrupt_pauses.pause_after_fence();
+                let source = interrupt_path.clone();
+                let crashed = Arc::new(tempfile::tempdir().expect("crash copy tempdir"));
+                kept.keep(&crashed);
+                Box::pin(async move {
+                    pause.wait_until_reached().await;
+                    let target = crashed.path().join("lash.db");
+                    for suffix in ["", "-wal"] {
+                        let mut from = source.as_os_str().to_owned();
+                        from.push(suffix);
+                        let mut to = target.as_os_str().to_owned();
+                        to.push(suffix);
+                        if std::path::Path::new(&from).exists() {
+                            std::fs::copy(&from, &to).expect("copy the crashed database");
+                        }
+                    }
+                    pause.release();
+                    reopen_file(target, lash_sqlite_store::testing::SqlitePauses::default())
+                })
+                    as std::pin::Pin<
+                        Box<
+                            dyn std::future::Future<
+                                    Output = lash_conformance::fused_artifact_store::Reopen,
+                                > + Send,
+                        >,
+                    >
+            })),
+        }
+    })
+}; [
+    (module_share_outlives_environment_share_in_either_order, "module-share-end-orders"),
+    (module_share_survives_a_cut_between_its_ends, "module-share-crash-cuts"),
+]);

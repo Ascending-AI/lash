@@ -785,11 +785,10 @@ impl lash_execution_contracts::process::ProcessRegistryTestSupport for SqlitePro
     }
 }
 
-/// An environment row as one statement read it: its head blob and, for a
-/// head, its body's offset and blob (FIG-7700).
+/// An environment row as one statement read it: its head blob and its
+/// body's offset and blob (FIG-7700).
 struct StoredEnvironment {
     head: Option<Vec<u8>>,
-    body_ref: Option<String>,
     body_at: Option<i64>,
     body: Option<Vec<u8>>,
 }
@@ -798,9 +797,8 @@ impl StoredEnvironment {
     fn read(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Self> {
         Ok(Self {
             head: row.get(at)?,
-            body_ref: row.get(at + 1)?,
-            body_at: row.get(at + 2)?,
-            body: row.get(at + 3)?,
+            body_at: row.get(at + 1)?,
+            body: row.get(at + 2)?,
         })
     }
 
@@ -809,9 +807,6 @@ impl StoredEnvironment {
         let missing =
             || stored_data_corrupt("process environment", "artifact points at a missing blob");
         let head = crate::codec::decode_artifact_blob(&self.head.ok_or_else(missing)?)?;
-        if self.body_ref.is_none() {
-            return Ok(head);
-        }
         let body = crate::codec::decode_artifact_blob(&self.body.ok_or_else(missing)?)?;
         crate::artifact_store::splice_env_parts(&head, self.body_at.ok_or_else(missing)?, &body)
     }
@@ -864,9 +859,8 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
                                 .map(|head| {
                                     Ok::<_, rusqlite::Error>(StoredEnvironment {
                                         head: Some(head),
-                                        body_ref: row.get(4)?,
-                                        body_at: row.get(5)?,
-                                        body: row.get(6)?,
+                                        body_at: row.get(4)?,
+                                        body: row.get(5)?,
                                     })
                                 })
                                 .transpose()?;

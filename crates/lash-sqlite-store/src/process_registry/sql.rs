@@ -55,14 +55,14 @@ lash_store_sql::statements! {
         /// Environment bytes by reference without executable reconstruction.
         /// With a head's body offset and body blob, spliced by the caller
         /// in the same snapshot (FIG-7700).
-        select_environment_bytes = "SELECT b.content, a.body_ref, a.body_at, body_blob.content
+        select_environment_bytes = "SELECT b.content, a.body_at, body_blob.content
              FROM artifact_refs a LEFT JOIN blobs b ON b.id = a.blob_ref
              LEFT JOIN artifact_refs body ON body.namespace = 'process_env_body' AND body.artifact_ref = a.body_ref
              LEFT JOIN blobs body_blob ON body_blob.id = body.blob_ref
              WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
 
         /// A retained process and its environment bytes, or its prune tombstone, atomically.
-        select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json, b.content, NULL, NULL, a.body_ref, a.body_at, body_blob.content
+        select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json, b.content, NULL, NULL, a.body_at, body_blob.content
              FROM processes p
              LEFT JOIN artifact_refs a ON a.namespace = ?2
                AND a.artifact_ref = json_extract(p.execution_json, '$.input.launch.env')
@@ -71,7 +71,7 @@ lash_store_sql::statements! {
              LEFT JOIN blobs body_blob ON body_blob.id = body.blob_ref
              WHERE p.process_id = ?1
              UNION ALL
-             SELECT NULL, NULL, terminal_label, pruned_at_ms, NULL, NULL, NULL
+             SELECT NULL, NULL, terminal_label, pruned_at_ms, NULL, NULL
              FROM process_tombstones WHERE process_id = ?1";
 
         /// No conflict clause: the row was read as absent under the same
