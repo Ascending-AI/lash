@@ -71,6 +71,19 @@ lash_store_sql::statements! {
              VALUES (?1, ?2, COALESCE((SELECT id FROM blobs WHERE hash = ?3), CASE WHEN ?3 IS NOT NULL THEN -1 END), ?4, ?5)
              ON CONFLICT (namespace, artifact_ref) DO NOTHING";
 
+        /// Point closure `?1`/`?2` at the blob of the body `?3`/`?2`: a
+        /// closure has no bytes of its own (FIG-7700).
+        insert_closure_pointer = "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
+             SELECT ?1, ?2, blob_ref FROM artifact_refs WHERE namespace = ?3 AND artifact_ref = ?2
+             ON CONFLICT (namespace, artifact_ref) DO NOTHING";
+
+        /// The body reference head `?1`/`?2` splices back.
+        select_head_body_ref = "SELECT body_ref FROM artifact_refs
+             WHERE namespace = ?1 AND artifact_ref = ?2";
+
+        /// Whether `?1`/`?2` is stored.
+        select_exists = "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)";
+
         /// A head `?1`/`?2`'s body offset and the blob its body points at;
         /// no row for an artifact stored whole.
         select_env_body = "SELECT refs.body_at, (SELECT hash FROM blobs WHERE id = body.blob_ref)
@@ -155,6 +168,9 @@ pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 /// Where environment bodies live, beside the heads at their references.
 pub(crate) const PROCESS_ENV_BODY_NAMESPACE: &str =
     lash_core_store::process_env::stored::BODY_NAMESPACE;
+/// Where environment bodies' module closures live (FIG-7700).
+pub(crate) const PROCESS_ENV_CLOSURE_NAMESPACE: &str =
+    lash_core_store::process_env::stored::CLOSURE_NAMESPACE;
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
@@ -165,6 +181,7 @@ const LOCAL_ARTIFACT_NAMESPACES: lash_store_sql::Vocabulary =
         |column| {
             let names = [
                 MODULE_ARTIFACT_NAMESPACE,
+                PROCESS_ENV_CLOSURE_NAMESPACE,
                 PROCESS_ENV_NAMESPACE,
                 PROCESS_DEFINITION_NAMESPACE,
                 TURN_PRELUDE_NAMESPACE,
@@ -177,7 +194,7 @@ const LOCAL_ARTIFACT_NAMESPACES: lash_store_sql::Vocabulary =
 
 mod env_storage;
 pub(crate) use env_storage::splice_env_parts;
-use env_storage::{splice_env_body_conn, store_process_env_tx};
+use env_storage::{env_closure_tx, splice_env_body_conn, store_process_env_tx};
 mod held;
 #[path = "artifact_store/packages.rs"]
 mod packages;
@@ -307,18 +324,37 @@ pub(crate) fn acquire_process_env_tx(
         }
         .into());
     }
-    // The head holds its closure: the start's one edge keeps all of it.
-    crate::conn::cached_execute(
-        tx,
-        artifact_sql().edges.insert_edge.sql(),
-        params![
-            PROCESS_ENV_NAMESPACE,
-            env.as_str(),
-            referrer.kind().as_str(),
-            referrer.canonical_id()
-        ],
-    )
-    .map_err(artifact_sqlite_error)?;
+    hold_env_shares_tx(tx, env.as_str(), &referrer).map_err(artifact_sqlite_error)?;
+    Ok(())
+}
+
+/// Give `referrer` both shares of stored environment `env_ref`: an edge to
+/// its head and one to its module closure (FIG-7700).
+fn hold_env_shares_tx(
+    tx: &rusqlite::Connection,
+    env_ref: &str,
+    referrer: &ArtifactReferrer,
+) -> rusqlite::Result<()> {
+    let closure = env_closure_tx(tx, env_ref)?.ok_or_else(|| {
+        artifact_failure(ArtifactStoreError::ArtifactMissing {
+            artifact_ref: env_ref.to_owned(),
+        })
+    })?;
+    for (namespace, artifact_ref) in [
+        (PROCESS_ENV_NAMESPACE, env_ref),
+        (PROCESS_ENV_CLOSURE_NAMESPACE, closure.as_str()),
+    ] {
+        crate::conn::cached_execute(
+            tx,
+            artifact_sql().edges.insert_edge.sql(),
+            params![
+                namespace,
+                artifact_ref,
+                referrer.kind().as_str(),
+                referrer.canonical_id()
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -387,7 +423,18 @@ impl SqliteStore {
                         .map_err(sqlite_conversion_error)?;
                 }
                 if namespace == PROCESS_ENV_NAMESPACE {
-                    store_process_env_tx(tx, &artifact_ref, &bytes, blob_profile, tx.fleet())?;
+                    let closure =
+                        store_process_env_tx(tx, &artifact_ref, &bytes, blob_profile, tx.fleet())?;
+                    crate::conn::cached_execute(
+                        tx,
+                        artifact_sql().edges.insert_edge.sql(),
+                        params![
+                            PROCESS_ENV_CLOSURE_NAMESPACE,
+                            closure,
+                            referrer.kind().as_str(),
+                            referrer.canonical_id()
+                        ],
+                    )?;
                 } else {
                     let blob_ref = Self::insert_artifact_blob_conn(
                         tx,
@@ -461,6 +508,9 @@ impl SqliteStore {
                 crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                     .map_err(sqlite_conversion_error)?;
             }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                return hold_env_shares_tx(tx, &artifact_ref, referrer);
+            }
             crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
                 params![namespace, artifact_ref, referrer.kind().as_str(), referrer.canonical_id()])?;
             Ok(())
@@ -507,36 +557,48 @@ impl SqliteStore {
     }
 
     /// Fence, carry, sever and reclaim in the owner's existing transaction.
+    /// A module share includes the referrer's environment closures; an
+    /// environment carried to a referrer gives it both shares (FIG-7700).
     pub(crate) fn end_namespaced_tx(
         tx: &rusqlite::Connection,
         namespace: &str,
         cleanup: &ResolvedArtifactCleanup,
         now_ms: u64,
     ) -> rusqlite::Result<()> {
-        let refs: Vec<String> = {
+        let shares = if namespace == MODULE_ARTIFACT_NAMESPACE {
+            vec![MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_CLOSURE_NAMESPACE]
+        } else {
+            vec![namespace]
+        };
+        let mut refs = Vec::new();
+        for share in &shares {
             let mut stmt = tx.statement(
                 artifact_sql()
                     .edges
                     .select_referrer_edges_in_namespace
                     .sql(),
             )?;
-            stmt.query_map(
-                params![
-                    namespace,
-                    cleanup.referrer.kind().as_str(),
-                    cleanup.referrer.canonical_id()
-                ],
-                |row| {
-                    let artifact_ref = row.get(1)?;
-                    let kind: String = row.get(2)?;
-                    let id: String = row.get(3)?;
-                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
-                    Ok(artifact_ref)
-                },
-            )?
-            .collect::<rusqlite::Result<_>>()?
-        };
-        if refs.is_empty() && artifact_fenced_tx(tx, &cleanup.referrer)? {
+            let found: Vec<String> = stmt
+                .query_map(
+                    params![
+                        share,
+                        cleanup.referrer.kind().as_str(),
+                        cleanup.referrer.canonical_id()
+                    ],
+                    |row| {
+                        let artifact_ref = row.get(1)?;
+                        let kind: String = row.get(2)?;
+                        let id: String = row.get(3)?;
+                        decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+                        Ok(artifact_ref)
+                    },
+                )?
+                .collect::<rusqlite::Result<_>>()?;
+            refs.push((*share, found));
+        }
+        if refs.iter().all(|(_, found)| found.is_empty())
+            && artifact_fenced_tx(tx, &cleanup.referrer)?
+        {
             return Ok(());
         }
         fence_artifact_referrer_tx(tx, &cleanup.referrer, now_ms)?;
@@ -548,13 +610,18 @@ impl SqliteStore {
                 continue;
             }
             let artifact_ref = &carry.artifact.artifact_ref;
-            let exists: bool = tx.statement("SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)").and_then(|mut statement| statement.query_row(
-                    params![namespace, artifact_ref], |row| row.get(0)))?;
+            let exists: bool = tx
+                .statement(artifact_sql().refs.select_exists.sql())?
+                .query_row(params![namespace, artifact_ref], |row| row.get(0))?;
             if !exists {
                 return Err(artifact_failure(ArtifactStoreError::CarryArtifactMissing {
                     artifact_ref: artifact_ref.clone(),
                     to: carry.to.clone(),
                 }));
+            }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                hold_env_shares_tx(tx, artifact_ref, &carry.to)?;
+                continue;
             }
             crate::conn::cached_execute(
                 tx,
@@ -567,19 +634,22 @@ impl SqliteStore {
                 ],
             )?;
         }
-        crate::conn::cached_execute(
-            tx,
-            artifact_sql()
-                .edges
-                .delete_referrer_edges_in_namespace
-                .sql(),
-            params![
-                namespace,
-                cleanup.referrer.kind().as_str(),
-                cleanup.referrer.canonical_id()
-            ],
-        )?;
-        Self::reclaim_unreferenced_artifacts_tx(tx, namespace, &refs)
+        for (share, found) in &refs {
+            crate::conn::cached_execute(
+                tx,
+                artifact_sql()
+                    .edges
+                    .delete_referrer_edges_in_namespace
+                    .sql(),
+                params![
+                    share,
+                    cleanup.referrer.kind().as_str(),
+                    cleanup.referrer.canonical_id()
+                ],
+            )?;
+            Self::reclaim_unreferenced_artifacts_tx(tx, share, found)?;
+        }
+        Ok(())
     }
 
     /// The database-owned share of an end. The obligation remains until

@@ -114,6 +114,37 @@ BEGIN
     RETURN NULL;
 END
 $lash_acquire_holds$;
+CREATE OR REPLACE FUNCTION lash_acquire_env(p_env text, p_kind text, p_id text, p_write boolean)
+RETURNS text[] LANGUAGE plpgsql VOLATILE AS $lash_acquire_env$
+DECLARE
+    v_body text;
+BEGIN
+    SELECT body_ref INTO v_body FROM lash_lash_vm_artifacts
+        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env;
+    IF v_body IS NULL THEN
+        RETURN ARRAY['absent', NULL];
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0));
+    -- This statement starts after the closure's lock wait.
+    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
+        RETURN ARRAY['closure', v_body];
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:process_execution_env:' || p_env, 0));
+    IF NOT p_write THEN
+        RETURN ARRAY['locked', v_body];
+    END IF;
+    -- This statement starts after the head's lock wait.
+    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env) THEN
+        RETURN ARRAY['missing', v_body];
+    END IF;
+    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+        VALUES ('process_execution_env', p_env, p_kind, p_id), ('env_closure', v_body, p_kind, p_id)
+        ON CONFLICT DO NOTHING;
+    RETURN ARRAY['held', v_body];
+END
+$lash_acquire_env$;
 "#
     .to_owned()
 }

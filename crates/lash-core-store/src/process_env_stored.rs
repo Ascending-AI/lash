@@ -1,18 +1,28 @@
-//! How a store keeps a published environment's exact bytes: a shared body
-//! and a small head (FIG-7700).
+//! How a store keeps a published environment's exact bytes: a shared body,
+//! a small head and the body's module closure (FIG-7700).
 //!
 //! The body is one contiguous span of the environment's top-level members
 //! other than `components` and `capabilities`, stored once under a
 //! content address of its bytes. The head is the remaining bytes, kept at
 //! the environment's own reference with the offset the body splices back
 //! at. Reads rebuild the original bytes exactly, whatever spelling the
-//! publisher used; a spelling this split cannot represent is stored whole.
+//! publisher used; a spelling this split cannot represent is all body
+//! under an empty head.
+//!
+//! The modules the body names are held by a closure artifact at the body's
+//! reference in [`CLOSURE_NAMESPACE`], not by the body: a referrer's
+//! environment share holds the head (and so the body), its module share
+//! holds the closure, and each share keeps what it holds until it ends.
 
 /// The members a head keeps. Every other top-level member is the body's.
 const HEAD_MEMBERS: [&[u8]; 2] = [b"components", b"capabilities"];
 
 /// The namespace bodies are stored under, beside the environments' own.
 pub const BODY_NAMESPACE: &str = "process_env_body";
+
+/// The namespace of a body's module closure, at the body's reference. A
+/// closure's lock key sorts before every module's, head's and body's.
+pub const CLOSURE_NAMESPACE: &str = "env_closure";
 
 /// version_surface = "coexist"
 /// version_guard(items(PROCESS_ENV_BODY_PREFIX_VERSION, body_ref))
@@ -35,15 +45,33 @@ pub struct StoredSplit {
     pub body_ref: String,
 }
 
-/// Split `bytes` into a head and a body, or `None` when they are not one
-/// top-level object whose body members form one span with no head member
-/// between them.
+/// Split `bytes` into a head and a body. Bytes that are not one top-level
+/// object whose body members form one span with no head member between
+/// them are all body under an empty head.
 #[must_use]
-pub fn split(bytes: &[u8]) -> Option<StoredSplit> {
-    let members = top_level_members(bytes)?;
+pub fn split(bytes: &[u8]) -> StoredSplit {
+    let (head, at, body) = match body_span(bytes) {
+        Some((start, end)) => {
+            let mut head = Vec::with_capacity(bytes.len() - (end - start));
+            head.extend_from_slice(&bytes[..start]);
+            head.extend_from_slice(&bytes[end..]);
+            (head, start, bytes[start..end].to_vec())
+        }
+        None => (Vec::new(), 0, bytes.to_vec()),
+    };
+    StoredSplit {
+        head,
+        at,
+        body_ref: body_ref(&body),
+        body,
+    }
+}
+
+/// The one span the body members of `bytes` form, if they form one.
+fn body_span(bytes: &[u8]) -> Option<(usize, usize)> {
     let mut body: Option<(usize, usize)> = None;
     let mut head_after_body = false;
-    for (key, start, end) in members {
+    for (key, start, end) in top_level_members(bytes)? {
         if HEAD_MEMBERS.contains(&key) {
             head_after_body |= body.is_some();
             continue;
@@ -53,17 +81,7 @@ pub fn split(bytes: &[u8]) -> Option<StoredSplit> {
         }
         body = Some(body.map_or((start, end), |(first, _)| (first, end)));
     }
-    let (start, end) = body?;
-    let body = bytes[start..end].to_vec();
-    let mut head = Vec::with_capacity(bytes.len() - body.len());
-    head.extend_from_slice(&bytes[..start]);
-    head.extend_from_slice(&bytes[end..]);
-    Some(StoredSplit {
-        head,
-        at: start,
-        body_ref: body_ref(&body),
-        body,
-    })
+    body
 }
 
 /// The content address of a body's bytes.

@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 44.
+-- lash-postgres-store schema, component version 45.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -974,7 +974,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 44, 44)
+VALUES ('lash-postgres-store', 45, 45)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable
@@ -3020,6 +3020,37 @@ BEGIN
     RETURN NULL;
 END
 $lash_acquire_holds$;
+CREATE OR REPLACE FUNCTION lash_acquire_env(p_env text, p_kind text, p_id text, p_write boolean)
+RETURNS text[] LANGUAGE plpgsql VOLATILE AS $lash_acquire_env$
+DECLARE
+    v_body text;
+BEGIN
+    SELECT body_ref INTO v_body FROM lash_lash_vm_artifacts
+        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env;
+    IF v_body IS NULL THEN
+        RETURN ARRAY['absent', NULL];
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0));
+    -- This statement starts after the closure's lock wait.
+    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
+        RETURN ARRAY['closure', v_body];
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:process_execution_env:' || p_env, 0));
+    IF NOT p_write THEN
+        RETURN ARRAY['locked', v_body];
+    END IF;
+    -- This statement starts after the head's lock wait.
+    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env) THEN
+        RETURN ARRAY['missing', v_body];
+    END IF;
+    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+        VALUES ('process_execution_env', p_env, p_kind, p_id), ('env_closure', v_body, p_kind, p_id)
+        ON CONFLICT DO NOTHING;
+    RETURN ARRAY['held', v_body];
+END
+$lash_acquire_env$;
 CREATE OR REPLACE FUNCTION lash_publish_env_over_stored_body(
     p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea,
     p_modules text[], p_kind text, p_id text,
@@ -3050,15 +3081,18 @@ BEGIN
     IF missing IS NOT NULL THEN
         RETURN;
     END IF;
+    INSERT INTO lash_lash_vm_artifacts (namespace, artifact_ref, storage_kind, artifact_bytes)
+        VALUES ('env_closure', p_body_ref, 0, ''::bytea)
+        ON CONFLICT (namespace, artifact_ref) DO NOTHING;
     INSERT INTO lash_artifact_dependency_edges (namespace, artifact_ref, holder_namespace, holder_ref)
-        SELECT 'kernel_document', wanted.artifact_ref, 'process_env_body', p_body_ref
+        SELECT 'kernel_document', wanted.artifact_ref, 'env_closure', p_body_ref
         FROM unnest(p_modules) AS wanted(artifact_ref)
         ON CONFLICT DO NOTHING;
     INSERT INTO lash_artifact_dependency_edges (namespace, artifact_ref, holder_namespace, holder_ref)
         VALUES ('process_env_body', p_body_ref, 'process_execution_env', p_env_ref)
         ON CONFLICT DO NOTHING;
     INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
-        VALUES ('process_execution_env', p_env_ref, p_kind, p_id)
+        VALUES ('process_execution_env', p_env_ref, p_kind, p_id), ('env_closure', p_body_ref, p_kind, p_id)
         ON CONFLICT DO NOTHING;
 END
 $lash_publish_env_over_stored_body$;

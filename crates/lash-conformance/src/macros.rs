@@ -927,6 +927,8 @@ macro_rules! artifact_referrer_tests {
             (process_env_spellings_read_back_exactly, "process-env-exact-spellings"),
             (environment_holders_answer_package_authority_as_direct_holders, "process-env-package-authority"),
             (environment_retention_survives_a_cut_at_every_step, "process-env-crash-cuts"),
+            (module_share_outlives_environment_share_in_either_order, "module-share-end-orders"),
+            (module_share_survives_a_cut_between_its_ends, "module-share-crash-cuts"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);

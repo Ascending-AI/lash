@@ -7,8 +7,9 @@ use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_core_store::store::StoreError;
 use lash_protocol_types::EffectJournalIdentity;
 
-pub(super) const NAMESPACES: [&str; 4] = [
+pub(super) const NAMESPACES: [&str; 5] = [
     super::MODULE_ARTIFACT_NAMESPACE,
+    super::PROCESS_ENV_CLOSURE_NAMESPACE,
     super::PROCESS_DEFINITION_NAMESPACE,
     super::PROCESS_ENV_NAMESPACE,
     super::TURN_PRELUDE_NAMESPACE,

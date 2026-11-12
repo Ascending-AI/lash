@@ -1174,28 +1174,14 @@ where
         "a bystander may not label"
     );
 
-    // Release as the cleanup relay applies it: the module share carries the
-    // publication to a pin, then the environment share carries the
-    // environment to the process.
+    // Release as the cleanup relay applies it: the environment share carries
+    // the environment to the process, then the module share carries the
+    // publication to a pin.
     let (pin, carried_claim) = pin_claim();
     let process = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
         "env-authority",
     ));
     let process_claim = ReferrerClaim::unguarded(process.clone()).expect("process claim");
-    handles
-        .artifacts
-        .end_module_referrer(&ResolvedArtifactCleanup {
-            referrer: start.clone(),
-            carries: vec![ArtifactCarry {
-                artifact: ArtifactName {
-                    store: ArtifactStoreId::module(),
-                    artifact_ref: lash_durable::packages::publication_reference(&origin.key),
-                },
-                to: pin.clone(),
-            }],
-        })
-        .await
-        .expect("start's module share carries the publication");
     handles
         .process_env
         .end_process_env_referrer(&ResolvedArtifactCleanup {
@@ -1210,6 +1196,20 @@ where
         })
         .await
         .expect("start's environment share carries the environment");
+    handles
+        .artifacts
+        .end_module_referrer(&ResolvedArtifactCleanup {
+            referrer: start.clone(),
+            carries: vec![ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::module(),
+                    artifact_ref: lash_durable::packages::publication_reference(&origin.key),
+                },
+                to: pin.clone(),
+            }],
+        })
+        .await
+        .expect("start's module share carries the publication");
     let reopened = (fixture.reopen)();
     let (unheld, labels) = package_authority(&*reopened.packages, &start_claim, &origin).await;
     assert!(
@@ -1260,6 +1260,15 @@ where
         .end_process_env_referrer(&end(republisher.clone()))
         .await
         .expect("republisher environment ends");
+    assert_eq!(
+        reopened
+            .packages
+            .publication(&origin.key)
+            .await
+            .expect("read"),
+        Some(origin.publication.clone()),
+        "the republisher's module share outlives its environment share"
+    );
     reopened
         .artifacts
         .end_module_referrer(&end(republisher))
@@ -1284,6 +1293,305 @@ where
     );
 }
 
+/// Which of a referrer's two shares ends first.
+#[derive(Clone, Copy, Debug)]
+enum ShareOrder {
+    EnvironmentFirst,
+    ModulesFirst,
+}
+
+/// One run of [`module_share_outlives_environment_share_in_either_order`]:
+/// a publisher holds an environment through both its shares; `bystander`
+/// holds nothing and carries the publication to `first`; the publisher's
+/// own module end carries it to `second`.
+struct ShareRun {
+    origin: OriginEnv,
+    publisher: ArtifactReferrer,
+    publisher_claim: ReferrerClaim,
+    bystander: ArtifactReferrer,
+    first: (ArtifactReferrer, ReferrerClaim),
+    second: (ArtifactReferrer, ReferrerClaim),
+}
+
+impl ShareRun {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance fixture validates each store step"
+    )]
+    async fn new(handles: &crate::fused_artifact_store::ArtifactStoreHandles) -> Self {
+        let origin = origin_env(handles, false).await;
+        let (publisher, publisher_claim) = pin_claim();
+        handles
+            .process_env
+            .publish_process_env(&publisher_claim, &origin.env_ref, &origin.bytes)
+            .await
+            .expect("publish env");
+        handles
+            .artifacts
+            .end_module_referrer(&end(origin.configured.clone()))
+            .await
+            .expect("configured ends");
+        Self {
+            origin,
+            publisher,
+            publisher_claim,
+            bystander: pin_claim().0,
+            first: pin_claim(),
+            second: pin_claim(),
+        }
+    }
+
+    /// The publisher's environment share ends.
+    async fn end_environment(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+    ) -> String {
+        format!(
+            "{:?}",
+            handles
+                .process_env
+                .end_process_env_referrer(&end(self.publisher.clone()))
+                .await
+        )
+    }
+
+    /// The publisher's module share ends; as its second end it carries the
+    /// publication to `second`.
+    async fn end_modules(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+        carries: bool,
+    ) -> String {
+        let carries = if carries {
+            vec![carry(
+                ArtifactStoreId::module(),
+                lash_durable::packages::publication_reference(&self.origin.key),
+                &self.second.0,
+            )]
+        } else {
+            Vec::new()
+        };
+        format!(
+            "{:?}",
+            handles
+                .artifacts
+                .end_module_referrer(&ResolvedArtifactCleanup {
+                    referrer: self.publisher.clone(),
+                    carries,
+                })
+                .await
+        )
+    }
+
+    /// The publisher's environment share ends, or its module share.
+    async fn end_share(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+        environment: bool,
+        second: bool,
+    ) -> String {
+        if environment {
+            self.end_environment(handles).await
+        } else {
+            self.end_modules(handles, second).await
+        }
+    }
+
+    /// A referrer holding nothing carries the publication to `first`.
+    async fn bystander_carries(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+    ) -> String {
+        let answer = handles
+            .artifacts
+            .end_module_referrer(&ResolvedArtifactCleanup {
+                referrer: self.bystander.clone(),
+                carries: vec![carry(
+                    ArtifactStoreId::module(),
+                    lash_durable::packages::publication_reference(&self.origin.key),
+                    &self.first.0,
+                )],
+            })
+            .await;
+        match answer {
+            Ok(()) => "carried".to_owned(),
+            Err(_) => "refused".to_owned(),
+        }
+    }
+
+    /// The environment's and the publication's bytes, the publisher's
+    /// authority, and whether each carry destination holds the publication.
+    async fn observe(&self, handles: &crate::fused_artifact_store::ArtifactStoreHandles) -> String {
+        let environment = match handles
+            .process_env
+            .get_process_env(&self.origin.env_ref)
+            .await
+        {
+            Ok(Some(bytes)) if bytes == self.origin.bytes => "exact".to_owned(),
+            other => format!("{other:?}"),
+        };
+        let publication = match handles.packages.publication(&self.origin.key).await {
+            Ok(Some(record)) if record == self.origin.publication => "exact".to_owned(),
+            other => format!("{other:?}"),
+        };
+        let (unheld, labels) =
+            package_authority(&*handles.packages, &self.publisher_claim, &self.origin).await;
+        let publisher = if unheld.contains("ReferrerEnded") && labels.contains("ReferrerEnded") {
+            "ended".to_owned()
+        } else {
+            format!("{unheld} {labels}")
+        };
+        let mut holders = Vec::new();
+        for (_, claim) in [&self.first, &self.second] {
+            let (unheld, labels) = package_authority(&*handles.packages, claim, &self.origin).await;
+            holders.push(if unheld == "Ok({})" && labels == "Ok(())" {
+                "holds".to_owned()
+            } else if unheld == format!("Ok({{{:?}}})", self.origin.key)
+                && labels.contains("Missing")
+            {
+                "-".to_owned()
+            } else {
+                format!("{unheld} {labels}")
+            });
+        }
+        format!(
+            "env {environment}, publication {publication}, publisher {publisher}, first {}, second {}",
+            holders[0], holders[1]
+        )
+    }
+}
+
+/// Where a crash cuts a [`ShareRun`].
+#[derive(Clone, Copy, Debug)]
+enum ShareCut {
+    /// The first end never commits; recovery replays it.
+    FirstLost,
+    /// The first end commits and its reply is lost; recovery replays it.
+    FirstCommitted,
+    /// The second end never commits; recovery replays it.
+    SecondLost,
+    /// The second end commits and its reply is lost; recovery replays it.
+    SecondCommitted,
+}
+
+/// End the publisher's two shares in `order`, reopening the store between
+/// the two ends and after a cut, and answer every observation.
+async fn share_run<F>(make: &F, order: ShareOrder, cut: Option<ShareCut>) -> Vec<String>
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let fixture = make();
+    let mut handles = fixture.open;
+    let run = ShareRun::new(&handles).await;
+    let mut seen = Vec::new();
+    for (index, environment) in match order {
+        ShareOrder::EnvironmentFirst => [true, false],
+        ShareOrder::ModulesFirst => [false, true],
+    }
+    .into_iter()
+    .enumerate()
+    {
+        let lost = matches!(
+            (index, cut),
+            (0, Some(ShareCut::FirstLost)) | (1, Some(ShareCut::SecondLost))
+        );
+        let committed = matches!(
+            (index, cut),
+            (0, Some(ShareCut::FirstCommitted)) | (1, Some(ShareCut::SecondCommitted))
+        );
+        if !lost {
+            let answer = run.end_share(&handles, environment, index == 1).await;
+            if !committed {
+                seen.push(answer);
+            }
+        }
+        // A reopen between the two ends, and after every cut.
+        if index == 0 || lost || committed {
+            drop(handles);
+            handles = (fixture.reopen)();
+        }
+        if lost || committed {
+            seen.push(run.end_share(&handles, environment, index == 1).await);
+        }
+        seen.push(run.observe(&handles).await);
+        if index == 0 {
+            seen.push(run.bystander_carries(&handles).await);
+            seen.push(run.observe(&handles).await);
+        }
+    }
+    seen
+}
+
+/// What the store answered before environments owned their modules
+/// through a body (FIG-7700): a referrer's module share holds the
+/// environment's closure until that share ends, whatever its environment
+/// share does, and its environment share alone holds no module.
+fn share_answers(order: ShareOrder) -> Vec<String> {
+    let line = |environment: &str, publication: &str, first: &str, second: &str| {
+        format!(
+            "env {environment}, publication {publication}, publisher ended, first {first}, second {second}"
+        )
+    };
+    match order {
+        ShareOrder::EnvironmentFirst => vec![
+            "Ok(())".into(),
+            line("Ok(None)", "exact", "-", "-"),
+            "carried".into(),
+            line("Ok(None)", "exact", "holds", "-"),
+            "Ok(())".into(),
+            line("Ok(None)", "exact", "holds", "holds"),
+        ],
+        ShareOrder::ModulesFirst => vec![
+            "Ok(())".into(),
+            line("exact", "Ok(None)", "-", "-"),
+            "refused".into(),
+            line("exact", "Ok(None)", "-", "-"),
+            "Ok(())".into(),
+            line("Ok(None)", "Ok(None)", "-", "-"),
+        ],
+    }
+}
+
+/// A referrer's module share keeps the environment's closure until that
+/// share ends, in either end order and across a reopen between the two
+/// ends: the publication reads back exactly, the referrer's package
+/// authority, and a module carry to another referrer between the ends,
+/// all answer as when the referrer held each module directly (FIG-7700).
+pub async fn module_share_outlives_environment_share_in_either_order<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    for order in [ShareOrder::EnvironmentFirst, ShareOrder::ModulesFirst] {
+        assert_eq!(
+            share_run(&make, order, None).await,
+            share_answers(order),
+            "{order:?}"
+        );
+    }
+}
+
+/// A crash at either end of [`module_share_outlives_environment_share_in_either_order`],
+/// recovered by replaying that end, answers as the uncut run (FIG-7700).
+pub async fn module_share_survives_a_cut_between_its_ends<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    for order in [ShareOrder::EnvironmentFirst, ShareOrder::ModulesFirst] {
+        for cut in [
+            ShareCut::FirstLost,
+            ShareCut::FirstCommitted,
+            ShareCut::SecondLost,
+            ShareCut::SecondCommitted,
+        ] {
+            assert_eq!(
+                share_run(&make, order, Some(cut)).await,
+                share_answers(order),
+                "{order:?} cut {cut:?}"
+            );
+        }
+    }
+}
+
 /// The referrers of one cut run, minted fresh so runs never share a fence.
 struct CutRun {
     origin: OriginEnv,
@@ -1303,17 +1611,17 @@ struct CutRun {
 const CUT_STEPS: [(&str, usize); 10] = [
     ("start publishes the environment", 0),
     ("configured ends", 1),
-    ("start's module share carries the publication to the pin", 2),
     (
         "start's environment share carries the environment to the process",
         2,
     ),
+    ("start's module share carries the publication to the pin", 2),
     ("republisher publishes the environment again", 4),
-    ("process's module share ends", 5),
     ("process's environment share ends", 5),
+    ("process's module share ends", 5),
     ("pin ends", 7),
-    ("republisher's module share ends", 8),
     ("republisher's environment share ends", 8),
+    ("republisher's module share ends", 8),
 ];
 
 fn carry(store: ArtifactStoreId, artifact_ref: String, to: &ArtifactReferrer) -> ArtifactCarry {
@@ -1387,19 +1695,19 @@ impl CutRun {
             }
             2 => {
                 handles
-                    .artifacts
-                    .end_module_referrer(&ResolvedArtifactCleanup {
+                    .process_env
+                    .end_process_env_referrer(&ResolvedArtifactCleanup {
                         referrer: self.start.clone(),
-                        carries: vec![carry(ArtifactStoreId::module(), publication, &self.pin)],
+                        carries: vec![carry(ArtifactStoreId::ProcessEnv, env_ref, &self.process)],
                     })
                     .await
             }
             3 => {
                 handles
-                    .process_env
-                    .end_process_env_referrer(&ResolvedArtifactCleanup {
+                    .artifacts
+                    .end_module_referrer(&ResolvedArtifactCleanup {
                         referrer: self.start.clone(),
-                        carries: vec![carry(ArtifactStoreId::ProcessEnv, env_ref, &self.process)],
+                        carries: vec![carry(ArtifactStoreId::module(), publication, &self.pin)],
                     })
                     .await
             }
@@ -1415,14 +1723,14 @@ impl CutRun {
             }
             5 => {
                 handles
-                    .artifacts
-                    .end_module_referrer(&end(self.process.clone()))
+                    .process_env
+                    .end_process_env_referrer(&end(self.process.clone()))
                     .await
             }
             6 => {
                 handles
-                    .process_env
-                    .end_process_env_referrer(&end(self.process.clone()))
+                    .artifacts
+                    .end_module_referrer(&end(self.process.clone()))
                     .await
             }
             7 => {
@@ -1433,14 +1741,14 @@ impl CutRun {
             }
             8 => {
                 handles
-                    .artifacts
-                    .end_module_referrer(&end(self.republisher.clone()))
+                    .process_env
+                    .end_process_env_referrer(&end(self.republisher.clone()))
                     .await
             }
             _ => {
                 handles
-                    .process_env
-                    .end_process_env_referrer(&end(self.republisher.clone()))
+                    .artifacts
+                    .end_module_referrer(&end(self.republisher.clone()))
                     .await
             }
         };

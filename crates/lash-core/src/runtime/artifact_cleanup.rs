@@ -606,18 +606,9 @@ impl ArtifactCleanupRelay {
         referrer: &ArtifactReferrer,
         carries: &[ArtifactCarry],
     ) -> Result<(), DeliveryFailure> {
-        // Modules end before environments: an environment holds its module
-        // closure, so the referrer still reaches those modules through its
-        // environment while the module share decides its carries.
-        self.ports
-            .modules
-            .end_module_referrer(&ResolvedArtifactCleanup::for_store(
-                referrer,
-                carries,
-                &ArtifactStoreId::module(),
-            ))
-            .await
-            .map_err(store_failure("module store"))?;
+        // Environments end before modules: an environment carried to its
+        // destination gives it the environment's module closure, which must
+        // still be stored, so the referrer's module share ends after it.
         self.ports
             .process_env
             .end_process_env_referrer(&ResolvedArtifactCleanup::for_store(
@@ -627,6 +618,15 @@ impl ArtifactCleanupRelay {
             ))
             .await
             .map_err(store_failure("process-environment store"))?;
+        self.ports
+            .modules
+            .end_module_referrer(&ResolvedArtifactCleanup::for_store(
+                referrer,
+                carries,
+                &ArtifactStoreId::module(),
+            ))
+            .await
+            .map_err(store_failure("module store"))?;
         self.ports
             .definitions
             .end_process_definition_referrer(&ResolvedArtifactCleanup::for_store(

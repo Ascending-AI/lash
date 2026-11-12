@@ -28,6 +28,18 @@ lash_store_sql::statements! {
         /// `?4` if that body is stored: its first missing module of `?6`,
         /// else its edges and referrer `?7`/`?8`'s (FIG-7701 R5).
         publish_over_stored_body = "SELECT stored, missing FROM lash_publish_env_over_stored_body(?1, ?2, ?3, ?4, ?5, ?6::TEXT[], ?7, ?8)";
+        /// Environment `?1`'s body reference, read unlocked, then its
+        /// closure's lock and existence, then its head's lock; with `?4`,
+        /// the head's existence and referrer `?2`/`?3`'s edges to head and
+        /// closure (FIG-7700). Answers `{state, body}`.
+        acquire_env = "SELECT lash_acquire_env(?1, ?2, ?3, ?4)";
+        /// Each stored head of `?2` in namespace `?1` and the body it
+        /// splices back (FIG-7700).
+        select_body_refs = "SELECT artifact_ref, body_ref FROM lash_vm_artifacts
+             WHERE namespace = ?1 AND artifact_ref = ANY(?2::TEXT[]) AND body_ref IS NOT NULL";
+        /// Each of `?2` stored in namespace `?1`.
+        select_stored_refs = "SELECT artifact_ref FROM lash_vm_artifacts
+             WHERE namespace = ?1 AND artifact_ref = ANY(?2::TEXT[])";
         /// Delete each artifact of `?2` in namespace `?1` that no referrer
         /// edge and no dependency edge names. Each deleted row answers the
         /// graph node it rooted, if bridged, once per artifact it held: its
@@ -218,6 +230,11 @@ pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 /// Where environment bodies live, beside the heads at their references.
 pub(crate) const PROCESS_ENV_BODY_NAMESPACE: &str =
     lash_core_store::process_env::stored::BODY_NAMESPACE;
+/// Where each body's module closure lives, at the body's reference: a row
+/// with no bytes whose dependency edges hold the modules. A referrer's
+/// module share includes its edge here (FIG-7700).
+pub(crate) const PROCESS_ENV_CLOSURE_NAMESPACE: &str =
+    lash_core_store::process_env::stored::CLOSURE_NAMESPACE;
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
@@ -243,7 +260,7 @@ pub(crate) use env_storage::function_ddl as env_over_body_function_ddl;
 
 #[path = "artifact_store/env_storage.rs"]
 mod env_storage;
-use env_storage::{EnvPublication, held_closure_tx};
+use env_storage::{CarriedClosures, EnvPublication, acquire_env_tx, held_closure_tx};
 
 #[path = "artifact_store/tool_material.rs"]
 mod tool_material;
@@ -357,15 +374,8 @@ pub(crate) async fn acquire_process_env_tx(
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
     lock_live_referrer_tx(tx, &referrer).await?;
-    // The head holds its closure: the start's one edge keeps all of it.
-    let head = [(PROCESS_ENV_NAMESPACE, env.as_str())];
-    Holds {
-        locks: &head,
-        checks: &head,
-        edges: &head,
-    }
-    .run(tx, &referrer)
-    .await?;
+    // Both shares: the head, which holds its body, and the body's closure.
+    acquire_env_tx(tx, env.as_str(), &referrer, None).await?;
     Ok(())
 }
 
@@ -609,10 +619,21 @@ impl PostgresLashVmArtifactStore {
             .map_err(ArtifactStoreError::from)?;
         lock_admitted_referrer_tx(&mut tx, &claim.referrer()).await?;
         let Some(bytes) = bytes else {
+            let cleanup = claim.guard_cleanup();
+            if namespace == PROCESS_ENV_NAMESPACE {
+                let now_ms = self.clock.timestamp_ms();
+                acquire_env_tx(
+                    &mut tx,
+                    artifact_ref,
+                    &claim.referrer(),
+                    cleanup.as_ref().map(|cleanup| (cleanup, now_ms)),
+                )
+                .await?;
+                return tx.commit().await.map_err(backend);
+            }
             // An acquisition: the artifact's lock, the claim's guard, then
             // its existence and the edge.
             let artifact = [(namespace, artifact_ref)];
-            let cleanup = claim.guard_cleanup();
             Holds {
                 locks: &artifact,
                 checks: if cleanup.is_none() { &artifact } else { &[] },
@@ -991,12 +1012,18 @@ impl PostgresLashVmArtifactStore {
             .await
             .map_err(ArtifactStoreError::from)?;
         if cleanup.carries.is_empty() {
+            // A module share includes the referrer's environment closures.
+            let shares: &[&str] = if namespace == MODULE_ARTIFACT_NAMESPACE {
+                &[MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_CLOSURE_NAMESPACE]
+            } else {
+                std::slice::from_ref(&namespace)
+            };
             local_end::end(
                 &mut tx,
                 &cleanup.referrer,
                 None,
                 self.clock.timestamp_ms(),
-                &[namespace],
+                shares,
             )
             .await
             .map_err(ArtifactStoreError::from)?;
@@ -1006,6 +1033,10 @@ impl PostgresLashVmArtifactStore {
         tx.commit().await.map_err(backend)
     }
 
+    /// Fence, carry, sever and reclaim in the owner's transaction. A module
+    /// share includes the referrer's environment closures; an environment
+    /// carried to a referrer gives it both shares, storing the closure when
+    /// it is not (FIG-7700).
     pub(crate) async fn end_namespaced_tx(
         tx: &mut sqlx::PgConnection,
         namespace: &str,
@@ -1025,13 +1056,7 @@ impl PostgresLashVmArtifactStore {
             .map(|carry| carry.to.clone())
             .collect();
         referrers.push(cleanup.referrer.clone());
-        referrers.sort_by_key(|referrer| {
-            format!(
-                "lash-artifact-referrer:{}:{}",
-                referrer.kind().as_str(),
-                referrer.canonical_id()
-            )
-        });
+        referrers.sort_by_key(referrer_lock_key);
         referrers.dedup();
         // Lock every session history before any referrer, in stable order.
         for referrer in &referrers {
@@ -1040,56 +1065,42 @@ impl PostgresLashVmArtifactStore {
         for referrer in &referrers {
             lock_referrer_tx(tx, referrer).await.map_err(backend)?;
         }
-        let edges = crate::observed_sql::query(
-            artifact_sql()
-                .edges
-                .select_referrer_edges_in_namespace
-                .sql(),
-        )
-        .bind(namespace)
-        .bind(cleanup.referrer.kind().as_str())
-        .bind(cleanup.referrer.canonical_id())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(backend)?;
-        let source_refs: BTreeSet<String> = edges
-            .iter()
-            .map(|row| {
-                decode_edge_referrer(row)?;
-                row.try_get::<String, _>(1).map_err(backend)
-            })
-            .collect::<Result<_, _>>()?;
-        let all_refs: BTreeSet<String> = source_refs
-            .iter()
-            .cloned()
-            .chain(
-                cleanup
-                    .carries
-                    .iter()
-                    .map(|carry| carry.artifact.artifact_ref.clone()),
+        let shares: &[&str] = if namespace == MODULE_ARTIFACT_NAMESPACE {
+            &[MODULE_ARTIFACT_NAMESPACE, PROCESS_ENV_CLOSURE_NAMESPACE]
+        } else {
+            std::slice::from_ref(&namespace)
+        };
+        let mut sources: Vec<(&str, BTreeSet<String>)> = Vec::with_capacity(shares.len());
+        for share in shares {
+            let edges = crate::observed_sql::query(
+                artifact_sql()
+                    .edges
+                    .select_referrer_edges_in_namespace
+                    .sql(),
             )
-            .collect();
-        // What the released artifacts hold, transitively, joins their one
-        // sorted lock acquisition: deleting them can free it (FIG-7700).
-        let mut locked: BTreeSet<(String, String)> = all_refs
-            .iter()
-            .map(|reference| (namespace.to_owned(), reference.clone()))
-            .collect();
-        locked.extend(held_closure_tx(tx, namespace, &source_refs).await?);
-        lock_artifact_set_tx(tx, &locked).await?;
-        crate::observed_sql::query(artifact_sql().fences.insert_fence.sql())
+            .bind(*share)
             .bind(cleanup.referrer.kind().as_str())
             .bind(cleanup.referrer.canonical_id())
-            .bind(crate::support::clamp_epoch_ms(now_ms))
-            .execute(crate::observed_sql::executor(&mut *tx))
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(backend)?;
+            let refs: BTreeSet<String> = edges
+                .iter()
+                .map(|row| {
+                    decode_edge_referrer(row)?;
+                    row.try_get::<String, _>(1).map_err(backend)
+                })
+                .collect::<Result<_, _>>()?;
+            sources.push((share, refs));
+        }
         // Every destination's referrer lock is held, so whether it still
         // takes carries cannot change below: read it once per destination.
+        // The ending referrer is fenced below, so it takes none.
         let mut destinations: Vec<(&ArtifactReferrer, bool)> = Vec::new();
         for carry in &cleanup.carries {
             if destinations.iter().all(|(to, _)| *to != &carry.to) {
-                let live = session_artifact_owner_live_tx(tx, &carry.to).await?
+                let live = carry.to != cleanup.referrer
+                    && session_artifact_owner_live_tx(tx, &carry.to).await?
                     && !is_fenced_tx(tx, &carry.to).await?;
                 destinations.push((&carry.to, live));
             }
@@ -1099,19 +1110,63 @@ impl PostgresLashVmArtifactStore {
             .iter()
             .filter(|carry| destinations.contains(&(&carry.to, true)))
             .collect();
+        // A carried environment's closure: locked first, as its key sorts
+        // before every other artifact's, then stored if it is not.
+        let closures = if namespace == PROCESS_ENV_NAMESPACE {
+            CarriedClosures::lock(tx, &live).await?
+        } else {
+            CarriedClosures::default()
+        };
+        // What the released artifacts hold, transitively, joins their one
+        // sorted lock acquisition: deleting them can free it (FIG-7700).
+        let mut locked: BTreeSet<(String, String)> = cleanup
+            .carries
+            .iter()
+            .map(|carry| (namespace.to_owned(), carry.artifact.artifact_ref.clone()))
+            .collect();
+        for (share, refs) in &sources {
+            locked.extend(
+                refs.iter()
+                    .map(|reference| ((*share).to_owned(), reference.clone())),
+            );
+            locked.extend(held_closure_tx(tx, share, refs).await?);
+        }
+        locked.extend(closures.module_locks());
+        lock_artifact_set_tx(tx, &locked).await?;
+        crate::observed_sql::query(artifact_sql().fences.insert_fence.sql())
+            .bind(cleanup.referrer.kind().as_str())
+            .bind(cleanup.referrer.canonical_id())
+            .bind(crate::support::clamp_epoch_ms(now_ms))
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
         carry_edges_tx(tx, namespace, &live, &destinations).await?;
-        crate::observed_sql::query(
-            artifact_sql()
-                .edges
-                .delete_referrer_edges_in_namespace
-                .sql(),
-        )
-        .bind(namespace)
-        .bind(cleanup.referrer.kind().as_str())
-        .bind(cleanup.referrer.canonical_id())
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(backend)?;
+        closures.carry(tx, &live, &destinations).await?;
+        for (share, refs) in &sources {
+            crate::observed_sql::query(
+                artifact_sql()
+                    .edges
+                    .delete_referrer_edges_in_namespace
+                    .sql(),
+            )
+            .bind(*share)
+            .bind(cleanup.referrer.kind().as_str())
+            .bind(cleanup.referrer.canonical_id())
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
+            Self::reclaim_sources_tx(tx, share, refs).await?;
+        }
+        Ok(())
+    }
+
+    /// Reclaim each of `source_refs` in `namespace` that no referrer names
+    /// and nothing holds, and what that frees.
+    async fn reclaim_sources_tx(
+        tx: &mut sqlx::PgConnection,
+        namespace: &str,
+        source_refs: &BTreeSet<String>,
+    ) -> Result<(), ArtifactStoreError> {
         if source_refs.is_empty() {
             return Ok(());
         }
@@ -1137,7 +1192,7 @@ impl PostgresLashVmArtifactStore {
                 .push((referrer.kind(), referrer.canonical_id()));
         }
         let mut witnesses = Vec::with_capacity(source_refs.len());
-        for artifact_ref in &source_refs {
+        for artifact_ref in source_refs {
             use lash_core_store::store::EnumerationProgress;
             use lash_core_store::store::ReclamationEnumeration;
             let referrers = held.remove(artifact_ref).unwrap_or_default();

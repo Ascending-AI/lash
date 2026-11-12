@@ -359,19 +359,19 @@ async fn a_publication_over_a_stored_body_answers_as_a_first_publication() {
     let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
         .expect("pin claim");
     let (env_ref, bytes, document) = published_environment(&store, &claim, 21).await;
-    let split = stored::split(&bytes).expect("the environment stores split");
+    let split = stored::split(&bytes);
     let (other_ref, other_bytes) = environment_over(21, Some("other"));
     assert_eq!(
-        stored::split(&other_bytes).map(|other| other.body_ref),
-        Some(split.body_ref.clone()),
+        stored::split(&other_bytes).body_ref,
+        split.body_ref,
         "another head over the same body"
     );
     let edges = dependency_edges(pool).await;
     assert!(
         edges.iter().any(|(holder_namespace, _, _, artifact_ref)| {
-            holder_namespace == stored::BODY_NAMESPACE && *artifact_ref == document
+            holder_namespace == stored::CLOSURE_NAMESPACE && *artifact_ref == document
         }),
-        "the body holds the document: {edges:?}"
+        "the body's closure holds the document: {edges:?}"
     );
     let immutable = |error: ArtifactStoreError, expected: &str| match error {
         ArtifactStoreError::Immutable { artifact_ref } => assert_eq!(artifact_ref, expected),

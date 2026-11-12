@@ -1,4 +1,4 @@
--- lash-postgres-store teardown, component version 44.
+-- lash-postgres-store teardown, component version 45.
 --
 -- Generated artifact. These bytes are exactly the DDL a host applies to drop
 -- everything this component owns at the reject-and-recreate boundary;
@@ -183,6 +183,8 @@ DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
 DROP FUNCTION IF EXISTS lash_lock_referrer CASCADE;
 
 DROP FUNCTION IF EXISTS lash_acquire_holds CASCADE;
+
+DROP FUNCTION IF EXISTS lash_acquire_env CASCADE;
 
 DROP FUNCTION IF EXISTS lash_publish_env_over_stored_body CASCADE;
 
