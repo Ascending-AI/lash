@@ -933,4 +933,15 @@ impl Objects {
             self.free.get_mut().push(handle.index);
         }
     }
+
+    /// Advances a free slot over complete allocate/release cycles for
+    /// generation-wrap laws, without executing billions of equivalent
+    /// cycles. Each omitted cycle leaves the same free-list entry and
+    /// increments only this slot's generation.
+    #[cfg(feature = "perf-witness")]
+    pub fn skip_free_slot_cycles(&mut self, index: u32, cycles: u32) {
+        let slot = &mut self.slots[index as usize];
+        assert!(matches!(slot.body, Body::Free) && slot.listed.get());
+        slot.generation = slot.generation.wrapping_add(cycles);
+    }
 }

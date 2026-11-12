@@ -659,3 +659,118 @@ fn entered_calls_are_counted_across_a_seal_and_a_cold_reopen() {
         .collect();
     assert_eq!(entered, expected);
 }
+
+/// K-EFF-008 / K-MACH-008: later observation sees the same future call
+/// occurrences and effect identities. A Watch counts only its observed
+/// suffix; the task's call counters include the unobserved prefix too.
+#[test]
+fn observation_attached_after_a_slice_keeps_prior_call_occurrences() {
+    use super::embedder::{World, int};
+    use crate::{Host, HostFault, ObservationMode, Outcome, Request};
+    use lash_kernel_doc::{Datum, ErrorDatum};
+    use lash_kernel_value::kernel_internals::effect_parts;
+    use lash_kernel_value::sites::{EffectLocation, PositionLabel, Site};
+
+    #[derive(Default)]
+    struct Later {
+        active: bool,
+        world: World,
+        entered: Vec<EffectLocation>,
+    }
+    impl Host for Later {
+        fn cancel_requested(&mut self) -> bool {
+            self.world.cancel_requested()
+        }
+        fn observes_sites(&self) -> bool {
+            self.active
+        }
+        fn enter_site(&mut self, at: &EffectLocation) {
+            self.entered.push(at.clone());
+        }
+        fn perform(
+            &mut self,
+            effect: &lash_kernel_value::OperationUse,
+            args: &[Datum],
+            site: &PositionLabel,
+            origin: &Site,
+        ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
+            self.world.perform(effect, args, site, origin)
+        }
+        fn print(&mut self, value: &Datum) {
+            self.world.print(value);
+        }
+    }
+
+    const TEXT: &str = "main { let f = fn(x) { return x } let total = 0 for x in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] { set total = num.add(total, apply f(x)) } do perform 0(total) as Any return total }";
+    // Watch attachment and site-observer attachment are independent:
+    // the latter run has no Watch at any point.
+    for late_watch in [true, false] {
+        let run = |late: bool| {
+            let mut embedder = Embedder::with(TEXT, Setup::default());
+            let mut host = Later {
+                active: late_watch || !late,
+                ..Later::default()
+            };
+            if late_watch && !late {
+                embedder.machine.set_observe(ObservationMode::Counts);
+            }
+            loop {
+                assert_eq!(
+                    embedder.machine.run(&mut host, 5).unwrap(),
+                    Step::Slice,
+                    "the prefix ends at a slice before the effect"
+                );
+                if embedder.machine.meters().charged.unwrap() >= 60 {
+                    break;
+                }
+            }
+            let prefix_charge = embedder.machine.meters().charged;
+            if !late {
+                assert!(
+                    !host.entered.is_empty(),
+                    "the prefix entered the repeated call"
+                );
+            }
+            host.entered.clear();
+            embedder.machine.take_counts();
+            if late_watch && late {
+                embedder.machine.set_observe(ObservationMode::Counts);
+            }
+            host.active = true;
+            let mut requests = Vec::new();
+            let end = loop {
+                match embedder.machine.run(&mut host, 5).unwrap() {
+                    Step::Slice => {}
+                    Step::Parked(park) => {
+                        for request in park.requests {
+                            embedder
+                                .machine
+                                .deliver(
+                                    super::embedder::wait_of(&request),
+                                    Outcome::Completed(Datum::Null),
+                                )
+                                .unwrap();
+                            requests.push(request);
+                        }
+                    }
+                    Step::Ended(end) => break end,
+                }
+            };
+            assert_eq!(result(end), int(55));
+            let last = host.entered.last().expect("the suffix entered calls");
+            assert_eq!(effect_parts(&last.at).occurrence, 9);
+            let [Request::Effect(effect)] = requests.as_slice() else {
+                panic!("one final effect: {requests:?}");
+            };
+            assert_eq!(effect.args, vec![int(55)]);
+            (
+                prefix_charge,
+                embedder.machine.meters().charged,
+                embedder.machine.take_counts(),
+                host.entered,
+                requests,
+            )
+        };
+        assert_eq!(run(true), run(false), "late Watch={late_watch}");
+    }
+}

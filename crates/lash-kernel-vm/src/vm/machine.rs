@@ -402,6 +402,11 @@ impl CoreMachine {
 }
 
 impl CoreMachine {
+    #[cfg(test)]
+    pub(super) fn call_law_vm(&mut self) -> &mut Vm<SlotHeap> {
+        &mut self.vm
+    }
+
     /// What the tokens of this run's counts and context name.
     #[cfg(any(test, feature = "perf-witness"))]
     pub(crate) fn guest_symbols(&self) -> crate::observe::GuestSymbols {

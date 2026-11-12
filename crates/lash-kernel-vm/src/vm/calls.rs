@@ -48,9 +48,8 @@ impl Done {
 /// The direct-call guard: what the last closure a value call entered
 /// resolved to. It holds while the arena has freed nothing, so no handle
 /// was freed or given to another object and a closure's identity is
-/// the one read; and while no saved function was bound, which only
-/// appends globals, so the closure is still no saved function. The
-/// program's tables are the instance's for its life.
+/// the one read. Globals are bound before any call can populate the
+/// memo. The program's tables are the instance's for its life.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Direct {
     closure: ArenaHandle,
@@ -58,6 +57,29 @@ pub(crate) struct Direct {
     globals: usize,
     params: u16,
     entry: Entry,
+}
+
+#[cfg(test)]
+thread_local! {
+    static PLAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn without_memo<R>(f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PLAIN.with(|plain| plain.set(self.0));
+        }
+    }
+    let _restore = Restore(PLAIN.with(|plain| plain.replace(true)));
+    f()
+}
+
+#[cfg(test)]
+pub(crate) fn hits() -> u64 {
+    HITS.with(std::cell::Cell::get)
 }
 
 impl<H: Heap> Vm<H> {
@@ -104,14 +126,24 @@ impl<H: Heap> Vm<H> {
     /// removed once read. A closure the last call entered, still the same
     /// object, enters as it resolved then ([`Direct`]).
     fn call_value(&mut self, argc: usize) -> Run<()> {
+        #[cfg(test)]
+        if PLAIN.with(std::cell::Cell::get) {
+            self.direct = None;
+        }
+        // durable::session::bind binds globals only during start, before this memo exists.
+        debug_assert!(
+            self.direct
+                .is_none_or(|direct| direct.globals == self.globals.len())
+        );
         let at = self.cx.stack.len() - argc - 1;
         let callee = self.cx.stack[at];
         if let Value::Closure(handle) = callee
             && let Some(direct) = self.direct
             && direct.closure == handle
             && direct.freed == self.heap.arena().freed()
-            && direct.globals == self.globals.len()
         {
+            #[cfg(test)]
+            HITS.with(|hits| hits.set(hits.get() + 1));
             return self.enter_value(at, argc, direct.params, direct.entry, Some(handle));
         }
         let (unit, closure, callable) = match callee {
@@ -153,6 +185,8 @@ impl<H: Heap> Vm<H> {
         };
         let params = self.program.unit(unit).params;
         let entry = self.entry(unit, link);
+        // A saved call enters a fresh handle the next call cannot match;
+        // caching it would evict the useful memo without a possible hit.
         if let (Value::Closure(handle), Some(closure)) = (callee, closure)
             && handle == closure
         {
@@ -670,5 +704,162 @@ impl<H: Heap> Vm<H> {
             self.fee(units)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod memo_laws {
+    use super::*;
+    use crate::laws::embedder::{ROOMY, World, core_machine, int};
+    use crate::{Machine, Step};
+
+    /// K-CLO-001 / K-FN-004: after a slot's generation wraps, its
+    /// complete handle can equal a long-dead memo key. The arena's u64
+    /// freed epoch must still resolve the new closure's body and arity.
+    #[test]
+    fn a_direct_memo_rejects_a_reused_slot_after_generation_wrap() {
+        const SOURCE: &str = "main { let cells = [100] let f = fn() { return 7 } let g = fn(x) { set cells[0] = x return cells[0] } do apply f() return apply f() }";
+        let prepare = || {
+            let mut machine = core_machine(SOURCE, ROOMY, None).unwrap();
+            loop {
+                assert_eq!(machine.run(&mut World::default(), 1).unwrap(), Step::Slice);
+                let vm = machine.call_law_vm();
+                if vm.direct.is_some() && vm.cx.frames.len() == 1 {
+                    break;
+                }
+            }
+            let vm = machine.call_law_vm();
+            let old = vm.direct.unwrap().closure;
+            let other = vm
+                .cx
+                .stack
+                .iter()
+                .find_map(|value| match value {
+                    Value::Closure(handle) if *handle != old => Some(*handle),
+                    _ => None,
+                })
+                .expect("the other closure is still a local");
+            let (identity, cells, _) = vm.heap.arena().closure(other).unwrap();
+            let identity = std::sync::Arc::new(identity.clone());
+            let cells = cells.to_vec();
+            vm.held.extend(cells.iter().copied().map(Value::Handle));
+            for value in &mut vm.cx.stack {
+                if matches!(value, Value::Closure(_)) {
+                    *value = Value::Null;
+                }
+            }
+            let caller = vm.cx.frames.last_mut().unwrap();
+            let code = vm.program.unit(caller.unit);
+            let call = code
+                .ops
+                .iter()
+                .rposition(|op| matches!(op, crate::bytecode::op::Op::Call(_)))
+                .unwrap();
+            caller.pc = call as u32 + 1;
+            let before = vm.heap.arena().freed();
+            vm.collect();
+            assert!(vm.heap.arena().objects().get(old).is_none());
+            assert!(vm.heap.arena().freed() > before);
+            // Keep earlier free-list entries occupied, so the target
+            // slot is the next allocation during every omitted cycle.
+            let probe = loop {
+                vm.heap
+                    .admit(crate::heap::meter::closure(cells.len()))
+                    .unwrap();
+                let replacement = vm
+                    .heap
+                    .closure(std::sync::Arc::clone(&identity), cells.clone());
+                if replacement.index() == old.index() {
+                    break replacement;
+                }
+                vm.held.push(Value::Closure(replacement));
+            };
+            vm.collect();
+            assert!(vm.heap.arena().objects().get(probe).is_none());
+            // Two real releases, then 2^32-2 complete empty-closure
+            // cycles: the same generation, but a different freed epoch.
+            vm.heap.skip_free_slot_cycles(old.index(), u32::MAX - 1);
+            vm.heap
+                .admit(crate::heap::meter::closure(cells.len()))
+                .unwrap();
+            let replacement = vm.heap.closure(identity, cells);
+            vm.held.push(Value::Closure(replacement));
+            assert_eq!(
+                replacement, old,
+                "handle equality alone cannot reject this ABA"
+            );
+            assert_ne!(vm.direct.unwrap().freed, vm.heap.arena().freed());
+            machine
+        };
+
+        // The new body takes and stores its argument, unlike the old
+        // zero-argument body. Charge and refusal attribution are those
+        // of resolving that same replacement without the memo.
+        for argc in [0, 1, 2] {
+            let run = |plain: bool| {
+                let mut machine = prepare();
+                let vm = machine.call_law_vm();
+                let closure = vm.direct.unwrap().closure;
+                if plain {
+                    vm.direct = None;
+                }
+                vm.cx.stack.push(Value::Closure(closure));
+                vm.cx.stack.extend(std::iter::repeat_n(Value::Int(9), argc));
+                let entry = vm.call_value(argc);
+                let (flow, answer) = match entry {
+                    Ok(()) => {
+                        // This is the new closure's real frame. Let its
+                        // existing dispatcher return its value through
+                        // the caller's original return-call continuation.
+                        assert_eq!(vm.cx.frames.last().unwrap().closure, Some(closure));
+                        let stop = loop {
+                            let stop = vm.run(&mut World::default(), 1);
+                            if !matches!(stop, Stop::Slice) {
+                                break stop;
+                            }
+                        };
+                        let flow = format!("{stop:?}");
+                        let answer = match stop {
+                            Stop::Returned(value) => Some(value),
+                            _ => None,
+                        };
+                        (flow, answer)
+                    }
+                    Err(flow) => (format!("{flow:?}"), None),
+                };
+                let (_, cells, _) = vm.heap.arena().closure(closure).unwrap();
+                let captured = vm.heap.cell_get(cells[0]).unwrap();
+                let value = vm
+                    .heap
+                    .arena()
+                    .sequence(captured.handle().unwrap())
+                    .unwrap()
+                    .iter()
+                    .map(|value| match value {
+                        Value::Int(value) => Some(*value),
+                        Value::Absent => None,
+                        other => panic!("unexpected captured member: {other:?}"),
+                    })
+                    .collect::<Vec<_>>();
+                (flow, value, vm.charged(), vm.raise_site(), answer)
+            };
+            let fast = run(false);
+            let plain = run(true);
+            assert_eq!(fast, plain, "arity {argc}");
+            if argc == 1 {
+                assert_eq!(fast.4, Some(int(9)));
+            }
+            if argc == 2 {
+                assert_eq!(fast.3.unwrap().unit, lash_kernel_value::sites::Unit::Main);
+            }
+            assert_eq!(
+                fast.1,
+                match argc {
+                    0 => vec![None],
+                    1 => vec![Some(9)],
+                    _ => vec![Some(100)],
+                }
+            );
+        }
     }
 }

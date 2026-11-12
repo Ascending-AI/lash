@@ -353,3 +353,76 @@ fn direct_call_entry_agrees_whole_and_cold() {
     }
     println!("direct call entry: {comparisons} paired runs");
 }
+
+/// K-CLO-001 / K-FN-004: a repeated value-call site resolves a rebound
+/// closure's own body and arity. Closures of one body still use their
+/// distinct cells; a different body must not inherit the memo's entry.
+#[test]
+fn a_direct_memo_resolves_rebound_closures_and_their_captures() {
+    let cases = [
+        (
+            "let cells = [0, 100] let f = fn(x) { set cells[0] = flat.add(cells[0], x) return cells[0] } let other = fn(x) { set cells[1] = flat.add(cells[1], flat.add(x, 10)) return cells[1] } let answers = [] let i = 0 while flat.lt(i, 3) { if same(i, 1) { set f = other } set answers[list.len(answers)] = apply f(1) set i = flat.add(i, 1) } return (answers, cells)",
+            Datum::Tuple(vec![
+                Datum::List(vec![int(1), int(111), int(122)]),
+                Datum::List(vec![int(1), int(122)]),
+            ]),
+        ),
+        (
+            "let make = fn(n) { return fn(x) { set n = flat.add(n, x) return n } } let left = apply make(1) let right = apply make(100) let f = left let answers = [] let i = 0 while flat.lt(i, 4) { if same(i, 1) { set f = right } if same(i, 2) { set f = left } set answers[list.len(answers)] = apply f(1) set i = flat.add(i, 1) } return answers",
+            Datum::List(vec![int(2), int(101), int(3), int(4)]),
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!("main {{ {body} }}");
+        let before = crate::vm::calls::hits();
+        let fast = observe(&source, u64::MAX, super::super::embedder::ROOMY, false);
+        assert!(
+            crate::vm::calls::hits() > before,
+            "a repeated closure was entered"
+        );
+        assert_eq!(fast.end, format!("finished {expected:?}"));
+        let plain = crate::vm::calls::without_memo(|| {
+            observe(&source, u64::MAX, super::super::embedder::ROOMY, false)
+        });
+        assert_eq!(fast.outcome(), plain.outcome());
+        assert_eq!(fast.stops, plain.stops);
+        for limit in 0..=fast.stops.last().unwrap().1.charged.unwrap() {
+            let bounds = Bounds {
+                charge_limit: limit,
+                ..super::super::embedder::ROOMY
+            };
+            let fast = observe(&source, u64::MAX, bounds, false);
+            let plain =
+                crate::vm::calls::without_memo(|| observe(&source, u64::MAX, bounds, false));
+            assert_eq!(
+                fast.outcome(),
+                plain.outcome(),
+                "charge limit {limit}: {body}"
+            );
+            assert_eq!(fast.stops, plain.stops, "charge limit {limit}: {body}");
+        }
+    }
+
+    // The second trip refuses before the new closure's body can write.
+    let source = "main { let cells = [0, 100] let f = fn(x) { set cells[0] = x return x } let other = fn() { set cells[1] = 999 return 999 } let i = 0 while flat.lt(i, 2) { if same(i, 1) { set f = other } print cells print apply f(7) set i = flat.add(i, 1) } return cells }";
+    let fast = observe(source, u64::MAX, super::super::embedder::ROOMY, false);
+    assert_eq!(
+        fast.printed,
+        vec![
+            Datum::List(vec![int(0), int(100)]),
+            int(7),
+            Datum::List(vec![int(7), int(100)])
+        ]
+    );
+    let plain = crate::vm::calls::without_memo(|| {
+        observe(source, u64::MAX, super::super::embedder::ROOMY, false)
+    });
+    assert_eq!(fast.outcome(), plain.outcome());
+    assert_eq!(fast.stops, plain.stops);
+    assert!(fast.end.contains("arity"), "{}", fast.end);
+    assert!(
+        fast.end.contains("Main"),
+        "the caller owns the refusal: {}",
+        fast.end
+    );
+}

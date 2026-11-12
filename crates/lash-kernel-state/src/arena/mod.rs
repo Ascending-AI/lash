@@ -1442,6 +1442,17 @@ impl Arena {
         self.freed
     }
 
+    /// Compresses complete empty-closure reuses of an already free slot
+    /// for generation-wrap laws. Their surviving effects are the slot
+    /// generation, freed count, allocation count and allocation tokens.
+    #[cfg(feature = "perf-witness")]
+    pub fn skip_free_slot_cycles(&mut self, index: u32, cycles: u32) {
+        self.objects.skip_free_slot_cycles(index, cycles);
+        self.freed += u64::from(cycles);
+        self.allocations += u64::from(cycles);
+        self.tokens += u64::from(cycles);
+    }
+
     /// Whether a release is due: enough objects wait on the zero-count
     /// list.
     #[inline]

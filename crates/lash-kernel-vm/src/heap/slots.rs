@@ -76,6 +76,12 @@ pub(crate) struct SlotHeap {
 }
 
 impl SlotHeap {
+    /// Skips complete reuses of a free slot for generation-wrap laws.
+    #[cfg(test)]
+    pub(crate) fn skip_free_slot_cycles(&mut self, index: u32, cycles: u32) {
+        self.arena.skip_free_slot_cycles(index, cycles);
+    }
+
     pub(crate) fn new(bound: u64) -> Self {
         Self {
             arena: Arena::new(),
