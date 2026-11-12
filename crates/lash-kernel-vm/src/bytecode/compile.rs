@@ -1693,6 +1693,7 @@ impl<'a> Compiler<'a> {
             fused: Vec::new(),
             traces: Vec::new(),
             micros: Vec::new(),
+            trace_steps: Vec::new(),
             inlines: Vec::new(),
             folds: Vec::new(),
             origin,

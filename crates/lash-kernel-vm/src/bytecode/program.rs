@@ -184,7 +184,8 @@ pub struct Unit {
     /// The block heads' traces `Op::Trace` names, and their micro-ops
     /// (`trace`).
     pub traces: Vec<super::trace::Trace>,
-    pub micros: Vec<super::trace::Micro>,
+    pub micros: Vec<super::trace::Step>,
+    pub trace_steps: Vec<super::trace::Step>,
     /// The library bodies expanded in place of their calls (`inline`),
     /// each a region of ops past the unit's own.
     pub inlines: Vec<InlineSite>,
@@ -416,9 +417,20 @@ impl Words {
     /// the word path holds its registers.
     #[inline(never)]
     pub fn numbers(&self, args: [Value; 2]) -> Option<(Value, Option<u64>)> {
+        self.numbers_of(self.operation, args)
+    }
+
+    /// [`Self::numbers`] where the caller knows the form's `operation`.
+    #[inline(always)]
+    pub fn numbers_of(
+        &self,
+        operation: scalar::ScalarOp,
+        args: [Value; 2],
+    ) -> Option<(Value, Option<u64>)> {
+        debug_assert_eq!(operation, self.operation);
         let (value, at) = match args {
             [Value::Float(a), Value::Float(b)] if self.domain != ScalarDomain::Words => {
-                (scalar::floats(self.operation, a, b)?, 0)
+                (scalar::floats(operation, a, b)?, 0)
             }
             [a, b] if self.domain.mixed() => {
                 let at = match (a, b) {
@@ -426,11 +438,11 @@ impl Words {
                     (_, Value::Int(b)) => usize::from(b != 0) << 1,
                     _ => 0,
                 };
-                (scalar::mixed(self.operation, a, b)?, at)
+                (scalar::mixed(operation, a, b)?, at)
             }
             _ => return None,
         };
-        Some((value, self.fee.map(|table| table[at])))
+        Some((value, self.fee.as_ref().map(|table| table[at])))
     }
 }
 

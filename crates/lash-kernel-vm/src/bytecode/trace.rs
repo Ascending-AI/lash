@@ -19,6 +19,8 @@
 //! code, and are never saved: a saved frame stands at an op, and the op
 //! a head's trace replaces is still `Unit::original`'s.
 
+use lash_kernel_doc::scalar::ScalarOp;
+
 use super::op::Op;
 use super::program::{LIB, Program, Then, Unit};
 
@@ -160,6 +162,463 @@ impl Micro {
     }
 }
 
+/// What a [`Step`] runs: the runner's handler for its micro-op, by the
+/// handler table's index (`vm::trace`). A fused run whose scalar form
+/// names its operation runs a handler made for that operation, the
+/// pushes and the op that takes its answer ([`word_kind`]); any other
+/// runs [`Kind::Fused`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Kind {
+    Block,
+    Trip,
+    Then,
+    Pass,
+    Local,
+    Const,
+    SetLocal,
+    Copy,
+    Pop,
+    CaptureGet,
+    CellGet,
+    Fused,
+    Inline,
+    Branch,
+    Jump,
+    Exit,
+}
+
+/// The first fused run's kind made for its operation.
+pub const WORDS: usize = 32;
+
+/// The handler table's length: every kind's index is below it.
+pub const PLAIN_KINDS: usize = 256;
+pub const GENERIC_BUNDLE: usize = 4096;
+pub const SMALL_BUNDLE: usize = GENERIC_BUNDLE + PLAIN_KINDS;
+// Step::kind returns a u16 range, so every index fits and the runner
+// needs no bounds branch on its handler-table lookup.
+pub const KINDS: usize = 1 << 16;
+
+/// A zero-terminated sequence of small kinds, four bits per kind. The
+/// constant is also the handler's template parameter, so its operations
+/// inline without a runtime prefix match.
+const fn prefix(kinds: &[Kind]) -> u64 {
+    let mut code = 0;
+    let mut n = 0;
+    while n < kinds.len() {
+        code |= (kinds[n] as u64 + 1) << (n * 4);
+        n += 1;
+    }
+    code
+}
+
+pub const WORD_PREFIXES: [u64; 13] = [
+    prefix(&[]),
+    prefix(&[Kind::Block]),
+    prefix(&[Kind::Trip]),
+    prefix(&[Kind::Then]),
+    prefix(&[Kind::Then, Kind::Copy]),
+    prefix(&[Kind::Block, Kind::Pass]),
+    prefix(&[Kind::Block, Kind::Pass, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Pop]),
+    prefix(&[Kind::Block, Kind::Local]),
+    prefix(&[Kind::Then, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Pass, Kind::Copy]),
+    prefix(&[Kind::Local]),
+    prefix(&[Kind::Block, Kind::SetLocal, Kind::Block]),
+];
+pub const SMALL_PREFIXES: [u64; 58] = [
+    prefix(&[]),
+    prefix(&[Kind::Block]),
+    prefix(&[Kind::Block, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Local, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Local, Kind::Const]),
+    prefix(&[Kind::Block, Kind::CaptureGet]),
+    prefix(&[Kind::Block, Kind::CaptureGet, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Local, Kind::CaptureGet]),
+    prefix(&[Kind::Block, Kind::CaptureGet, Kind::Local, Kind::Local]),
+    prefix(&[Kind::Block, Kind::CaptureGet, Kind::Const]),
+    prefix(&[Kind::Block, Kind::Local, Kind::Local, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Copy]),
+    prefix(&[Kind::Then, Kind::Copy]),
+    prefix(&[Kind::Block, Kind::Pass]),
+    prefix(&[Kind::Block, Kind::Pass, Kind::Local]),
+    prefix(&[
+        Kind::Block,
+        Kind::Pass,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Local,
+        Kind::Local,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Pass,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Local,
+        Kind::Local,
+        Kind::Const,
+    ]),
+    prefix(&[
+        Kind::Then,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Local,
+        Kind::Local,
+    ]),
+    prefix(&[
+        Kind::Then,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Copy,
+        Kind::Local,
+        Kind::Local,
+        Kind::Const,
+    ]),
+    prefix(&[Kind::Local]),
+    prefix(&[Kind::Local, Kind::Local]),
+    prefix(&[Kind::Local, Kind::Const]),
+    prefix(&[Kind::CaptureGet]),
+    prefix(&[Kind::CaptureGet, Kind::Local]),
+    prefix(&[Kind::CaptureGet, Kind::Local, Kind::Local]),
+    prefix(&[Kind::Const]),
+    prefix(&[Kind::Block, Kind::CellGet]),
+    prefix(&[Kind::Block, Kind::CellGet, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Local, Kind::Local, Kind::Const]),
+    prefix(&[
+        Kind::Block,
+        Kind::CaptureGet,
+        Kind::Local,
+        Kind::Local,
+        Kind::Local,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Copy,
+        Kind::Const,
+    ]),
+    prefix(&[Kind::Const, Kind::SetLocal, Kind::Const]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Copy,
+        Kind::Const,
+    ]),
+    prefix(&[
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+    ]),
+    prefix(&[Kind::Local, Kind::Local, Kind::Local]),
+    prefix(&[
+        Kind::Block,
+        Kind::Pop,
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Pop,
+        Kind::Block,
+        Kind::Copy,
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Local,
+    ]),
+    prefix(&[Kind::Block, Kind::Const, Kind::SetLocal, Kind::Block]),
+    prefix(&[
+        Kind::Block,
+        Kind::Copy,
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Local,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Local,
+    ]),
+    prefix(&[Kind::Block, Kind::Const, Kind::SetLocal, Kind::Local]),
+    prefix(&[
+        Kind::Block,
+        Kind::Copy,
+        Kind::Block,
+        Kind::Local,
+        Kind::Local,
+        Kind::Local,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Local,
+        Kind::Local,
+        Kind::Local,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Copy,
+        Kind::Const,
+    ]),
+    prefix(&[Kind::CellGet, Kind::Local, Kind::Local]),
+    prefix(&[Kind::Block, Kind::Pop]),
+    prefix(&[Kind::Local, Kind::CaptureGet, Kind::Local, Kind::Local]),
+    prefix(&[
+        Kind::Block,
+        Kind::SetLocal,
+        Kind::Local,
+        Kind::CaptureGet,
+        Kind::Local,
+        Kind::Local,
+    ]),
+    prefix(&[Kind::Block, Kind::SetLocal]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+    ]),
+    prefix(&[Kind::Local, Kind::Local, Kind::Const]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Copy,
+        Kind::Const,
+    ]),
+    prefix(&[Kind::Trip]),
+    prefix(&[Kind::Block, Kind::SetLocal, Kind::Local, Kind::Const]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+    ]),
+    prefix(&[
+        Kind::Then,
+        Kind::Copy,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Local,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+        Kind::Const,
+    ]),
+    prefix(&[
+        Kind::Block,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+        Kind::SetLocal,
+        Kind::Const,
+    ]),
+];
+
+/// The scalar operations, by their index in a fused run's kind.
+pub const OPERATIONS: [ScalarOp; 12] = [
+    ScalarOp::Add,
+    ScalarOp::Sub,
+    ScalarOp::Mul,
+    ScalarOp::Div,
+    ScalarOp::RemTrunc,
+    ScalarOp::RemFloor,
+    ScalarOp::FloorDiv,
+    ScalarOp::Eq,
+    ScalarOp::Lt,
+    ScalarOp::Le,
+    ScalarOp::Gt,
+    ScalarOp::Ge,
+];
+
+/// What takes a fused run's answer, by its index in the run's kind.
+pub const PUSH: u8 = 0;
+pub const SET_LOCAL: u8 = 1;
+pub const POP: u8 = 2;
+pub const BRANCH: u8 = 3;
+
+/// The kind of a fused run of operation `op` (by [`OPERATIONS`]) that
+/// pushes `pushes` operands and whose answer `then` takes.
+pub const fn word_kind(op: u8, pushes: u8, then: u8) -> usize {
+    WORDS + ((op as usize * 3 + pushes as usize) << 2 | then as usize)
+}
+
+/// A micro-op as the runner reads it: its handler's kind and its
+/// operands, in two words that a handler takes in registers. `small` is a
+/// local, a pass, a capture, a cell, a branch's `looping` or a fused
+/// run's `SetLocal`; `a` a block, a constant, a fused run, an inline
+/// site, a copy's `to` or a target; `b` a trip's `then` or a `next`.
+#[derive(Clone, Copy, Debug)]
+pub struct Step {
+    head: u64,
+    tail: u64,
+}
+
+impl Step {
+    fn new(kind: usize, pc: u32, small: u16, a: u32, b: u32) -> Self {
+        debug_assert!(kind < KINDS);
+        Self {
+            head: kind as u64 | u64::from(small) << 16 | u64::from(pc) << 32,
+            tail: u64::from(a) | u64::from(b) << 32,
+        }
+    }
+
+    /// The handler table's index.
+    #[inline(always)]
+    pub fn kind(self) -> usize {
+        (self.head & 0xffff) as usize
+    }
+
+    /// The op the micro-op stands for, its first where it stands for two.
+    #[inline(always)]
+    pub fn pc(self) -> u32 {
+        (self.head >> 32) as u32
+    }
+
+    #[inline(always)]
+    pub fn small(self) -> u16 {
+        (self.head >> 16) as u16
+    }
+
+    #[inline(always)]
+    pub fn a(self) -> u32 {
+        self.tail as u32
+    }
+
+    #[inline(always)]
+    pub fn b(self) -> u32 {
+        (self.tail >> 32) as u32
+    }
+
+    /// The same step with kind `kind` and `small`.
+    pub fn with(self, kind: Kind, small: u16) -> Self {
+        Self::new(kind as usize, self.pc(), small, self.a(), self.b())
+    }
+}
+
+/// `micro`'s step in `unit`.
+fn step(unit: &Unit, micro: Micro) -> Step {
+    let plain = |kind: Kind, pc, small, a, b| Step::new(kind as usize, pc, small, a, b);
+    match micro {
+        Micro::Block { pc, block } => plain(Kind::Block, pc, 0, block, 0),
+        Micro::Trip { pc, block, then } => plain(Kind::Trip, pc, 0, block, then),
+        Micro::Then { pc, block, pass } => plain(Kind::Then, pc, pass, block, 0),
+        Micro::Pass { pc, n } => plain(Kind::Pass, pc, n, 0, 0),
+        Micro::Local { pc, n } => plain(Kind::Local, pc, n, 0, 0),
+        Micro::Const { pc, n } => plain(Kind::Const, pc, 0, n, 0),
+        Micro::SetLocal { pc, n } => plain(Kind::SetLocal, pc, n, 0, 0),
+        Micro::Copy { pc, from, to } => plain(Kind::Copy, pc, from, u32::from(to), 0),
+        Micro::Pop { pc } => plain(Kind::Pop, pc, 0, 0, 0),
+        Micro::CaptureGet { pc, n } => plain(Kind::CaptureGet, pc, n, 0, 0),
+        Micro::CellGet { pc, n } => plain(Kind::CellGet, pc, n, 0, 0),
+        Micro::Fused { pc, n, next } => {
+            let fused = &unit.fused[n as usize];
+            let (then, small) = match fused.then {
+                Then::Push => (PUSH, 0),
+                Then::SetLocal(k) => (SET_LOCAL, k),
+                Then::Pop => (POP, 0),
+                Then::Branch { .. } => (BRANCH, 0),
+            };
+            // One operation for both forms, where the run has any.
+            let operation = match (&fused.words, &fused.numbers) {
+                (Some(words), Some(numbers)) if words.operation != numbers.operation => None,
+                (Some(form), _) | (None, Some(form)) => Some(form.operation),
+                (None, None) => None,
+            };
+            let kind = match operation.and_then(|op| OPERATIONS.iter().position(|&at| at == op)) {
+                Some(op) => word_kind(op as u8, fused.pushes, then),
+                None => Kind::Fused as usize,
+            };
+            Step::new(kind, pc, small, n, next)
+        }
+        Micro::Inline { pc, n } => plain(Kind::Inline, pc, 0, n, 0),
+        Micro::Branch {
+            pc,
+            to,
+            looping,
+            next,
+        } => plain(Kind::Branch, pc, u16::from(looping), to, next),
+        Micro::Jump { pc, to, next } => plain(Kind::Jump, pc, 0, to, next),
+        Micro::Exit { pc } => plain(Kind::Exit, pc, 0, 0, 0),
+    }
+}
+
 /// Builds the traces of every unit of `program`, its own code: a
 /// document's, when it is linked, or the library's, when it is
 /// published. A library body's validated ops stay what inlining and
@@ -254,7 +713,108 @@ pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
         }
     }
     unit.traces = traces;
-    unit.micros = micros;
+    let steps: Vec<_> = micros.into_iter().map(|micro| step(unit, micro)).collect();
+    bundle(unit, steps);
+}
+
+/// Prefix kinds are encoded at build time. Common sequences select a
+/// handler whose leading operations are statically known; long or rare
+/// sequences retain the general bundle handler.
+fn bundle_kind(kind: usize, prefix: &[Step]) -> usize {
+    let code = (prefix.len() <= 16).then(|| {
+        prefix.iter().enumerate().fold(0u64, |code, (n, step)| {
+            code | ((step.kind() + 1) as u64) << (n * 4)
+        })
+    });
+    let patterns = if kind >= WORDS {
+        &WORD_PREFIXES[..]
+    } else {
+        &SMALL_PREFIXES[..]
+    };
+    match code.and_then(|code| patterns.iter().position(|&pattern| pattern == code)) {
+        Some(n) if kind >= WORDS => PLAIN_KINDS * (n + 1) + kind,
+        Some(n) => SMALL_BUNDLE + n * 16 + kind,
+        None => GENERIC_BUNDLE + kind,
+    }
+}
+
+/// Small steps share the following handler's activation. Their original
+/// records remain in `trace_steps`, so a cold read or a failed entry
+/// still returns its own op, after exactly the preceding effects.
+fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
+    let tiny = |step: Step| step.kind() < Kind::Fused as usize;
+    let mut starts = vec![NONE; steps.len()];
+    let mut groups = Vec::new();
+    let mut first = 0;
+    while first < steps.len() {
+        let mut main = first;
+        while main + 1 < steps.len() && tiny(steps[main]) {
+            main += 1;
+        }
+        let mut end = main + 1;
+        // A jump after the answer uses this activation too. It can only
+        // follow a successful fallthrough; a branch or bail skips it.
+        let falls_through = steps[main].kind() == Kind::Inline as usize
+            || ((steps[main].kind() == Kind::Fused as usize || steps[main].kind() >= WORDS)
+                && !matches!(
+                    unit.fused[steps[main].a() as usize].then,
+                    Then::Branch { .. }
+                ));
+        if falls_through
+            && steps
+                .get(end)
+                .is_some_and(|step| step.kind() == Kind::Jump as usize)
+        {
+            end += 1;
+        }
+        starts[first] = groups.len() as u32;
+        groups.push((first, main, end));
+        first = end;
+    }
+    let redirect = |next: u32| {
+        if next == NONE {
+            NONE
+        } else {
+            let target = starts[next as usize];
+            assert_ne!(target, NONE, "a trace targets a group boundary");
+            target
+        }
+    };
+    for trace in &mut unit.traces {
+        trace.start = redirect(trace.start);
+    }
+    for step in &mut steps {
+        if step.kind() == Kind::Jump as usize
+            || step.kind() == Kind::Branch as usize
+            || step.kind() >= WORDS
+            || step.kind() == Kind::Fused as usize
+        {
+            *step = Step::new(
+                step.kind(),
+                step.pc(),
+                step.small(),
+                step.a(),
+                redirect(step.b()),
+            );
+        }
+    }
+    unit.micros = groups
+        .into_iter()
+        .map(|(first, main, end)| {
+            if first == main && end == main + 1 {
+                steps[main]
+            } else {
+                Step::new(
+                    bundle_kind(steps[main].kind(), &steps[first..main]),
+                    steps[first].pc(),
+                    (end - main - 1) as u16,
+                    first as u32,
+                    main as u32,
+                )
+            }
+        })
+        .collect();
+    unit.trace_steps = steps;
 }
 
 /// The block a loop head at `pc` (block `block`) prepays ahead: where
