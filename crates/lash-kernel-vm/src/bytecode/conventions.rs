@@ -61,16 +61,9 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
         checked: None,
         entry: None,
     });
-    // Settlement runs after the body's handlers have left, like its return.
-    // This is the root unit: there are no caller handlers beneath its own.
-    let handlers = unit.ops[..returns]
-        .iter()
-        .filter(|op| matches!(op, Op::TryEnter(_)))
-        .count();
-    let mut epilogue = vec![Op::Block(0)];
-    epilogue.extend(std::iter::repeat_n(Op::TryExit, handlers));
-    epilogue.push(Op::Call(call));
-    append(&mut unit, &epilogue);
+    // Settlement runs after the body's handlers have left, like its return:
+    // those its frame still holds, never a caller's.
+    append(&mut unit, &[Op::Block(0), Op::TryLeave, Op::Call(call)]);
     append(&mut unit, &[Op::Block(0), Op::Return]);
     for op in &mut unit.ops[..returns] {
         match op {
@@ -179,10 +172,6 @@ fn clean_up(
         return unsupported("an entry with a run-root cleanup has no compiled body");
     };
     let body = unit.ops.len();
-    let handlers = unit.ops[..body]
-        .iter()
-        .filter(|op| matches!(op, Op::TryEnter(_)))
-        .count();
     let call = unit.calls.len() as u32;
     unit.calls.push(CallSite {
         callee,
@@ -195,14 +184,13 @@ fn clean_up(
     let mut paths = [0u32; 3];
     for (path, departure) in paths.iter_mut().zip([Op::Return, Op::Fall, Op::Raise]) {
         *path = unit.ops.len() as u32;
-        // A return or a fall leaves the body's handlers behind; a raise
-        // reaches the cleanup only once none is left.
-        let mut call_ops = vec![Op::Block(0)];
-        if departure != Op::Raise {
-            call_ops.extend(std::iter::repeat_n(Op::TryExit, handlers));
+        // A return or a fall leaves the handlers its frame still holds,
+        // never a caller's; a raise reaches the cleanup only once none of
+        // its own is left.
+        match departure {
+            Op::Raise => append(&mut unit, &[Op::Block(0), Op::Call(call)]),
+            _ => append(&mut unit, &[Op::Block(0), Op::TryLeave, Op::Call(call)]),
         }
-        call_ops.push(Op::Call(call));
-        append(&mut unit, &call_ops);
         append(&mut unit, &[Op::Block(0), Op::Pop, departure]);
     }
     let [returned, fell, raised] = paths;

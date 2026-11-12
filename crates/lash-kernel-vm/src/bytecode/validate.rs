@@ -273,7 +273,7 @@ impl Unit {
             let fits = match *op {
                 Op::Block(_) | Op::Nop | Op::Pop | Op::Index | Op::SetIndex => true,
                 Op::SetIndexPlaceFirst | Op::RemoveIndex | Op::Return | Op::Fall => true,
-                Op::Raise | Op::TryExit | Op::Print | Op::Finish | Op::Fail => true,
+                Op::Raise | Op::TryExit | Op::TryLeave | Op::Print | Op::Finish | Op::Fail => true,
                 Op::MakeTuple(_) | Op::MakeList(_) | Op::MakeMap(_) | Op::MakeSet(_) => true,
                 Op::Const(n) => program.get_constant(n).is_some(),
                 Op::Local(n) | Op::SetLocal(n) | Op::CellGet(n) | Op::CellSet(n) | Op::Box(n) => {
@@ -703,6 +703,7 @@ impl Unit {
             | Op::Jump(_)
             | Op::TryEnter(_)
             | Op::TryExit
+            | Op::TryLeave
             | Op::ForNext(_)
             | Op::ProtoStep(_)
             | Op::ProtoMore(_)

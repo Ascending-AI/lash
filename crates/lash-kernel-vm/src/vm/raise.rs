@@ -104,6 +104,21 @@ impl<H: Heap> Vm<H> {
         true
     }
 
+    /// Drops the handlers the running frame installed, and only those: a
+    /// call through an import runs its entry's epilogue above its
+    /// caller's handlers.
+    pub(super) fn leave_handlers(&mut self) {
+        let top = self.cx.frames.len().saturating_sub(1);
+        while self
+            .cx
+            .handlers
+            .last()
+            .is_some_and(|handler| handler.frame as usize >= top)
+        {
+            self.cx.handlers.pop();
+        }
+    }
+
     /// Drops the handlers of frames that are gone: a `return` inside a
     /// `try` leaves its handlers with its frame.
     pub(super) fn drop_handlers(&mut self) {

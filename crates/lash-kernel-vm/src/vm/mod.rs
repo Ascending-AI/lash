@@ -1577,6 +1577,7 @@ impl<H: Heap> Vm<H> {
             Op::TryExit => {
                 self.cx.handlers.pop();
             }
+            Op::TryLeave => self.leave_handlers(),
             Op::ForOpen(n) => self.for_open(unit, n)?,
             Op::ForNext(n) => self.for_next(unit, n)?,
             Op::ProtoOpen(n) => self.proto_open(unit, n)?,

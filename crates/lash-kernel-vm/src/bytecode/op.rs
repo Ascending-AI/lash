@@ -109,6 +109,10 @@ pub enum Op {
     TryEnter(u32),
     /// Removes the innermost handler.
     TryExit,
+    /// Removes every handler the running frame still holds, none of its
+    /// callers': an entry's epilogue after its body has left
+    /// (`K-DOC-003`, `K-TASK-019`).
+    TryLeave,
 
     // --- Loops. Loop `n` of the unit names its hidden locals.
     /// Pops the iterable into loop `n`'s state.
