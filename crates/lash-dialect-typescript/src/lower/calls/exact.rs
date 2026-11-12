@@ -22,6 +22,12 @@
 //!   (`push`, `indexOf`, `sort`, ...). A receiver that is no list gets that
 //!   row: its kind check where the row has one (`push` reads the list's
 //!   length), else the generic row (`indexOf` of a text finds nothing).
+//! - `record.method(r, "name", ...args)` is that call on a record the
+//!   source built: its own field by that name where it is unbranded and
+//!   holds one, else the built-in row's helper read, then applied to `r`,
+//!   its receiver and named arguments read as `callable.method` reads them.
+//!   A receiver that is no record gets the same ladder: a branded or
+//!   fieldless value takes the helper's read, which fails where it runs.
 //! - `list.length(xs)` is `xs.length` of a list the source built: its
 //!   length as a float, with no kind test.
 //! - `record.field(r, "name")` is `r.name` of a record the source built:
@@ -54,6 +60,7 @@ pub(in crate::lower) enum Exact {
     ListSet,
     Method,
     RecordField,
+    RecordMethod,
     TextLength,
     Initialized,
 }
@@ -68,6 +75,7 @@ impl Exact {
             "value.initialized" => Self::Initialized,
             "callable.method" => Self::Method,
             "record.field" => Self::RecordField,
+            "record.method" => Self::RecordMethod,
             "value.length" => Self::TextLength,
             _ => return None,
         };
@@ -119,10 +127,11 @@ impl Lowerer<'_> {
                 };
                 self.get_member(&object, &key)
             }
-            Exact::Method | Exact::ListMethod => {
-                let name = match exact {
-                    Exact::Method => "callable.method",
-                    _ => "list.method",
+            Exact::Method | Exact::ListMethod | Exact::RecordMethod => {
+                let (name, ty) = match exact {
+                    Exact::Method => ("callable.method", Ty::Unknown),
+                    Exact::RecordMethod => ("record.method", Ty::Object),
+                    _ => ("list.method", Ty::Array),
                 };
                 let [
                     ast::CallArg::Value(object @ ast::Expr::Ident(..)),
@@ -159,7 +168,7 @@ impl Lowerer<'_> {
                     }
                     _ => self.lower_expr(object).and_then(|object| {
                         let object = Operand {
-                            ty: Ty::Array,
+                            ty,
                             ..self.pin(object)
                         };
                         self.call_method_on(

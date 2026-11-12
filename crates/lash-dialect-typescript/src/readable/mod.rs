@@ -448,10 +448,21 @@ console.log(JSON.stringify(created));
         materialize_callable_as(lowered, |function| function)
     }
 
-    /// The enumeration law's forms whose `x` is a known list, map, set,
-    /// record or text: as `const x = ...` beside them, `[(kind, body,
-    /// module)]` with the capture's value for each kind.
-    fn known_receiver_forms() -> Vec<(&'static str, k::CaptureValue, String, String)> {
+    /// One of the enumeration law's forms with `x` a known receiver.
+    struct KnownReceiver {
+        kind: &'static str,
+        value: k::CaptureValue,
+        /// The form's own declarations, then `const x = <literal>;`.
+        prefix: String,
+        body: String,
+        /// A member read or call on `x`'s kind (`inventory::members`), not
+        /// an operator applied to it.
+        member: bool,
+    }
+
+    /// The enumeration law's forms over `x` alone (or `x` and an untyped
+    /// `y`), with `x` a known list, map, set, record and text.
+    fn known_receiver_forms() -> Vec<KnownReceiver> {
         let int = |i: i64| k::CaptureValue::Data(k::Datum::Int(i.into()));
         let text = |t: &str| k::CaptureValue::Data(k::Datum::Text(t.into()));
         let kinds = [
@@ -473,10 +484,16 @@ console.log(JSON.stringify(created));
             ),
             ("text", text("78"), "\"78\""),
         ];
-        let mut forms = crate::lower::inventory::forms();
-        forms.extend(crate::lower::inventory::members());
-        let mut out = Vec::new();
-        for (_, source) in forms {
+        let forms = crate::lower::inventory::forms()
+            .into_iter()
+            .map(|form| (false, form))
+            .chain(
+                crate::lower::inventory::members()
+                    .into_iter()
+                    .map(|form| (true, form)),
+            );
+        let mut out: Vec<KnownReceiver> = Vec::new();
+        for (member, (_, source)) in forms {
             let Some(start) = source.find("export function demo(") else {
                 continue;
             };
@@ -484,7 +501,6 @@ console.log(JSON.stringify(created));
             let Some(close) = rest.find(')') else {
                 continue;
             };
-            // A form over `x` alone, or `x` and an untyped `y`.
             if rest[..close]
                 .split(',')
                 .map(str::trim)
@@ -498,38 +514,90 @@ console.log(JSON.stringify(created));
             let body = rest[open + 1..end].trim();
             for (kind, value, literal) in &kinds {
                 let prefix = format!("{}const x = {literal};\n", &source[..start]);
-                out.push((*kind, value.clone(), prefix, body.to_string()));
+                // Annotated variants of a form share its body.
+                if out
+                    .iter()
+                    .any(|form| form.kind == *kind && form.prefix == prefix && form.body == body)
+                {
+                    continue;
+                }
+                out.push(KnownReceiver {
+                    kind,
+                    value: value.clone(),
+                    prefix,
+                    body: body.to_owned(),
+                    member,
+                });
             }
         }
-        out.sort_by(|a, b| (a.0, &a.2, &a.3).cmp(&(b.0, &b.2, &b.3)));
-        out.dedup_by(|a, b| (a.0, &a.2, &a.3) == (b.0, &b.2, &b.3));
         out
     }
 
     /// FIG-7711: every enumerated form over a known receiver that lowers
-    /// prints and reads back to the same document.
+    /// prints and reads back to the same document, in a plain module and as
+    /// a published arrow capturing `x`. The captured arm is admitted for
+    /// members of maps, sets and records; members of lists and texts and
+    /// operators applied to `x` are still open.
     #[test]
     fn enumerated_forms_over_known_receivers_print() {
         let library = crate::tests::library();
         let namespaces = Default::default();
         let environment = Environment::new(library, &namespaces);
         let mut refusals = Vec::new();
-        for (kind, _, prefix, body) in known_receiver_forms() {
+        for form in known_receiver_forms() {
+            let KnownReceiver {
+                kind,
+                value,
+                prefix,
+                body,
+                member,
+            } = &form;
             let module = format!(
                 "{prefix}export async function demo(y: any): Promise<unknown> {{ {body} }}\n"
             );
-            let Ok(lowered) =
+            if let Ok(lowered) =
                 crate::lower(&module, &environment, lash_kernel_dialect::Mode::Module)
-            else {
+                && let Err(error) = print(
+                    &lowered.document,
+                    Some(&lowered.captions),
+                    library,
+                    Default::default(),
+                )
+            {
+                refusals.push(format!("module {kind}: {body} :: {error}"));
+            }
+            let cell =
+                format!("{prefix}const demo = async (y: any): Promise<unknown> => {{ {body} }};\n");
+            let Ok(lowered) = crate::lower(
+                &cell,
+                &environment,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            ) else {
+                continue;
+            };
+            // The materializer fills `x` alone: a callable that also
+            // captures other cell values (a tagged template's strings) is
+            // outside the captured arm.
+            let Ok(opened) = std::panic::catch_unwind(|| {
+                materialize_callable_as(&lowered, |mut function| {
+                    function.captures = [(lash_kernel_value::Name::new("x"), value.clone())]
+                        .into_iter()
+                        .collect();
+                    function
+                })
+            }) else {
                 continue;
             };
             if let Err(error) = print(
-                &lowered.document,
-                Some(&lowered.captions),
+                &opened.document,
+                Some(&opened.captions),
                 library,
                 Default::default(),
             ) {
-                refusals.push(format!("module {kind}: {body} :: {error}"));
+                let refusal = format!("captured {kind}: {body} :: {error}");
+                if *member && !matches!(*kind, "list" | "text") {
+                    refusals.push(refusal);
+                }
             }
         }
         assert!(
@@ -557,7 +625,8 @@ console.log(JSON.stringify(created));
                     .as_ref()?
                     .signature
                     .params
-                    .is_empty()
+                    .iter()
+                    .all(|param| param.name.as_str() == "y")
                     .then_some((site, written, closure))
             })
             .expect("zero-argument callable");
@@ -586,7 +655,7 @@ console.log(JSON.stringify(created));
                         .and_then(|origin| origin.name.clone())
                         .unwrap_or_default(),
                 ),
-                k::Datum::Float(k::Float::new(0.0)),
+                k::Datum::Float(k::Float::new(presentation.signature.params.len() as f64)),
                 k::Datum::Null,
                 k::Datum::Record(vec![]),
             ]),

@@ -414,8 +414,23 @@ impl Lifter<'_> {
         if self.pending_at(member).is_none() {
             return Ok(None);
         }
-        let Some(read @ Expr::Field(..)) = self.take_pending(member) else {
-            return Err("a method read that is not a member read".to_owned());
+        let read = match self.take_pending(member) {
+            Some(read @ Expr::Field(..)) => read,
+            // A record's own field or its built-in row, read under the
+            // exact style: the call is `record.method`.
+            Some(Expr::Call(callee, read))
+                if matches!(&*callee, Expr::Ident(name) if name == "record.field")
+                    && matches!(read.as_slice(), [_, Expr::Text(field)] if field == method) =>
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr(arg))
+                    .collect::<Lift<Vec<_>>>()?;
+                let mut read = read;
+                read.extend(args);
+                return Ok(Some(super::expressions::constructor("record.method", read)));
+            }
+            _ => return Err("a method read that is not a member read".to_owned()),
         };
         if !matches!(&read, Expr::Field(_, field) if field == method) {
             return Err("a method called by another name than it was read by".to_owned());

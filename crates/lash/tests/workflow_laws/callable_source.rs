@@ -979,6 +979,7 @@ export async function ships(): Promise<string> {
     const found = async (x: number): Promise<number> => xs.indexOf(x);
     const measured = async (x: number): Promise<number> => x + t.length;
     const fielded = async (x: number): Promise<number> => x + r.a;
+    const owned = async (key: string): Promise<boolean> => r.hasOwnProperty(key);
     const zs = [1];
     const pushed = async (x: number): Promise<number> => { zs.push(x); return zs.length + zs[1]; };
     const ws = [1, 2];
@@ -998,6 +999,7 @@ export async function ships(): Promise<string> {
     await tools.capture({value: "collection-found", nested: {fact: found}});
     await tools.capture({value: "collection-measured", nested: {fact: measured}});
     await tools.capture({value: "collection-fielded", nested: {fact: fielded}});
+    await tools.capture({value: "collection-owned", nested: {fact: owned}});
     await tools.capture({value: "collection-pushed", nested: {fact: pushed}});
     await tools.capture({value: "collection-bumped", nested: {fact: bumped}});
     await tools.capture({value: "collection-later", nested: {fact: later}});
@@ -1030,6 +1032,11 @@ export async function ships(): Promise<string> {
             serde_json::json!(4),
         ),
         ("fielded", serde_json::json!({"x": 1}), serde_json::json!(6)),
+        (
+            "owned",
+            serde_json::json!({"key": "a"}),
+            serde_json::json!(true),
+        ),
         ("found", serde_json::json!({"x": 8}), serde_json::json!(1)),
         ("pushed", serde_json::json!({"x": 5}), serde_json::json!(7)),
         ("bumped", serde_json::json!({"x": 3}), serde_json::json!(5)),
@@ -1138,6 +1145,21 @@ export async function ships(): Promise<string> {
         )
         .await,
         Ok(serde_json::json!(-1)),
+    );
+    // FIG-7711: `[7, 8].hasOwnProperty("a")` would be false; the record's
+    // method read tests the receiver's own fields first, whose kind check
+    // fails on a list.
+    assert_eq!(
+        run_source(
+            edited("owned", "{ a: 5, b: \"z\" }", "[7, 8]"),
+            "owned-list",
+            serde_json::json!({"key": "a"}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
     );
     // A push onto a text would dispatch the text's member; the
     // list's own push reads the list's length first, whose kind check

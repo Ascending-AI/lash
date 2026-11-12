@@ -83,6 +83,11 @@ the list's own row (`map` over its slots, say) with no kind test, its
 receiver and named arguments read as `callable.method` reads them. It
 spells every row of the list's own table (`push`, `indexOf`, `sort`, ...); a
 receiver that is no list gets that row, with its kind check where it has one.
+`record.method(r, "name", ...args)` is that call on a record the source built:
+its own field by that name where it is unbranded and holds one, else the
+built-in row's helper read, applied to `r`, receiver and named arguments read
+as `callable.method` reads them. A receiver that is no record takes the same
+ladder, so a list fails its own-field test's kind check.
 `list.set(xs, i, v)` is a built list's element write: `i`'s position test and
 the bound that admits an append, then the write in place, else `ts.set`, so
 `xs[i] += v` on a capture reads `list.element` and writes `list.set`.
