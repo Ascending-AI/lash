@@ -239,7 +239,15 @@ impl Lifter<'_> {
         {
             return self.template(args);
         }
-        if self.style.operators
+        // Numeric operators evaluate both operands before checking their kinds.
+        // Keep that order for held results even in the exact-call style; nested
+        // native calls would check the left before evaluating the right.
+        let held_number = args.iter().any(|value| {
+            matches!(value, k::Expr::Call { function, args }
+                if self.is(function, crate::constructs::operators::NUMBER_GUARD)
+                    && matches!(args.as_slice(), [k::Expr::Variable(name)] if self.pending_at(name).is_some()))
+        });
+        if (self.style.operators || held_number)
             && let Some(operator) = self.operator(&name, args)
         {
             return operator;
@@ -389,11 +397,13 @@ impl Lifter<'_> {
             if op == "in" {
                 return self.operand(value, "value.operand");
             }
-            if !self.style.operators
-                && crate::constructs::operators::asserted(op)
-                && let k::Expr::Call { function, args } = value
+            // The assertion inverts this existing guard, preserving its held
+            // operand and check order without inferring a capture cell's kind.
+            if let k::Expr::Call { function, args } = value
                 && self.is(function, crate::constructs::operators::NUMBER_GUARD)
                 && let [value] = args.as_slice()
+                && ((!self.style.operators && crate::constructs::operators::asserted(op))
+                    || matches!(value, k::Expr::Variable(name) if self.pending_at(name).is_some()))
             {
                 return Ok(Expr::As(
                     Box::new(self.expr(value)?),
