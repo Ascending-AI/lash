@@ -305,21 +305,33 @@ pub struct InlineSite {
     pub lookup_words: Option<u32>,
 }
 
-/// Two body-derived folds with their original completion bills and blocks.
+/// A guarded read and a word update with their original bills and blocks.
 #[derive(Clone, Copy)]
 pub struct LookupWords {
     pub key: lash_kernel_doc::arena::ShortText,
     pub lookup: u32,
-    pub words: u32,
     pub get_callee: UnitId,
-    pub word_callee: UnitId,
+    pub update: WordUpdate,
     pub get_fees: [u64; 2],
     pub word_fees: [u64; 8],
     pub operation: scalar::ScalarOp,
     pub between: u64,
-    pub after: u64,
     pub resume: u32,
     pub destination: u16,
+}
+
+/// A body's separate completion/block, or a native update inside the
+/// continuing caller block. Native depth admission still applies.
+#[derive(Clone, Copy)]
+pub enum WordUpdate {
+    Body {
+        callee: UnitId,
+        completion: u32,
+        after: u64,
+    },
+    Native {
+        native: u32,
+    },
 }
 
 /// The most steps, and values made, of one fold.

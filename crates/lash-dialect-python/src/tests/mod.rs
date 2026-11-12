@@ -6,6 +6,7 @@ mod conformance;
 mod controls;
 mod deviations;
 mod fstrings;
+mod lookup;
 mod machine;
 mod module;
 mod naming;

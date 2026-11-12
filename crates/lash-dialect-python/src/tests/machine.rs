@@ -945,7 +945,7 @@ pub(super) struct ExecutionObservation {
     pub(super) end: End,
     pub(super) lines: Vec<String>,
     requests: Vec<String>,
-    charged: u64,
+    pub(super) charged: u64,
     carry: Option<BTreeMap<Name, lash_kernel_vm::SessionValue>>,
 }
 

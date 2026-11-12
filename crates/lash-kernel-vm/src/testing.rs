@@ -32,9 +32,26 @@ pub fn bodies(library: &PreparedLibrary) -> PreparedLibrary {
     )
 }
 
+/// Runs a law on the ordinary read/update path, retaining the same helper
+/// image and compiled program. Cached recipes cannot bypass this control.
+pub fn without_lookup_words<R>(f: impl FnOnce() -> R) -> R {
+    crate::vm::lookup::without(f)
+}
+
 /// A compiled and validated bytecode program, without a running machine.
 pub struct BytecodeProgram {
-    _code: crate::bytecode::program::Program,
+    code: crate::bytecode::program::Program,
+}
+
+impl BytecodeProgram {
+    /// Constant-key map reads composed with their following word update.
+    pub fn lookup_word_sites(&self) -> usize {
+        self.code
+            .units
+            .iter()
+            .map(|unit| unit.lookup_words.len())
+            .sum()
+    }
 }
 
 /// Compiles every unit reached by this document and validates the bytecode.
@@ -69,7 +86,8 @@ pub fn compile_document(
     crate::bytecode::validate::validate(&code).map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;
-    Ok(BytecodeProgram { _code: code })
+    crate::bytecode::fold::fold(&mut code);
+    Ok(BytecodeProgram { code })
 }
 
 /// How a registered definition runs on the core.
