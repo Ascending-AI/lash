@@ -150,30 +150,15 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         if wanted.is_empty() {
             return Ok(std::collections::BTreeMap::new());
         }
-        let rows: Vec<(String, Vec<u8>, Vec<String>, Vec<String>)> = crate::observed_sql::query_as(
-            artifact_sql()
-                .lash_vm_artifacts
-                .select_records_with_edges
-                .sql(),
-        )
-        .bind(MODULE_ARTIFACT_NAMESPACE)
-        .bind(&wanted)
-        .fetch_all(crate::observed_sql::executor(&self.pool))
-        .await
-        .map_err(backend)
-        .map_err(lash_durable::DurableError::from)?;
-        // A record with an edge the single read would refuse is left to it.
-        Ok(rows
-            .into_iter()
-            .filter(|(_, _, kinds, ids)| {
-                kinds.len() == ids.len()
-                    && kinds
-                        .iter()
-                        .zip(ids)
-                        .all(|(kind, id)| ArtifactReferrer::decode(kind, id).is_ok())
-            })
-            .map(|(reference, bytes, _, _)| (reference, bytes))
-            .collect())
+        let rows: Vec<(String, Vec<u8>)> =
+            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_records.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(&wanted)
+                .fetch_all(crate::observed_sql::executor(&self.pool))
+                .await
+                .map_err(backend)
+                .map_err(lash_durable::DurableError::from)?;
+        Ok(rows.into_iter().collect())
     }
     async fn end_package_records(
         &self,

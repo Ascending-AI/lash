@@ -145,51 +145,20 @@ lash_store_sql::statements! {
              LEFT JOIN lash_vm_artifacts AS body ON artifact.storage_kind = 2
                  AND body.namespace = 'process_env_body' AND body.artifact_ref = artifact.body_ref
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2";
-        /// Every referrer edge naming artifact `?2` of namespace `?1`, kinds
-        /// and ids in stored-pair order, and what the artifact stores as
-        /// [`Self::select_stored`] reads it, all in one statement and one
-        /// snapshot: one row whether or not the artifact is stored, `present`
-        /// null when it is not (FIG-7701).
-        select_stored_with_edges = "SELECT
-                 ARRAY(SELECT edge.referrer_kind FROM artifact_referrer_edges AS edge
-                     WHERE edge.namespace = ?1 AND edge.artifact_ref = ?2
-                     ORDER BY edge.referrer_kind, edge.referrer_id) AS kinds,
-                 ARRAY(SELECT edge.referrer_id FROM artifact_referrer_edges AS edge
-                     WHERE edge.namespace = ?1 AND edge.artifact_ref = ?2
-                     ORDER BY edge.referrer_kind, edge.referrer_id) AS ids,
-                 stored.present, stored.bytes, stored.graph_ref
-             FROM (SELECT 1) AS one
-             LEFT JOIN (
-                 SELECT TRUE AS present,
-                     CASE WHEN artifact.storage_kind = 2
-                         THEN substr(artifact.artifact_bytes, 1, artifact.body_at) || body.artifact_bytes
-                             || substr(artifact.artifact_bytes, artifact.body_at + 1)
-                         ELSE artifact.artifact_bytes END AS bytes,
-                     (SELECT hash FROM blobs WHERE id = artifact.graph_ref) AS graph_ref
-                 FROM lash_vm_artifacts AS artifact
-                 LEFT JOIN lash_vm_artifacts AS body ON artifact.storage_kind = 2
-                     AND body.namespace = 'process_env_body' AND body.artifact_ref = artifact.body_ref
-                 WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
-             ) AS stored ON TRUE";
         /// What each stored artifact of `?2` in namespace `?1` stores, as
         /// [`Self::select_stored`]; an absent one has no row.
         select_stored_set = "SELECT artifact_ref, artifact_bytes, (SELECT hash FROM blobs WHERE id = graph_ref) AS graph_ref
              FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ANY(?2::TEXT[])";
+        /// Each stored byte artifact of `?2` in namespace `?1`: its bytes,
+        /// and no referrer edge, so the read does not grow with the
+        /// artifact's referrers (FIG-7701).
+        select_records = "SELECT artifact_ref, artifact_bytes
+             FROM lash_vm_artifacts
+             WHERE namespace = ?1 AND artifact_ref = ANY(?2::TEXT[])
+                 AND storage_kind = 0 AND artifact_bytes IS NOT NULL";
         /// Each reference of `?2` in namespace `?1` that referrer `?3`/`?4`
         /// holds no edge to.
-        /// Each stored byte artifact of `?2` in namespace `?1`, with every
-        /// referrer edge naming it, kinds and ids in the same order.
-        select_records_with_edges = "SELECT artifact.artifact_ref, artifact.artifact_bytes,
-                 ARRAY(SELECT edge.referrer_kind FROM artifact_referrer_edges AS edge
-                     WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref
-                     ORDER BY edge.referrer_kind, edge.referrer_id) AS kinds,
-                 ARRAY(SELECT edge.referrer_id FROM artifact_referrer_edges AS edge
-                     WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref
-                     ORDER BY edge.referrer_kind, edge.referrer_id) AS ids
-             FROM lash_vm_artifacts AS artifact
-             WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ANY(?2::TEXT[])
-                 AND artifact.storage_kind = 0 AND artifact.artifact_bytes IS NOT NULL";
         select_unheld = "SELECT wanted.artifact_ref FROM unnest(?2::TEXT[]) AS wanted(artifact_ref)
              WHERE NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
                  WHERE edge.namespace = ?1 AND edge.artifact_ref = wanted.artifact_ref
@@ -1304,30 +1273,20 @@ impl PostgresLashVmArtifactStore {
         namespace: &str,
         artifact_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
-        let row = crate::observed_sql::query(
-            artifact_sql()
-                .lash_vm_artifacts
-                .select_stored_with_edges
-                .sql(),
-        )
-        .bind(namespace)
-        .bind(artifact_ref)
-        .fetch_one(crate::observed_sql::executor(&self.pool))
-        .await
-        .map_err(backend)?;
-        // Every edge decodes, in stored-pair order, before the bytes are
-        // looked at: an edge this build cannot read refuses the read.
-        let kinds: Vec<String> = row.try_get("kinds").map_err(backend)?;
-        let ids: Vec<String> = row.try_get("ids").map_err(backend)?;
-        for (kind, id) in kinds.iter().zip(&ids) {
-            decode_referrer(kind, id)?;
-        }
-        let present: Option<bool> = row.try_get("present").map_err(backend)?;
-        if present.is_none() {
+        // Only the artifact's own row: a bytes read neither fetches nor
+        // decodes its referrer edges, so its cost does not grow with how
+        // many referrers hold it. Paths that act on edges decode them
+        // (FIG-7701).
+        let stored: Option<(Option<Vec<u8>>, Option<crate::keys::Key>)> =
+            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .fetch_optional(crate::observed_sql::executor(&self.pool))
+                .await
+                .map_err(backend)?;
+        let Some((bytes, root)) = stored else {
             return Ok(None);
-        }
-        let bytes: Option<Vec<u8>> = row.try_get("bytes").map_err(backend)?;
-        let root: Option<crate::keys::Key> = row.try_get("graph_ref").map_err(backend)?;
+        };
         match bytes {
             Some(bytes) => Ok(Some(bytes)),
             None => self.module_node_body(root.as_deref()).await,

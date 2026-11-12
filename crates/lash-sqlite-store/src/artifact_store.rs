@@ -194,6 +194,9 @@ const LOCAL_ARTIFACT_NAMESPACES: lash_store_sql::Vocabulary =
 mod env_storage;
 pub(crate) use env_storage::splice_env_parts;
 use env_storage::{env_closure_tx, splice_env_body_conn, store_process_env_tx};
+#[cfg(test)]
+#[path = "artifact_store/edge_read_tests.rs"]
+mod edge_read_tests;
 mod held;
 #[path = "artifact_store/packages.rs"]
 mod packages;
@@ -783,9 +786,11 @@ impl SqliteStore {
     ) -> Result<Option<Vec<u8>>, StoreError> {
         #[cfg(feature = "testing")]
         let pauses = self.conn.pauses();
-        // The pointer, its edges and the body it names are one snapshot: a
-        // release that reclaims the pointer and peels its body cannot land
-        // between them.
+        // The pointer and the body it names are one snapshot: a release
+        // that reclaims the pointer and peels its body cannot land between
+        // them. A bytes read neither fetches nor decodes the artifact's
+        // referrer edges, so its cost does not grow with how many referrers
+        // hold it; paths that act on edges decode them (FIG-7701).
         // The read runs on a reader, never queued behind the writer's
         // batches (FIG-6939).
         let resolved = self
@@ -809,13 +814,6 @@ impl SqliteStore {
                 #[cfg(feature = "testing")]
                 if let Some(pauses) = pauses.as_ref() {
                     pauses.reach_compound_read(crate::testing::SqliteCompoundRead::Artifact);
-                }
-                let mut edges = conn.statement(artifact_sql().edges.select_artifact_edges.sql())?;
-                let mut rows = edges.query(params![namespace, artifact_ref])?;
-                while let Some(row) = rows.next()? {
-                    let kind: String = row.get(0)?;
-                    let id: String = row.get(1)?;
-                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
                 }
                 if encoding == Some(1) {
                     return Self::module_node_conn(conn, &blob_ref)
@@ -1211,11 +1209,11 @@ mod tests {
     use lash_core_store::artifact_referrer::HostArtifactPin;
     use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 
-    fn pin() -> ArtifactReferrer {
+    pub(super) fn pin() -> ArtifactReferrer {
         ArtifactReferrer::HostPin(HostArtifactPin::mint())
     }
 
-    async fn store() -> (tempfile::TempDir, SqliteStore) {
+    pub(super) async fn store() -> (tempfile::TempDir, SqliteStore) {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::open(
             &dir.path().join("artifact.db"),
@@ -1226,7 +1224,7 @@ mod tests {
         (dir, store)
     }
 
-    async fn edge_count(store: &SqliteStore, artifact_ref: &str) -> i64 {
+    pub(super) async fn edge_count(store: &SqliteStore, artifact_ref: &str) -> i64 {
         let artifact_ref = artifact_ref.to_owned();
         store.conn.call(move |conn| {
             conn.query_row_once("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'kernel_document' AND artifact_ref = ?1",
@@ -1532,97 +1530,11 @@ mod tests {
             .expect("create old table");
         assert!(
             old.query_row_once(
-                artifact_sql().edges.select_artifact_edges.sql(),
+                artifact_sql().edges.select_artifact_has_edge.sql(),
                 params![MODULE_ARTIFACT_NAMESPACE, "m"],
-                |row| row.get::<_, String>(0)
+                |row| row.get::<_, bool>(0)
             )
             .is_err()
         );
-    }
-
-    #[tokio::test]
-    async fn artifact_read_refuses_a_malformed_stored_referrer() {
-        let (_dir, store) = store().await;
-        store
-            .publish_module_artifact(
-                &ReferrerClaim::unguarded(pin()).expect("host pin claim"),
-                "malformed-edge",
-                b"module",
-            )
-            .await
-            .expect("publish module");
-        store
-            .conn
-            .write(|tx| {
-                tx.execute_once(
-                    artifact_sql().edges.insert_edge.sql(),
-                    params![
-                        MODULE_ARTIFACT_NAMESPACE,
-                        "malformed-edge",
-                        "host_pin",
-                        "not-a-pin"
-                    ],
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("insert malformed edge");
-        let error = store
-            .get_module_artifact("malformed-edge")
-            .await
-            .expect_err("malformed referrer pair must fail the artifact read");
-        assert!(matches!(
-            &error,
-            ArtifactStoreError::StoredDataCorrupt {
-                source: lash_protocol_types::module_artifact_refusal::ModuleArtifactCorruption::Storage { record_kind, .. },
-            } if record_kind == "artifact referrer edge"
-        ));
-        let plugin_error: lash_execution_contracts::plugin_error::PluginError = error.into();
-        assert!(matches!(
-            plugin_error,
-            lash_execution_contracts::plugin_error::PluginError::Runtime(runtime)
-                if runtime.code == lash_core_store::runtime_error::RuntimeErrorCode::RuntimeStoreCorrupt
-        ));
-    }
-
-    #[tokio::test]
-    async fn artifact_read_refuses_an_unknown_referrer_kind_and_keeps_the_bytes() {
-        let (_dir, store) = store().await;
-        store
-            .publish_module_artifact(
-                &ReferrerClaim::unguarded(pin()).expect("host pin claim"),
-                "future-edge",
-                b"module",
-            )
-            .await
-            .expect("publish module");
-        store
-            .conn
-            .call(|conn| {
-                conn.execute_batch("PRAGMA ignore_check_constraints = ON")?;
-                conn.execute_once(
-                    artifact_sql().edges.insert_edge.sql(),
-                    params![
-                        MODULE_ARTIFACT_NAMESPACE,
-                        "future-edge",
-                        "synthetic_next",
-                        "x"
-                    ],
-                )?;
-                conn.execute_batch("PRAGMA ignore_check_constraints = OFF")?;
-                Ok(())
-            })
-            .await
-            .expect("inject an edge written by the next build");
-        assert!(matches!(
-            store.get_module_artifact("future-edge").await,
-            Err(ArtifactStoreError::Incompatible {
-                refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
-                    label,
-                    ..
-                }
-            }) if label == "synthetic_next"
-        ));
-        assert_eq!(edge_count(&store, "future-edge").await, 2);
     }
 }

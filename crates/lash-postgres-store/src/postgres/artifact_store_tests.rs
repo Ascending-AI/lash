@@ -9,14 +9,41 @@ use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
 
 use crate::testing::IsolatedDatabase;
 
-/// A read decodes every referrer edge naming the artifact, in stored-pair
-/// order, before it answers the bytes: an edge this build cannot read
-/// refuses the read even though the bytes are stored, and the refusal is
-/// the first such edge's (FIG-7701 R1, review item 1).
+/// Plant `count` referrer edges with ids `{prefix}{n}` and `kind` on module
+/// artifact `artifact_ref`, bypassing every writer.
+async fn plant_edges(
+    pool: &sqlx::PgPool,
+    artifact_ref: &str,
+    kind: &str,
+    prefix: &str,
+    count: i64,
+) {
+    sqlx::query(
+        "INSERT INTO lash_artifact_referrer_edges
+             (namespace, artifact_ref, referrer_kind, referrer_id)
+         SELECT 'kernel_document', $1, $2, $3 || n FROM generate_series(1, $4) AS n",
+    )
+    .bind(artifact_ref)
+    .bind(kind)
+    .bind(prefix)
+    .bind(count)
+    .execute(pool)
+    .await
+    .expect("plant referrer edges");
+}
+
+/// A bytes read's work does not grow with the artifact's referrers: the
+/// same statements, rows and returned bytes under 1 and 10,000 direct
+/// edges, and none of them reads the edge table (FIG-7701, the lead's
+/// ruling on the referrer scan). Its answers stay the store's: a missing
+/// artifact is none, a fenced holder's artifact another holder keeps is
+/// its bytes, and a reclaimed one is none.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_read_refuses_on_the_first_unreadable_edge_before_its_bytes() {
+async fn a_bytes_read_does_not_grow_with_the_artifacts_referrers() {
+    use lash_core_ids::operational_metrics::sql;
+    use lash_core_store::artifact_referrer::ArtifactCleanup;
     let Some(database_url) = crate::postgres_test_support::database_url() else {
-        eprintln!("skipping the artifact-read edge law: database URL is not set");
+        eprintln!("skipping the artifact-read cost law: database URL is not set");
         return;
     };
     let database = IsolatedDatabase::create(&database_url).await;
@@ -24,45 +51,165 @@ async fn a_read_refuses_on_the_first_unreadable_edge_before_its_bytes() {
         .await
         .expect("open the isolated store");
     let store = storage.process_env_store();
-    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
-        .expect("pin claim");
+    let mut work = Vec::new();
+    for (index, edges) in [1_i64, 10_000].into_iter().enumerate() {
+        let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+            .expect("pin claim");
+        let document =
+            lash_kernel_value::names::DocumentId::from_bytes([index as u8 + 1; 32]).to_string();
+        store
+            .publish_module_artifact(&claim, &document, b"stored document")
+            .await
+            .expect("publish the document");
+        plant_edges(
+            storage.pool(),
+            &document,
+            "host_pin",
+            "retained-",
+            edges - 1,
+        )
+        .await;
+        let (bytes, receipt) = sql::collect(
+            "artifact-read",
+            "postgres",
+            store.get_module_artifact(&document),
+        )
+        .await;
+        assert_eq!(
+            bytes.expect("read"),
+            Some(b"stored document".to_vec()),
+            "{edges} edges"
+        );
+        assert!(
+            receipt
+                .shapes
+                .keys()
+                .all(|shape| !shape.contains("referrer_edges")),
+            "a bytes read reads no edge: {:?}",
+            receipt.shapes.keys().collect::<Vec<_>>()
+        );
+        let shapes: Vec<(String, u64, u64)> = receipt
+            .shapes
+            .iter()
+            .map(|(shape, work)| (shape.clone(), work.statements, work.rows_returned))
+            .collect();
+        work.push((
+            receipt.statements,
+            receipt.rows_returned,
+            receipt.result_bytes,
+            shapes,
+        ));
+    }
+    assert!(work[0].0 > 0, "the read is observed");
+    assert_eq!(work[0], work[1], "the read's work at 1 and 10,000 edges");
+
+    let absent = lash_kernel_value::names::DocumentId::from_bytes([0xa0; 32]).to_string();
+    assert_eq!(
+        store.get_module_artifact(&absent).await.expect("read"),
+        None
+    );
+    let [fenced, keeper] = [(); 2].map(|()| ArtifactReferrer::HostPin(HostArtifactPin::mint()));
+    let document = lash_kernel_value::names::DocumentId::from_bytes([0xa1; 32]).to_string();
+    for holder in [&fenced, &keeper] {
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(holder.clone()).expect("pin claim"),
+                &document,
+                b"kept",
+            )
+            .await
+            .expect("hold the document");
+    }
+    let cleanup = storage.artifact_cleanup();
+    cleanup
+        .arm_cleanup(&ArtifactCleanup::ended(fenced, Vec::new(), None), 1)
+        .await
+        .expect("end the first holder");
+    assert_eq!(
+        store.get_module_artifact(&document).await.expect("read"),
+        Some(b"kept".to_vec()),
+        "a fenced holder's artifact another holder keeps"
+    );
+    cleanup
+        .arm_cleanup(&ArtifactCleanup::ended(keeper, Vec::new(), None), 2)
+        .await
+        .expect("end the last holder");
+    assert_eq!(
+        store.get_module_artifact(&document).await.expect("read"),
+        None,
+        "a reclaimed artifact"
+    );
+}
+
+/// An edge this build cannot read refuses every end that acts on it, as
+/// stored corruption, and keeps the bytes and every edge; a bytes read does
+/// not decode edges and answers the bytes (FIG-7701, the lead's ruling on
+/// the referrer scan; review item 1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unreadable_edge_refuses_the_ends_that_act_on_it_not_a_bytes_read() {
+    use lash_core_store::artifact_referrer::{ArtifactCleanup, ResolvedArtifactCleanup};
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the artifact edge law: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let holder = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let claim = ReferrerClaim::unguarded(holder.clone()).expect("pin claim");
     let document = lash_kernel_value::names::DocumentId::from_bytes([7; 32]).to_string();
     store
         .publish_module_artifact(&claim, &document, b"stored document")
         .await
         .expect("publish the document");
+    // Two edges no referrer decode accepts.
+    plant_edges(storage.pool(), &document, "frame_environment", "x", 1).await;
+    plant_edges(storage.pool(), &document, "frame_environment", "[", 1).await;
+    let edges = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM lash_artifact_referrer_edges WHERE artifact_ref = $1",
+        )
+        .bind(&document)
+        .fetch_one(storage.pool())
+        .await
+        .expect("count edges")
+    };
+    let corrupt = |refusal: String| {
+        assert!(
+            refusal.contains("malformed frame_environment referrer id"),
+            "an unreadable edge refuses the end: {refusal}"
+        );
+    };
     assert_eq!(
         store
             .get_module_artifact(&document)
             .await
-            .expect("a read under readable edges"),
+            .expect("a bytes read does not decode edges"),
         Some(b"stored document".to_vec()),
     );
-
-    // Two edges no referrer decode accepts. In stored-pair order `[1` comes
-    // before `x`; their decode errors differ (`[1` names a non-string
-    // element, `x` is no JSON value).
-    for id in ["x", "[1"] {
-        sqlx::query(
-            "INSERT INTO lash_artifact_referrer_edges
-                 (namespace, artifact_ref, referrer_kind, referrer_id)
-             VALUES ('kernel_document', $1, 'frame_environment', $2)",
-        )
-        .bind(&document)
-        .bind(id)
-        .execute(storage.pool())
+    // The local end the ending transaction runs.
+    let refused = storage
+        .artifact_cleanup()
+        .arm_cleanup(&ArtifactCleanup::ended(holder.clone(), Vec::new(), None), 1)
         .await
-        .expect("plant an unreadable edge");
-    }
-    let refusal = store
-        .get_module_artifact(&document)
+        .expect_err("the local end refuses past an unreadable edge");
+    corrupt(refused.to_string());
+    assert_eq!(edges().await, 3);
+    // The store's own end, as the relay delivers it.
+    let refused = store
+        .end_module_referrer(&ResolvedArtifactCleanup {
+            referrer: holder,
+            carries: Vec::new(),
+        })
         .await
-        .expect_err("an unreadable edge refuses the read");
-    let message = refusal.to_string();
-    assert!(
-        message.contains("malformed frame_environment referrer id")
-            && message.contains("invalid type: integer"),
-        "the first edge in stored-pair order refuses: {message}"
+        .expect_err("the relay's end refuses past an unreadable edge");
+    corrupt(refused.to_string());
+    assert_eq!(edges().await, 3);
+    assert_eq!(
+        store.get_module_artifact(&document).await.expect("read"),
+        Some(b"stored document".to_vec()),
     );
 }
 

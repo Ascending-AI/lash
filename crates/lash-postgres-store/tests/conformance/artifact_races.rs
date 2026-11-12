@@ -812,14 +812,14 @@ async fn postgres_ended_cleanup_arms_a_fence_before_delivery() {
 }
 
 #[tokio::test]
-async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
+async fn postgres_stored_referrer_ids_are_never_empty() {
     let Some((_lock, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
     let store = storage.lash_vm_artifact_store();
     let (_, claim) = host_pin();
-    let artifact_ref = "artifact-corrupt-edge";
+    let artifact_ref = "artifact-empty-edge";
     store
         .publish_module_artifact(&claim, artifact_ref, b"bytes")
         .await
@@ -834,22 +834,6 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
     assert!(
         empty_id.is_err(),
         "an empty stored referrer id must fail CHECK"
-    );
-    sqlx::query(
-        "UPDATE lash_artifact_referrer_edges SET referrer_id = 'invalid-host-pin'
-         WHERE namespace = 'kernel_document' AND artifact_ref = $1",
-    )
-    .bind(artifact_ref)
-    .execute(storage.pool())
-    .await
-    .expect("inject undecodable stored referrer");
-    let error = store
-        .get_module_artifact(artifact_ref)
-        .await
-        .expect_err("corrupt edge must refuse the read");
-    assert!(
-        error.to_string().contains("data is corrupt"),
-        "wrong read error: {error}"
     );
 }
 
