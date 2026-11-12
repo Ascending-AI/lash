@@ -2530,6 +2530,7 @@ fn a_real_sized_catalogue_imports_under_default_decode_bounds() {
 }
 
 /// FIG-7659: refusing a request at the decode bound ends only that request.
+/// FIG-7690: so do 70 MiB of decoded signatures, on every attempt.
 /// Even a one-fault restart window leaves a fresh session able to run.
 #[test]
 fn a_bounded_request_refusal_never_poisons_the_pool() {
@@ -2566,15 +2567,24 @@ fn a_bounded_request_refusal_never_poisons_the_pool() {
         assert!(!error.is_host_verdict());
         assert!(!pool.stats().restart_storm);
     }
-
-    let mut worker = checkout(&pool);
-    let request = Request::Lower {
+    let lower = |source: &str, namespaces| Request::Lower {
         dialect: "typescript".into(),
-        source: "console.log('pool alive');".into(),
-        namespaces: Default::default(),
+        source: source.into(),
+        namespaces,
         bindings: Default::default(),
         functions: Default::default(),
     };
+    let result = lash_kernel_value::Type::Enum(vec!["x".repeat(1 << 20)]);
+    let result = lash_kernel_value::Type::Tuple(vec![result; 70]);
+    let sig = lash_kernel_value::schema::tool_signature(result.clone(), true, result);
+    let bytes = rmp_serde::to_vec_named(&lower("host.echo();", echo_namespace(sig))).expect("b");
+    let error = checkout(&pool)
+        .prepare(VmOwner::new("big"), EncodedPayload(bytes))
+        .unwrap_err();
+    assert!(error.to_string().contains("signatures exceed 64 MiB"));
+    assert!(!error.is_host_verdict() && !pool.stats().restart_storm);
+    let mut worker = checkout(&pool);
+    let request = lower("console.log('pool alive');", Default::default());
     let response = worker
         .prepare(
             VmOwner::new("fresh-session"),

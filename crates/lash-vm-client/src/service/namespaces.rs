@@ -154,8 +154,8 @@ pub(super) fn deserialize<'de, D: Deserializer<'de>>(
 ) -> Result<Namespaces, D::Error> {
     use serde::de::Error as _;
     let wire = Wire::deserialize(deserializer)?;
+    let types = types::Types::new::<D::Error>(wire.types)?;
     let mut remaining = lash_vm_protocol::DecodeLimits::standard().max_allocation_bytes;
-    let (types, charges) = types::expand::<D::Error>(wire.types, &mut remaining)?;
     for member in wire.packages.values().flat_map(|members| members.values()) {
         let indices: Vec<_> = match member {
             Member::Operation { params, result, .. } => params
@@ -166,12 +166,7 @@ pub(super) fn deserialize<'de, D: Deserializer<'de>>(
             Member::Export(export) => export.indices(),
         };
         for index in indices {
-            let size = charges
-                .get(index)
-                .ok_or_else(|| D::Error::custom("unknown shared signature type"))?;
-            remaining = remaining
-                .checked_sub(*size)
-                .ok_or_else(|| D::Error::custom("expanded signatures exceed 64 MiB"))?;
+            types.charge::<D::Error>(index, &mut remaining)?;
         }
     }
     let packages = wire
@@ -196,11 +191,11 @@ pub(super) fn deserialize<'de, D: Deserializer<'de>>(
                                         .into_iter()
                                         .map(|p| Param {
                                             name: p.name,
-                                            ty: types[p.ty].clone(),
+                                            ty: types.get(p.ty),
                                             optional: p.optional,
                                         })
                                         .collect(),
-                                    result: types[result].clone(),
+                                    result: types.get(result),
                                 },
                                 controls,
                                 mode,
@@ -422,6 +417,100 @@ mod tests {
         Ok(())
     }
 
+    /// A catalogue whose tools share record types many times over decodes:
+    /// the decoder charges the trees it builds by what they allocate, which
+    /// the expanded node count bounds, not by a serialized estimate of them
+    /// (FIG-7690: Cenote's tool catalogue was refused at 64 MiB).
+    #[test]
+    fn shared_record_catalogues_decode_within_their_node_bound()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use lash_kernel_value::{RecordRest, RecordType, RecordTypeField};
+        let record = |ty: Type| {
+            Type::Record(RecordType {
+                fields: (0..8)
+                    .map(|i| RecordTypeField {
+                        name: format!("f{i}"),
+                        ty: ty.clone(),
+                        optional: false,
+                    })
+                    .collect(),
+                rest: RecordRest::Closed,
+            })
+        };
+        // Nodes: block 1 + 8 = 9, step 1 + 8 * 9 = 73, doc 1 + 8 * 73 = 585.
+        let doc = record(record(record(Type::Text)));
+        let operations = 100;
+        // Each operation takes a doc and returns a list of docs.
+        let nodes = operations * (585 + 1 + 585);
+        let path = PackagePath::parse("catalogue")?;
+        let members = (0..operations)
+            .map(|i| {
+                Ok((
+                    Segment::new(format!(
+                        "read{}{}",
+                        char::from(b'a' + (i / 26) as u8),
+                        char::from(b'a' + (i % 26) as u8)
+                    ))?,
+                    NamespaceMember {
+                        visibility: lash_kernel_value::Visibility::Public,
+                        kind: NamespaceKind::Operation(OperationSignature {
+                            signature: Signature {
+                                params: vec![Param {
+                                    name: Name::new("input"),
+                                    ty: doc.clone(),
+                                    optional: false,
+                                }],
+                                result: Type::List(Box::new(doc.clone())),
+                            },
+                            controls: Default::default(),
+                            mode: lash_kernel_value::OperationMode::Read,
+                        }),
+                    },
+                ))
+            })
+            .collect::<Result<_, Box<dyn std::error::Error>>>()?;
+        let namespaces = Namespaces::new([(path, members)].into(), Default::default(), &|_| false)?;
+        let request = Request::Lower {
+            dialect: "typescript".into(),
+            source: String::new(),
+            namespaces: namespaces.clone(),
+            bindings: Default::default(),
+            functions: Default::default(),
+        };
+        let bytes =
+            rmp_serde::to_vec_named(&lash_kernel_value::json_number::MessagePack(&request))?;
+        let Request::Lower {
+            namespaces: decoded,
+            ..
+        } = lash_kernel_value::json_number::decode::<Request>(&bytes)?
+        else {
+            unreachable!()
+        };
+        assert_eq!(decoded, namespaces);
+        // Every node is one slot of its parent's container (a record field
+        // at most) plus at most two allocations of its own: its field list,
+        // and its field name of two bytes.
+        let per_node = (size_of::<lash_kernel_value::RecordTypeField>() + 2 * 16 + 2) as u64;
+        let wire: Wire =
+            serde_json::from_value(serde_json::to_value(&request)?["lower"]["namespaces"].clone())?;
+        let types = types::Types::new::<serde::de::value::Error>(wire.types)?;
+        let mut remaining = u64::MAX;
+        for member in wire.packages.values().flat_map(BTreeMap::values) {
+            let Member::Operation { params, result, .. } = member else {
+                unreachable!()
+            };
+            for index in params.iter().map(|p| p.ty).chain([*result]) {
+                types.charge::<serde::de::value::Error>(index, &mut remaining)?;
+            }
+        }
+        let charged = u64::MAX - remaining;
+        assert!(
+            charged <= nodes as u64 * per_node,
+            "{charged} bytes charged for {nodes} nodes"
+        );
+        Ok(())
+    }
+
     /// Sharing cannot amplify a small source frame beyond the allocation bound.
     #[test]
     fn shared_signature_references_cannot_amplify_the_decode_bound()
@@ -547,18 +636,18 @@ mod tests {
             amplified.push(TypeNode::Tuple(vec![index, index]));
         }
         let mut remaining = lash_vm_protocol::DecodeLimits::standard().max_allocation_bytes;
-        let error = types::expand::<serde::de::value::Error>(amplified, &mut remaining)
+        let error = types::Types::new::<serde::de::value::Error>(amplified)?
+            .charge::<serde::de::value::Error>(30, &mut remaining)
             .err()
             .ok_or("nested amplification was accepted")?;
         assert!(
             error
                 .to_string()
-                .contains("expanded signatures exceed 64 MiB"),
+                .contains("decoded signatures exceed 64 MiB"),
             "{error}"
         );
         for node in [TypeNode::List(0), TypeNode::Tuple(vec![1])] {
-            let mut remaining = lash_vm_protocol::DecodeLimits::standard().max_allocation_bytes;
-            let error = types::expand::<serde::de::value::Error>(vec![node], &mut remaining)
+            let error = types::Types::new::<serde::de::value::Error>(vec![node])
                 .err()
                 .ok_or("cyclic or unknown reference was accepted")?;
             assert!(
@@ -605,7 +694,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("expanded signatures exceed 64 MiB"),
+                .contains("decoded signatures exceed 64 MiB"),
             "{error}"
         );
         Ok(())

@@ -801,13 +801,24 @@ impl InfrastructureOutcome {
     /// Whether redriving the owning invocation can succeed. A refusal of the
     /// run's inputs and a limit the run itself exhausted fail the same way on
     /// every attempt; a host's deadline or budget does not
-    /// ([`WorkerLimit::is_host_verdict`]).
+    /// ([`WorkerLimit::is_host_verdict`]). So does a pure service exchange
+    /// whose request or response does not decode: the parent encodes the
+    /// same request again, and a fresh worker of the same image answers it
+    /// the same (FIG-7690).
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
             Self::PageRefused { refusal } => refusal.is_retryable(),
             Self::HeapFault { fault } => fault.is_retryable(),
-            Self::RunRefused { .. } | Self::WorkerDeployment { .. } => false,
+            Self::RunRefused { .. }
+            | Self::WorkerDeployment { .. }
+            | Self::ProtocolViolation {
+                breach:
+                    ProtocolBreach::Payload {
+                        payload: PayloadKind::ServiceRequest | PayloadKind::ServiceResponse,
+                        ..
+                    },
+            } => false,
             Self::WorkerCrashed { .. }
             | Self::RunCrashedWorker { .. }
             | Self::WorkerUnresponsive { .. }
