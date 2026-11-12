@@ -740,13 +740,7 @@ impl Compiler<'_> {
                 let checked = self.checked(f, *id, &target);
                 (target, checked)
             }
-            DocCallee::Import(slot) => {
-                let callable = self.imported(*slot)?;
-                (
-                    self.callee_at(f, callable)?,
-                    self.import_checked(*slot, callable),
-                )
-            }
+            DocCallee::Import(slot) => self.import_call(f, *slot)?,
         };
         f.point(f.here(), Point::Action(site.clone()));
         self.entered_call(f, target, argc as u16, site);
@@ -779,7 +773,7 @@ impl Compiler<'_> {
     }
 
     fn spawn(&mut self, f: &mut Fun, callee: &DocCallee, argc: usize, site: Site) -> Result<()> {
-        let (target, checked) = match callee {
+        let (target, resolved) = match callee {
             DocCallee::Value(_) => (None, None),
             DocCallee::Local(id) => (
                 Some(CallableId {
@@ -790,10 +784,10 @@ impl Compiler<'_> {
             ),
             DocCallee::Import(slot) => {
                 let callable = self.imported(*slot)?;
-                (Some(callable), self.import_checked(*slot, callable))
+                (Some(callable), Some(self.import_call(f, *slot)?))
             }
         };
-        let unit = self.stub(f, target, checked, argc as u16)?;
+        let unit = self.stub(f, target, resolved, argc as u16)?;
         let values = argc as u16 + u16::from(target.is_none());
         self.task_action(
             f,

@@ -25,13 +25,20 @@ impl<H: Heap> Vm<H> {
     /// Raises `function_argument` when one of the top `argc` operands does
     /// not fit `checked`'s parameter at its place.
     pub(super) fn check_arguments(&mut self, checked: &Checked, argc: usize) -> Run<()> {
-        let Signature { params, .. } = &checked.signature;
-        if !(checked.required..=params.len()).contains(&argc) {
+        if !(checked.required..=checked.signature.params.len()).contains(&argc) {
             return Err(self.error(
                 "arity",
                 "arguments do not fit the imported function signature",
             ));
         }
+        self.check_fits(checked, argc)
+    }
+
+    /// Raises `function_argument` when one of the top `argc` operands,
+    /// however many, does not fit `checked`'s parameter at its place.
+    #[inline(always)]
+    pub(super) fn check_fits(&mut self, checked: &Checked, argc: usize) -> Run<()> {
+        let Signature { params, .. } = &checked.signature;
         let from = self.cx.stack.len() - argc;
         // Below a value depth of two the check itself may raise
         // (`Self::fits`, `Self::any_members`); above it, an inline scalar

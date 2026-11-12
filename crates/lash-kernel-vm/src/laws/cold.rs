@@ -255,3 +255,220 @@ fn map_iteration_survives_removal_and_reinsertion_across_a_cold_reopen() {
         ])
     );
 }
+
+/// Typed body-only helpers over a collection of any members: one that
+/// takes it and returns, one whose body reads every member.
+fn collection_helpers(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    _: &std::collections::BTreeMap<&'static str, lash_kernel_value::names::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::names::FunctionId)> {
+    [
+        ("cold.take_list", "xs: List(Any)", "return 7"),
+        ("cold.take_map", "xs: Map(Any, Any)", "return 7"),
+        ("cold.take_set", "xs: Set(Any)", "return 7"),
+        (
+            "cold.read_list",
+            "xs: List(Any)",
+            "let n = 0 for x in xs { set n = 7 } return n",
+        ),
+        (
+            "cold.read_map",
+            "xs: Map(Any, Any)",
+            "let n = 0 for x in xs { set n = 7 } return n",
+        ),
+        (
+            "cold.read_set",
+            "xs: Set(Any)",
+            "let n = 0 for x in xs { set n = 7 } return n",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, params, body)| {
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function {name}({params}) -> Int\nkernel 1\ncharge 1\nbody {{ {body} }}"
+        ))
+        .unwrap();
+        (name, registry.register(definition, None).unwrap())
+    })
+    .collect()
+}
+
+/// The review's program (FIG-7694): a collection made before a park,
+/// another after it, and the first passed to typed helper `helper`.
+fn collection_program(kind: &str, helper: &str) -> String {
+    let build = match kind {
+        "list" => "work.fill(4000)".to_string(),
+        "map" => "call build(4000)".to_string(),
+        _ => "call build(4000)".to_string(),
+    };
+    let fill = match kind {
+        "map" => "set m[i] = i",
+        _ => "set m[i] = true",
+    };
+    let start = if kind == "map" { "map{}" } else { "set{}" };
+    format!(
+        "definition \"function build(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ let m = {start} let i = 0 while num.lt(i, n) {{ {fill} set i = num.add(i, 1) }} return m }}\"\n\
+         main {{\n  let xs = {build}\n  do perform 0(0) as Any\n  let ys = work.fill(4000)\n  let answer = invoke cold.{helper}_{kind}(xs)\n  do perform 0(answer) as Any\n  return (answer, list.len(ys))\n}}\n"
+    )
+}
+
+/// How the run of `text` under `memory` ends, with what it asked and
+/// was charged, sealed and opened cold at its first park when `cold`,
+/// and how many pages the cold machine read before its second park.
+fn collection_run(
+    text: &str,
+    memory: u64,
+    cold: bool,
+) -> (End, Vec<crate::Request>, Option<u64>, usize) {
+    let mut embedder = Embedder::with(
+        text,
+        Setup {
+            bounds: crate::Bounds {
+                memory,
+                ..super::embedder::ROOMY
+            },
+            probes: Some(collection_helpers),
+            ..Setup::default()
+        },
+    );
+    let reads = Rc::new(Cell::new(0));
+    let mut parks = 0;
+    let mut at_second = 0;
+    let end = loop {
+        match embedder.run() {
+            Step::Ended(end) => break end,
+            Step::Slice => (),
+            Step::Parked(_) => {
+                parks += 1;
+                if parks == 1 && cold {
+                    let root = embedder.checkpoint();
+                    let (program, library) = embedder.program(true);
+                    match crate::KernelMachine::open_in(
+                        program,
+                        embedder.bounds,
+                        &root,
+                        Box::new(ColdPages {
+                            source: embedder.source.clone(),
+                            reads: Rc::clone(&reads),
+                        }),
+                    ) {
+                        Ok(machine) => embedder.machine = machine,
+                        Err(error) => panic!("open: {error:?}"),
+                    }
+                    embedder.library = library;
+                }
+                if parks == 2 {
+                    at_second = reads.get();
+                }
+                embedder.deliver_next();
+            }
+        }
+    };
+    let charged = embedder.machine.meters().charged;
+    (end, embedder.requests.clone(), charged, at_second)
+}
+
+/// The least memory under which `text` finishes, resident or `cold`.
+fn least_memory(text: &str, cold: bool) -> u64 {
+    let (mut low, mut high) = (0u64, super::embedder::ROOMY.memory);
+    while low + 1 < high {
+        let mid = low + (high - low) / 2;
+        match collection_run(text, mid, cold).0 {
+            End::Finished(_) => high = mid,
+            _ => low = mid,
+        }
+    }
+    high
+}
+
+/// A typed helper's `List(Any)`, `Map(Any, Any)` or `Set(Any)` argument is
+/// checked by kind only (5905f8d544, contract §2/R10: payload counts once
+/// read), so a collection paged out at a park is not loaded at the call:
+/// the cold run gives the resident run's result, requests and charge
+/// wherever memory allows both, never refuses where the resident run does
+/// not or at a lower charge, and a body that reads the collection under a
+/// bound too small for it refuses at the call statement the read stands
+/// in, carrying the call's charge (FIG-7694).
+#[test]
+fn a_kind_checked_collection_is_loaded_where_the_helper_reads_it() {
+    let roomy = super::embedder::ROOMY.memory;
+    let run = |text: &str, memory: u64, cold: bool| collection_run(text, memory, cold);
+    // What a refusal at the call statement leaves to charge after it: the
+    // list program's take call refused for its own frame. Every program
+    // runs the same statements after the call.
+    let list_take = collection_program("list", "take");
+    let refused = run(&list_take, least_memory(&list_take, true) - 1, true);
+    let at_call = match &refused.0 {
+        End::Error(crate::RunError::Bound(exceeded)) => {
+            assert_eq!(
+                exceeded.site.as_ref().map(|site| &site.path[..]),
+                Some(&[3][..])
+            );
+            refused.2.unwrap()
+        }
+        other => panic!("the take call is not what refused: {other:?}"),
+    };
+    let tail = run(&list_take, roomy, true).2.unwrap() - at_call;
+    for kind in ["list", "map", "set"] {
+        let take = collection_program(kind, "take");
+        let read = collection_program(kind, "read");
+        for text in [&take, &read] {
+            let (warm, cold) = (run(text, roomy, false), run(text, roomy, true));
+            assert!(matches!(warm.0, End::Finished(_)), "{kind}: {:?}", warm.0);
+            assert_eq!(
+                (&warm.0, &warm.1, warm.2),
+                (&cold.0, &cold.1, cold.2),
+                "{kind}"
+            );
+            let mut memory = 60_000;
+            while memory <= 200_000 {
+                let (warm, cold) = (run(text, memory, false), run(text, memory, true));
+                match (&warm.0, &cold.0) {
+                    (End::Finished(_), _) => {
+                        assert_eq!(
+                            (&warm.0, &warm.1, warm.2),
+                            (&cold.0, &cold.1, cold.2),
+                            "{kind} {memory}"
+                        )
+                    }
+                    (_, End::Finished(_)) => (),
+                    _ => assert!(
+                        cold.2 >= warm.2,
+                        "{kind} {memory}: the cold run refused earlier"
+                    ),
+                }
+                memory += 8_000;
+            }
+        }
+        // The take call does not load the collection: the cold run passes
+        // the bound the resident run needs for both collections at once.
+        let least_take = least_memory(&take, true);
+        assert!(least_take < least_memory(&take, false), "{kind}");
+        assert!(least_take < least_memory(&read, true), "{kind}");
+        assert!(
+            run(&take, roomy, true).3 < run(&read, roomy, true).3,
+            "{kind}"
+        );
+        // Where take finishes, the read refuses at main's call statement.
+        let total = run(&read, roomy, true).2.unwrap();
+        match run(&read, least_take, true) {
+            (End::Error(crate::RunError::Bound(exceeded)), _, Some(charged), _) => {
+                assert_eq!(
+                    exceeded.function.as_ref().map(|name| name.as_str()),
+                    Some("main"),
+                    "{kind}"
+                );
+                assert_eq!(
+                    exceeded.site.as_deref(),
+                    Some(&lash_kernel_value::sites::Site::new(
+                        lash_kernel_value::sites::Unit::Main,
+                        [3]
+                    )),
+                    "{kind}"
+                );
+                assert_eq!(charged, total - tail, "{kind}");
+            }
+            other => panic!("{kind}: {:?}", other.0),
+        }
+    }
+}

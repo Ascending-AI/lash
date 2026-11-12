@@ -118,7 +118,8 @@ pub(crate) struct Entry<'a> {
 }
 
 /// The function each Link's function import slot resolves to.
-pub type Imports = BTreeMap<(LinkId, ImportSlot), CallableId>;
+pub type Imports =
+    BTreeMap<(LinkId, ImportSlot), (CallableId, lash_kernel_value::names::ExportName)>;
 
 /// The Links a run's build loads besides the one compiled, each with its
 /// own document, and what every Link's function imports resolve to.
@@ -385,7 +386,7 @@ impl Fun {
 /// literal or a helper's perform means that Link's own, so each Link's
 /// code is compiled, and found again, apart.
 #[derive(Default)]
-struct LinkCode {
+pub(super) struct LinkCode {
     immediates: HashMap<Literal, u32>,
     native_ids: HashMap<FunctionId, u32>,
     charge_ids: HashMap<FunctionId, u32>,
@@ -396,6 +397,9 @@ struct LinkCode {
     free: HashMap<FunctionId, BTreeSet<Name>>,
     /// The unit each unavailable helper compiled to.
     missing: HashMap<FunctionId, UnitId>,
+    /// The entry unit a call through an import enters, by the export's
+    /// function and start convention.
+    pub(super) entries: HashMap<(FunctionId, lash_kernel_doc::StartConvention), UnitId>,
 }
 
 /// The Link library code is compiled in: no loaded Link's.
@@ -487,12 +491,12 @@ pub(crate) struct Compiler<'a> {
     pub link: LinkId,
     /// The run's root Link: main's and the entry's.
     root: LinkId,
-    scope: LinkCode,
+    pub(super) scope: LinkCode,
     /// Every loaded Link's document.
     links: HashMap<LinkId, &'a Document>,
     /// What the compiler made for each Link other than the one it is in.
     parked: HashMap<LinkId, LinkCode>,
-    imports: &'a Imports,
+    pub(super) imports: &'a Imports,
     pub units: Vec<Option<Unit>>,
     pub constants: Vec<Constant>,
     pub natives: Vec<NativeEntry>,
@@ -505,6 +509,9 @@ pub(crate) struct Compiler<'a> {
     helpers: Option<&'a BuildHelpers>,
     pub globals: Vec<Name>,
     global_ids: HashMap<Name, u16>,
+    /// The export entries calls through imports enter
+    /// ([`Program::entered`]).
+    pub(super) entered: BTreeSet<UnitId>,
     /// Each action site's occurrence counter index (`K-EFF-008`).
     occurrences: HashMap<(LinkId, Site), u32>,
     /// The build image an open compiles under, when it is not the one the
@@ -547,6 +554,7 @@ impl<'a> Compiler<'a> {
             declares: BTreeSet::new(),
             helpers: None,
             globals: Vec::new(),
+            entered: BTreeSet::new(),
             global_ids: HashMap::new(),
             occurrences: HashMap::new(),
             available: None,
@@ -662,7 +670,7 @@ impl<'a> Compiler<'a> {
 
     /// Compiles Link `link` from here on, finding again what was already
     /// made for it.
-    fn enter_link(&mut self, link: LinkId) -> Result<()> {
+    pub(super) fn enter_link(&mut self, link: LinkId) -> Result<()> {
         if link == self.link {
             return Ok(());
         }
@@ -680,7 +688,7 @@ impl<'a> Compiler<'a> {
     /// The function import `slot` of the Link being compiled resolves to.
     pub(crate) fn imported(&self, slot: ImportSlot) -> Result<CallableId> {
         match self.imports.get(&(self.link, slot)) {
-            Some(callable) => Ok(*callable),
+            Some((callable, _)) => Ok(*callable),
             None => unsupported(format!("import {slot:?} names no function")),
         }
     }
@@ -808,6 +816,7 @@ impl<'a> Compiler<'a> {
             link: self.root,
             globals: self.globals,
             main,
+            entered: self.entered,
         })
     }
 
@@ -1477,7 +1486,7 @@ impl<'a> Compiler<'a> {
         &mut self,
         f: &Fun,
         callee: Option<CallableId>,
-        checked: Option<Arc<Checked>>,
+        resolved: Option<(Callee, Option<Arc<Checked>>)>,
         argc: u16,
     ) -> Result<UnitId> {
         let site = f.site();
@@ -1495,9 +1504,10 @@ impl<'a> Compiler<'a> {
         for value in 0..values {
             g.emit(Op::Local(value));
         }
-        let target = match callee {
-            None => Callee::Value,
-            Some(callable) => self.callee_at(&g, callable)?,
+        let (target, checked) = match (callee, resolved) {
+            (_, Some(resolved)) => resolved,
+            (None, None) => (Callee::Value, None),
+            (Some(callable), None) => (self.callee_at(&g, callable)?, None),
         };
         self.call(&mut g, target, argc, site);
         if let Some(call) = g.calls.last_mut() {

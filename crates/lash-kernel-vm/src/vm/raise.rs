@@ -58,7 +58,7 @@ impl<H: Heap> Vm<H> {
                 }
                 return Ok(());
             }
-            if top == 0 && self.clean_up_raise(value) {
+            if self.clean_up_raise(top, value) {
                 return Ok(());
             }
             let bill = self.cx.frames[top].bill;
@@ -84,11 +84,13 @@ impl<H: Heap> Vm<H> {
         }
     }
 
-    /// A raise leaving an entry's body from its root frame goes on at the
+    /// A raise leaving an entry's body from frame `top` goes on at the
     /// unit's run-root cleanup, the frame holding only the raised value
-    /// (`K-TASK-019`). A raise of the cleanup itself leaves the run.
-    fn clean_up_raise(&mut self, value: Value) -> bool {
-        let Some(frame) = self.cx.frames.first_mut() else {
+    /// (`K-TASK-019`): the run's root, or a call through an import, which
+    /// enters the export as a start does. A raise of the cleanup itself
+    /// leaves the entry.
+    fn clean_up_raise(&mut self, top: usize, value: Value) -> bool {
+        let Some(frame) = self.cx.frames.get_mut(top) else {
             return false;
         };
         let unit = self.program.unit(frame.unit);

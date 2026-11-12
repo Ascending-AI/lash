@@ -178,6 +178,9 @@ impl Unit {
                     program.get_unit(unit).is_some()
                         && charge.is_none_or(|c| program.get_charge(c).is_some())
                 }
+                Callee::Entry { unit, .. } => {
+                    program.get_unit(unit).is_some() && site.checked.is_some()
+                }
                 Callee::Value => true,
                 Callee::Machine { charge, .. } => {
                     charge.is_none_or(|c| program.get_charge(c).is_some())
@@ -861,6 +864,7 @@ mod tests {
             declared: Default::default(),
             globals: Vec::new(),
             main: 0,
+            entered: Default::default(),
         }
     }
 

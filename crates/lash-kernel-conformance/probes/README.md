@@ -16,6 +16,12 @@ Slice returns:
 
 - **R3** (K-MACH-002, a native Decline makes no step): base points at a
   library body's entry, inside it, or at its exit are dropped. 301 points.
+  Since FIG-7689 (7bcba3681b) a body-only library body's statements are
+  steps, as authored ones are: the slice-1 literals add the core's 530
+  statement-step points in body-only library bodies (`py.mul`,
+  `py.print_text`, `py.repr`, `py.add`, `py.for_in.*`, `py.exc.*` and their
+  closures), and no other point. A native's alternative body, entered by
+  its Decline, still makes none.
 - **R2** (K-ITER-005, hooks are library calls): base points at a protocol
   hook, at a loop start or a protocol step, are dropped. 97 points.
 - **R4** (K-MACH-002, dispatching a pending return after `finally` makes no
@@ -37,7 +43,10 @@ The following stay:
 Slices 7 and 50 follow from the slice-1 boundaries by the executor's own
 rule: return at the first boundary at least a slice past the last return,
 counting afresh after a park. This reproduces every base slice-7 and
-slice-50 run from its slice-1 run.
+slice-50 run from its slice-1 run. It reproduces the retargeted slice-7 and
+slice-50 literals from the retargeted slice-1 ones the same way: in t2 and
+t4 at slice 7 the one boundary just after each park is within a slice of
+it and makes no return.
 
 Charges:
 

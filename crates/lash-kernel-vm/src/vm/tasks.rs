@@ -1088,7 +1088,7 @@ impl<H: Heap> Vm<H> {
             return Ok(false);
         };
         let unit = match call.callee {
-            Callee::Unit { unit, .. } => Some(unit),
+            Callee::Unit { unit, .. } | Callee::Entry { unit, .. } => Some(unit),
             Callee::Value => match value {
                 Some(Value::Closure(handle)) => found(self.heap.arena().closure(handle))?
                     .and_then(|(identity, _, _)| self.closure_unit(&identity.callable)),

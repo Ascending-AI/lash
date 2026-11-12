@@ -362,7 +362,7 @@ fn save_frame(
     Ok(RunFrame {
         unit: RunUnit {
             link: program.links[frame.link as usize],
-            kind: save_kind(&unit.kind),
+            kind: save_kind(&unit.kind, program.entered.contains(&frame.unit)),
             site: unit.site.clone(),
             covered: unit.covered,
         },
@@ -511,7 +511,12 @@ fn function_of(unit: &Unit) -> Option<FunctionId> {
     }
 }
 
-pub(crate) fn save_kind(kind: &UnitKind) -> SavedKind {
+/// The kind a unit is saved as: an export's entry a call through an
+/// import enters (`entered`) saves as an entry.
+pub(crate) fn save_kind(kind: &UnitKind, entered: bool) -> SavedKind {
+    if entered {
+        return SavedKind::Entry;
+    }
     match kind {
         UnitKind::Main => SavedKind::Main,
         UnitKind::Declared(_) => SavedKind::Declared,
@@ -783,19 +788,22 @@ pub(super) struct Units<'p> {
 }
 
 impl<'p> Units<'p> {
-    /// An adapted entry (a settlement or a run-root cleanup epilogue) saves
-    /// under the key of its function's plain body: only the run's root
-    /// frame names `program.main`, so every other frame names the body.
+    /// A start's adapted entry (a settlement or a run-root cleanup
+    /// epilogue) saves under the key of its function's plain body: only
+    /// the run's root frame names `program.main`, so every other frame
+    /// names the body. One a call through an import enters saves as an
+    /// entry ([`Program::entered`]).
     pub(super) fn new(program: &'p Program) -> Self {
         let mut own: HashMap<_, _> = program
             .units
             .iter()
             .enumerate()
             .filter(|(at, _)| *at as UnitId != program.main)
-            .map(|(at, unit)| (unit_key(unit), at as UnitId))
+            .map(|(at, unit)| (unit_key(program, at as UnitId, unit), at as UnitId))
             .collect();
         if let Some(main) = program.units.get(program.main as usize) {
-            own.entry(unit_key(main)).or_insert(program.main);
+            own.entry(unit_key(program, program.main, main))
+                .or_insert(program.main);
         }
         Self { program, own }
     }
@@ -806,7 +814,7 @@ impl<'p> Units<'p> {
         let link = self.program.link_index(&saved.link)?;
         if root
             && let Some(main) = self.program.units.get(self.program.main as usize)
-            && unit_key(main) == saved_key(saved)
+            && unit_key(self.program, self.program.main, main) == saved_key(saved)
         {
             return Some((self.program.main, link));
         }
@@ -818,9 +826,10 @@ impl<'p> Units<'p> {
     }
 }
 
-/// The key a compiled unit is saved under.
-pub(super) fn unit_key(unit: &Unit) -> UnitKey<'_> {
-    (unit.link, save_kind(&unit.kind), &unit.site, unit.covered)
+/// The key unit `id` of `program` is saved under.
+pub(super) fn unit_key<'p>(program: &Program, id: UnitId, unit: &'p Unit) -> UnitKey<'p> {
+    let kind = save_kind(&unit.kind, program.entered.contains(&id));
+    (unit.link, kind, &unit.site, unit.covered)
 }
 
 /// The key a saved unit names.

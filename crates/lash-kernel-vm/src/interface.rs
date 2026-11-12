@@ -385,20 +385,8 @@ impl Program {
                         if !target.functions.contains_key(&callable.function) {
                             return Err(invalid("code target definition is not loaded"));
                         }
-                        let descriptor = match (target.exports.get(&export.name), &export.member) {
-                            (Some(lash_kernel_doc::Export::Function(function)), None) => function,
-                            (Some(lash_kernel_doc::Export::Type(ty)), Some(member)) => {
-                                match ty.members.get(member) {
-                                    Some(
-                                        lash_kernel_doc::TypeMember::Static(function)
-                                        | lash_kernel_doc::TypeMember::Method(function)
-                                        | lash_kernel_doc::TypeMember::Property(function),
-                                    ) => function,
-                                    _ => return Err(invalid("code target Type member is absent")),
-                                }
-                            }
-                            _ => return Err(invalid("code target Export is absent")),
-                        };
+                        let descriptor = exported(target, export)
+                            .ok_or_else(|| invalid("code target Export is absent"))?;
                         if descriptor.function != callable.function {
                             return Err(invalid("code target differs from its Export"));
                         }
@@ -854,6 +842,23 @@ pub use crate::durable::session::{
 pub use crate::paged::{
     CellStart, Finished, Inadmissible, Machine, MachineError, OpenError, SealError,
 };
+
+/// The function export `export` names in `document`: a function export,
+/// or a function member of a type export.
+pub(crate) fn exported<'d>(
+    document: &'d Document,
+    export: &ExportName,
+) -> Option<&'d lash_kernel_doc::FunctionExport> {
+    match (document.exports.get(&export.name)?, &export.member) {
+        (lash_kernel_doc::Export::Function(function), None) => Some(function),
+        (lash_kernel_doc::Export::Type(ty), Some(member)) => match ty.members.get(member)? {
+            lash_kernel_doc::TypeMember::Static(function)
+            | lash_kernel_doc::TypeMember::Method(function)
+            | lash_kernel_doc::TypeMember::Property(function) => Some(function),
+        },
+        _ => None,
+    }
+}
 
 /// A slot resolved under its owning Link. Code/type lookup never calls the host.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

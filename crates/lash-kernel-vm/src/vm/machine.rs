@@ -268,8 +268,8 @@ fn build(
                 .slots
                 .iter()
                 .filter_map(|(slot, prepared)| match prepared {
-                    crate::interface::PreparedSlot::Function { callable, .. } => {
-                        Some(((*link, *slot), *callable))
+                    crate::interface::PreparedSlot::Function { callable, export } => {
+                        Some(((*link, *slot), (*callable, export.clone())))
                     }
                     _ => None,
                 })

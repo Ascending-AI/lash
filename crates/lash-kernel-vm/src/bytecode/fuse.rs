@@ -6,7 +6,8 @@
 //! local or constant pushes, the two-argument native call with an inline
 //! answer (R8) they feed, and the op that takes its answer: a scalar
 //! operation, or a same or membership test such as a helper's kind
-//! dispatch runs. The fused call answers as the unfused call op does,
+//! dispatch runs, unless the call is held to a contract (an import's
+//! signature). The fused call answers as the unfused call op does,
 //! and runs the native's call where it declines. The call's fee cancels the block, and
 //! the rest runs exact, so the taking op is fused only where the exact
 //! path bills, tests and sees nothing at it. The run's first op becomes
@@ -22,9 +23,11 @@ use super::program::{Callee, Fused, Operand, Program, Then, Unit, Words};
 
 /// Fuses the runs of every unit of `program`.
 pub(crate) fn fuse(program: &mut Program) {
+    // A call held to a contract, an import's signature, checks its
+    // arguments first, as only the call op does.
     let answered = |site: u32, unit: &Unit| {
         let call = &unit.calls[site as usize];
-        let Callee::Native { native, .. } = call.callee else {
+        let (Callee::Native { native, .. }, None) = (call.callee, &call.checked) else {
             return false;
         };
         let entry = program.native(native);

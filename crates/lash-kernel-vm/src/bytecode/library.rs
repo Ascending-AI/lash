@@ -179,6 +179,7 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
         declared: Default::default(),
         globals: Vec::new(),
         main: 0,
+        entered: Default::default(),
     };
     for unit in &mut program.units {
         unit.sites = super::site_tables::build(unit);
@@ -203,7 +204,7 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
         if let UnitKind::Closure(function) = unit.kind {
             code.closures.entry(function).or_insert(id);
         }
-        let saved = crate::durable::save_kind(&unit.kind);
+        let saved = crate::durable::save_kind(&unit.kind, false);
         code.keys
             .insert((saved, unit.site.clone(), unit.covered), id);
         for action in &unit.actions {

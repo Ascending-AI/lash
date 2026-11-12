@@ -24,7 +24,7 @@ use super::frames::{Bill, Entry};
 use super::{Exceeded, Flow, Restart, Run, Stop, Vm, fault, read};
 use crate::Bound;
 use crate::bytecode::op::Op;
-use crate::bytecode::program::{Callee, NativeEntry, Program, Unit};
+use crate::bytecode::program::{Adapt, Callee, Checked, NativeEntry, Program, Unit};
 use crate::functions::MachineFunction;
 use crate::heap::Heap;
 
@@ -251,6 +251,10 @@ impl<H: Heap> Vm<H> {
                 let link = self.running_link();
                 self.enter(callee, argc, None, bill, link)
             }
+            Callee::Entry {
+                unit: callee,
+                adapt,
+            } => self.enter_entry(callee, adapt, site.checked.as_deref(), argc),
             Callee::Value => self.call_value(program, argc, site.checked.is_some()),
             Callee::Native { native, charged } => {
                 if let Some(checked) = &site.checked {
@@ -262,6 +266,90 @@ impl<H: Heap> Vm<H> {
                 function, charge, ..
             } => self.call_machine(function, charge, argc),
         }
+    }
+
+    /// A call through an import entering export entry `callee` with the
+    /// top `argc` arguments, adapted by `adapt` after `checked`.
+    #[cold]
+    #[inline(never)]
+    fn enter_entry(
+        &mut self,
+        callee: crate::bytecode::program::UnitId,
+        adapt: Adapt,
+        checked: Option<&Checked>,
+        argc: usize,
+    ) -> Run<()> {
+        let argc = self.adapted(checked, adapt, argc)?;
+        self.meter.leave();
+        self.exact = true;
+        let link = self.running_link();
+        self.enter(callee, argc, None, None, link)
+    }
+
+    /// The top `argc` arguments of a call through an import, held to
+    /// `checked` and made the export body's by its start convention as a
+    /// start makes them (`K-DOC-003`): how many the body is passed. A
+    /// TypeScript export's callers may pass fewer or more than it
+    /// declares. What the adaptation builds is built over copies of the
+    /// arguments, which stay rooted below until it is placed.
+    #[cold]
+    #[inline(never)]
+    fn adapted(&mut self, checked: Option<&Checked>, adapt: Adapt, argc: usize) -> Run<usize> {
+        let Some(checked) = checked else {
+            return Err(fault("an export's entry is called without its contract"));
+        };
+        match adapt {
+            Adapt::Python { .. } => self.check_arguments(checked, argc)?,
+            Adapt::Slots(_) | Adapt::Listed => self.check_fits(checked, argc)?,
+        }
+        let from = self.cx.stack.len() - argc;
+        let copy = |vm: &mut Self, range: std::ops::Range<usize>| {
+            for at in range {
+                vm.push(vm.cx.stack[from + at]);
+            }
+        };
+        match adapt {
+            Adapt::Slots(arity) => {
+                let arity = usize::from(arity);
+                self.cx.stack.truncate(from + argc.min(arity));
+                for _ in argc..arity {
+                    self.push(Value::Absent);
+                }
+                return Ok(arity);
+            }
+            Adapt::Listed => {
+                self.push(Value::Absent);
+                copy(self, 0..argc);
+                let values = self.top(argc).to_vec();
+                self.place(argc, NewObject::List(values))?;
+            }
+            Adapt::Python { positional } => {
+                let positional = usize::from(positional).min(argc);
+                copy(self, 0..positional);
+                let values = self.top(positional).to_vec();
+                self.place(positional, NewObject::List(values))?;
+                for (at, param) in checked.signature.params.iter().enumerate().take(argc) {
+                    if at >= positional {
+                        let name = self.text(param.name.as_str())?;
+                        self.push(name);
+                        self.push(self.cx.stack[from + at]);
+                    }
+                }
+                let named = 2 * (argc - positional);
+                let pairs = self
+                    .top(named)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|&[key, value]| (key, value))
+                    .collect();
+                self.place(named, NewObject::Map(pairs))?;
+                self.push(Value::Absent);
+            }
+        }
+        let adapted = self.cx.stack.len() - from - argc;
+        self.cx.stack.drain(from..from + argc);
+        Ok(adapted)
     }
 
     /// The bill a call of formula `charge` owes, over its top `argc`

@@ -8,12 +8,14 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, Decoder, Document, FunctionTarget, Literal, StartConvention};
 use lash_kernel_value::Type;
-use lash_kernel_value::names::FunctionId;
+use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot};
 use lash_kernel_value::sites::Unit as SiteUnit;
 
 use super::compile::{Compiler, Entry, Fun, Result, unsupported};
 use super::op::Op;
-use super::program::{Block, CallSite, Callee, Event, RootCleanup, Unit, UnitId, UnitKind};
+use super::program::{
+    Adapt, Block, CallSite, Callee, Checked, Event, RootCleanup, Unit, UnitId, UnitKind,
+};
 use crate::StartError;
 
 /// The unit a start runs: the entry's body under its start convention.
@@ -388,5 +390,95 @@ pub(crate) fn undefined_as_json(value: &mut Datum) {
             }
         }
         _ => {}
+    }
+}
+
+/// An export's entry unit, how a call through an import adapts its
+/// arguments to it (none for a `PyDirect` export), and the contract the
+/// call holds to.
+type Adapted = (UnitId, Option<Adapt>, Arc<Checked>);
+
+impl Compiler<'_> {
+    /// What a call from `f` through import `slot` calls, and the contract
+    /// it holds to. An export is entered as a start enters it, under its
+    /// start convention (`K-DOC-003`): one that adapts its arguments,
+    /// settles its result or cleans up after its body runs its own entry
+    /// unit, in its own Link, its arguments checked against its public
+    /// signature and then packed at the call. A `Direct` export's call is
+    /// a call of its function, held to the import's signature (FIG-7143).
+    pub(crate) fn import_call(
+        &mut self,
+        f: &Fun,
+        slot: ImportSlot,
+    ) -> Result<(Callee, Option<Arc<Checked>>)> {
+        let Some((callable, export)) = self.imports.get(&(self.link, slot)).cloned() else {
+            return unsupported(format!("import {slot:?} names no function"));
+        };
+        let home = self.link;
+        self.enter_link(callable.link)?;
+        let adapted = self.adapted(callable, &export);
+        self.enter_link(home)?;
+        match adapted? {
+            Some((unit, adapt, checked)) => Ok((
+                match adapt {
+                    Some(adapt) => Callee::Entry { unit, adapt },
+                    None => Callee::Unit { unit, charge: None },
+                },
+                Some(checked),
+            )),
+            None => Ok((
+                self.callee_at(f, callable)?,
+                self.import_checked(slot, callable),
+            )),
+        }
+    }
+
+    /// The entry unit of export `export` of the Link being compiled, which
+    /// names `callable`, how a call adapts its arguments to it, and the
+    /// contract a call of it holds to; none for a `Direct` export.
+    fn adapted(
+        &mut self,
+        callable: CallableId,
+        export: &lash_kernel_value::names::ExportName,
+    ) -> Result<Option<Adapted>> {
+        use lash_kernel_doc::StartConvention;
+        let Some(descriptor) = crate::interface::exported(self.document, export) else {
+            return unsupported("an import names an absent export");
+        };
+        let function = callable.function;
+        let adapt = match descriptor.convention {
+            StartConvention::Direct => return Ok(None),
+            StartConvention::PyDirect { .. } => None,
+            StartConvention::TsDirect { .. } => {
+                let arity = self.def(&function)?.signature.params.len();
+                let Ok(arity) = u16::try_from(arity) else {
+                    return unsupported("an export with more parameters than a call passes");
+                };
+                Some(Adapt::Slots(arity))
+            }
+            StartConvention::TsArgsList { .. } => Some(Adapt::Listed),
+            StartConvention::PyArgsList { positional } => Some(Adapt::Python {
+                positional: u16::try_from(positional).unwrap_or(u16::MAX),
+            }),
+        };
+        let key = (function, descriptor.convention.clone());
+        let unit = match self.scope.entries.get(&key) {
+            Some(unit) => *unit,
+            None => {
+                let unit = super::conventions::entry(
+                    self,
+                    &Entry {
+                        function,
+                        convention: &descriptor.convention,
+                        captures: None,
+                    },
+                )?;
+                self.entered.insert(unit);
+                self.scope.entries.insert(key, unit);
+                unit
+            }
+        };
+        let checked = Checked::new(callable, descriptor.signature.clone());
+        Ok(Some((unit, adapt, Arc::new(checked))))
     }
 }

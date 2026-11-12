@@ -67,6 +67,9 @@ pub struct Program {
     pub globals: Vec<Name>,
     /// The unit a `Main` start runs.
     pub main: UnitId,
+    /// The export entries calls through imports enter: a frame of one is
+    /// saved as an entry, apart from its function's plain unit.
+    pub entered: std::collections::BTreeSet<UnitId>,
 }
 
 /// What a constant is before an instance materializes it: an immediate is
@@ -522,6 +525,10 @@ pub enum Callee {
     /// A unit. `charge` is the completion formula the call bills when it
     /// returns or raises (an outermost uncovered library call), if any.
     Unit { unit: UnitId, charge: Option<u32> },
+    /// An export's entry that a call through an import enters: the
+    /// arguments, held to the site's `checked`, made the entry body's as
+    /// `adapt` says, as a start makes them (`K-DOC-003`).
+    Entry { unit: UnitId, adapt: Adapt },
     /// The value below the arguments: a closure or a function value.
     Value,
     /// A function the machine answers itself; `charge` as for a unit.
@@ -576,6 +583,21 @@ impl Checked {
             signature,
         }
     }
+}
+
+/// How a call through an import makes its arguments the export body's
+/// under the export's start convention, after they fit its signature. A
+/// TypeScript export's callers may pass fewer or more than it declares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Adapt {
+    /// `TsDirect`: the body's parameter slots, the arguments past them
+    /// dropped and the ones short of them absent.
+    Slots(u16),
+    /// `TsArgsList`: an absent `this`, and every argument in a list.
+    Listed,
+    /// `PyArgsList`: the first `positional` arguments in a list, the rest
+    /// in a map by their parameters' names, and no active exception.
+    Python { positional: u16 },
 }
 
 /// What a parameter's type decides of a value by its kind alone. A value

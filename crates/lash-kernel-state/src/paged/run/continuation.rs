@@ -337,6 +337,10 @@ pub enum UnitKind {
     Body,
     Closure,
     Spawn,
+    /// An export's entry under its start convention, entered by a call
+    /// through an import: its body with the convention's settlement or
+    /// run-root cleanup.
+    Entry,
 }
 
 /// Where at a site a frame stands.
@@ -384,7 +388,7 @@ macro_rules! tags {
 }
 
 tags! {
-    UnitKind { Main = 0, Declared = 1, Body = 2, Closure = 3, Spawn = 4, }
+    UnitKind { Main = 0, Declared = 1, Body = 2, Closure = 3, Spawn = 4, Entry = 5, }
     PointPhase { Call = 0, Ready = 1, Issued = 2, Went = 3, Statement = 4, Back = 5, }
     JoinKind { All = 0, AllSettled = 1, Race = 2, Any = 3, }
 }

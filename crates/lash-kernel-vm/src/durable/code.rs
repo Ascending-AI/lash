@@ -166,7 +166,9 @@ impl<'p> Walk<'p> {
                 }
                 Op::Call(n) => {
                     match unit.calls[n as usize].callee {
-                        Callee::Unit { unit, .. } => self.enter(unit, 0),
+                        Callee::Unit { unit, .. } | Callee::Entry { unit, .. } => {
+                            self.enter(unit, 0)
+                        }
                         Callee::Native { native, .. } => {
                             let native = program.native(native);
                             self.pin(native.function);
