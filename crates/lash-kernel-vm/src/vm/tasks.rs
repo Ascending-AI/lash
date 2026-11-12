@@ -693,13 +693,23 @@ impl<H: Heap> Vm<H> {
                     &raw,
                     &ty,
                 ) {
-                    Ok(datum) if raised => Err(Flow::Raise(self.decoded(&datum)?)),
+                    Ok(datum) if raised => {
+                        let value = self.decoded(&datum)?;
+                        self.catches
+                            .wait_raised(self.tasks.running, crate::WaitId(wait), value);
+                        Err(Flow::Raise(value))
+                    }
                     Ok(datum) => {
                         let value = self.decoded(&datum)?;
                         self.push(value);
                         Ok(())
                     }
-                    Err(refusal) => Err(Flow::Raise(super::datum::copy_in(self, &refusal)?)),
+                    Err(refusal) => {
+                        let value = super::datum::copy_in(self, &refusal)?;
+                        self.catches
+                            .wait_raised(self.tasks.running, crate::WaitId(wait), value);
+                        Err(Flow::Raise(value))
+                    }
                 }
             }
         }

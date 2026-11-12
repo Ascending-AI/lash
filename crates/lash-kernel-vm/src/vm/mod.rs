@@ -12,6 +12,7 @@
 
 pub(crate) mod callable;
 pub(crate) mod calls;
+pub(crate) mod catches;
 mod cells;
 pub(crate) mod charge;
 pub(crate) mod datum;
@@ -282,6 +283,7 @@ pub(crate) struct Vm<H: Heap> {
     functions: Digests<UnitId>,
     /// What observes the run; an observed run takes the exact path.
     pub watch: Option<Box<watch::Watch>>,
+    pub(crate) catches: catches::Catches,
     /// What a frame of each unit holds (contract §2): admitted when the
     /// frame is entered, returned when it leaves.
     pub(crate) frames: Vec<u64>,
@@ -408,6 +410,7 @@ impl<H: Heap> Vm<H> {
             closures,
             functions,
             watch: None,
+            catches: Default::default(),
             frames,
             crossing,
             unadmitted,
@@ -723,6 +726,7 @@ impl<H: Heap> Vm<H> {
             top,
             cx,
             tasks,
+            catches,
             held,
             restart,
             ..
@@ -735,6 +739,7 @@ impl<H: Heap> Vm<H> {
             held.iter().for_each(&mut *visit);
             cx.roots(&mut *visit);
             tasks.roots(&mut *visit);
+            catches.roots(&mut *visit);
             if let Some(restart) = restart {
                 restart.roots(&mut *visit);
             }
@@ -759,6 +764,7 @@ impl<H: Heap> Vm<H> {
         self.held.iter().for_each(&mut visit);
         self.cx.roots(&mut visit);
         self.tasks.roots(&mut visit);
+        self.catches.roots(&mut visit);
         if let Some(restart) = &self.restart {
             restart.roots(&mut visit);
         }
@@ -780,6 +786,7 @@ impl<H: Heap> Vm<H> {
             top,
             cx,
             tasks,
+            catches,
             held,
             restart,
             ..
@@ -792,6 +799,7 @@ impl<H: Heap> Vm<H> {
             held.iter().for_each(&mut *visit);
             cx.roots(&mut *visit);
             tasks.roots(&mut *visit);
+            catches.roots(&mut *visit);
             if let Some(restart) = restart {
                 restart.roots(&mut *visit);
             }
