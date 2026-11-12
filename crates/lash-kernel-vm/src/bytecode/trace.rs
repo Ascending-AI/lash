@@ -665,7 +665,7 @@ fn step(unit: &Unit, micro: Micro) -> Step {
                 Then::Push => (PUSH, 0),
                 Then::SetLocal(k) => (SET_LOCAL, k),
                 Then::Pop => (POP, 0),
-                Then::Branch { .. } => (BRANCH, 0),
+                Then::Branch { .. } | Then::NegatedBranch(_) => (BRANCH, 0),
             };
             // One operation for both forms, where the run has any.
             let operation = match (&fused.words, &fused.numbers) {
@@ -805,7 +805,12 @@ pub(crate) fn trace_unit(
         match micro {
             Micro::Jump { to, next, .. } | Micro::Branch { to, next, .. } => *next = start(*to),
             Micro::Fused { n, next, .. } => {
-                if let Then::Branch { to, .. } = unit.fused[*n as usize].then {
+                let target = match unit.fused[*n as usize].then {
+                    Then::Branch { to, .. } => Some(to),
+                    Then::NegatedBranch(n) => Some(unit.negated_branches[n as usize].to),
+                    _ => None,
+                };
+                if let Some(to) = target {
                     *next = start(to);
                 }
             }
@@ -863,7 +868,7 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
             || (is_fused(steps[main].kind())
                 && !matches!(
                     unit.fused[steps[main].a() as usize].then,
-                    Then::Branch { .. }
+                    Then::Branch { .. } | Then::NegatedBranch(_)
                 ));
         if falls_through
             && steps
@@ -931,14 +936,19 @@ fn ahead(unit: &Unit, pc: usize, block: u32) -> Option<u32> {
         return None;
     };
     let fused = &unit.fused[n as usize];
-    if fused.entry.is_some() || !matches!(fused.then, Then::Branch { .. }) {
+    if fused.entry.is_some() {
         return None;
     }
-    let Some(&Op::Block(then)) = unit.ops.get(fused.call as usize + 2) else {
+    let after = match fused.then {
+        Then::Branch { .. } => fused.call + 2,
+        Then::NegatedBranch(n) => unit.negated_branches[n as usize].not + 2,
+        _ => return None,
+    };
+    let Some(&Op::Block(then)) = unit.ops.get(after as usize) else {
         return None;
     };
     let blocks = &unit.blocks;
-    (blocks[block as usize].end == fused.call + 2
+    (blocks[block as usize].end == after
         && blocks[block as usize].charge.is_some()
         && blocks[then as usize].charge.is_some_and(|cost| cost > 0))
     .then_some(then)
@@ -1006,6 +1016,7 @@ fn line(unit: &Unit, head: usize, readable: &impl Fn(u32) -> bool, micros: &mut 
                 let call = fused.call as usize;
                 let after = match fused.then {
                     Then::Push => call + 1,
+                    Then::NegatedBranch(n) => unit.negated_branches[n as usize].not as usize + 2,
                     _ => call + 2,
                 };
                 (

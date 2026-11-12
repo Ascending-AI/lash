@@ -18,6 +18,25 @@ pub(super) fn rerun_from(fused: &Fused) -> u32 {
 }
 
 impl<H: Heap> Vm<H> {
+    /// The Not's fee and bool answer may be taken in place. A miss leaves
+    /// its original argument on the stack and runs its original call, so
+    /// its type error or completion refusal retains its original site.
+    #[inline(always)]
+    pub(super) fn negated_branch(&mut self, unit: &Unit, n: u32, value: Value) -> usize {
+        let branch = &unit.negated_branches[n as usize];
+        if let Value::Bool(taken) = value
+            && (self.off || self.meter.prepay(branch.fee))
+        {
+            return if taken {
+                branch.to as usize
+            } else {
+                branch.not as usize + 2
+            };
+        }
+        self.push(value);
+        branch.not as usize
+    }
+
     /// A branch's condition is no bool (`K-EVAL-005`).
     #[cold]
     #[inline(never)]
@@ -205,6 +224,7 @@ impl<H: Heap> Vm<H> {
                 self.cx.stack[base + usize::from(n)] = value;
             }
             Then::Pop => pc += 1,
+            Then::NegatedBranch(n) => pc = self.negated_branch(unit, n, value),
             Then::Branch { to, looping } => {
                 pc += 1;
                 match value {

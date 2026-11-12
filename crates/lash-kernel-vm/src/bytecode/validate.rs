@@ -844,6 +844,7 @@ mod tests {
             site: Site::new(SiteUnit::Main, Vec::new()),
             points: Vec::new(),
             fused: Vec::new(),
+            negated_branches: Vec::new(),
             traces: Vec::new(),
             micros: Vec::new(),
             trace_steps: Vec::new(),

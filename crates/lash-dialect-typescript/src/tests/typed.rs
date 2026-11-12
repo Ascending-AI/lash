@@ -948,18 +948,11 @@ fn defined_var_records_need_no_brand_admission() {
     }
 }
 
-/// K-CHG-002: a constant field read needs no extra boolean negation when
-/// swapping its arms preserves the membership test and both outcomes.
+/// TS-MEMBER-READ: plain, branded, missing and null reads retain their
+/// results when a sliced run saves and reopens.
 #[test]
-fn record_guards_test_membership_without_a_negation() {
+fn record_guards_preserve_member_reads_across_sliced_reopen() {
     let source = "function read(o) { return o.value; } let rejected = false; try { read(null); } catch { rejected = true; } await control.finish([read({value: 7}), read({}), read({__lash_brand: {}, value: 9}), read([]), rejected]);";
-    let not = super::library()
-        .iter()
-        .find(|(name, _)| *name == "bool.not")
-        .expect("bool.not installed")
-        .1;
-    let text = super::main_text_with_effects(source);
-    assert!(!text.contains(&not.to_string()), "{text}");
     let plain = super::machine::plain_record_resume(source, u64::MAX, false);
     assert_eq!(
         super::machine::end("await control.finish([7, undefined, 9, undefined, true]);"),
@@ -1056,4 +1049,64 @@ await control.finish([work(2), mapEmpty, mixed(true), unique(2), setEmpty, readE
         super::machine::end(source),
         super::machine::end("await control.finish([1, true, 9, 1, true, true, 7]);")
     );
+}
+
+/// SOURCE-HELPER-IDENTITY: attaching native implementations to the same
+/// helper declarations cannot change an authored source's document.
+#[test]
+fn lowering_uses_declared_helper_identities_without_native_availability() {
+    use lash_kernel_dialect::{CellEnvironment, Environment, Library, Mode};
+    use lash_kernel_doc::{FunctionCatalog, FunctionDefinition, FunctionHeader};
+    use lash_kernel_value::FunctionId;
+    use std::sync::Arc;
+
+    struct Declarations<'a>(&'a dyn Library);
+    impl FunctionCatalog for Declarations<'_> {
+        fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
+            self.0.definition(function)
+        }
+        fn header(&self, function: &FunctionId) -> Option<Arc<FunctionHeader>> {
+            self.0.header(function)
+        }
+        fn named_helper(&self, name: &str) -> Option<FunctionId> {
+            self.0.named_helper(name)
+        }
+        fn helper_library(&self) -> Option<&lash_kernel_doc::BuildHelpers> {
+            self.0.helper_library()
+        }
+        fn projection_helper(&self, role: lash_kernel_doc::ProjectionRole) -> Option<FunctionId> {
+            self.0.projection_helper(role)
+        }
+    }
+    impl Library for Declarations<'_> {
+        fn resolve(&self, name: &str) -> Option<FunctionId> {
+            self.0.resolve(name)
+        }
+    }
+    let registered = super::library();
+    let declarations = Declarations(registered);
+    let namespaces =
+        crate::tests::linked::namespaces(&super::machine::effects(), super::controls())
+            .expect("effect namespace");
+    for source in [
+        "function read(o) { return o.value; } read({value: 7});",
+        "const value = JSON.parse('{\"value\":7}'); value.value;",
+        "const value = JSON.stringify({value: 7}); value.length;",
+    ] {
+        let lower = |library: &dyn Library| {
+            crate::lower(
+                source,
+                &Environment::new(library, &namespaces),
+                Mode::Cell(CellEnvironment::first()),
+            )
+            .expect("source lowers under the helper declarations")
+        };
+        let native = lower(registered);
+        let declared = lower(&declarations);
+        assert_eq!(
+            native.document.document(),
+            declared.document.document(),
+            "{source}"
+        );
+    }
 }

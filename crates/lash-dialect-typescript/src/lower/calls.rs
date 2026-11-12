@@ -258,7 +258,6 @@ impl Lowerer<'_> {
             let read = direct.read;
             self.guard(
                 &direct.tests,
-                matches!(key, Key::Static(_)),
                 &mut |this| {
                     this.emit(Stmt::Assign {
                         place: place.clone(),
@@ -545,37 +544,15 @@ impl Lowerer<'_> {
     fn guard(
         &mut self,
         tests: &[Expr],
-        field_read: bool,
         fast: &mut dyn FnMut(&mut Self) -> Lowering<()>,
         slow: &mut dyn FnMut(&mut Self) -> Lowering<()>,
     ) -> Lowering<()> {
         let Some((test, rest)) = tests.split_first() else {
             return fast(self);
         };
-        let then_block = self.block(|this| this.guard(rest, field_read, fast, slow))?;
+        let then_block = self.block(|this| this.guard(rest, fast, slow))?;
         let else_block = self.block(|this| slow(this))?;
-        // These generated tests return bool. A certified negation needs
-        // only its operand when the branch arms exchange places.
-        let negated = if field_read
-            && let Expr::Call { function, args } = test
-            && let [value] = args.as_slice()
-            && let Some(registered) = self.library.registered(function)
-            && registered.definition().guard.is_none()
-            && registered
-                .native()
-                .and_then(|native| native.specialization().inline)
-                .and_then(|inline| inline.for_version(registered.definition().native_version))
-                == Some(lash_kernel_doc::arena::native::InlineOperation::Not)
-        {
-            Some(value)
-        } else {
-            None
-        };
-        if let Some(value) = negated {
-            self.emit_if(value.clone(), else_block, then_block);
-        } else {
-            self.emit_if(test.clone(), then_block, else_block);
-        }
+        self.emit_if(test.clone(), then_block, else_block);
         Ok(())
     }
 
@@ -750,7 +727,6 @@ impl Lowerer<'_> {
         };
         self.guard(
             &tests,
-            false,
             &mut |this| {
                 this.emit(Stmt::Assign {
                     place: place.clone(),

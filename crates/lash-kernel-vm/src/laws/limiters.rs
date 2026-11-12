@@ -4,6 +4,7 @@
 
 mod kinds;
 mod lookup;
+mod negated_member;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -602,6 +603,7 @@ struct Drive<'a> {
     cancel: bool,
     memory: u64,
     typed: bool,
+    probes: Option<super::embedder::Probes>,
 }
 
 impl Default for Drive<'_> {
@@ -617,6 +619,7 @@ impl Default for Drive<'_> {
             cancel: false,
             memory: ROOMY.memory,
             typed: false,
+            probes: None,
         }
     }
 }
@@ -646,7 +649,7 @@ fn drive(text: &str, how: Drive<'_>) -> Observed {
     let started = if how.typed {
         lookup::machine(text, bounds)
     } else {
-        super::embedder::core_machine(text, bounds, Some(huge_charges))
+        super::embedder::core_machine(text, bounds, Some(how.probes.unwrap_or(huge_charges)))
     };
     let mut machine = match started {
         Ok(machine) => machine,
@@ -1668,18 +1671,28 @@ fn traced(text: &str, limit: u64, exact: bool) -> u64 {
 /// state and a recorded charge's watch.
 #[test]
 fn floor_rows_refuse_and_slice_alike_on_the_prepaid_and_exact_paths() {
-    for text in FLOOR_ROWS {
-        let whole = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+    for (text, probes) in negated_member::rows(FLOOR_ROWS) {
+        let run = |limit, slice, exact, limiter: Option<&Scripted>| {
+            let seen = drive(
+                text,
+                Drive {
+                    limit,
+                    slice,
+                    exact,
+                    limiter,
+                    probes,
+                    ..Drive::default()
+                },
+            );
+            (seen.end, seen.charged, seen.printed)
+        };
+
+        let whole = run(ROOMY.charge_limit, u64::MAX, true, None);
         let total = whole.1.expect("charge is metered");
         assert!(whole.0.starts_with("Int"), "{whole:?}");
-        assert_eq!(
-            core_run(text, ROOMY.charge_limit, u64::MAX, false, None),
-            whole
-        );
-        assert!(
-            traced(text, ROOMY.charge_limit, false) > 0,
-            "no trace ran: {text}"
-        );
+        let before = crate::vm::trace::ran();
+        assert_eq!(run(ROOMY.charge_limit, u64::MAX, false, None), whole);
+        assert!(crate::vm::trace::ran() > before, "no trace ran: {text}");
         for slice in 1..=total {
             let sliced = |exact| {
                 let seen = drive(
@@ -1687,6 +1700,7 @@ fn floor_rows_refuse_and_slice_alike_on_the_prepaid_and_exact_paths() {
                     Drive {
                         slice,
                         exact,
+                        probes,
                         ..Drive::default()
                     },
                 );
@@ -1695,22 +1709,14 @@ fn floor_rows_refuse_and_slice_alike_on_the_prepaid_and_exact_paths() {
             assert_eq!(sliced(false), sliced(true), "slice {slice}: {text}");
         }
         for limit in 0..=total + 1 {
-            let exact = core_run(text, limit, u64::MAX, true, None);
-            assert_eq!(
-                core_run(text, limit, u64::MAX, false, None),
-                exact,
-                "limit {limit}"
-            );
-            assert_eq!(
-                core_run(text, limit, 7, false, None),
-                exact,
-                "limit {limit}, sliced"
-            );
+            let exact = run(limit, u64::MAX, true, None);
+            assert_eq!(run(limit, u64::MAX, false, None), exact, "limit {limit}");
+            assert_eq!(run(limit, 7, false, None), exact, "limit {limit}, sliced");
             let grow = total / 3 + 1;
-            let started = core_run(text, limit + grow, u64::MAX, true, None);
+            let started = run(limit + grow, u64::MAX, true, None);
             for exact_path in [false, true] {
                 let limiter = Scripted::answering([LimitDecision::Grow(grow)]);
-                let grown = core_run(text, limit, u64::MAX, exact_path, Some(&limiter));
+                let grown = run(limit, u64::MAX, exact_path, Some(&limiter));
                 assert_eq!(grown, started, "limit {limit} grown, exact {exact_path}");
             }
         }

@@ -19,7 +19,7 @@
 use lash_kernel_doc::arena::native::InlineOperation;
 
 use super::op::Op;
-use super::program::{Callee, Fused, Operand, Program, Then, Unit, Words};
+use super::program::{Callee, Fused, NegatedBranch, Operand, Program, Then, Unit, Words};
 
 /// Fuses the runs of every unit of `program`.
 pub(crate) fn fuse(program: &mut Program) {
@@ -64,22 +64,31 @@ pub(crate) fn fuse(program: &mut Program) {
     for (at, unit) in program.units.iter().enumerate() {
         let mut pc = 0;
         while pc < unit.ops.len() {
-            match run(unit, pc, &answered, &|n| program.readable(n)).map(|(mut fused, end)| {
+            match run(unit, pc, &answered, &|n| program.readable(n)).map(|(mut fused, mut end)| {
                 fused.words = form(fused.site, unit, true, false);
                 fused.numbers = form(fused.site, unit, false, false);
                 fused.guarded_numbers = form(fused.site, unit, false, true);
-                (fused, end)
+                let branch = negated_branch(program, unit, &fused);
+                if let Some(branch) = branch {
+                    end = branch.not as usize + 2;
+                }
+                (fused, end, branch)
             }) {
-                Some((fused, end)) => {
-                    runs.push((at, pc, fused));
+                Some((fused, end, branch)) => {
+                    runs.push((at, pc, fused, branch));
                     pc = end;
                 }
                 None => pc += 1,
             }
         }
     }
-    for (at, pc, fused) in runs {
+    for (at, pc, mut fused, branch) in runs {
         let unit = &mut program.units[at];
+        if let Some(branch) = branch {
+            fused.then = Then::NegatedBranch(unit.negated_branches.len() as u32);
+            unit.negated_branches.push(branch);
+        }
+
         unit.ops[pc] = Op::Fused(unit.fused.len() as u32);
         unit.fused.push(fused);
     }
@@ -142,4 +151,54 @@ fn run(
         guarded_numbers: None,
     };
     Some((fused, end))
+}
+
+/// Keep the authored negation in the document and the exact ops. The plan
+/// alone may use its version-matched native certificate to branch directly.
+fn negated_branch(program: &Program, unit: &Unit, fused: &Fused) -> Option<NegatedBranch> {
+    if !matches!(fused.then, Then::Push) {
+        return None;
+    }
+    let Callee::Native { native, .. } = unit.calls[fused.site as usize].callee else {
+        return None;
+    };
+    if !matches!(
+        program.native(native).scalar,
+        Some(InlineOperation::Membership(_) | InlineOperation::Same)
+    ) {
+        return None;
+    }
+    let not = fused.call + 1;
+    let Op::Call(site) = *unit.ops.get(not as usize)? else {
+        return None;
+    };
+    let Op::JumpIfFalse(to) = *unit.ops.get(not as usize + 1)? else {
+        return None;
+    };
+    for pc in [not as usize, not as usize + 1] {
+        if unit.step[pc] || !unit.event[pc].is_none() {
+            return None;
+        }
+    }
+    let call = &unit.calls[site as usize];
+    let Callee::Native { native, charged } = call.callee else {
+        return None;
+    };
+    let entry = program.native(native);
+    if call.argc != 1
+        || call.checked.is_some()
+        || call.entry.is_some()
+        || entry.params != 1
+        || entry.body.is_some()
+        || entry.guard.is_some()
+        || entry.scalar != Some(InlineOperation::Not)
+    {
+        return None;
+    }
+    let fee = if charged {
+        program.charge(entry.charge).constant()?
+    } else {
+        0
+    };
+    Some(NegatedBranch { not, to, fee })
 }

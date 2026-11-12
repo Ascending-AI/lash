@@ -1137,6 +1137,7 @@ impl<H: Heap> Vm<H> {
                             self.cx.stack[base + usize::from(n)] = $value;
                         }
                         Then::Pop => pc += 1,
+                        Then::NegatedBranch(n) => pc = self.negated_branch(unit, n, $value),
                         Then::Branch { to, looping } => match $value {
                             Value::Bool(true) => pc += 1,
                             Value::Bool(false) => pc = to as usize,

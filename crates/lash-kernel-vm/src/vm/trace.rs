@@ -655,6 +655,26 @@ impl<H: Heap> Vm<H> {
             Then::Push => self.push(value),
             Then::SetLocal(k) => self.cx.stack[base + usize::from(k)] = value,
             Then::Pop => {}
+            Then::NegatedBranch(n) => {
+                let branch = &line.unit.negated_branches[n as usize];
+                if let Value::Bool(taken) = value
+                    && (self.off || self.meter.prepay(branch.fee))
+                {
+                    if taken {
+                        self.meter.unfold();
+                        return if step.b() == NONE {
+                            exit_at(branch.to as usize)
+                        } else {
+                            step.b() as usize
+                        };
+                    }
+                } else {
+                    self.push(value);
+                    self.meter.unfold();
+                    return exit_at(branch.not as usize);
+                }
+            }
+
             Then::Branch { to, looping } => match value {
                 Value::Bool(true) => {}
                 Value::Bool(false) => {

@@ -1711,6 +1711,7 @@ impl<'a> Compiler<'a> {
             site: Site::new(site, path),
             points,
             fused: Vec::new(),
+            negated_branches: Vec::new(),
             traces: Vec::new(),
             micros: Vec::new(),
             trace_steps: Vec::new(),

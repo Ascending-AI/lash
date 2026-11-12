@@ -185,6 +185,8 @@ pub struct Unit {
     pub points: Vec<(u32, Point)>,
     /// The fused runs `Op::Fused` names (`fuse`).
     pub fused: Vec<Fused>,
+    /// Certified negations and branches taken by fused runs.
+    pub negated_branches: Vec<NegatedBranch>,
     /// The block heads' traces `Op::Trace` names, and their micro-ops
     /// (`trace`).
     pub traces: Vec<super::trace::Trace>,
@@ -491,11 +493,21 @@ pub enum Then {
     Push,
     SetLocal(u16),
     Pop,
+    /// A certified native negation followed by its original branch.
+    NegatedBranch(u32),
     /// `JumpIfFalse(to)`, or `WhileFalse(to)` when `looping`.
     Branch {
         to: u32,
         looping: bool,
     },
+}
+
+/// A negation and branch retained in the original ops for exact execution.
+#[derive(Clone, Copy, Debug)]
+pub struct NegatedBranch {
+    pub not: u32,
+    pub to: u32,
+    pub fee: u64,
 }
 
 /// What an observed run records before an op runs (`observe/`).
