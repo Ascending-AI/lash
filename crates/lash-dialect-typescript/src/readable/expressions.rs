@@ -661,12 +661,17 @@ impl Lifter<'_> {
             }
             k::ActKind::Call(k::Callee::Import(slot)) => {
                 let callee = self.operation(slot)?;
+                let held_argument = act.args.iter().any(|arg| {
+                    matches!(arg, k::Expr::Variable(name)
+                        if self.pending_at(name).is_some())
+                });
                 let args = act
                     .args
                     .iter()
                     .map(|value| self.expr(value))
                     .collect::<Lift<Vec<_>>>()?;
-                Ok(if self.style.operators {
+                // An ordinary call recreates the surrounding argument snapshot.
+                Ok(if self.style.operators || held_argument {
                     Expr::Call(Box::new(callee), args)
                 } else {
                     constructor(

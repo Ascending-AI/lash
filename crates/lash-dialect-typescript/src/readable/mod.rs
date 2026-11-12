@@ -1119,6 +1119,7 @@ console.log(JSON.stringify(created));
             ("views", "bar_chart"),
             ("views", "action"),
             ("views", "card"),
+            ("views", "text"),
             ("corpus", "echo"),
             ("processes", "await"),
         ] {

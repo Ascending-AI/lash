@@ -102,7 +102,7 @@ pub(super) async fn capturing_views() -> (
     lash::package::RecordedPackages,
     lash::vm::WorkflowEnvironmentRequest,
 ) {
-    let core = super::crossing::crossing_core().await;
+    let core = super::crossing::crossing_core_with_workflow_capture(true).await;
     let pin = lash::process::HostArtifactPin::mint();
     let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(super::crossing::CAPTURE_TOOLS, &())

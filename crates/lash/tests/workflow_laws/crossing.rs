@@ -34,7 +34,33 @@ fn capture_definition() -> lash::tools::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn capture_component() -> lash::process::StaticProcessComponent {
+fn capture_component(workflows: bool) -> lash::process::StaticProcessComponent {
+    let mut definitions = vec![capture_definition()];
+    let mut roots = [lash::package::Segment::new("tools").unwrap()]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if workflows {
+        roots.insert(lash::package::Segment::new("workflows").unwrap());
+        definitions.push(
+            lash::tools::ToolDefinition::raw(
+                "tool:workflow_create",
+                "workflows.create",
+                "Captures a workflow's run callable.",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "run": {"x-lash": {"kind": "function"}}
+                    },
+                    "required": ["name", "run"],
+                    "additionalProperties": false
+                }),
+                lash::tools::ToolDefinition::any_output(),
+            )
+            .expect("the workflow function slot")
+            .with_execution(std::time::Duration::from_secs(120)),
+        );
+    }
     lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(CAPTURE_TOOLS.component()),
         lash::plugins::PluginSpec::new()
@@ -43,19 +69,16 @@ fn capture_component() -> lash::process::StaticProcessComponent {
                 Arc::new(lash::package::ToolPackageProvider::new(
                     CAPTURE_TOOLS.component(),
                     lash::tool_provider_key!("capture"),
-                    [lash::package::Segment::new("tools").unwrap()].into(),
+                    roots,
                     Arc::new(lash::tools::StaticToolProvider::new(
-                        vec![capture_definition()],
+                        definitions.clone(),
                         Echo,
                     )),
                 )),
             )
             .with_tool_provider(
                 lash::tool_provider_key!("capture"),
-                Arc::new(lash::tools::StaticToolProvider::new(
-                    vec![capture_definition()],
-                    Echo,
-                )),
+                Arc::new(lash::tools::StaticToolProvider::new(definitions, Echo)),
             ),
     )
     .as_component(CAPTURE_TOOLS.format())
@@ -64,6 +87,10 @@ fn capture_component() -> lash::process::StaticProcessComponent {
 
 /// A node whose capture tool explicitly admits a nested function.
 pub(super) async fn crossing_core() -> lash::LashCore {
+    crossing_core_with_workflow_capture(false).await
+}
+
+pub(super) async fn crossing_core_with_workflow_capture(workflows: bool) -> lash::LashCore {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -78,7 +105,7 @@ pub(super) async fn crossing_core() -> lash::LashCore {
         lash::vm::WorkerService::new(config),
     )
     .await
-    .process_component(Arc::new(capture_component()), CAPTURE_TOOLS)
+    .process_component(Arc::new(capture_component(workflows)), CAPTURE_TOOLS)
     .build(node_identity("crossing"))
     .expect("the core builds")
 }

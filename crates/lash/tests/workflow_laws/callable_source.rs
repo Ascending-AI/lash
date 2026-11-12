@@ -557,8 +557,19 @@ async fn print_standalone_reopens_both_dialects_without_a_source_definition() {
 
 /// PRINT-STANDALONE (FIG-7660, FIG-7663): every published callable in the
 /// capture corpus prints, ordinarily imports and retains its frozen behavior.
+/// Cenote's R14 number-concatenation refusal is retained as an exact cell.
 #[tokio::test]
 async fn published_callable_capture_corpus_prints_and_roundtrips() {
+    const CENOTE_SIGNUP_COUNTS: &str = r#"const created = await workflows.create({
+  name: 'signup-counts-report',
+  run: async (): Promise<unknown> => {
+    const lines: Array<string> = [];
+    for (let i = 1; i <= 3; i++) lines.push('Week ' + i + ':');
+    return views.text(lines.join('\n'));
+  }
+});
+console.log(created);
+"#;
     let mut failures = Vec::new();
     for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
         let (core, pin, base, packages, request) = super::packages::capturing_views().await;
@@ -642,6 +653,9 @@ async def ships() -> str:
                 )),
             }
         }
+        if format == SourceFormat::TypeScriptV1 {
+            extra.push_str(CENOTE_SIGNUP_COUNTS);
+        }
         let source = source.replace(
             "    captured = \"later\"",
             &(extra + "    captured = \"later\""),
@@ -698,16 +712,33 @@ async def ships() -> str:
             (0..literal_cases.len())
                 .map(|index| (format!("literal{index}"), "", serde_json::Map::new())),
         );
+        if format == SourceFormat::TypeScriptV1 {
+            cases.push((
+                "signup-counts-report".to_owned(),
+                "",
+                serde_json::Map::new(),
+            ));
+        }
         for (name, suffix, args) in cases {
             let marker = format!("frozen-helper-{name}");
-            let shipped = ECHO_CALLS
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .iter()
-                .rev()
-                .find(|args| args["value"] == marker)
-                .unwrap()["nested"]["fact"]
-                .clone();
+            let shipped = {
+                let calls = ECHO_CALLS
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let captured = calls
+                    .iter()
+                    .rev()
+                    .find(|args| {
+                        args["value"] == marker
+                            || (name == "signup-counts-report" && args["name"] == name)
+                    })
+                    .unwrap();
+                if name == "signup-counts-report" {
+                    captured["run"].clone()
+                } else {
+                    captured["nested"]["fact"].clone()
+                }
+            };
             let function = FunctionValue::from_transport_json(
                 &shipped,
                 &lash::workflow::document::FunctionRegistry::default(),
@@ -757,6 +788,8 @@ async def ships() -> str:
                         serde_json::json!({"type":"card", "title":"Pi", "children":[{"type":"heading", "text":"3.1415926535897932384"},{"type":"text", "value":"20 digits"}]})
                     } else if name == "greet" {
                         serde_json::json!(format!("frozen `template` ${{text}}{suffix}"))
+                    } else if name == "signup-counts-report" {
+                        serde_json::json!({"type":"text", "value":"Week 1:\nWeek 2:\nWeek 3:"})
                     } else {
                         serde_json::json!({"type":"text", "value":true})
                     },
