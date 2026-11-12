@@ -918,3 +918,32 @@ fn reads_before_a_certain_assignment_see_undefined() {
         .collect();
     assert_eq!(observed, expected);
 }
+
+/// TS-PLAIN-DEFINITION: an initially undefined local is plain only when
+/// every read follows a definition and every definition is a plain record.
+#[test]
+fn defined_var_records_need_no_brand_admission() {
+    for declaration in ["var r; r = { a: 1 };", "var r = { a: 1 };"] {
+        let source = format!(
+            "function body() {{ {declaration} return r.a; }} await control.finish(body());"
+        );
+        let text = super::main_text_with_effects(&source);
+        assert!(!text.contains("__lash_brand"), "{text}");
+        assert_eq!(
+            super::machine::end(&source),
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Float(1.0.into()))
+        );
+    }
+    for body in [
+        "var r; const before = r.a; r = { a: 1 }; return before;",
+        "var r; if (flag) r = { a: 1 }; return r.a;",
+        "var r; r = { a: 1 }; if (flag) r = new Date(7); return r.a;",
+        "var r; r = { a: 1 }; function replace() { r = new Date(7); } replace(); return r.a;",
+    ] {
+        let source = format!("function body(flag) {{ {body} }} await control.finish(body(false));");
+        assert!(
+            super::main_text_with_effects(&source).contains("__lash_brand"),
+            "{source}"
+        );
+    }
+}

@@ -267,6 +267,9 @@ impl Facts {
             if entry.session_scope && session.contains(&Name::new(entry.name.as_str())) {
                 collector.plain.session(binding);
             }
+            if entry.unassigned && (entry.early || entry.session_scope) {
+                collector.plain.exclude(super::plain::Key::Binding(binding));
+            }
         }
         let numbers = Numbers::proven(&collector.bindings, &collector.spellings, session);
         let plain = std::mem::take(&mut collector.plain).finish(
@@ -891,10 +894,14 @@ impl<'a> Collector<'a> {
             Role::Assigned => self.lookup(name),
         };
         let value = match (&source, role) {
-            (Source::Value(value), Role::Declared { .. } | Role::Assigned) => Some(*value),
+            (Source::Value(value), _) => Some(*value),
             _ => None,
         };
-        self.plain.name(name, binding, value);
+        if matches!(source, Source::Unassigned) {
+            self.plain.declare(name);
+        } else {
+            self.plain.name(name, binding, value);
+        }
         let Some(binding) = binding else {
             return;
         };

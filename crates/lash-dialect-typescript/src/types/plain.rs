@@ -239,6 +239,10 @@ impl Facts {
 }
 
 impl<'a> Collector<'a> {
+    pub(super) fn declare(&mut self, name: &'a str) {
+        self.defined.insert(name);
+    }
+
     /// A declaration of, or an assignment to, `binding`, the binding
     /// `name` spells; `None` is a name the source does not declare, whose
     /// value leaves the source's view.
