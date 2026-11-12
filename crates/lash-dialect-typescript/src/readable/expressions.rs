@@ -276,6 +276,12 @@ impl Lifter<'_> {
                 )),
             )),
             ("num.to_float", [value]) => self.expr(value),
+            // A known text's element read, `t[i]` (an optional chain's link
+            // reads it as a value).
+            ("ts.text_index", [target, key]) => Ok(Expr::Index(
+                Box::new(self.expr(target)?),
+                Box::new(self.expr(key)?),
+            )),
             (name, [value]) => match crate::constructs::operators::unary_inverse(name, true) {
                 Some((token, condition)) => Ok(Expr::Unary(
                     token,

@@ -59,6 +59,21 @@ impl Lifter<'_> {
                 index += taken;
                 continue;
             }
+            // A field of a value the source built as no record (a list, a
+            // text) is the read helper's, `ts.read(value, "field")`.
+            if let k::Stmt::Let { name, value: read } = &block[index]
+                && let Some(args) = self.helper_read(read, "ts.read")
+                && let [target, k::Expr::Literal(k::Literal::Text(field))] = args.as_slice()
+                && target == value
+            {
+                let (pattern, taken) = match self.default_pattern(&block[index + 1..], name)? {
+                    Some((pattern, taken)) => (pattern, taken + 1),
+                    None => (Pattern::Name(self.binding(name)?), 1),
+                };
+                fields.push((field.clone(), pattern));
+                index += taken;
+                continue;
+            }
             if let Some((temporary, read, count)) = self.read_ladder(&block[index..])? {
                 let Expr::Field(_, field) = read else {
                     return Ok(None);

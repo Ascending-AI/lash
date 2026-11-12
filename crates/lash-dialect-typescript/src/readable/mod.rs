@@ -448,6 +448,98 @@ console.log(JSON.stringify(created));
         materialize_callable_as(lowered, |function| function)
     }
 
+    /// The enumeration law's forms whose `x` is a known list, map, set,
+    /// record or text: as `const x = ...` beside them, `[(kind, body,
+    /// module)]` with the capture's value for each kind.
+    fn known_receiver_forms() -> Vec<(&'static str, k::CaptureValue, String, String)> {
+        let int = |i: i64| k::CaptureValue::Data(k::Datum::Int(i.into()));
+        let text = |t: &str| k::CaptureValue::Data(k::Datum::Text(t.into()));
+        let kinds = [
+            (
+                "list",
+                k::CaptureValue::List(vec![int(7), int(8)]),
+                "[7, 8]",
+            ),
+            (
+                "map",
+                k::CaptureValue::Map(vec![(text("a"), int(1))]),
+                "new Map([[\"a\", 1]])",
+            ),
+            ("set", k::CaptureValue::Set(vec![int(1)]), "new Set([1])"),
+            (
+                "record",
+                k::CaptureValue::Record(vec![("a".into(), int(5)), ("b".into(), text("z"))]),
+                "{a: 5, b: \"z\"}",
+            ),
+            ("text", text("78"), "\"78\""),
+        ];
+        let mut forms = crate::lower::inventory::forms();
+        forms.extend(crate::lower::inventory::members());
+        let mut out = Vec::new();
+        for (_, source) in forms {
+            let Some(start) = source.find("export function demo(") else {
+                continue;
+            };
+            let rest = &source[start + "export function demo(".len()..];
+            let Some(close) = rest.find(')') else {
+                continue;
+            };
+            // A form over `x` alone, or `x` and an untyped `y`.
+            if rest[..close]
+                .split(',')
+                .map(str::trim)
+                .any(|param| !(param.is_empty() || param.starts_with("x:") || param == "y: any"))
+            {
+                continue;
+            }
+            let (Some(open), Some(end)) = (rest.find('{'), rest.rfind('}')) else {
+                continue;
+            };
+            let body = rest[open + 1..end].trim();
+            for (kind, value, literal) in &kinds {
+                let prefix = format!("{}const x = {literal};\n", &source[..start]);
+                out.push((*kind, value.clone(), prefix, body.to_string()));
+            }
+        }
+        out.sort_by(|a, b| (a.0, &a.2, &a.3).cmp(&(b.0, &b.2, &b.3)));
+        out.dedup_by(|a, b| (a.0, &a.2, &a.3) == (b.0, &b.2, &b.3));
+        out
+    }
+
+    /// FIG-7711: every enumerated form over a known receiver that lowers
+    /// prints and reads back to the same document.
+    #[test]
+    fn enumerated_forms_over_known_receivers_print() {
+        let library = crate::tests::library();
+        let namespaces = Default::default();
+        let environment = Environment::new(library, &namespaces);
+        let mut refusals = Vec::new();
+        for (kind, _, prefix, body) in known_receiver_forms() {
+            let module = format!(
+                "{prefix}export async function demo(y: any): Promise<unknown> {{ {body} }}\n"
+            );
+            let Ok(lowered) =
+                crate::lower(&module, &environment, lash_kernel_dialect::Mode::Module)
+            else {
+                continue;
+            };
+            if let Err(error) = print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                Default::default(),
+            ) {
+                refusals.push(format!("module {kind}: {body} :: {error}"));
+            }
+        }
+        assert!(
+            refusals.is_empty(),
+            "{} refusals:\n{}",
+            refusals.len(),
+            refusals.join("\n")
+        );
+    }
+
     /// Materializes the callable of `lowered` as `saved` leaves its value.
     fn materialize_callable_as(
         lowered: &lash_kernel_dialect::Lowered,

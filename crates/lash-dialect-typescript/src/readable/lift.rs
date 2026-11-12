@@ -473,6 +473,7 @@ impl<'a> Lifter<'a> {
                 self.module_helpers.insert(name.clone());
             }
         }
+        let prelude = skip;
         let mut skip = skip;
         if packed {
             // The entry binder pads its supplied list, then binds each source parameter.
@@ -494,7 +495,27 @@ impl<'a> Lifter<'a> {
                 skip += 1;
             }
         }
-        let body = self.block_at(&statements[skip..], &site, skip)?;
+        let mut body = self.block_at(&statements[skip..], &site, skip)?;
+        // A module binding the entry recreates is one its source reads; a
+        // read whose value goes unused (`void x`) lowers to nothing, so it
+        // is written again for the binding to be recreated.
+        let mut unread = Vec::new();
+        for statement in &statements[..prelude] {
+            if let k::Stmt::Let { name, .. } = statement
+                && self.module_capture(statement)
+                && !reads_name(k::Node::Block(&statements[skip..]), name)
+            {
+                unread.push(Stmt {
+                    caption: None,
+                    kind: source::StmtKind::Expr(source::Expr::Unary(
+                        "void ",
+                        Box::new(source::Expr::Ident(self.binding(name)?)),
+                    )),
+                });
+            }
+        }
+        unread.append(&mut body);
+        let body = unread;
         let captured_body = self.module_body(name, &body)?;
         let const_binding = captured_body.is_some() && self.style.const_functions;
         let body = captured_body.unwrap_or(source::Body::Block(body));
