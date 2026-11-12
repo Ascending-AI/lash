@@ -20,12 +20,7 @@ when:
   would bypass the epoch fence the modules apply;
 - a dialect module carries a statement the other dialect module also carries,
   once table prefixes and whitespace are set aside: a statement both dialects
-  issue verbatim belongs in the neutral set, never mirrored by hand;
-- a process row's history archive (`history_archive`, up to 256 KiB) is
-  named by anything but the archive's own statement modules and the schema,
-  or a statement reads the process table by wildcard (`SELECT *`, `p.*`,
-  `RETURNING *`): an ordinary process-row read names its columns and leaves
-  the archive out, so only the archive's readers fetch it (FIG-7701).
+  issue verbatim belongs in the neutral set, never mirrored by hand.
 
 SQL is matched by its keywords in upper case (`FROM actors`,
 `INSERT INTO lash_nodes`, `REFERENCES lash_actors`), so prose that mentions
@@ -119,40 +114,6 @@ def stray_sql(root: Path, paths: list[str], allowed: set[str]) -> list[str]:
     return findings
 
 
-ARCHIVE_COLUMN = re.compile(r"\bhistory_archive\b")
-ARCHIVE_MODULES = {f"{directory}/process_history.rs" for directory in (NEUTRAL_DIR, *DIALECT_DIRS)}
-ARCHIVE_SCHEMA = SCHEMA_ARTIFACTS | {"crates/lash-sqlite-store/src/schema.rs"}
-PROCESS_TABLE = re.compile(r"\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:main\.)?(?:lash_)?processes\b")
-WILDCARD = re.compile(r"\b(?:SELECT|RETURNING)\s+\*|\b\w+\.\*")
-STRING = re.compile(r'r#+"(?:.|\n)*?"#+|"(?:[^"\\]|\\.)*"')
-
-
-def archive_reads(root: Path, paths: list[str]) -> list[str]:
-    """The archive column stays in its modules; no wildcard reads a process row."""
-    findings = []
-    for path in paths:
-        if "/tests/" in path or path.startswith("tests/"):
-            continue
-        try:
-            text = (root / path).read_text()
-        except (OSError, UnicodeDecodeError):
-            continue
-        if path not in ARCHIVE_MODULES | ARCHIVE_SCHEMA:
-            for match in ARCHIVE_COLUMN.finditer(text):
-                line = text.count("\n", 0, match.start()) + 1
-                findings.append(f"{path}:{line}: the history archive named outside its modules")
-        if path in SCHEMA_ARTIFACTS:
-            continue
-        for literal in STRING.finditer(text):
-            sql = literal.group(0)
-            if PROCESS_TABLE.search(sql) and (wildcard := WILDCARD.search(sql)):
-                line = text.count("\n", 0, literal.start() + wildcard.start()) + 1
-                findings.append(
-                    f"{path}:{line}: a process-table statement reads by wildcard ({wildcard.group(0)!r}); name its columns"
-                )
-    return findings
-
-
 def normalized(statement: str) -> str:
     return " ".join(re.sub(r"\blash_(" + "|".join(TABLES) + r")\b", r"\1", statement).split())
 
@@ -181,11 +142,7 @@ def main() -> int:
     paths = tracked(ROOT)
     modules = module_files(paths)
     allowed = modules | SCHEMA_ARTIFACTS
-    findings = (
-        stray_sql(ROOT, paths, allowed)
-        + mirrored(ROOT, modules)
-        + archive_reads(ROOT, paths)
-    )
+    findings = stray_sql(ROOT, paths, allowed) + mirrored(ROOT, modules)
     if findings:
         print("durability engine SQL outside its modules:", file=sys.stderr)
         print("\n".join(f"  {finding}" for finding in findings), file=sys.stderr)

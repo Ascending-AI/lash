@@ -664,17 +664,8 @@ pub(super) fn acquire_in(
     if request.ttl_millis <= 0 {
         return Ok(Err(DurableError::Graph(GraphRefusal::LeaseLost)));
     }
-    match graph::root_in(tx, &request.owner)? {
-        Ok(Some((root, archive))) if root == request.expected => {
-            // A root of a packed history leases a live copy of its closure,
-            // restored in this transaction: the page reads, renewals and
-            // retirement of the lease are those of any live root.
-            if let Some(archive) = archive
-                && let Err(error) = super::process_history::restore(tx, &archive, root)?
-            {
-                return Ok(Err(error));
-            }
-        }
+    match graph::root_of(tx, &request.owner)? {
+        Ok(Some(root)) if root == request.expected => {}
         Ok(Some(_)) => return Ok(Err(DurableError::Graph(GraphRefusal::RevisionConflict))),
         Ok(None) => return Ok(Err(DurableError::Graph(GraphRefusal::RootRetired))),
         Err(refusal) => return Ok(Err(DurableError::Graph(refusal))),

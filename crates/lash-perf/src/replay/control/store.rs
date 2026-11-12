@@ -67,14 +67,6 @@ impl DurableStore for ObservedStore {
         self.observe("readiness", self.inner.readiness()).await
     }
 
-    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
-        self.observe(
-            "pack_finished_histories",
-            self.inner.pack_finished_histories(limit),
-        )
-        .await
-    }
-
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let claimed = self.observe("claim", self.inner.claim(node, limit)).await?;
         if !claimed.is_empty() {

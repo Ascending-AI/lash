@@ -457,16 +457,6 @@ pub trait DurableStore: DurableReads {
     /// answer only permits a claim, which decides under its own fence.
     async fn readiness(&self) -> Result<Readiness, DurableError>;
 
-    /// Pack the history of up to `limit` finished processes whose history is
-    /// still undecided into each one's archive (FIG-7701), in process-id
-    /// order, one transaction each. A history the archive cannot hold
-    /// (over [`PROCESS_ARCHIVE_CAP_BYTES`](crate::domain::process_archive::PROCESS_ARCHIVE_CAP_BYTES),
-    /// unsupported, or still referenced by another owner's call) keeps its
-    /// rows and is never retried; a process whose actor is live is skipped
-    /// until its actor ends. Returns how many histories it archived. Every
-    /// reader answers the same before and after.
-    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError>;
-
     /// Acquire only `actor` for a test writer after execution is quiescent.
     /// The compare-and-set requires its observed `epoch` and an unowned,
     /// nonterminal row. Missing and terminal actors use the existing mailbox

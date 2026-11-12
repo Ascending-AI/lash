@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 48
+version 49
 table lash_abandoned_consumer_holds
   column abandoned_at_ms bigint not-null
   column hold_key text not-null
@@ -403,8 +403,6 @@ table lash_processes
   column end_plan_payload text nullable
   column end_plan_scope_id text nullable
   column execution_json text not-null
-  column history text nullable
-  column history_archive bytea nullable
   column identity_kind text not-null
   column identity_label text nullable
   column last_event_sequence bigint not-null generated

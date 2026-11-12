@@ -735,10 +735,6 @@ impl DurableStore for Retiring {
         self.inner.readiness().await
     }
 
-    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
-        self.inner.pack_finished_histories(limit).await
-    }
-
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         // A committed claim can become visible before this await returns.
         // Cancellation must not erase the attempt that acquired its owner.

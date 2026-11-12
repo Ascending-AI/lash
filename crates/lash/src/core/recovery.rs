@@ -66,7 +66,6 @@ impl CleanupPass {
                     _ = interval.tick() => {}
                 }
             }
-            let durable = Arc::clone(backend.durable());
             drop(backend);
             loop {
                 tokio::select! {
@@ -79,11 +78,6 @@ impl CleanupPass {
                 };
                 if let Err(error) = relay_due(relay.as_ref(), clock.as_ref(), pacing.cleanup_page).await {
                     tracing::warn!(%error, "artifact cleanup pass failed; the next tick retries it");
-                }
-                // A finished process's history moves to its archive
-                // (FIG-7701); readers answer the same either side of it.
-                if let Err(error) = durable.pack_finished_histories(pacing.cleanup_page.get()).await {
-                    tracing::warn!(%error, "process history packing failed; the next tick retries it");
                 }
             }
         });

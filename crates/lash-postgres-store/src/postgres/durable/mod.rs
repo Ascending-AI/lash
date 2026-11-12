@@ -83,7 +83,6 @@ pub(crate) use pages::cut_retirement_holds;
 pub(crate) use pages::retire_roots;
 mod model_calls;
 mod park;
-mod process_history;
 mod process_view;
 pub(crate) mod processes;
 mod prompts;
@@ -1295,10 +1294,6 @@ impl DurableStore for PostgresDurableStore {
             })
         })
         .await
-    }
-
-    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
-        self.pack_due_histories(limit).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

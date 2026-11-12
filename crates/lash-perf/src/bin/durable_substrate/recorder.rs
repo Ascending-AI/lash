@@ -430,10 +430,6 @@ impl DurableStore for RecordingStore {
         self.inner.readiness().await
     }
 
-    async fn pack_finished_histories(&self, limit: usize) -> Result<usize, DurableError> {
-        self.inner.pack_finished_histories(limit).await
-    }
-
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let started = Instant::now();
         let answer = self.inner.claim(node, limit).await;

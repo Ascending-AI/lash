@@ -2359,8 +2359,8 @@ async fn process_outcome_projections_are_readable_on_sqlite_memory() {
 #[path = "core_node_processes/read_tools.rs"]
 mod read_tools;
 
-#[path = "core_node_processes/history_archive.rs"]
-mod history_archive;
+#[path = "core_node_processes/pruned_prompts.rs"]
+mod pruned_prompts;
 
 #[path = "support/callback_carry.rs"]
 mod live_owner_pins;

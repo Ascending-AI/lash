@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 48.
+-- lash-postgres-store schema, component version 49.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -643,15 +643,7 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     end_plan_scope_id TEXT COLLATE "C",
     end_plan_payload TEXT,
     end_plan_ended_at_ms BIGINT,
-    -- A finished process's run history, packed into one archive once its
-    -- actor ended (FIG-7701): NULL until decided, 'rows' when it keeps its
-    -- rows (over the cap or unsupported), 'archive' when history_archive
-    -- holds it. Only the archive readers select history_archive, and it is
-    -- the last column, so no other read of the row fetches it.
-    history TEXT CONSTRAINT ck_processes_history CHECK (history IN ('rows', 'archive')),
-    history_archive BYTEA,
     CONSTRAINT ck_processes_terminal_event CHECK ((terminal_event_sequence IS NULL) = (terminal_event_type IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_header IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_digest IS NULL) AND (terminal_event_sequence IS NOT NULL OR (terminal_event_key IS NULL AND terminal_event_payload IS NULL))),
-    CONSTRAINT ck_processes_history_archive CHECK ((history_archive IS NULL) = (history IS NULL OR history <> 'archive')),
     CONSTRAINT ck_processes_end_plan CHECK ((end_plan_scope_id IS NULL) = (end_plan_payload IS NULL) AND (end_plan_scope_id IS NULL) = (end_plan_ended_at_ms IS NULL)),
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
@@ -743,10 +735,6 @@ CREATE OR REPLACE VIEW lash_process_event_log AS
 -- Retention reclaims packed plans by their end instant.
 CREATE INDEX IF NOT EXISTS idx_lash_processes_end_plan
     ON lash_processes(end_plan_ended_at_ms) WHERE end_plan_ended_at_ms IS NOT NULL;
--- Finished processes whose history is not yet packed or kept: the pack
--- sweep's candidates (FIG-7701).
-CREATE INDEX IF NOT EXISTS idx_lash_processes_history_due
-    ON lash_processes(process_id) WHERE terminal_event_sequence IS NOT NULL AND history IS NULL;
 
 -- The event prefix a host released of a still-retained process (FIG-3482):
 -- events at or below `released_through` keep their row without a payload,
@@ -952,7 +940,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 48, 48)
+VALUES ('lash-postgres-store', 49, 49)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable

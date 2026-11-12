@@ -216,13 +216,6 @@ impl super::PostgresDurableStore {
         let limits: DecodeLimits = self.pools.graph_reads.owner();
         self.read_snapshot(|snapshot| {
             Box::pin(async move {
-                // The history discriminator chooses the representation
-                // first, in the read's one snapshot.
-                if let Some(archived) =
-                    super::process_history::tool_calls(snapshot, owner, selection, &limits).await?
-                {
-                    return Ok(archived);
-                }
                 let key = owner.stored();
                 let rows: Vec<StoredCall> = match selection {
                     ToolCallSelection::Calls(calls) => {
