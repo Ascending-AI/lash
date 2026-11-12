@@ -249,8 +249,8 @@ impl std::fmt::Debug for PostgresDurableStore {
 
 type Tx = GuardedTx<'static>;
 
-/// Delete `process`'s run facts and the waits it owns, in its prune: the
-/// process host API's tool calls go with its record. Answers the RoundFact
+/// Delete `process`'s run facts, prompt snapshots and the waits it owns, in
+/// its prune: the process host API's tool calls go with its record. Answers the RoundFact
 /// nodes they held: the prune's to peel.
 pub(crate) async fn retire_process_rows(
     tx: &mut PgConnection,
@@ -268,13 +268,11 @@ pub(crate) async fn retire_process_rows(
         )
         .await?,
     );
-    facts.extend(
-        model_calls::delete_session(
-            tx,
-            &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
-        )
-        .await?,
-    );
+    let session = lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str());
+    facts.extend(model_calls::delete_session(&mut *tx, &session).await?);
+    // The prompt snapshots of its model calls are the process's history
+    // too: they go with it, and their texts no other root holds with them.
+    prompts::release(&mut *tx, &session, None).await?;
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor).await?;
     }

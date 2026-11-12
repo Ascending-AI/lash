@@ -152,6 +152,27 @@ impl Raw {
         }
     }
 
+    /// The process's prompt snapshot rows and the text edges they hold.
+    async fn prompt_rows(&self, process: &ProcessId) -> i64 {
+        let session = model_session(process).as_str().to_owned();
+        let sql = |prefix: &str, session_key: &str| {
+            format!(
+                "SELECT (SELECT count(*) FROM {prefix}prompt_snapshots WHERE session_id = {session_key}) \
+                 + (SELECT count(*) FROM {prefix}prompt_snapshot_texts WHERE session_id = {session_key})"
+            )
+        };
+        match self {
+            Self::Sqlite(path) => Self::sqlite(path)
+                .query_row(&sql("", "?1"), [&session], |row| row.get(0))
+                .unwrap(),
+            Self::Postgres(url) => sqlx::query_scalar(&sql("lash_", "$1"))
+                .bind(&session)
+                .fetch_one(&mut Self::pg(url).await)
+                .await
+                .unwrap(),
+        }
+    }
+
     /// The owner and call columns of the process's model calls.
     async fn model_keys(&self, process: &ProcessId) -> Vec<(String, String)> {
         let session = model_session(process).as_str().to_owned();
@@ -711,6 +732,23 @@ async fn each_read_fetches_the_archive_once(
     );
 }
 
+/// The prompt keys of the process's model calls.
+fn prompt_keys(process: &ProcessId, model_keys: &[(String, String)]) -> Vec<PromptCallKey> {
+    model_keys
+        .iter()
+        .map(|(run, call)| PromptCallKey {
+            session: model_session(process),
+            call: ModelCallId::Owned {
+                owner: run
+                    .strip_prefix("owned:")
+                    .expect("a process's model call is owned")
+                    .to_owned(),
+                key: call.clone(),
+            },
+        })
+        .collect()
+}
+
 fn same(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>, when: &str) {
     assert_eq!(
         before.keys().collect::<Vec<_>>(),
@@ -814,6 +852,15 @@ async fn a_packed_history_reads_as_its_rows(tier: Tier) {
     );
     raw.set_archive(&process, &archive).await;
 
+    let prompts = prompt_keys(&process, &model_keys);
+    for key in &prompts {
+        assert!(
+            durable.prompt_snapshot(key).await.unwrap().is_some(),
+            "the finished process's prompt snapshot reads before the prune"
+        );
+    }
+    assert!(raw.prompt_rows(&process).await > 0);
+
     let pruned = core
         .processes()
         .prune(
@@ -825,6 +872,20 @@ async fn a_packed_history_reads_as_its_rows(tier: Tier) {
         .unwrap();
     assert_eq!(pruned.pruned_processes, 1);
     assert_eq!(raw.history(&process).await, None, "prune takes the archive");
+    // The prompt snapshots are the process's history too: prune takes
+    // them with it, and a read of one answers as for any pruned fact.
+    for key in &prompts {
+        assert_eq!(
+            durable.prompt_snapshot(key).await.unwrap(),
+            None,
+            "prune takes the process's prompt snapshot"
+        );
+    }
+    assert_eq!(
+        raw.prompt_rows(&process).await,
+        0,
+        "prune takes the process's prompt snapshot rows and their text edges"
+    );
     assert!(durable.run_facts(&owner).await.unwrap().rows.is_empty());
     assert!(matches!(
         hydrate(sibling).await,

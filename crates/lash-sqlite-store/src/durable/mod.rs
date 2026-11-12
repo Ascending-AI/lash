@@ -184,9 +184,9 @@ pub(crate) fn retire_session_rows(
     Ok(roots)
 }
 
-/// Delete `process`'s run facts and the waits it owns, in its prune: the
-/// process host API's tool calls go with its record, and the RoundFact
-/// nodes they held are peeled.
+/// Delete `process`'s run facts, prompt snapshots and the waits it owns, in
+/// its prune: the process host API's tool calls go with its record, and the
+/// RoundFact nodes they held are peeled.
 pub(crate) fn retire_process_rows(
     tx: &Connection,
     process: &lash_vocabulary::identity::ProcessId,
@@ -199,10 +199,11 @@ pub(crate) fn retire_process_rows(
         tx,
         &lash_durable::domain::CallOwner::Process(process.clone()),
     )?);
-    facts.extend(model_calls::delete_session(
-        tx,
-        &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
-    )?);
+    let session = lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str());
+    facts.extend(model_calls::delete_session(tx, &session)?);
+    // The prompt snapshots of its model calls are the process's history
+    // too: they go with it, and their texts no other root holds with them.
+    prompts::release(tx, &session, None)?;
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
     }
