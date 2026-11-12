@@ -117,6 +117,28 @@ impl Raw {
         }
     }
 
+    /// Whether the process's end has settled into what a prune takes: no
+    /// consumer hold and its terminal cascade complete (the prune's own
+    /// predicate on those columns).
+    async fn prunable(&self, process: &ProcessId) -> bool {
+        let sql = |prefix: &str, id: &str| {
+            format!(
+                "SELECT consumer_hold_key IS NULL AND cascade_cursor IS NULL \
+                 FROM {prefix}processes WHERE process_id = {id}"
+            )
+        };
+        match self {
+            Self::Sqlite(path) => Self::sqlite(path)
+                .query_row(&sql("", "?1"), [process.as_str()], |row| row.get(0))
+                .unwrap(),
+            Self::Postgres(url) => sqlx::query_scalar(&sql("lash_", "$1"))
+                .bind(process.as_str())
+                .fetch_one(&mut Self::pg(url).await)
+                .await
+                .unwrap(),
+        }
+    }
+
     /// The prompt keys of the process's model calls.
     async fn prompt_keys(&self, process: &ProcessId) -> Vec<PromptCallKey> {
         let session = model_session(process);
@@ -342,6 +364,16 @@ async fn a_pruned_process_takes_its_prompt_snapshots(tier: Tier) {
     }
     assert!(raw.prompt_rows(&process).await > 0);
 
+    // The process's output is read before its terminal cascade completes,
+    // and a prune skips a process whose cascade is still running: wait for
+    // the end to settle, as a host's later prune would find it.
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while !raw.prunable(&process).await {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the process's terminal cascade completes");
     let pruned = core
         .processes()
         .prune(
