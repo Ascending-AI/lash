@@ -601,3 +601,67 @@ fn two_conventions_of_one_body_reopen_as_their_own_entries() {
         }
     }
 }
+
+/// K-DOC-003, FIG-7143: an adapted import checks the call's result by its
+/// own signature, not the export's. An export declaring `Bool` serves an
+/// import declaring `Any`; its body returns null, which the import's
+/// contract admits, so the call returns null as a call of that contract
+/// does.
+#[test]
+fn an_adapted_import_checks_results_by_its_own_signature() {
+    let exported = Signature {
+        params: vec![],
+        result: Type::Bool,
+    };
+    let imported = Signature {
+        params: vec![],
+        result: Type::Any,
+    };
+    let body = function(
+        "entry.unfit",
+        imported.clone(),
+        BTreeMap::new(),
+        vec![Stmt::Return { value: null() }],
+    );
+    let hook = function(
+        "entry.settle",
+        Signature {
+            params: vec![Param {
+                name: Name::new("value"),
+                ty: Type::Any,
+                optional: false,
+            }],
+            result: Type::Any,
+        },
+        BTreeMap::new(),
+        vec![Stmt::Return {
+            value: Expr::Variable(Name::new("value")),
+        }],
+    );
+    let export = FunctionExport {
+        function: body.identity(),
+        signature: exported,
+        convention: StartConvention::TsDirect {
+            await_fn: lash_kernel_doc::FunctionTarget::Local(hook.identity()),
+        },
+        asynchronous: false,
+        rest: false,
+    };
+    let program = entry_world(
+        vec![body, hook],
+        vec![("entry", export)],
+        vec![("entry", imported)],
+        vec![],
+        vec![
+            called(0, "a", vec![]),
+            Stmt::Return {
+                value: Expr::Variable(Name::new("a")),
+            },
+        ],
+    );
+    let (end, _, _) = entry_run(&program, None);
+    assert!(
+        matches!(&end, End::Finished(done) if done.result == Datum::Null),
+        "{end:?}"
+    );
+}
