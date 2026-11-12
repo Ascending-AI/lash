@@ -44,6 +44,7 @@ use crate::adapter::{
 const MAX_ROUNDS: usize = 32;
 
 mod bindings;
+mod collections;
 mod flow;
 mod forwarding;
 
@@ -171,6 +172,7 @@ struct Collector<'a> {
     /// The bindings of the current function a value was certainly given to
     /// on every path to where the walk stands.
     defined: HashSet<usize>,
+    initialized_reads: HashSet<usize>,
     /// Bindings an assignment or declaration being walked gives a value
     /// once its value has run.
     pending: Vec<usize>,
@@ -187,6 +189,8 @@ pub(crate) struct Facts {
     session: BTreeSet<Name>,
     /// Each binding's type and contents, by its index in the collector.
     shapes: Vec<Shape>,
+    collections: HashMap<usize, Ty>,
+    initialized_reads: HashSet<usize>,
     contents_stable: bool,
     /// Binding identities whose producers cannot need builtin forwarding.
     non_builtin: BTreeSet<usize>,
@@ -247,14 +251,7 @@ impl Facts {
         collector.declare_vars(&program.statements);
         collector.declare_block(&program.statements);
         collector.statements(&program.statements);
-        for entry in &mut collector.bindings {
-            entry
-                .sources
-                .retain(|source| !matches!(source, Source::Unassigned));
-            if entry.unassigned && (entry.early || entry.session_scope) {
-                entry.sources.push(Source::Opaque);
-            }
-        }
+        let collections = collector.collection_definitions();
         let mut aliases = BTreeMap::new();
         // A package's value type is named by its dotted path, which no
         // local alias can spell.
@@ -300,6 +297,8 @@ impl Facts {
                 .collect(),
             plain,
             shapes: vec![Shape::new(Ty::Never); collector.bindings.len()],
+            collections: HashMap::new(),
+            initialized_reads: std::mem::take(&mut collector.initialized_reads),
             contents_stable: !collector.contents_unstable
                 && collector.contents_roots.iter().all(|root| {
                     !collector.names.contains_key(root) && !session.contains(&Name::new(*root))
@@ -375,6 +374,7 @@ impl Facts {
                 *shape = Shape::new(Ty::Unknown);
             }
         }
+        facts.derive_collections(collections);
         facts.derive_forwarding_facts(&collector);
         facts.narrowable = collector
             .names
@@ -465,7 +465,8 @@ impl Facts {
     }
 
     pub(crate) fn primitive(&self, expr: &Expr) -> Option<Ty> {
-        self.plain.primitive(expr, &|name| self.binding(name))
+        self.collection_primitive(expr)
+            .or_else(|| self.plain.primitive(expr, &|name| self.binding(name)))
     }
 
     /// The literal text `expr`'s value is proven by construction to begin
@@ -847,6 +848,7 @@ impl<'a> Collector<'a> {
                 }
                 self.capture(binding);
                 self.use_of(binding);
+                self.record_initialized_read(binding, name);
             }
             None if self.function_depth > 0 => {
                 self.plain

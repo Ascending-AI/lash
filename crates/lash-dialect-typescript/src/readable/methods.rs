@@ -118,6 +118,65 @@ impl Lifter<'_> {
         Ok(None)
     }
 
+    /// The same map arm without receiver admission, after a proved construction.
+    pub(super) fn constructed_map(
+        &mut self,
+        block: &[k::Stmt],
+    ) -> Lift<Option<(Name, Expr, usize)>> {
+        let [
+            k::Stmt::Let {
+                name: result,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            },
+            rest @ ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let (target, taken) = match rest {
+            [
+                k::Stmt::Assign {
+                    value: k::Rhs::Expr(k::Expr::Call { function, args }),
+                    ..
+                },
+                ..,
+            ] if self.is(function, "map.contains") => match args.as_slice() {
+                [target, _] => (target, 1),
+                _ => return Ok(None),
+            },
+            [
+                k::Stmt::Assign {
+                    place: k::Place::Member(k::Member::Index { target, .. }),
+                    ..
+                },
+                _,
+                ..,
+            ] => (target, 2),
+            [
+                k::Stmt::Let { .. },
+                k::Stmt::If {
+                    condition: k::Expr::Call { function, args },
+                    ..
+                },
+                _,
+                ..,
+            ] if self.is(function, "map.contains") => match args.as_slice() {
+                [target, _] => (target, 3),
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        let Some((method, args)) = self.map_body(&rest[..taken], target, result) else {
+            return Ok(None);
+        };
+        let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
+        Ok(Some((
+            result.clone(),
+            self.method_call(target, method, args)?,
+            taken + 1,
+        )))
+    }
+
     /// A map method's body in place over plain arguments
     /// (`lower::calls`'s `map_method`), setting `result`: the method and the
     /// arguments it was called with.

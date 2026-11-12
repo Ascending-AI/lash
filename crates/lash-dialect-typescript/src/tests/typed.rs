@@ -968,3 +968,92 @@ fn record_guards_test_membership_without_a_negation() {
     let sliced = super::machine::plain_record_resume(source, 1, true);
     assert_eq!((&plain.0, plain.1), (&sliced.0, sliced.1));
 }
+
+/// TS-CONSTRUCTOR-KIND: a sole construction proves only initialized reads.
+/// Zero trips, early reads, mixed assignments and captured writes keep admission.
+#[test]
+fn a_single_collection_construction_proves_only_initialized_reads() {
+    fn calls_kind(expr: &lash_kernel_doc::Expr, kind: lash_kernel_value::FunctionId) -> bool {
+        match expr {
+            lash_kernel_doc::Expr::Call { function, args } => {
+                *function == kind || args.iter().any(|arg| calls_kind(arg, kind))
+            }
+            _ => false,
+        }
+    }
+    fn kind_guard(block: &[lash_kernel_doc::Stmt], kind: lash_kernel_value::FunctionId) -> bool {
+        block.iter().any(|stmt| match stmt {
+            lash_kernel_doc::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                calls_kind(condition, kind)
+                    || kind_guard(then_block, kind)
+                    || kind_guard(else_block, kind)
+            }
+            lash_kernel_doc::Stmt::While {
+                body, else_block, ..
+            }
+            | lash_kernel_doc::Stmt::For {
+                body, else_block, ..
+            } => kind_guard(body, kind) || kind_guard(else_block, kind),
+            _ => false,
+        })
+    }
+    let source = r#"
+function work(n) { var s, i; for (i = 0; i < n; i++) { s = new Map(); s.set('one', 1); if (!s.has('one')) throw 0; } return s.size; }
+function unique(n) { var s, i; for (i = 0; i < n; i++) { s = new Set(); s.add('one'); s.has('one'); } return s.size; }
+function early() { var s; const value = s.has('one'); s = new Map(); return value; }
+function mixed(flag) { var s; s = new Map(); if (flag) s = {set() { return 9; }}; return s.set('one', 1); }
+function captured() { var s; s = new Map(); function replace() { s = {set() { return 7; }}; } replace(); return s.set('one', 1); }
+let mapEmpty = false, setEmpty = false, readEarly = false;
+try { work(0); } catch { mapEmpty = true; }
+try { unique(0); } catch { setEmpty = true; }
+try { early(); } catch { readEarly = true; }
+await control.finish([work(2), mapEmpty, mixed(true), unique(2), setEmpty, readEarly, captured()]);
+"#;
+    let lowered = super::lower_with_effects(source).expect("collection proof source lowers");
+    let kind = super::library()
+        .iter()
+        .find(|(name, _)| *name == "kind")
+        .expect("kind installed")
+        .1;
+    let mut loops = 0;
+    let mut guarded = std::collections::BTreeSet::new();
+    for definition in lowered.document.functions.values() {
+        let Some(body) = definition.body() else {
+            continue;
+        };
+        match definition.name.as_str() {
+            "work" | "unique" => {
+                for statement in &body.block {
+                    if let lash_kernel_doc::Stmt::While { body, .. } = statement {
+                        loops += 1;
+                        assert!(
+                            !kind_guard(body, kind),
+                            "{} keeps repeated receiver admission",
+                            definition.name
+                        );
+                    }
+                }
+            }
+            "early" | "mixed" | "captured" if kind_guard(&body.block, kind) => {
+                guarded.insert(definition.name.as_str().to_owned());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(loops, 2, "both constructor loops were inspected");
+    assert_eq!(
+        guarded,
+        ["early", "mixed", "captured"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(
+        super::machine::end(source),
+        super::machine::end("await control.finish([1, true, 9, 1, true, true, 7]);")
+    );
+}

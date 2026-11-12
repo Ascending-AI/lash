@@ -951,7 +951,11 @@ impl<'a> Lifter<'a> {
             });
             return Ok(2);
         }
-        let ladder = match self.array_ladder(block)? {
+        let ladder = match self.constructed_map(block)? {
+            Some(ladder) => Some(ladder),
+            None => self.array_ladder(block)?,
+        };
+        let ladder = match ladder {
             Some(ladder) => Some(ladder),
             None => match self.map_ladder(block)? {
                 Some(ladder) => Some(ladder),

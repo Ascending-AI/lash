@@ -1183,7 +1183,7 @@ impl Lowerer<'_> {
             return Ok(called);
         }
         if let Key::Static(name) = &key
-            && let Some(called) = self.call_map(&object, name, args)?
+            && let Some(called) = self.call_map(&object, name, args, proven)?
         {
             return Ok(called);
         }
@@ -1255,6 +1255,7 @@ impl Lowerer<'_> {
         object: &Operand,
         name: &str,
         args: &[ast::CallArg],
+        proven: bool,
     ) -> Lowering<Option<Operand>> {
         if !matches!(
             object.ty,
@@ -1268,18 +1269,26 @@ impl Lowerer<'_> {
             "has" => "ts.map.has",
             _ => return Ok(None),
         };
+        let call = |this: &mut Self| match plain_arguments(args) {
+            Some(values) => this.map_method(object, name, &values),
+            None => {
+                let passed = this.arguments(args)?;
+                this.invoke(function, &[object.clone(), passed], Ty::Unknown)
+            }
+        };
+        if proven && object.ty == Ty::Map {
+            let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+            let place = Place::Variable(super::statements::variable_of(&result));
+            let value = call(self)?;
+            self.store(place, value);
+            return Ok(Some(result));
+        }
         let kind = self.native("kind", vec![object.expr()])?;
         let test = self.same(kind, Operand::text("map").expr())?;
         let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
         let place = Place::Variable(super::statements::variable_of(&result));
         let direct = self.block(|this| {
-            let value = match plain_arguments(args) {
-                Some(values) => this.map_method(object, name, &values)?,
-                None => {
-                    let passed = this.arguments(args)?;
-                    this.invoke(function, &[object.clone(), passed], Ty::Unknown)?
-                }
-            };
+            let value = call(this)?;
             this.store(place.clone(), value);
             Ok(())
         })?;
@@ -1368,7 +1377,9 @@ impl Lowerer<'_> {
         discard_result: bool,
         proven: bool,
     ) -> Lowering<Option<Operand>> {
-        let Some((receiver, check)) = declared_receiver(&object.ty) else {
+        let receiver = declared_receiver(&object.ty)
+            .or_else(|| (proven && object.ty == Ty::Set).then_some((Receiver::Set, None)));
+        let Some((receiver, check)) = receiver else {
             return Ok(None);
         };
         let Some(function) = self
