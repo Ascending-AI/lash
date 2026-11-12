@@ -252,6 +252,15 @@ pub(super) async fn the_terminal_event_reads_releases_and_prunes_like_any_event(
         (1, 2),
         "the tick and the terminal take the first two sequences"
     );
+    assert_eq!(
+        registry
+            .stored_event_sequences_for_testing(&process_id)
+            .await
+            .expect("read where the events are stored"),
+        (Some(2), vec![1, 3]),
+        "the terminal is packed on the row and the events either side of it are rows: \
+         every read below goes through the packed form"
+    );
 
     let limit = std::num::NonZeroUsize::new(16).unwrap_or(std::num::NonZeroUsize::MIN);
     let full = match page_after(registry.as_ref(), &process_id, 0).await {

@@ -24,6 +24,10 @@ pub trait ProcessRowProbe: Send + Sync {
 
     /// Remove the fault [`Self::fail_parent_end_plan_writes`] installed.
     async fn clear_injected_failure(&self);
+
+    /// A registry over the same database, opened afresh: what a node that
+    /// crashed opens when it comes back.
+    async fn reopen(&self) -> Arc<dyn ProcessRegistry>;
 }
 
 fn session_registration(originator: &SessionScope) -> ProcessRegistration {
@@ -535,10 +539,12 @@ pub async fn a_late_child_racing_close_prune_and_reclaim_is_refused_until_the_pl
     }
 }
 
-/// A prune that fails at the write moving a packed plan to the table (item
-/// 5) keeps the row and its plan: the plan is on the row or in the table,
-/// never neither, and a late child is refused either way. The retried prune
-/// moves it and removes the row with its one event.
+/// A prune cut at the write moving a packed plan to the table (item 5)
+/// keeps the row and its plan. The node crashes there, and the registry it
+/// opens when it comes back finds the plan on the row or in the table, never
+/// neither, and refuses a late child either way. Its prune moves the plan and
+/// removes the row with its one event; that prune's acknowledgement lost,
+/// the next node's retry prunes nothing and leaves the plan where it was.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -575,11 +581,14 @@ pub async fn a_prune_failing_at_plan_write_back_keeps_the_plan(
             crate::ProjectionWatermark::NoProjector,
         )
         .await;
-    probe.clear_injected_failure().await;
     assert!(
         failed.is_err(),
         "the prune fails at the plan's write-back, got {failed:?}"
     );
+    // The node crashes at the cut: nothing it holds is read again.
+    drop(registry);
+    probe.clear_injected_failure().await;
+    let registry = probe.reopen().await;
     assert!(
         registry
             .get_process(&parent)
@@ -599,7 +608,7 @@ pub async fn a_prune_failing_at_plan_write_back_keeps_the_plan(
         "a late child is refused after the failed prune"
     );
 
-    let report = prune(&registry, filter).await;
+    let report = prune(&registry, filter.clone()).await;
     assert_eq!(
         (report.pruned_processes, report.pruned_events),
         (1, 1),
@@ -607,12 +616,32 @@ pub async fn a_prune_failing_at_plan_write_back_keeps_the_plan(
     );
     assert_eq!(
         plan(&registry, &scope).await,
-        Some(stamp),
+        Some(stamp.clone()),
         "the retried prune moves the plan, first stamp and all"
     );
     assert_eq!(
         late_child(&registry, &originator, &scope).await,
         None,
         "a late child is refused under the moved plan"
+    );
+
+    // That prune's acknowledgement is lost: the node that comes back retries.
+    drop(registry);
+    let registry = probe.reopen().await;
+    let report = prune(&registry, filter).await;
+    assert_eq!(
+        (report.pruned_processes, report.pruned_events),
+        (0, 0),
+        "the retry finds nothing left to prune"
+    );
+    assert_eq!(
+        plan(&registry, &scope).await,
+        Some(stamp),
+        "the retry leaves the moved plan as it was"
+    );
+    assert_eq!(
+        late_child(&registry, &originator, &scope).await,
+        None,
+        "a late child is refused after the retry"
     );
 }

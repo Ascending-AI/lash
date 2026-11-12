@@ -783,6 +783,34 @@ impl lash_execution_contracts::process::ProcessRegistryTestSupport for SqlitePro
             .await
             .map_err(process_sqlite_error)?
     }
+
+    async fn stored_event_sequences_for_testing(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(Option<u64>, Vec<u64>), lash_execution_contracts::plugin_error::PluginError> {
+        let process_id = process_id.clone();
+        let (packed, rows) = self
+            .conn
+            .call(move |conn| {
+                let packed: Option<i64> = conn.query_row(
+                    "SELECT terminal_event_sequence FROM processes WHERE process_id = ?1",
+                    [process_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let rows = conn
+                    .prepare("SELECT sequence FROM process_events WHERE process_id = ?1 ORDER BY sequence")?
+                    .query_map([process_id.as_str()], |row| row.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?;
+                Ok((packed, rows))
+            })
+            .await
+            .map_err(process_sqlite_error)?;
+        let sequence = |value: i64| plugin_u64_from_sql("ProcessEvent", "sequence", value);
+        Ok((
+            packed.map(sequence).transpose()?,
+            rows.into_iter().map(sequence).collect::<Result<_, _>>()?,
+        ))
+    }
 }
 
 /// An environment row as one statement read it: its head blob and its

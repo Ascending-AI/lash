@@ -61,6 +61,10 @@ impl lash_conformance::ProcessRowProbe for SqliteProcessRowProbe {
             .execute_batch("DROP TRIGGER fail_parent_end_plan_write")
             .expect("remove the plan-write fault");
     }
+
+    async fn reopen(&self) -> Arc<dyn ProcessRegistry> {
+        self.0.reopen().await.process_registry() as Arc<dyn ProcessRegistry>
+    }
 }
 
 lash_conformance::process_row_packing_tests!({

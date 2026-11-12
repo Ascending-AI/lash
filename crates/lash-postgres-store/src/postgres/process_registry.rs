@@ -928,6 +928,34 @@ impl lash_execution_contracts::process::ProcessRegistryTestSupport for PostgresP
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(receipts)
     }
+
+    async fn stored_event_sequences_for_testing(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(Option<u64>, Vec<u64>), PluginError> {
+        let packed: Option<i64> = sqlx::query_scalar(
+            "SELECT terminal_event_sequence FROM lash_processes WHERE process_id = $1",
+        )
+        .bind(process_id.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let rows: Vec<i64> = sqlx::query_scalar(
+            "SELECT sequence FROM lash_process_events WHERE process_id = $1 ORDER BY sequence",
+        )
+        .bind(process_id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let sequence = |value: i64| {
+            u64::try_from(value)
+                .map_err(|_| PluginError::Session(format!("a negative event sequence {value}")))
+        };
+        Ok((
+            packed.map(sequence).transpose()?,
+            rows.into_iter().map(sequence).collect::<Result<_, _>>()?,
+        ))
+    }
 }
 
 #[async_trait::async_trait]

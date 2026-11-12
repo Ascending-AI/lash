@@ -354,6 +354,7 @@ impl Raw {
                 )
                 .replace("{session}", &quote(model_session(process).as_str()))
                 .replace("{actor}", &quote(actor.as_str()))
+                .replace("{process}", &quote(process.as_str()))
         };
         for statement in statements {
             match self {
@@ -368,6 +369,60 @@ impl Raw {
                         .await
                         .unwrap();
                 }
+            }
+        }
+    }
+
+    /// `process`'s first call states a reason of `bytes` bytes.
+    async fn reason_of(&self, process: &ProcessId, bytes: usize) {
+        let fill = match self {
+            Self::Sqlite(_) => format!("printf('%.*c', {bytes}, 'x')"),
+            Self::Postgres(_) => format!("repeat('x', {bytes})"),
+        };
+        self.alter(
+            process,
+            &[&format!(
+                "UPDATE {{p}}tool_calls SET reason = {fill} \
+                 WHERE owner_key = {{owner}} AND call_id = \
+                   (SELECT min(call_id) FROM {{p}}tool_calls WHERE owner_key = {{owner}})"
+            )],
+        )
+        .await;
+    }
+
+    /// Run `sqlite` or `postgres`, whichever is this store's.
+    async fn run(&self, sqlite: &str, postgres: &str) {
+        match self {
+            Self::Sqlite(path) => Self::sqlite(path).execute_batch(sqlite).unwrap(),
+            Self::Postgres(url) => {
+                sqlx::raw_sql(postgres)
+                    .execute(&mut Self::pg(url).await)
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
+    /// The store set over this database, opened afresh: what a node that
+    /// crashed opens when it comes back.
+    async fn reopen(&self) -> Arc<dyn StoreSet> {
+        match self {
+            Self::Sqlite(path) => Arc::new(
+                lash_sqlite_store::SqliteStoreSet::open(
+                    path,
+                    lash_sqlite_store::SqliteSynchronous::Normal,
+                )
+                .await
+                .unwrap(),
+            ),
+            Self::Postgres(url) => {
+                let storage = lash_postgres_store::testing::connect(url)
+                    .await
+                    .expect("the isolated database opens");
+                Arc::new(lash_postgres_store::PostgresStoreSet::new(
+                    &storage,
+                    Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+                ))
             }
         }
     }
@@ -1914,3 +1969,349 @@ async fn a_packed_history_decodes_only_what_it_selects(tier: Tier) {
 }
 
 on_every_tier!(a_packed_history_decodes_only_what_it_selects: sqlite_memory, postgres);
+
+/// The packing transfer is one commit, cut on either side of it (item 27):
+///
+/// - a fault at its last write (the peel), after the archive is installed
+///   and the rows deleted, leaves the history undecided with every row,
+///   reading as before;
+/// - a node that crashes and reopens the store then packs it;
+/// - a pack whose acknowledgement is lost is retried by a reopened node
+///   and skipped, the archive byte for byte as committed and the history
+///   reading as before.
+async fn a_pack_cut_at_its_commit_reads_as_its_rows(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 1024);
+    let process = Box::pin(run_one(&core, 2)).await;
+    let durable = Arc::clone(backend.durable());
+    let model_keys = raw.model_keys(&process).await;
+    let before = answers(durable.as_ref(), &process, &model_keys).await;
+    let held = raw.rows(&process).await;
+
+    raw.run(
+        "CREATE TRIGGER cut BEFORE DELETE ON blobs BEGIN SELECT RAISE(ABORT, 'cut'); END",
+        "CREATE FUNCTION cut() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'cut'; END $$; \
+         CREATE TRIGGER cut BEFORE DELETE ON lash_blobs FOR EACH ROW EXECUTE FUNCTION cut()",
+    )
+    .await;
+    assert!(
+        durable.pack_finished_histories(16).await.is_err(),
+        "the cut refuses the pack"
+    );
+    assert_eq!(
+        raw.history(&process).await,
+        Some((None, None)),
+        "a pack cut before its commit leaves the history undecided"
+    );
+    assert_eq!(raw.rows(&process).await, held, "every row stays");
+    same(
+        &before,
+        &answers(durable.as_ref(), &process, &model_keys).await,
+        "after a pack cut before its commit",
+    );
+    raw.run(
+        "DROP TRIGGER cut",
+        "DROP TRIGGER cut ON lash_blobs; DROP FUNCTION cut()",
+    )
+    .await;
+    core.shutdown().await.unwrap();
+    drop((core, durable, backend));
+
+    // The node comes back and packs.
+    let (backend, core) = core_over(raw.reopen().await, 1024);
+    let durable = Arc::clone(backend.durable());
+    assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 1);
+    let packed = raw.archive(&process).await;
+    assert_eq!(raw.rows(&process).await, 0, "the rows moved");
+    same(
+        &before,
+        &answers_naming(durable.as_ref(), &process, &model_keys, None).await,
+        "after the reopened node packed",
+    );
+    core.shutdown().await.unwrap();
+    drop((core, durable, backend));
+
+    // That pack's acknowledgement was lost: a reopened node retries it.
+    let (backend, core) = core_over(raw.reopen().await, 1024);
+    let durable = Arc::clone(backend.durable());
+    assert_eq!(
+        durable.pack_finished_histories(16).await.unwrap(),
+        0,
+        "the retry finds the history decided"
+    );
+    assert_eq!(
+        raw.archive(&process).await,
+        packed,
+        "the archive is as committed"
+    );
+    same(
+        &before,
+        &answers_naming(durable.as_ref(), &process, &model_keys, None).await,
+        "after the retried pack",
+    );
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(a_pack_cut_at_its_commit_reads_as_its_rows: sqlite_memory, postgres);
+
+/// The cap is inclusive (item 27): an archive of exactly
+/// [`PROCESS_ARCHIVE_CAP_BYTES`] packs and reads as its rows, and one a
+/// byte longer keeps every row. Three processes of one shape, the first
+/// packed to measure it, the others padded by one call's reason, which the
+/// archive stores with a fixed-width length.
+async fn an_archive_at_the_cap_packs_and_one_byte_over_keeps_its_rows(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 1024);
+    let durable = Arc::clone(backend.durable());
+    let mut processes = Vec::new();
+    for _ in 0..3 {
+        let process = Box::pin(run_one(&core, 2)).await;
+        raw.reason_of(&process, 1).await;
+        processes.push(process);
+    }
+    let hold = "UPDATE {p}processes SET history = 'rows' WHERE process_id = {process}";
+    let release = "UPDATE {p}processes SET history = NULL WHERE process_id = {process}";
+    for process in &processes[1..] {
+        raw.alter(process, &[hold]).await;
+    }
+    assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 1);
+    let measured = raw.archive(&processes[0]).await.len();
+    let room = PROCESS_ARCHIVE_CAP_BYTES - measured;
+
+    let at_cap = &processes[1];
+    raw.reason_of(at_cap, 1 + room).await;
+    raw.alter(at_cap, &[release]).await;
+    let model_keys = raw.model_keys(at_cap).await;
+    let before = answers(durable.as_ref(), at_cap, &model_keys).await;
+    assert_eq!(
+        durable.pack_finished_histories(16).await.unwrap(),
+        1,
+        "an archive at the cap packs"
+    );
+    assert_eq!(raw.archive(at_cap).await.len(), PROCESS_ARCHIVE_CAP_BYTES);
+    assert_eq!(raw.rows(at_cap).await, 0, "the rows moved");
+    same(
+        &before,
+        &answers(durable.as_ref(), at_cap, &model_keys).await,
+        "an archive at the cap",
+    );
+
+    let over = &processes[2];
+    raw.reason_of(over, 2 + room).await;
+    raw.alter(over, &[release]).await;
+    let model_keys = raw.model_keys(over).await;
+    let before = answers(durable.as_ref(), over, &model_keys).await;
+    let held = raw.rows(over).await;
+    assert_eq!(
+        durable.pack_finished_histories(16).await.unwrap(),
+        0,
+        "an archive a byte over the cap does not pack"
+    );
+    assert_eq!(
+        raw.history(over).await,
+        Some((Some("rows".to_owned()), None))
+    );
+    assert_eq!(raw.rows(over).await, held, "every row stays");
+    same(
+        &before,
+        &answers(durable.as_ref(), over, &model_keys).await,
+        "a byte over the cap",
+    );
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(an_archive_at_the_cap_packs_and_one_byte_over_keeps_its_rows: sqlite_memory, postgres);
+
+/// Every node process `process`'s run facts reach.
+async fn reached(store: &dyn lash_durable::DurableStore, process: &ProcessId) -> BTreeSet<NodeId> {
+    let limits = GraphReadPolicy::standard().owner();
+    let owner = OwnerKey::Process(process.clone());
+    let mut nodes = BTreeSet::new();
+    for row in store.run_facts(&owner).await.unwrap().rows {
+        let graph = store
+            .hydrate(fact(&owner, row.run, row.ordinal), None, limits)
+            .await
+            .unwrap();
+        nodes.extend(graph.nodes.into_keys());
+    }
+    nodes
+}
+
+/// Packing races a prune (item 27): both answer, the prune takes every
+/// process it chose, packed or not, and a process the prune leaves reads
+/// as its rows, though its nodes are shared with the pruned ones.
+async fn a_pack_racing_a_prune_loses_nothing(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 1024);
+    let durable = Arc::clone(backend.durable());
+    let mut pruned = Vec::new();
+    for _ in 0..4 {
+        pruned.push(Box::pin(run_one(&core, 2)).await);
+    }
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let cutoff = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let left = Box::pin(run_one(&core, 2)).await;
+    let model_keys = raw.model_keys(&left).await;
+    let before = answers(durable.as_ref(), &left, &model_keys).await;
+    let shared: BTreeSet<NodeId> = reached(durable.as_ref(), &pruned[0])
+        .await
+        .intersection(&reached(durable.as_ref(), &left).await)
+        .cloned()
+        .collect();
+    assert!(!shared.is_empty(), "the processes share nodes");
+
+    let registry = core.processes();
+    let (packed, report) = tokio::join!(
+        durable.pack_finished_histories(16),
+        registry.prune(
+            cutoff,
+            None,
+            lash::process::ProjectionWatermark::NoProjector
+        ),
+    );
+    let packed = packed.expect("the pack answers");
+    let report = report.expect("the prune answers");
+    assert!(
+        (1..=5).contains(&packed),
+        "the pack moved the kept process at least: {packed}"
+    );
+    assert_eq!(
+        report.pruned_processes, 4,
+        "the prune takes every process it chose"
+    );
+    for process in &pruned {
+        assert_eq!(raw.history(process).await, None, "a pruned process is gone");
+        assert_eq!(raw.rows(process).await, 0, "with every row");
+    }
+    assert_eq!(
+        raw.history(&left).await.map(|(history, _)| history),
+        Some(Some("archive".to_owned()))
+    );
+    same(
+        &before,
+        &answers(durable.as_ref(), &left, &model_keys).await,
+        "the process the prune left",
+    );
+    assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 0);
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(a_pack_racing_a_prune_loses_nothing: sqlite_memory, postgres);
+
+/// A node two processes share stays stored while either holds it as rows
+/// (item 27): packing one keeps the other's reads, the shared nodes stay
+/// live, and packing the last holder retires them, both reading on.
+async fn packing_a_shared_copy_keeps_it_for_its_other_holder(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 1024);
+    let durable = Arc::clone(backend.durable());
+    let first = Box::pin(run_one(&core, 2)).await;
+    let second = Box::pin(run_one(&core, 2)).await;
+    let keys = [raw.model_keys(&first).await, raw.model_keys(&second).await];
+    let before = [
+        answers(durable.as_ref(), &first, &keys[0]).await,
+        answers(durable.as_ref(), &second, &keys[1]).await,
+    ];
+    let shared: BTreeSet<NodeId> = reached(durable.as_ref(), &first)
+        .await
+        .intersection(&reached(durable.as_ref(), &second).await)
+        .cloned()
+        .collect();
+    assert!(!shared.is_empty(), "the processes share nodes");
+    assert_eq!(raw.live(&shared).await, shared);
+
+    raw.alter(
+        &second,
+        &["UPDATE {p}processes SET history = 'rows' WHERE process_id = {process}"],
+    )
+    .await;
+    assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 1);
+    assert_eq!(
+        raw.live(&shared).await,
+        shared,
+        "the other holder keeps the shared nodes"
+    );
+    same(
+        &before[1],
+        &answers(durable.as_ref(), &second, &keys[1]).await,
+        "the other holder, its copy shared with a packed history",
+    );
+    same(
+        &before[0],
+        &answers(durable.as_ref(), &first, &keys[0]).await,
+        "the packed history",
+    );
+
+    raw.alter(
+        &second,
+        &["UPDATE {p}processes SET history = NULL WHERE process_id = {process}"],
+    )
+    .await;
+    assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 1);
+    assert!(
+        raw.live(&shared).await.len() < shared.len(),
+        "packing the last holder retires the copy no other root holds"
+    );
+    for (at, process) in [&first, &second].into_iter().enumerate() {
+        same(
+            &before[at],
+            &answers(durable.as_ref(), process, &keys[at]).await,
+            "both packed",
+        );
+    }
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(packing_a_shared_copy_keeps_it_for_its_other_holder: sqlite_memory, postgres);
+
+/// Readers reading through a pack (item 27): every read made while the
+/// histories move answers as their rows did, whichever side of the commit
+/// it lands on.
+async fn a_read_across_the_move_reads_as_its_rows(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 1024);
+    let durable = Arc::clone(backend.durable());
+    let mut held = Vec::new();
+    for _ in 0..3 {
+        let process = Box::pin(run_one(&core, 2)).await;
+        let keys = raw.model_keys(&process).await;
+        let before = answers(durable.as_ref(), &process, &keys).await;
+        held.push((process, keys, before));
+    }
+    let moved = std::sync::atomic::AtomicBool::new(false);
+    let reads = async {
+        let mut passes = 0;
+        loop {
+            let last = moved.load(Ordering::SeqCst);
+            for (process, keys, before) in &held {
+                same(
+                    before,
+                    &answers(durable.as_ref(), process, keys).await,
+                    "a read across the move",
+                );
+            }
+            passes += 1;
+            if last {
+                break passes;
+            }
+        }
+    };
+    let pack = async {
+        let packed = durable.pack_finished_histories(16).await.unwrap();
+        moved.store(true, Ordering::SeqCst);
+        packed
+    };
+    let (passes, packed) = tokio::join!(reads, pack);
+    assert_eq!(packed, 3);
+    assert!(passes >= 2, "reads ran through the move");
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(a_read_across_the_move_reads_as_its_rows: sqlite_memory, postgres);

@@ -47,8 +47,9 @@ lash_conformance::process_prune_reclaim_tests!({
     (database, "postgres", factory, registry, probe)
 });
 
-/// Reads a process row's state revision and faults the parent-end table.
-struct PostgresProcessRowProbe(sqlx::PgPool);
+/// Reads a process row's state revision and faults the parent-end table;
+/// reopens the database at its URL.
+struct PostgresProcessRowProbe(sqlx::PgPool, String);
 
 #[async_trait::async_trait]
 impl lash_conformance::ProcessRowProbe for PostgresProcessRowProbe {
@@ -88,6 +89,13 @@ impl lash_conformance::ProcessRowProbe for PostgresProcessRowProbe {
                 .expect("remove the plan-write fault");
         }
     }
+
+    async fn reopen(&self) -> Arc<dyn ProcessRegistry> {
+        let storage = lash_postgres_store::testing::connect(&self.1)
+            .await
+            .expect("reopen postgres");
+        Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>
+    }
 }
 
 lash_conformance::process_row_packing_tests!({
@@ -97,8 +105,10 @@ lash_conformance::process_row_packing_tests!({
     };
     lash_execution_contracts::testing::process_execution_env_fixture(&storage.process_env_store())
         .await;
-    let probe = Arc::new(PostgresProcessRowProbe(storage.pool().clone()))
-        as Arc<dyn lash_conformance::ProcessRowProbe>;
+    let probe = Arc::new(PostgresProcessRowProbe(
+        storage.pool().clone(),
+        database.url().to_owned(),
+    )) as Arc<dyn lash_conformance::ProcessRowProbe>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     (database, registry, probe)
 });

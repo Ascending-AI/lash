@@ -130,6 +130,15 @@ pub trait ProcessRegistryTestSupport: Send + Sync {
                 ))
             })
     }
+
+    /// Where `process_id`'s events are stored (FIG-7701): the sequence of
+    /// the terminal event packed on its row, when one is, and the sequences
+    /// of its event rows, ascending. A law reads it to show which stored
+    /// form its reads went through.
+    async fn stored_event_sequences_for_testing(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(Option<u64>, Vec<u64>), PluginError>;
 }
 
 /// Small-fixture event-log convenience, excluded from production builds.
