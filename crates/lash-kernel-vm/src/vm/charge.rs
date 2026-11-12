@@ -18,6 +18,14 @@
 //! `finish`, a bound error, a limiter consultation, a dynamic fee that
 //! does not fit, a cancellation) cancels the reservation exactly once: the
 //! reservation is an `Option`, taken when cancelled.
+//!
+//! A trace may prepay a loop's head block together with the block its
+//! condition falls into (`enter_two`): one guard decides both, as two
+//! entries in a row would, since every prefix of the pair fits where the
+//! pair does. The second block's cost is held `ahead` inside the head's
+//! reservation until control falls into it (`then`), or is given back
+//! (`unfold`) before control goes anywhere else, so no other reader sees
+//! a pair: a cancellation inside the head gives back the pair's rest.
 
 use lash_kernel_doc::{Measure, Value};
 
@@ -56,6 +64,9 @@ pub(crate) struct Meter {
     reserved: Option<u64>,
     /// The charge at which the running slice ends.
     slice_end: u64,
+    /// Of the reservation, the cost of the block a trace prepaid with
+    /// the running one (`enter_two`), not yet entered; zero otherwise.
+    ahead: u64,
 }
 
 impl Meter {
@@ -65,6 +76,7 @@ impl Meter {
             limit,
             reserved: None,
             slice_end: u64::MAX,
+            ahead: 0,
         }
     }
 
@@ -101,6 +113,57 @@ impl Meter {
         }
     }
 
+    /// Prepays a block of fixed `cost` with the block of fixed `ahead`
+    /// that control falls into next, where the pair fits: then each
+    /// entry alone would have been prepaid too. Otherwise prepays the
+    /// block alone, as [`Self::enter`]. Gives whether the block is
+    /// prepaid.
+    #[inline]
+    pub(crate) fn enter_two(&mut self, cost: Option<u64>, ahead: Option<u64>) -> bool {
+        debug_assert!(self.reserved.is_none(), "a block is entered once reserved");
+        if let (Some(cost), Some(ahead)) = (cost, ahead)
+            && let Some(pair) = cost.checked_add(ahead)
+            && let Some(used) = self.used.checked_add(pair)
+            && used <= self.limit
+            && used < self.slice_end
+        {
+            self.used = used;
+            self.reserved = Some(pair);
+            self.ahead = ahead;
+            return true;
+        }
+        self.enter(cost)
+    }
+
+    /// Control fell into the block prepaid ahead: its cost is now the
+    /// reservation. Gives `false` where no block was prepaid ahead.
+    #[inline]
+    pub(crate) fn then(&mut self) -> bool {
+        if self.ahead == 0 {
+            return false;
+        }
+        self.reserved = Some(self.ahead);
+        self.ahead = 0;
+        true
+    }
+
+    /// Control does not fall into the block prepaid ahead: its cost is
+    /// given back, and the running block's reservation is its own.
+    #[inline]
+    pub(crate) fn unfold(&mut self) {
+        if self.ahead != 0 {
+            self.give_back();
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn give_back(&mut self) {
+        self.used -= self.ahead;
+        self.reserved = self.reserved.map(|cost| cost - self.ahead);
+        self.ahead = 0;
+    }
+
     /// Adds a fixed event's `units` under `Charge::Off`, where they only
     /// place the slice: no limit is compared.
     #[inline]
@@ -118,6 +181,10 @@ impl Meter {
     /// The block ended at its last op: its reservation is spent.
     #[inline]
     pub(crate) fn leave(&mut self) {
+        debug_assert_eq!(
+            self.ahead, 0,
+            "a block prepaid ahead is entered or given back"
+        );
         self.reserved = None;
     }
 
@@ -129,6 +196,7 @@ impl Meter {
         if let Some(cost) = self.reserved.take() {
             self.used -= cost - through;
         }
+        self.ahead = 0;
     }
 
     /// Bills `units` one-unit events on the exact path. At a refusal the

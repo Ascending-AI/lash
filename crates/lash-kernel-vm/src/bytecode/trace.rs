@@ -44,6 +44,9 @@ pub struct Trace {
 /// No trace: control goes back to the dispatcher at the op.
 pub const NONE: u32 = u32::MAX;
 
+/// A [`Micro::Then`] with no `Pass` after its head.
+pub const NO_PASS: u16 = u16::MAX;
+
 /// One op of a trace (`pc` its index), run as the dispatcher runs it on a
 /// prepaid, unobserved block. Where a micro-op names `next`, it is the
 /// first micro-op of the trace at the op control goes to, or [`NONE`].
@@ -53,6 +56,23 @@ pub enum Micro {
     Block {
         pc: u32,
         block: u32,
+    },
+    /// A loop's head: the block before ends, and this one is entered with
+    /// block `then`, the one its fused condition falls into, prepaid
+    /// ahead under one guard (`Meter::enter_two`).
+    Trip {
+        pc: u32,
+        block: u32,
+        then: u32,
+    },
+    /// The head of the block a [`Micro::Trip`] prepaid ahead, which its
+    /// condition fell into, and the loop's `Pass(pass)` right after it
+    /// unless `pass` is [`NO_PASS`]: the block was entered with the trip
+    /// where the pair fit, else it is entered here as a head is.
+    Then {
+        pc: u32,
+        block: u32,
+        pass: u16,
     },
     Pass {
         pc: u32,
@@ -121,6 +141,8 @@ impl Micro {
     pub fn pc(self) -> u32 {
         match self {
             Self::Block { pc, .. }
+            | Self::Trip { pc, .. }
+            | Self::Then { pc, .. }
             | Self::Pass { pc, .. }
             | Self::Local { pc, .. }
             | Self::Const { pc, .. }
@@ -182,6 +204,7 @@ pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
             match micro {
                 Micro::Exit { .. } => break,
                 Micro::Copy { .. } => saved += 2,
+                Micro::Then { pass, .. } if *pass != NO_PASS => saved += 2,
                 Micro::Fused { n, .. }
                     if unit.fused[*n as usize].words.is_none()
                         && unit.fused[*n as usize].numbers.is_none() =>
@@ -233,16 +256,74 @@ pub(crate) fn trace_unit(unit: &mut Unit, readable: &impl Fn(u32) -> bool) {
     unit.micros = micros;
 }
 
+/// The block a loop head at `pc` (block `block`) prepays ahead: where
+/// the head's block is one fused condition whose run counts no entry
+/// and falls into the next block's head, and both blocks bill a fixed
+/// cost, the next's nonzero (`Meter::enter_two` holds it as nonzero).
+fn ahead(unit: &Unit, pc: usize, block: u32) -> Option<u32> {
+    let Some(&Op::Fused(n)) = unit.ops.get(pc + 1) else {
+        return None;
+    };
+    let fused = &unit.fused[n as usize];
+    if fused.entry.is_some() || !matches!(fused.then, Then::Branch { .. }) {
+        return None;
+    }
+    let Some(&Op::Block(then)) = unit.ops.get(fused.call as usize + 2) else {
+        return None;
+    };
+    let blocks = &unit.blocks;
+    (blocks[block as usize].end == fused.call + 2
+        && blocks[block as usize].charge.is_some()
+        && blocks[then as usize].charge.is_some_and(|cost| cost > 0))
+    .then_some(then)
+}
+
 /// The trace from block head `head`.
 fn line(unit: &Unit, head: usize, readable: &impl Fn(u32) -> bool, micros: &mut Vec<Micro>) {
     let mut pc = head;
-    for _ in 0..LENGTH {
+    for step in 0..LENGTH {
         let Some(&op) = unit.ops.get(pc) else {
             break;
         };
         let at = pc as u32;
         let (micro, next) = match op {
-            Op::Block(block) => (Micro::Block { pc: at, block }, pc + 1),
+            // The block a trip's condition falls into, prepaid ahead.
+            Op::Block(block)
+                if matches!(micros.last(), Some(Micro::Fused { .. }))
+                    && matches!(micros.iter().rev().nth(1),
+                        Some(Micro::Trip { then, .. }) if *then == block) =>
+            {
+                match unit.ops.get(pc + 1) {
+                    Some(&Op::Pass(n)) if n != NO_PASS => (
+                        Micro::Then {
+                            pc: at,
+                            block,
+                            pass: n,
+                        },
+                        pc + 2,
+                    ),
+                    _ => (
+                        Micro::Then {
+                            pc: at,
+                            block,
+                            pass: NO_PASS,
+                        },
+                        pc + 1,
+                    ),
+                }
+            }
+            // A trip ends in the line: its pair is entered or given back.
+            Op::Block(block) => match ahead(unit, pc, block).filter(|_| LENGTH - step >= 3) {
+                Some(then) => (
+                    Micro::Trip {
+                        pc: at,
+                        block,
+                        then,
+                    },
+                    pc + 1,
+                ),
+                None => (Micro::Block { pc: at, block }, pc + 1),
+            },
             Op::Pass(n) => (Micro::Pass { pc: at, n }, pc + 1),
             Op::Local(from) => match unit.ops.get(pc + 1) {
                 Some(&Op::SetLocal(to)) => (Micro::Copy { pc: at, from, to }, pc + 2),

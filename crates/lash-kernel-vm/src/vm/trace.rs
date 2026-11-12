@@ -12,7 +12,7 @@ use lash_kernel_doc::Value;
 
 use super::{Flow, Run, Vm, fused};
 use crate::bytecode::program::{Program, Then, Unit};
-use crate::bytecode::trace::{Micro, NONE};
+use crate::bytecode::trace::{Micro, NO_PASS, NONE};
 use crate::heap::Heap;
 
 #[cfg(test)]
@@ -60,12 +60,16 @@ impl<H: Heap> Vm<H> {
                     | Micro::CellGet { .. }
                     | Micro::Fused { .. }
                     | Micro::Inline { .. }
+                    | Micro::Then { .. }
                     | Micro::Exit { .. }
             ) {
                 ran!();
             }
             debug_assert!(
-                matches!(micro, Micro::Block { .. } | Micro::Exit { .. }) || !self.exact,
+                matches!(
+                    micro,
+                    Micro::Block { .. } | Micro::Trip { .. } | Micro::Exit { .. }
+                ) || !self.exact,
                 "a trace runs on the prepaid path"
             );
             match micro {
@@ -76,6 +80,36 @@ impl<H: Heap> Vm<H> {
                     self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
                     if self.exact {
                         return Ok(Some(pc as usize + 1));
+                    }
+                }
+                Micro::Trip { pc, block, then } => {
+                    self.meter.leave();
+                    let charge = unit.blocks[block as usize].charge;
+                    let ahead = unit.blocks[then as usize].charge;
+                    self.exact = self.watch.is_some() || !self.meter.enter_two(charge, ahead);
+                    if self.exact {
+                        return Ok(Some(pc as usize + 1));
+                    }
+                }
+                Micro::Then { pc, block, pass } => {
+                    // Entered with the trip, or here where the pair did
+                    // not fit, as a head enters its block.
+                    if !self.meter.then() {
+                        self.meter.leave();
+                        let block = &unit.blocks[block as usize];
+                        self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
+                        if self.exact {
+                            #[cfg(test)]
+                            self.witness(unit, Micro::Block { pc, block: 0 });
+                            return Ok(Some(pc as usize + 1));
+                        }
+                    }
+                    ran!();
+                    if pass != NO_PASS {
+                        let local = &mut self.cx.stack[base + usize::from(pass)];
+                        if let Value::Int(count) = *local {
+                            *local = Value::Int(count.saturating_add(1));
+                        }
                     }
                 }
                 Micro::Pass { n, .. } => {
@@ -134,12 +168,16 @@ impl<H: Heap> Vm<H> {
                         }
                         // The native's ordinary answer, or its call, from
                         // the run's call on, as the dispatcher runs it.
+                        // A block prepaid ahead is given back first: the
+                        // dispatcher enters it as its head.
                         Ok(None) => {
                             ran!();
+                            self.meter.unfold();
                             return self.fused_slow(program, unit, n, base, args, len, top);
                         }
                         Err(flow) => {
                             ran!();
+                            self.meter.unfold();
                             self.cx.frames[top].pc = match flow {
                                 Flow::Cold { .. } => fused::rerun_from(fused),
                                 _ => fused.call + 1,
@@ -154,13 +192,17 @@ impl<H: Heap> Vm<H> {
                         Then::Pop => {}
                         Then::Branch { to, looping } => match value {
                             Value::Bool(true) => {}
-                            Value::Bool(false) if next == NONE => {
-                                return Ok(Some(to as usize));
+                            Value::Bool(false) => {
+                                self.meter.unfold();
+                                if next == NONE {
+                                    return Ok(Some(to as usize));
+                                }
+                                at = next as usize;
                             }
-                            Value::Bool(false) => at = next as usize,
                             // The answer and its fee are the run's: the
                             // branch raises after them, as its op does.
                             _ => {
+                                self.meter.unfold();
                                 self.cx.frames[top].pc = fused.call + 2;
                                 return Err(self.condition_error(looping));
                             }
@@ -224,7 +266,11 @@ impl<H: Heap> Vm<H> {
     fn witness(&self, unit: &Unit, micro: Micro) {
         RAN.with(|ran| ran.set(ran.get() + 1));
         let pc = micro.pc() as usize;
-        let ops = if let Micro::Copy { .. } = micro { 2 } else { 1 };
+        let ops = match micro {
+            Micro::Copy { .. } => 2,
+            Micro::Then { pass, .. } if pass != NO_PASS => 2,
+            _ => 1,
+        };
         for pc in pc..pc + ops {
             if unit.steps && unit.step[pc] {
                 crate::perf_witness::record(|work| work.vm_steps += 1);
