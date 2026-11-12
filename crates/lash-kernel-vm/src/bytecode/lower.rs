@@ -272,6 +272,8 @@ impl Compiler<'_> {
                     f.emit(Op::SetLocal(held));
                     self.depart(f, None)?;
                     f.emit(Op::Local(held));
+                } else {
+                    self.depart(f, None)?;
                 }
                 Self::exit(f, Op::Return);
             }
@@ -549,10 +551,15 @@ impl Compiler<'_> {
                 // The handler starts a block, the raised value on the stack.
                 let handler = f.label();
                 f.patch(enter, handler);
+                let taking = f.emit(Op::CatchEnter(0));
+                f.scopes.push((depth, Scope::Catch(taking as u32)));
                 Self::scoped(f, |f| {
                     Self::bind(f, &catch.binding);
                     self.child_block(f, 1, &catch.body)
                 })?;
+                f.scopes.pop();
+                f.emit(Op::CatchExit(taking as u32));
+                f.patch(taking, f.here());
                 let end = f.label();
                 f.patch(skip, end);
             }
@@ -601,6 +608,9 @@ impl Compiler<'_> {
             match scope {
                 Scope::Handler => {
                     f.emit(Op::TryExit);
+                }
+                Scope::Catch(taking) => {
+                    f.emit(Op::CatchExit(taking));
                 }
                 Scope::Finally(block, path) => {
                     f.scopes.truncate(at);

@@ -113,6 +113,10 @@ pub enum Op {
     /// callers': an entry's epilogue after its body has left
     /// (`K-DOC-003`, `K-TASK-019`).
     TryLeave,
+    /// A catch takes the raised value on the stack until `end`.
+    CatchEnter(u32),
+    /// A normal departure from the catch entered at this op.
+    CatchExit(u32),
 
     // --- Loops. Loop `n` of the unit names its hidden locals.
     /// Pops the iterable into loop `n`'s state.

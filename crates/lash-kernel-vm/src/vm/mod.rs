@@ -1596,6 +1596,8 @@ impl<H: Heap> Vm<H> {
                 self.cx.handlers.pop();
             }
             Op::TryLeave => self.leave_handlers(),
+            Op::CatchEnter(end) => self.catch_enter(end),
+            Op::CatchExit(at) => self.catch_exit(at),
             Op::ForOpen(n) => self.for_open(unit, n)?,
             Op::ForNext(n) => self.for_next(unit, n)?,
             Op::ProtoOpen(n) => self.proto_open(unit, n)?,

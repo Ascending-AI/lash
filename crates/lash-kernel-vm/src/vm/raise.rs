@@ -50,6 +50,8 @@ impl<H: Heap> Vm<H> {
             if let Some(handler) = self.cx.handlers.last().copied()
                 && handler.frame as usize == top
             {
+                self.catches
+                    .raised_to(self.tasks.running, top as u32, Some(handler.pc), value);
                 self.cx.handlers.pop();
                 self.cx.stack.truncate(handler.height as usize);
                 self.cx.stack.push(value);
@@ -58,6 +60,8 @@ impl<H: Heap> Vm<H> {
                 }
                 return Ok(());
             }
+            self.catches
+                .raised_to(self.tasks.running, top as u32, None, value);
             if self.clean_up_raise(top, value) {
                 return Ok(());
             }

@@ -274,6 +274,8 @@ impl Unit {
                 Op::Block(_) | Op::Nop | Op::Pop | Op::Index | Op::SetIndex => true,
                 Op::SetIndexPlaceFirst | Op::RemoveIndex | Op::Return | Op::Fall => true,
                 Op::Raise | Op::TryExit | Op::TryLeave | Op::Print | Op::Finish | Op::Fail => true,
+                Op::CatchEnter(end) => (pc as u32) < end && end as usize <= len,
+                Op::CatchExit(at) => matches!(self.ops.get(at as usize), Some(Op::CatchEnter(_))),
                 Op::MakeTuple(_) | Op::MakeList(_) | Op::MakeMap(_) | Op::MakeSet(_) => true,
                 Op::Const(n) => program.get_constant(n).is_some(),
                 Op::Local(n) | Op::SetLocal(n) | Op::CellGet(n) | Op::CellSet(n) | Op::Box(n) => {
@@ -704,6 +706,8 @@ impl Unit {
             | Op::TryEnter(_)
             | Op::TryExit
             | Op::TryLeave
+            | Op::CatchEnter(_)
+            | Op::CatchExit(_)
             | Op::ForNext(_)
             | Op::ProtoStep(_)
             | Op::ProtoMore(_)

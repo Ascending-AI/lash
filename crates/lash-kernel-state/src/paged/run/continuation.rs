@@ -133,6 +133,29 @@ record! {
         /// across seals, never shrunk, since a cold page's values are not
         /// read to seal.
         pub held_code: Vec<FunctionId>,
+        /// Failed-wait errors followed until the host takes the observation.
+        pub failures: Vec<RunFailure>,
+        /// Recoveries completed since the host last took the observation.
+        pub caught: Vec<u64>,
+    }
+}
+
+record! {
+    /// A failed wait's error identity, optionally held by an active catch.
+    pub struct RunFailure {
+        pub task: u32,
+        pub wait: u64,
+        pub error: u32,
+        pub catch: Option<RunCatch>,
+    }
+}
+
+record! {
+    /// An active catch by its frame, document path and compiled copy.
+    pub struct RunCatch {
+        pub frame: u32,
+        pub site: Vec<u32>,
+        pub copy: u32,
     }
 }
 

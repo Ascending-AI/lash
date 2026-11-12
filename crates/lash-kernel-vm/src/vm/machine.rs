@@ -909,7 +909,7 @@ impl Machine for CoreMachine {
     }
 
     fn take_caught(&mut self) -> Vec<WaitId> {
-        Vec::new()
+        self.vm.catches.take()
     }
 
     fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {

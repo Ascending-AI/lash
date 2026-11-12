@@ -378,3 +378,62 @@ fn observation_probes(
     );
     probes
 }
+
+/// FIG-6817: a catch's recovery is retained before it is reported, including
+/// a still-open catch and catches in a callee or a callback. Taking the
+/// observation twice must not report the same failed occurrence twice.
+#[test]
+fn caught_failures_survive_a_seal_before_the_host_takes_them() {
+    for body in [
+        "try { do perform 1(\"failed\") as Any } catch e { do perform 0(\"held\") as Any } return null",
+        "let answer = call recover() do perform 0(\"held\") as Any return answer",
+        "let answer = invoke each.twice(fn(x) { try { do perform 1(\"failed\") as Any } catch e { return x } }, 7) do perform 0(\"held\") as Any return answer",
+    ] {
+        let recover = "function recover() -> Any\nkernel 1\nmetering statements\nbody { try { do perform 1(\"failed\") as Any } catch e { return 7 } }";
+        let mut run = Embedder::new(&format!("definition {recover:?}\nmain {{ {body} }}"));
+        assert!(matches!(run.run(), Step::Parked(_)), "{body}");
+        let failed = super::embedder::wait_of(&run.pending[0]);
+        run.deliver("failed");
+        assert!(matches!(run.run(), Step::Parked(_)), "{body}");
+        run.reopen(false);
+        assert_eq!(run.machine.take_caught(), [failed], "{body}");
+        assert!(run.machine.take_caught().is_empty(), "{body}");
+    }
+}
+
+/// FIG-6817: reopening an active catch must retain enough error identity
+/// to undo its take when it re-raises, also through a callee or callback.
+#[test]
+fn a_rethrow_after_reopening_an_active_catch_is_not_recovered() {
+    let failing =
+        "try { do perform 1(\"failed\") as Any } catch e { print \"taken\" throw e } return null";
+    let definition =
+        format!("function recover() -> Any\nkernel 1\nmetering statements\nbody {{ {failing} }}");
+    for body in [
+        failing.to_owned(),
+        "return call recover()".to_owned(),
+        format!("return invoke each.twice(fn(x) {{ {failing} }}, 7)"),
+    ] {
+        let mut run = Embedder::with(
+            &format!("definition {definition:?}\nmain {{ {body} }}"),
+            Setup {
+                slice: 1,
+                ..Setup::default()
+            },
+        );
+        while matches!(run.run(), Step::Slice) {}
+        run.deliver("failed");
+        while run.world.printed.is_empty() {
+            assert!(matches!(run.run(), Step::Slice), "{body}");
+        }
+        run.reopen(false);
+        assert!(
+            matches!(
+                run.run_to_end(&[]),
+                End::Error(crate::RunError::Uncaught { .. })
+            ),
+            "{body}"
+        );
+        assert!(run.machine.take_caught().is_empty(), "{body}");
+    }
+}

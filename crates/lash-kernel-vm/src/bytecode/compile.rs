@@ -159,6 +159,7 @@ pub(crate) struct LoopCtx {
 #[derive(Clone)]
 pub(crate) enum Scope {
     Handler,
+    Catch(u32),
     /// A finally block and its site path.
     Finally(Arc<[Stmt]>, Vec<u32>),
 }
@@ -377,6 +378,7 @@ impl Fun {
             Op::JumpIfFalse(_) => Op::JumpIfFalse(to),
             Op::WhileFalse(_) => Op::WhileFalse(to),
             Op::TryEnter(_) => Op::TryEnter(to),
+            Op::CatchEnter(_) => Op::CatchEnter(to),
             other => other,
         };
     }

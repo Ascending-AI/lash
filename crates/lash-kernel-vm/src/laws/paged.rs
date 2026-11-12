@@ -270,6 +270,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
                 panic!("must park");
             };
             let Request::Effect(request) = &park.requests[0];
+            let wait = request.wait;
             let before = embedder.machine.meters().charged.expect("exact charge");
             let outcome = if rejected {
                 Outcome::Completed(Datum::Text("not an integer".into()))
@@ -296,6 +297,12 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
                 expected,
                 "cold={cold}, rejected={rejected}"
             );
+            assert_eq!(
+                embedder.machine.take_caught(),
+                vec![wait],
+                "cold={cold}, rejected={rejected}"
+            );
+            assert!(embedder.machine.take_caught().is_empty());
         }
     }
 }

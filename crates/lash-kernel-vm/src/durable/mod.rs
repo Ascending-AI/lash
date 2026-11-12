@@ -10,6 +10,7 @@
 //! build's table and refuses a point the table does not hold.
 
 mod admit;
+mod catches;
 mod code;
 pub(crate) mod session;
 
@@ -151,6 +152,8 @@ pub(crate) fn seal(
         })?
         .into_iter()
         .collect();
+    let failures = catches::save(vm, &mut values)?;
+    let caught = vm.catches.caught.iter().map(|wait| wait.0).collect();
     let heap = vm.heap.seal(&values.0)?;
     let held_code = code::held(&program, &vm.heap.code).into_iter().collect();
     Ok(RunRecord {
@@ -180,6 +183,8 @@ pub(crate) fn seal(
         next_join,
         pins,
         held_code,
+        failures,
+        caught,
     })
 }
 
@@ -765,6 +770,7 @@ pub(crate) fn open(
         })
         .collect::<Result<_, String>>()?;
     scheduler.next_join = record.next_join;
+    catches::open(vm, record, values)?;
     vm.refused = record.refused;
     let raw: u64 = vm
         .tasks
