@@ -35,11 +35,14 @@ impl World {
                 Some(attachments),
             )
         } else {
-            (
-                Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap()),
-                None,
-                None,
+            let files = tempfile::tempdir().unwrap();
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                files.path().join("store.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
             )
+            .await
+            .unwrap();
+            (Arc::new(stores), None, Some(files))
         };
         let core = builder_on_workers(
             stores.clone(),
@@ -100,6 +103,79 @@ impl World {
         assert_eq!(finished(&self.core, &process).await, serde_json::json!(key));
         process
     }
+}
+
+/// ENV-READ-CORRUPT: a stored head with a missing body is corrupt; an
+/// absent head is absent, even when the process record remains.
+async fn missing_body_is_corrupt_and_absent_head_is_none(postgres: bool) {
+    use sqlx::Connection as _;
+
+    let world = World::new(postgres).await;
+    let pin = lash::process::HostArtifactPin::mint();
+    let publication = world.publish(&pin, "corrupt").await;
+    let process = world.finish(&publication, "env-read-corrupt").await;
+    let cleanup_fence = lash::testing::quiesce_artifact_cleanup(&world.core).await;
+    cleanup_fence.settle().await.unwrap();
+    let reference = publication.env_ref.as_str();
+    if let Some(database) = &world._database {
+        let mut conn = sqlx::PgConnection::connect(database.url()).await.unwrap();
+        let result = sqlx::query("UPDATE lash_lash_vm_artifacts SET body_ref = 'env-read-missing-body' WHERE namespace = 'process_execution_env' AND artifact_ref = $1")
+            .bind(reference).execute(&mut conn).await.unwrap();
+        assert_eq!(result.rows_affected(), 1);
+    } else {
+        let conn = rusqlite::Connection::open(
+            world._attachments.as_ref().unwrap().path().join("store.db"),
+        )
+        .unwrap();
+        assert_eq!(conn.execute("UPDATE artifact_refs SET body_ref = 'env-read-missing-body' WHERE namespace = 'process_execution_env' AND artifact_ref = ?1", [reference]).unwrap(), 1);
+    }
+    let artifacts = world.core.host_artifacts();
+    let assert_corrupt = |result: lash::Result<Option<lash::process::ProcessEnv>>| {
+        assert!(
+            matches!(
+                result,
+                Err(lash::EmbedError::Store(lash_core::StoreError::StoredDataCorrupt {
+                    record_kind: "process environment", ref message,
+                })) if message == "artifact points at a missing blob"
+            ),
+            "a stored head with a missing body must be corrupt: {result:?}"
+        );
+    };
+    assert_corrupt(artifacts.get_process_env(&process).await);
+    assert_corrupt(world.core.processes().env(&publication.env_ref).await);
+    let authority = world.core.processes().environment(&process).await;
+    assert!(
+        matches!(authority, Err(lash::EmbedError::Store(lash_core::StoreError::StoredDataCorrupt { record_kind: "process environment", ref message })) if message == "artifact points at a missing blob"),
+        "authority must preserve corruption: {authority:?}"
+    );
+
+    // Point the retained process at an absent head, independently of the
+    // broken head above and its incoming retention edges.
+    let absent = "env-read-absent-head";
+    if let Some(database) = &world._database {
+        let mut conn = sqlx::PgConnection::connect(database.url()).await.unwrap();
+        let result = sqlx::query("UPDATE lash_processes SET execution_json = replace(execution_json, $1, $2) WHERE process_id = $3")
+            .bind(reference).bind(absent).bind(process.as_str()).execute(&mut conn).await.unwrap();
+        assert_eq!(result.rows_affected(), 1);
+    } else {
+        let conn = rusqlite::Connection::open(
+            world._attachments.as_ref().unwrap().path().join("store.db"),
+        )
+        .unwrap();
+        assert_eq!(conn.execute("UPDATE processes SET execution_json = replace(execution_json, ?1, ?2) WHERE process_id = ?3", [reference, absent, process.as_str()]).unwrap(), 1);
+    }
+    assert_eq!(artifacts.get_process_env(&process).await.unwrap(), None);
+    assert_eq!(
+        world
+            .core
+            .processes()
+            .env(&lash::process::ProcessEnvRef::new(absent))
+            .await
+            .unwrap(),
+        None
+    );
+    drop(cleanup_fence);
+    world.core.shutdown().await.unwrap();
 }
 
 /// ENV-READ-WHOLE: a finished run returns the published value, including its
@@ -275,6 +351,7 @@ macro_rules! stores {
 }
 
 stores!(
+    missing_body_is_corrupt_and_absent_head_is_none,
     finished_environment_relinks,
     shared_body_keeps_each_head,
     absence_follows_prune_and_last_holder,

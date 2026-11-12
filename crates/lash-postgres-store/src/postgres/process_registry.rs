@@ -975,8 +975,9 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
         .fetch_optional(crate::observed_sql::executor(&self.pool))
         .await
         .map_err(store_sqlx_error)?;
-        row.map(|row| row.try_get(0).map_err(store_sqlx_error))
+        row.map(|row| stored_environment_bytes(&row, 0, 1))
             .transpose()
+            .map(Option::flatten)
     }
 
     async fn process_authority(
@@ -994,7 +995,7 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
             if let Some(record) = record {
                 let record = serde_json::from_str(&record)
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
-                Ok((record, row.get(1)))
+                Ok((record, stored_environment_bytes(&row, 1, 4)?))
             } else {
                 Err(StoreError::ProcessAuthorityPruned {
                     terminal_label: row.get(2),
@@ -1005,4 +1006,22 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
         })
         .transpose()
     }
+}
+
+/// A missing head is absent; a stored head must splice into complete bytes.
+fn stored_environment_bytes(
+    row: &sqlx::postgres::PgRow,
+    bytes_at: usize,
+    head_at: usize,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    if !row.try_get::<bool, _>(head_at).map_err(store_sqlx_error)? {
+        return Ok(None);
+    }
+    row.try_get::<Option<Vec<u8>>, _>(bytes_at)
+        .map_err(store_sqlx_error)?
+        .ok_or_else(|| StoreError::StoredDataCorrupt {
+            record_kind: "process environment",
+            message: "artifact points at a missing blob".into(),
+        })
+        .map(Some)
 }

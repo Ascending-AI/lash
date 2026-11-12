@@ -54,7 +54,8 @@ lash_store_sql::statements! {
 
         /// Environment bytes by reference without executable reconstruction.
         /// A head's body is spliced back in the same snapshot (FIG-7700).
-        select_environment_bytes = "SELECT substr(a.artifact_bytes, 1, a.body_at) || body.artifact_bytes || substr(a.artifact_bytes, a.body_at + 1)
+        select_environment_bytes = "SELECT substr(a.artifact_bytes, 1, a.body_at) || body.artifact_bytes || substr(a.artifact_bytes, a.body_at + 1),
+                 a.artifact_ref IS NOT NULL
              FROM lash_vm_artifacts a
              LEFT JOIN lash_vm_artifacts body ON body.namespace = 'process_env_body' AND body.artifact_ref = a.body_ref
              WHERE a.namespace = ?1 AND a.artifact_ref = ?2";
@@ -62,14 +63,14 @@ lash_store_sql::statements! {
         /// A retained process and its environment bytes, or its prune tombstone, atomically.
         select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json,
                  substr(a.artifact_bytes, 1, a.body_at) || body.artifact_bytes || substr(a.artifact_bytes, a.body_at + 1),
-                 NULL::text, NULL::bigint
+                 NULL::text, NULL::bigint, a.artifact_ref IS NOT NULL
              FROM processes p
              LEFT JOIN lash_vm_artifacts a ON a.namespace = ?2
                AND a.artifact_ref = p.execution_json::jsonb #>> '{input,launch,env}'
              LEFT JOIN lash_vm_artifacts body ON body.namespace = 'process_env_body' AND body.artifact_ref = a.body_ref
              WHERE p.process_id = ?1
              UNION ALL
-             SELECT NULL, NULL, terminal_label, pruned_at_ms
+             SELECT NULL, NULL, terminal_label, pruned_at_ms, FALSE
              FROM process_tombstones WHERE process_id = ?1";
 
         /// The stored record for `?1`, under its write lock.
