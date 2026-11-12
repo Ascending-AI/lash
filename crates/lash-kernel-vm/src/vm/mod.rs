@@ -1272,8 +1272,8 @@ impl<H: Heap> Vm<H> {
                         }
                         sync!(pc);
                         self.call(&program, unit, site)?;
-                        // A native that answered leaves the frame running.
-                        if matches!(call.callee, Callee::Native { .. })
+                        // An answered native or completed leaf keeps this caller running.
+                        if matches!(call.callee, Callee::Native { .. } | Callee::Value)
                             && self.cx.frames.len() == top + 1
                         {
                             continue;

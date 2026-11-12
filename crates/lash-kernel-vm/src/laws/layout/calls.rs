@@ -426,3 +426,59 @@ fn a_direct_memo_resolves_rebound_closures_and_their_captures() {
         fast.end
     );
 }
+
+/// K-CHG-001 / K-MACH-002: failed prepayment resumes the real callee
+/// before its next unpaid op, preserving captures and the exact refusal.
+#[test]
+fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
+    for (body, answers) in [
+        (
+            "set last = x return x",
+            Datum::List((0..6).map(int).collect()),
+        ),
+        ("set last = x", Datum::List(vec![Datum::Null; 6])),
+    ] {
+        let source = format!(
+            "main {{ let last = 0 let f = fn(x) {{ {body} }} let answers = [] let i = 0 while flat.lt(i, 6) {{ set answers[list.len(answers)] = apply f(i) set i = flat.add(i, 1) }} return (answers, last) }}"
+        );
+        let roomy = super::super::embedder::ROOMY;
+        let before = crate::vm::calls::leaves();
+        let fast = observe(&source, u64::MAX, roomy, false);
+        assert!(
+            crate::vm::calls::leaves() > before,
+            "the authored f returned through its real-frame leaf path"
+        );
+        let expected = Datum::Tuple(vec![answers, int(5)]);
+        assert_eq!(fast.end, format!("finished {expected:?}"));
+        let plain = crate::vm::calls::without_memo(|| observe(&source, u64::MAX, roomy, false));
+        assert_eq!(fast.outcome(), plain.outcome());
+        assert_eq!(fast.stops, plain.stops);
+        let charge = plain.stops.last().unwrap().1.charged.unwrap();
+        for limit in 0..=charge {
+            let bounds = Bounds {
+                charge_limit: limit,
+                ..roomy
+            };
+            let fast = observe(&source, u64::MAX, bounds, false);
+            let plain =
+                crate::vm::calls::without_memo(|| observe(&source, u64::MAX, bounds, false));
+            assert_eq!(fast.outcome(), plain.outcome(), "charge limit {limit}");
+            assert_eq!(fast.stops, plain.stops, "charge limit {limit}");
+        }
+        for charge in [crate::Charge::Exact, crate::Charge::Off] {
+            let bounds = Bounds { charge, ..roomy };
+            for slice in [1, 3, 17, 101] {
+                let fast = observe_reopening(&source, slice, bounds, false, true);
+                let plain = crate::vm::calls::without_memo(|| {
+                    observe_reopening(&source, slice, bounds, false, true)
+                });
+                assert_eq!(fast.outcome(), plain.outcome(), "{charge:?} slice {slice}");
+                assert_eq!(fast.stops, plain.stops, "{charge:?} slice {slice}");
+                assert_eq!(
+                    fast.checkpoints, plain.checkpoints,
+                    "{charge:?} slice {slice}"
+                );
+            }
+        }
+    }
+}

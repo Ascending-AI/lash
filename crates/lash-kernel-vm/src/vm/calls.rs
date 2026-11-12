@@ -23,6 +23,7 @@ use lash_kernel_doc::heap::LogicalBytes;
 use super::frames::{Bill, Entry};
 use super::{Exceeded, Flow, Restart, Run, Stop, Vm, fault, read};
 use crate::Bound;
+use crate::bytecode::op::Op;
 use crate::bytecode::program::{Callee, NativeEntry, Program, Unit};
 use crate::functions::MachineFunction;
 use crate::heap::Heap;
@@ -57,11 +58,13 @@ pub(crate) struct Direct {
     globals: usize,
     params: u16,
     entry: Entry,
+    leaf: bool,
 }
 
 #[cfg(test)]
 thread_local! {
     static PLAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LEAVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static HITS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -80,6 +83,153 @@ pub(crate) fn without_memo<R>(f: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 pub(crate) fn hits() -> u64 {
     HITS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn leaves() -> u64 {
+    LEAVES.with(std::cell::Cell::get)
+}
+
+fn small_leaf(program: &Program, unit: &Unit) -> bool {
+    let end = unit
+        .inlines
+        .iter()
+        .map(|site| site.entry as usize)
+        .min()
+        .unwrap_or(unit.ops.len());
+    end <= 64
+        && unit.boxed.is_empty()
+        && unit.cleanup.is_none()
+        && unit.ops[..end].iter().all(|op| match *op {
+            Op::Block(_)
+            | Op::Trace(_)
+            | Op::Local(_)
+            | Op::SetLocal(_)
+            | Op::Pop
+            | Op::CaptureGet(_)
+            | Op::CaptureSet(_)
+            | Op::CellGet(_)
+            | Op::CellSet(_)
+            | Op::Return
+            | Op::Fall
+            | Op::Nop => true,
+            Op::Const(n) => program.readable(n),
+            Op::Inline(n) => {
+                let site = &unit.inlines[n as usize];
+                let call = &unit.calls[site.call as usize];
+                call.entry.is_none() && call.checked.is_none() && site.folds.0 < site.folds.1
+            }
+            _ => false,
+        })
+}
+
+impl<H: Heap> Vm<H> {
+    /// Runs a bounded leaf on its original ops and real frame. An unpaid
+    /// op goes back to dispatch before its start; a cold read leaves pc
+    /// past the op, as dispatch does, so resume suppresses a second start.
+    fn leaf_run(&mut self, program: &Program, entry: Entry, checked: bool) -> Run<()> {
+        if self.watch.is_some() {
+            return Ok(());
+        }
+        #[cfg(test)]
+        if self.chill.is_some() || self.collecting {
+            return Ok(());
+        }
+        let unit = program.unit(entry.unit);
+        let top = self.cx.frames.len() - 1;
+        let base = self.cx.frames[top].base as usize;
+        let mut pc = 0;
+        loop {
+            let op = unit.ops[pc];
+            if self.exact && !matches!(op, Op::Block(_) | Op::Trace(_)) {
+                self.cx.frames[top].pc = pc as u32;
+                return Ok(());
+            }
+            match op {
+                Op::Block(block) => {
+                    self.meter.leave();
+                    self.exact = !self.meter.enter(unit.blocks[block as usize].charge);
+                }
+                Op::Trace(n) => match self.trace(program, unit, top, n, base)? {
+                    Some(next) => {
+                        pc = next;
+                        continue;
+                    }
+                    None => return Ok(()),
+                },
+                Op::Inline(n) => {
+                    let site = &unit.inlines[n as usize];
+                    if site.steps && self.meter.spent() {
+                        self.cx.frames[top].pc = pc as u32;
+                        return Ok(());
+                    }
+                    self.cx.frames[top].pc = pc as u32 + 1;
+                    let (start, end) = site.folds;
+                    if !self.inline_fast(unit, n, &unit.folds[start as usize..end as usize])? {
+                        self.cx.frames[top].pc = pc as u32;
+                        return Ok(());
+                    }
+                    #[cfg(test)]
+                    if unit.steps && unit.step[pc] {
+                        crate::perf_witness::record(|work| work.vm_steps += 1);
+                    }
+                }
+                _ => {
+                    #[cfg(test)]
+                    if unit.steps && unit.step[pc] {
+                        crate::perf_witness::record(|work| work.vm_steps += 1);
+                    }
+                    self.cx.frames[top].pc = pc as u32 + 1;
+                    match op {
+                        Op::Nop => {}
+                        Op::Const(n) => self.push(self.konst(n)),
+                        Op::Local(n) => self.push(self.cx.stack[base + usize::from(n)]),
+                        Op::SetLocal(n) => {
+                            let value = self.pop();
+                            self.cx.stack[base + usize::from(n)] = value;
+                        }
+                        Op::Pop => {
+                            self.pop();
+                        }
+                        Op::CaptureGet(_) | Op::CaptureSet(_) | Op::CellGet(_) | Op::CellSet(_) => {
+                            self.cell_op(op)?;
+                        }
+                        Op::Return | Op::Fall => {
+                            let value = if op == Op::Return {
+                                self.cx.stack[self.cx.stack.len() - 1]
+                            } else {
+                                Value::Null
+                            };
+                            self.meter.leave();
+                            self.exact = true;
+                            let unfit = if checked {
+                                self.unfit_result(value)?
+                            } else {
+                                None
+                            };
+                            let Some(frame) = self.cx.frames.pop() else {
+                                return Err(fault("a leaf returned without a frame"));
+                            };
+                            self.heap.release(entry.cost);
+                            self.cx.stack.truncate(frame.base as usize);
+                            if let Some(unfit) = unfit {
+                                return Err(self.typed_error("entry_type_mismatch", &unfit));
+                            }
+                            self.push(value);
+                            #[cfg(test)]
+                            LEAVES.with(|leaves| leaves.set(leaves.get() + 1));
+                            return Ok(());
+                        }
+                        _ => {
+                            self.cx.frames[top].pc = pc as u32;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            pc += 1;
+        }
+    }
 }
 
 impl<H: Heap> Vm<H> {
@@ -101,7 +251,7 @@ impl<H: Heap> Vm<H> {
                 let link = self.running_link();
                 self.enter(callee, argc, None, bill, link)
             }
-            Callee::Value => self.call_value(argc),
+            Callee::Value => self.call_value(program, argc, site.checked.is_some()),
             Callee::Native { native, charged } => {
                 if let Some(checked) = &site.checked {
                     self.check_arguments(checked, argc)?;
@@ -125,7 +275,7 @@ impl<H: Heap> Vm<H> {
     /// (`K-FN-004`, `K-CLO-001`). The callee is read where it stands and
     /// removed once read. A closure the last call entered, still the same
     /// object, enters as it resolved then ([`Direct`]).
-    fn call_value(&mut self, argc: usize) -> Run<()> {
+    fn call_value(&mut self, program: &Program, argc: usize, checked: bool) -> Run<()> {
         #[cfg(test)]
         if PLAIN.with(std::cell::Cell::get) {
             self.direct = None;
@@ -144,7 +294,12 @@ impl<H: Heap> Vm<H> {
         {
             #[cfg(test)]
             HITS.with(|hits| hits.set(hits.get() + 1));
-            return self.enter_value(at, argc, direct.params, direct.entry, Some(handle));
+            self.enter_value(at, argc, direct.params, direct.entry, Some(handle))?;
+            return if direct.leaf {
+                self.leaf_run(program, direct.entry, checked)
+            } else {
+                Ok(())
+            };
         }
         let (unit, closure, callable) = match callee {
             Value::Closure(handle) => {
@@ -196,6 +351,7 @@ impl<H: Heap> Vm<H> {
                 globals: self.globals.len(),
                 params,
                 entry,
+                leaf: small_leaf(program, program.unit(unit)),
             });
         }
         self.enter_value(at, argc, params, entry, closure)
@@ -816,7 +972,8 @@ mod memo_laws {
                 }
                 vm.cx.stack.push(Value::Closure(closure));
                 vm.cx.stack.extend(std::iter::repeat_n(Value::Int(9), argc));
-                let entry = vm.call_value(argc);
+                let program = std::sync::Arc::clone(&vm.program);
+                let entry = vm.call_value(&program, argc, false);
                 let (flow, answer) = match entry {
                     Ok(()) => {
                         // This is the new closure's real frame. Let its
