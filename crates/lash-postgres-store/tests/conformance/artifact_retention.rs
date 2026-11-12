@@ -98,6 +98,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
             (environment_retention_survives_a_cut_at_every_step, "process-env-crash-cuts"),
             (module_share_outlives_environment_share_in_either_order, "module-share-end-orders"),
             (module_share_survives_a_cut_between_its_ends, "module-share-crash-cuts"),
+            (carried_environments_refuse_in_the_callers_order, "process-env-carry-refusal-order"),
 
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);

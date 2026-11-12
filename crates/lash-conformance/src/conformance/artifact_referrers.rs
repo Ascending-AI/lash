@@ -1592,6 +1592,172 @@ where
     }
 }
 
+/// An environment over its own document and the link that authors it.
+struct LinkedEnv {
+    document: lash_kernel_value::names::DocumentId,
+    link: lash_core_store::packages::LinkRecord,
+    env_ref: lash_core::ProcessEnvRef,
+    bytes: Vec<u8>,
+    /// The environment's body reference: its closure's key.
+    body: String,
+    /// The document's and the link's module references.
+    modules: std::collections::BTreeSet<String>,
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture builds a valid environment"
+)]
+fn linked_env(round: u8) -> LinkedEnv {
+    use lash_kernel_value::package::Link;
+    let document = lash_kernel_value::names::DocumentId::from_bytes([round; 32]);
+    let link = Link {
+        helper_fills: Default::default(),
+        document,
+        fills: Default::default(),
+    };
+    let link = lash_core_store::packages::LinkRecord {
+        id: link.identity(),
+        link,
+    };
+    let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+        lash_vocabulary::claims::RegistryKind::Process,
+    );
+    execution.authored.insert(link.id);
+    let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
+        .execution(execution)
+        .build()
+        .expect("env");
+    let env_ref = env.stable_ref().expect("env ref");
+    let bytes = env.to_store_bytes().expect("env bytes");
+    let body = lash_core_store::process_env::stored::split(&bytes).body_ref;
+    let modules = [
+        document.to_string(),
+        lash_durable::packages::link_reference(&link.id),
+    ]
+    .into();
+    LinkedEnv {
+        document,
+        link,
+        env_ref,
+        bytes,
+        body,
+        modules,
+    }
+}
+
+impl LinkedEnv {
+    /// `modules` publishes the document and the link; `holder` publishes
+    /// the environment over them.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance fixture validates each store step"
+    )]
+    async fn publish(
+        &self,
+        handles: &crate::fused_artifact_store::ArtifactStoreHandles,
+        modules: &ReferrerClaim,
+        holder: &ReferrerClaim,
+    ) {
+        handles
+            .artifacts
+            .publish_module_artifact(modules, &self.document.to_string(), b"carry order document")
+            .await
+            .expect("document");
+        handles
+            .packages
+            .put_link(modules, &self.link, &[])
+            .await
+            .expect("link");
+        handles
+            .process_env
+            .publish_process_env(holder, &self.env_ref, &self.bytes)
+            .await
+            .expect("publish env");
+    }
+}
+
+/// Carried environments refuse in the caller's order, as each carry's
+/// environment was checked in turn before environments owned their modules
+/// through a closure (FIG-7700); the order a store takes its locks in does
+/// not choose the refusal. A source's module share has ended and taken its
+/// environments' modules while its environment share keeps their heads.
+/// Carrying [A, B] from that share names A's missing module both when B's
+/// head is absent and when B's closure is missing too.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn carried_environments_refuse_in_the_callers_order<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    let envs: Vec<LinkedEnv> = (90..=121).map(linked_env).collect();
+    // A sorts before B by reference, so a store that checks its carries in
+    // reference order checks them in the caller's order; B's closure sorts
+    // before A's, so a store that checks closures in key order names B.
+    let (a, b) = envs
+        .iter()
+        .flat_map(|a| envs.iter().map(move |b| (a, b)))
+        .find(|(a, b)| a.env_ref.as_str() < b.env_ref.as_str() && b.body < a.body)
+        .expect("two environments whose reference and closure orders differ");
+    for b_published in [false, true] {
+        let fixture = make();
+        let handles = fixture.open;
+        let (configured, configured_claim) = pin_claim();
+        let (source, source_claim) = pin_claim();
+        let (destination, _destination_claim) = pin_claim();
+        a.publish(&handles, &configured_claim, &source_claim).await;
+        if b_published {
+            b.publish(&handles, &configured_claim, &source_claim).await;
+        }
+        handles
+            .artifacts
+            .end_module_referrer(&end(configured))
+            .await
+            .expect("configured ends");
+        handles
+            .artifacts
+            .end_module_referrer(&end(source.clone()))
+            .await
+            .expect("source's module share ends");
+        let answer = handles
+            .process_env
+            .end_process_env_referrer(&ResolvedArtifactCleanup {
+                referrer: source,
+                carries: [a, b]
+                    .into_iter()
+                    .map(|env| {
+                        carry(
+                            ArtifactStoreId::ProcessEnv,
+                            env.env_ref.as_str().to_owned(),
+                            &destination,
+                        )
+                    })
+                    .collect(),
+            })
+            .await;
+        let named = match &answer {
+            Err(ArtifactStoreError::ArtifactMissing { artifact_ref })
+                if a.modules.contains(artifact_ref) =>
+            {
+                "a module of A".to_owned()
+            }
+            other => format!("{other:?}"),
+        };
+        assert_eq!(
+            named,
+            "a module of A",
+            "B {}",
+            if b_published {
+                "published, both closures missing"
+            } else {
+                "absent"
+            }
+        );
+    }
+}
+
 /// The referrers of one cut run, minted fresh so runs never share a fence.
 struct CutRun {
     origin: OriginEnv,

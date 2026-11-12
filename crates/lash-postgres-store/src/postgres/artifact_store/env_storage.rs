@@ -419,13 +419,18 @@ async fn arm_tx(
 #[derive(Default)]
 pub(super) struct CarriedClosures {
     bodies: std::collections::BTreeMap<String, String>,
-    missing: std::collections::BTreeMap<String, Result<BTreeSet<String>, ArtifactStoreError>>,
+    missing: std::collections::BTreeMap<String, BTreeSet<String>>,
+    /// The closures to store, in the carries' order.
+    order: Vec<String>,
 }
 
 impl CarriedClosures {
     /// Read each live carry's body reference, lock every closure, then read
-    /// the modules of each closure not stored. A carry whose head was not
-    /// stored when read refuses: the read is a linearizable answer.
+    /// the modules of each closure not stored. The first carry, in the
+    /// caller's order, whose head was not stored when read or whose missing
+    /// closure needs a module that is not refuses, as each carry's
+    /// environment was checked in turn before (FIG-7700): the locks are
+    /// sorted, the refusal is not.
     pub(super) async fn lock(
         tx: &mut sqlx::PgConnection,
         live: &[&lash_core_store::artifact_referrer::ArtifactCarry],
@@ -446,15 +451,6 @@ impl CarriedClosures {
                 .map_err(backend)?
                 .into_iter()
                 .collect();
-        if let Some(carry) = live
-            .iter()
-            .find(|carry| !bodies.contains_key(&carry.artifact.artifact_ref))
-        {
-            return Err(ArtifactStoreError::CarryArtifactMissing {
-                artifact_ref: carry.artifact.artifact_ref.clone(),
-                to: carry.to.clone(),
-            });
-        }
         let closures: BTreeSet<(String, String)> = bodies
             .values()
             .map(|body| (PROCESS_ENV_CLOSURE_NAMESPACE.to_owned(), body.clone()))
@@ -471,7 +467,14 @@ impl CarriedClosures {
                 .into_iter()
                 .collect();
         let mut missing = std::collections::BTreeMap::new();
-        for (head, body) in &bodies {
+        let mut order = Vec::new();
+        for carry in live {
+            let head = carry.artifact.artifact_ref.as_str();
+            let Some(body) = bodies.get(head) else {
+                return Err(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: head.to_owned(),
+                });
+            };
             if stored.contains(body) || missing.contains_key(body) {
                 continue;
             }
@@ -486,17 +489,17 @@ impl CarriedClosures {
             .flatten();
             // A head gone since its read refuses at the carries' check.
             let closure = match bytes {
-                Some(bytes) => match process_env_closure_tx(tx, &bytes).await {
-                    Err(ArtifactStoreError::Backend(error)) => {
-                        return Err(ArtifactStoreError::Backend(error));
-                    }
-                    closure => closure,
-                },
-                None => Ok(BTreeSet::new()),
+                Some(bytes) => process_env_closure_tx(tx, &bytes).await?,
+                None => BTreeSet::new(),
             };
             missing.insert(body.clone(), closure);
+            order.push(body.clone());
         }
-        Ok(Self { bodies, missing })
+        Ok(Self {
+            bodies,
+            missing,
+            order,
+        })
     }
 
     /// The modules of every closure to store, for the carries' one sorted
@@ -504,24 +507,27 @@ impl CarriedClosures {
     pub(super) fn module_locks(&self) -> impl Iterator<Item = (String, String)> + '_ {
         self.missing
             .values()
-            .filter_map(|closure| closure.as_ref().ok())
             .flatten()
             .map(|module| (MODULE_ARTIFACT_NAMESPACE.to_owned(), module.clone()))
     }
 
-    /// Store each missing closure, refusing the first module it needs that
-    /// is not stored, then give each live destination an edge to each of
-    /// its carried environments' closures. The heads were checked.
+    /// Store each missing closure in the carries' order, refusing the first
+    /// module it needs that is not stored, then give each live destination
+    /// an edge to each of its carried environments' closures. The heads
+    /// were checked.
     pub(super) async fn carry(
         self,
         tx: &mut sqlx::PgConnection,
         live: &[&lash_core_store::artifact_referrer::ArtifactCarry],
         destinations: &[(&ArtifactReferrer, bool)],
     ) -> Result<(), ArtifactStoreError> {
-        for (body, closure) in self.missing {
-            let closure = closure?;
+        let mut missing = self.missing;
+        for body in &self.order {
+            let Some(closure) = missing.remove(body) else {
+                continue;
+            };
             recheck_modules_tx(tx, &closure).await?;
-            store_closure_tx(tx, &body, &closure).await?;
+            store_closure_tx(tx, body, &closure).await?;
         }
         for (to, _) in destinations.iter().filter(|(_, live)| *live) {
             let references: Vec<&str> = live

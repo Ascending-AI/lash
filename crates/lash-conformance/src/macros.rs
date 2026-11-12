@@ -929,6 +929,7 @@ macro_rules! artifact_referrer_tests {
             (environment_retention_survives_a_cut_at_every_step, "process-env-crash-cuts"),
             (module_share_outlives_environment_share_in_either_order, "module-share-end-orders"),
             (module_share_survives_a_cut_between_its_ends, "module-share-crash-cuts"),
+            (carried_environments_refuse_in_the_callers_order, "process-env-carry-refusal-order"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);
