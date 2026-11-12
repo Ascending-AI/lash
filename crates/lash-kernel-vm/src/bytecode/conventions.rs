@@ -456,8 +456,7 @@ impl Compiler<'_> {
                 positional: u16::try_from(positional).unwrap_or(u16::MAX),
             }),
         };
-        let key = (function, descriptor.convention.clone());
-        let unit = match self.scope.entries.get(&key) {
+        let unit = match self.scope.entries.get(export) {
             Some(unit) => *unit,
             None => {
                 let unit = super::conventions::entry(
@@ -468,8 +467,8 @@ impl Compiler<'_> {
                         captures: None,
                     },
                 )?;
-                self.entered.insert(unit);
-                self.scope.entries.insert(key, unit);
+                self.entered.insert(unit, export.clone());
+                self.scope.entries.insert(export.clone(), unit);
                 unit
             }
         };

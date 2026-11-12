@@ -397,9 +397,9 @@ pub(super) struct LinkCode {
     free: HashMap<FunctionId, BTreeSet<Name>>,
     /// The unit each unavailable helper compiled to.
     missing: HashMap<FunctionId, UnitId>,
-    /// The entry unit a call through an import enters, by the export's
-    /// function and start convention.
-    pub(super) entries: HashMap<(FunctionId, lash_kernel_doc::StartConvention), UnitId>,
+    /// The entry unit a call through an import enters, by the export of
+    /// the Link it enters: one per export, as a saved frame names it.
+    pub(super) entries: HashMap<lash_kernel_value::names::ExportName, UnitId>,
 }
 
 /// The Link library code is compiled in: no loaded Link's.
@@ -511,7 +511,7 @@ pub(crate) struct Compiler<'a> {
     global_ids: HashMap<Name, u16>,
     /// The export entries calls through imports enter
     /// ([`Program::entered`]).
-    pub(super) entered: BTreeSet<UnitId>,
+    pub(super) entered: BTreeMap<UnitId, lash_kernel_value::names::ExportName>,
     /// Each action site's occurrence counter index (`K-EFF-008`).
     occurrences: HashMap<(LinkId, Site), u32>,
     /// The build image an open compiles under, when it is not the one the
@@ -554,7 +554,7 @@ impl<'a> Compiler<'a> {
             declares: BTreeSet::new(),
             helpers: None,
             globals: Vec::new(),
-            entered: BTreeSet::new(),
+            entered: BTreeMap::new(),
             global_ids: HashMap::new(),
             occurrences: HashMap::new(),
             available: None,

@@ -17,7 +17,7 @@
 use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_value::content_ids::LinkId;
-use lash_kernel_value::names::{FunctionId, Name, OperationUse};
+use lash_kernel_value::names::{ExportName, FunctionId, Name, OperationUse};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, WaitCancellation};
 use lash_kernel_value::tokens::{
     TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
@@ -330,17 +330,43 @@ record! {
 }
 
 /// What a unit is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UnitKind {
     Main,
     Declared,
     Body,
     Closure,
     Spawn,
-    /// An export's entry under its start convention, entered by a call
-    /// through an import: its body with the convention's settlement or
-    /// run-root cleanup.
-    Entry,
+    /// The entry of the named export of the unit's Link under its start
+    /// convention, entered by a call through an import: its body with the
+    /// convention's settlement or run-root cleanup. The Link's document
+    /// fixes the export's function and convention, so two exports of one
+    /// body under different conventions are different entries.
+    Entry(ExportName),
+}
+
+impl TokenCodec for UnitKind {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Main => out.sum(0, 0),
+            Self::Declared => out.sum(1, 0),
+            Self::Body => out.sum(2, 0),
+            Self::Closure => out.sum(3, 0),
+            Self::Spawn => out.sum(4, 0),
+            Self::Entry(export) => one(out, 5, export),
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(match input.sum()? {
+            (0, 0) => Self::Main,
+            (1, 0) => Self::Declared,
+            (2, 0) => Self::Body,
+            (3, 0) => Self::Closure,
+            (4, 0) => Self::Spawn,
+            (5, 1) => Self::Entry(ExportName::decode(input)?),
+            (variant, _) => return Err(TokenError::UnsupportedVariant { variant }),
+        })
+    }
 }
 
 /// Where at a site a frame stands.
@@ -388,7 +414,6 @@ macro_rules! tags {
 }
 
 tags! {
-    UnitKind { Main = 0, Declared = 1, Body = 2, Closure = 3, Spawn = 4, Entry = 5, }
     PointPhase { Call = 0, Ready = 1, Issued = 2, Went = 3, Statement = 4, Back = 5, }
     JoinKind { All = 0, AllSettled = 1, Race = 2, Any = 3, }
 }

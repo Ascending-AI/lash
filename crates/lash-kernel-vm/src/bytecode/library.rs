@@ -204,7 +204,7 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
         if let UnitKind::Closure(function) = unit.kind {
             code.closures.entry(function).or_insert(id);
         }
-        let saved = crate::durable::save_kind(&unit.kind, false);
+        let saved = crate::durable::save_kind(&unit.kind, None);
         code.keys
             .insert((saved, unit.site.clone(), unit.covered), id);
         for action in &unit.actions {

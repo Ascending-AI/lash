@@ -517,3 +517,87 @@ fn an_adapted_import_holds_to_the_imports_narrower_signature() {
         assert_eq!(requests, 1, "{case}");
     }
 }
+
+/// K-DOC-003, contract §2: two exports of one body under different start
+/// conventions are two entries, and a sealed frame of one reopens as that
+/// one. Exports `first` and `second` settle one parking body through hooks
+/// that park and answer true and false; main calls both, in either order,
+/// and returns `first`'s answer, true. Reopened cold at each of the four
+/// parks (each body's and each hook's), the run ends, requests and is
+/// charged as the warm run does.
+#[test]
+fn two_conventions_of_one_body_reopen_as_their_own_entries() {
+    let public = Signature {
+        params: vec![],
+        result: Type::Bool,
+    };
+    let body = function(
+        "entry.shared",
+        public.clone(),
+        pause_import(),
+        vec![perform(), returns(false)],
+    );
+    let hooks: Vec<_> = [("entry.first", true), ("entry.second", false)]
+        .into_iter()
+        .map(|(name, answer)| {
+            function(
+                name,
+                Signature {
+                    params: vec![Param {
+                        name: Name::new("value"),
+                        ty: Type::Any,
+                        optional: false,
+                    }],
+                    result: Type::Bool,
+                },
+                pause_import(),
+                vec![perform(), returns(answer)],
+            )
+        })
+        .collect();
+    let exports = ["first", "second"]
+        .into_iter()
+        .zip(&hooks)
+        .map(|(name, hook)| {
+            (
+                name,
+                FunctionExport {
+                    function: body.identity(),
+                    signature: public.clone(),
+                    convention: StartConvention::TsDirect {
+                        await_fn: lash_kernel_doc::FunctionTarget::Local(hook.identity()),
+                    },
+                    asynchronous: true,
+                    rest: false,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    for order in [["first", "second"], ["second", "first"]] {
+        let imports = order.iter().map(|name| (*name, public.clone())).collect();
+        let main = vec![
+            called(0, order[0], vec![]),
+            called(1, order[1], vec![]),
+            Stmt::Return {
+                value: Expr::Variable(Name::new("first")),
+            },
+        ];
+        let mut functions = vec![body.clone()];
+        functions.extend(hooks.iter().cloned());
+        let program = entry_world(functions, exports.clone(), imports, vec![], main);
+        let warm = entry_run(&program, None);
+        assert!(
+            matches!(&warm.0, End::Finished(done) if done.result == Datum::Bool(true)),
+            "{order:?}: {:?}",
+            warm.0
+        );
+        assert_eq!(warm.1, 4, "{order:?}");
+        for park in 0..4 {
+            assert_eq!(
+                entry_run(&program, Some(park)),
+                warm,
+                "{order:?}, cold at park {park}"
+            );
+        }
+    }
+}

@@ -67,9 +67,10 @@ pub struct Program {
     pub globals: Vec<Name>,
     /// The unit a `Main` start runs.
     pub main: UnitId,
-    /// The export entries calls through imports enter: a frame of one is
-    /// saved as an entry, apart from its function's plain unit.
-    pub entered: std::collections::BTreeSet<UnitId>,
+    /// The export entries calls through imports enter, each by the export
+    /// of its Link it enters: a frame of one is saved as that export's
+    /// entry, apart from its function's plain unit and any other export's.
+    pub entered: std::collections::BTreeMap<UnitId, lash_kernel_value::names::ExportName>,
 }
 
 /// What a constant is before an instance materializes it: an immediate is

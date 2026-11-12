@@ -362,7 +362,7 @@ fn save_frame(
     Ok(RunFrame {
         unit: RunUnit {
             link: program.links[frame.link as usize],
-            kind: save_kind(&unit.kind, program.entered.contains(&frame.unit)),
+            kind: save_kind(&unit.kind, program.entered.get(&frame.unit)),
             site: unit.site.clone(),
             covered: unit.covered,
         },
@@ -513,9 +513,12 @@ fn function_of(unit: &Unit) -> Option<FunctionId> {
 
 /// The kind a unit is saved as: an export's entry a call through an
 /// import enters (`entered`) saves as an entry.
-pub(crate) fn save_kind(kind: &UnitKind, entered: bool) -> SavedKind {
-    if entered {
-        return SavedKind::Entry;
+pub(crate) fn save_kind(
+    kind: &UnitKind,
+    entered: Option<&lash_kernel_value::names::ExportName>,
+) -> SavedKind {
+    if let Some(export) = entered {
+        return SavedKind::Entry(export.clone());
     }
     match kind {
         UnitKind::Main => SavedKind::Main,
@@ -821,20 +824,20 @@ impl<'p> Units<'p> {
         if let Some(id) = self.own.get(&saved_key(saved)) {
             return Some((*id, link));
         }
-        let key = (saved.kind, saved.site.clone(), saved.covered);
+        let key = (saved.kind.clone(), saved.site.clone(), saved.covered);
         self.program.lib.keys.get(&key).map(|id| (*id, link))
     }
 }
 
 /// The key unit `id` of `program` is saved under.
 pub(super) fn unit_key<'p>(program: &Program, id: UnitId, unit: &'p Unit) -> UnitKey<'p> {
-    let kind = save_kind(&unit.kind, program.entered.contains(&id));
+    let kind = save_kind(&unit.kind, program.entered.get(&id));
     (unit.link, kind, &unit.site, unit.covered)
 }
 
 /// The key a saved unit names.
 pub(super) fn saved_key(unit: &RunUnit) -> UnitKey<'_> {
-    (unit.link, unit.kind, &unit.site, unit.covered)
+    (unit.link, unit.kind.clone(), &unit.site, unit.covered)
 }
 
 fn open_frame(

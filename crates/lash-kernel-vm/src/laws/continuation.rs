@@ -310,7 +310,7 @@ fn stood(record: &RunRecord) -> Vec<Stood> {
                 .iter()
                 .enumerate()
                 .map(move |(at, frame)| Stood {
-                    kind: frame.unit.kind,
+                    kind: frame.unit.kind.clone(),
                     site: frame.site.clone(),
                     phase: frame.phase,
                     operands: frame.operands.len(),
