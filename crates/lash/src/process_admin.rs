@@ -62,7 +62,7 @@ pub enum ProcessAuthority {
     },
 }
 
-fn decode_environment(
+pub(crate) fn decode_environment(
     env_ref: &lash_core::ProcessEnvRef,
     bytes: &[u8],
 ) -> Result<lash_core::ProcessEnv> {

@@ -23,6 +23,8 @@ use support::*;
 #[cfg(all(feature = "typescript", feature = "python"))]
 #[path = "workflow_laws/callable_source.rs"]
 mod callable_source;
+#[path = "workflow_laws/env_read_conformance.rs"]
+mod env_read_conformance;
 
 /// `guarded(name)`: binds `out` inside a `try`, sleeps once in each turn of
 /// a nested loop, and returns `out`. Written as a kernel document: no

@@ -54,6 +54,7 @@
         "tests/workflow_laws/coarse.rs",
         "tests/workflow_laws/crossing.rs",
         "tests/workflow_laws/documents.rs",
+        "tests/workflow_laws/env_read_conformance.rs",
         "tests/workflow_laws/failures.rs",
         "tests/workflow_laws/generated_source.rs",
         "tests/workflow_laws/inline_starts.rs",
