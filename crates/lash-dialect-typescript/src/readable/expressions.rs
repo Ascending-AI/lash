@@ -944,8 +944,21 @@ impl Lifter<'_> {
                 Ok(Expr::Index(Box::new(target), Box::new(key)))
             }
             ("ts.read", [target, k::Expr::Literal(k::Literal::Text(field))]) => {
+                // A known list's or text's field read: its kind's own read
+                // under the exact style.
+                let exact = self.style.exact && self.reads_binding(target);
+                let text =
+                    matches!(target, k::Expr::Variable(name) if self.text_checked.contains(name));
                 let target = self.expr(target)?;
-                Ok(Expr::Field(Box::new(target), field.clone()))
+                Ok(match (exact, text) {
+                    (true, true) => {
+                        constructor("value.field", vec![target, Expr::Text(field.clone())])
+                    }
+                    (true, false) => {
+                        constructor("list.field", vec![target, Expr::Text(field.clone())])
+                    }
+                    (false, _) => Expr::Field(Box::new(target), field.clone()),
+                })
             }
             (name, [receiver, k::Expr::List(rest)]) => {
                 let Some((namespace, method)) = name

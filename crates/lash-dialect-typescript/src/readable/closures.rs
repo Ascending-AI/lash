@@ -114,7 +114,7 @@ impl Lifter<'_> {
             Vec::new(),
         );
         let wrapper = self.in_function(closure.function);
-        let (is_async, args, body, site) = match definition
+        let (is_async, args, body, site, projection) = match definition
             .body()
             .ok_or_else(|| "closure has no body".to_owned())?
             .block
@@ -164,9 +164,10 @@ impl Lifter<'_> {
                         lash_kernel_value::sites::Unit::Library(inner.function),
                         Vec::new(),
                     ),
+                    inner_definition.projection,
                 )
             }
-            body => (false, args, body, site),
+            body => (false, args, body, site, definition.projection),
         };
         let names: Vec<&Name> = start
             .signature
@@ -178,7 +179,15 @@ impl Lifter<'_> {
             return refuse("a function body outside its defining unit");
         };
         let mut inner = self.in_function(*body_function);
-        let body = inner.function_body(is_async, args, &names, &mut params, body, &site)?;
+        let implicit_end = projection == k::ProjectionRole::ImplicitReturn;
+        let body = inner.function_body(
+            (is_async, implicit_end),
+            args,
+            &names,
+            &mut params,
+            body,
+            &site,
+        )?;
         let length = params
             .iter()
             .position(|param| param.default.is_some())
@@ -195,10 +204,13 @@ impl Lifter<'_> {
     }
 
     /// The body of a function value taking `names` from its argument list
-    /// `args`: an arrow's expression, or its statements.
+    /// `args`: an arrow's expression, or its statements. Its closing
+    /// `return undefined` is left unwritten only where the body's end is the
+    /// implicit return (`implicit_end`): an authored `return void x` of a
+    /// read with no effect keeps its `return`.
     fn function_body(
         &mut self,
-        is_async: bool,
+        (is_async, implicit_end): (bool, bool),
         args: &Name,
         names: &[&Name],
         params: &mut [Param],
@@ -246,6 +258,7 @@ impl Lifter<'_> {
                 _ => false,
             };
             if implicit
+                && implicit_end
                 && self
                     .site_caption(&site.child((body.len() - 1) as u32))
                     .is_none()

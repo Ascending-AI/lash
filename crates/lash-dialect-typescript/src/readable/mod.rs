@@ -455,9 +455,6 @@ console.log(JSON.stringify(created));
         /// The form's own declarations, then `const x = <literal>;`.
         prefix: String,
         body: String,
-        /// A member read or call on `x`'s kind (`inventory::members`), not
-        /// an operator applied to it.
-        member: bool,
     }
 
     /// The enumeration law's forms over `x` alone (or `x` and an untyped
@@ -486,14 +483,9 @@ console.log(JSON.stringify(created));
         ];
         let forms = crate::lower::inventory::forms()
             .into_iter()
-            .map(|form| (false, form))
-            .chain(
-                crate::lower::inventory::members()
-                    .into_iter()
-                    .map(|form| (true, form)),
-            );
+            .chain(crate::lower::inventory::members());
         let mut out: Vec<KnownReceiver> = Vec::new();
-        for (member, (_, source)) in forms {
+        for (_, source) in forms {
             let Some(start) = source.find("export function demo(") else {
                 continue;
             };
@@ -526,17 +518,48 @@ console.log(JSON.stringify(created));
                     value: value.clone(),
                     prefix,
                     body: body.to_owned(),
-                    member,
                 });
             }
         }
         out
     }
 
+    /// Captured forms whose original lowering has no exact spelling under
+    /// the FIG-7711 rules, stopped for the lead: an operator applied to the
+    /// capture itself reads the capture in place and calls its kind's own
+    /// helper with no kind check, where a printed callable holds the
+    /// capture in a temporary of unknown kind; a template literal joins a
+    /// known text without `ts.to_string`.
+    const STOPPED: &[(&[&str], &str)] = &[
+        (ALL, "const {a = 1, ...rest} = x; return rest;"),
+        (ALL, "const {a, b: [c]} = x; return a + c;"),
+        (ALL, "const {a, ...rest} = x; return rest;"),
+        (ALL, "delete x.a; return x;"),
+        (
+            ALL,
+            "for (const key in x) { if (key) return key; } return null;",
+        ),
+        (ALL, "return \"a\" in x;"),
+        (ALL, "return 'a' in x;"),
+        (ALL, "return delete x.a;"),
+        (ALL, "return delete x?.a;"),
+        (ALL, "return new x(1);"),
+        (ALL, "return x(...[1, 2]);"),
+        (ALL, "return x?.(1);"),
+        (ALL, "return x?.[1];"),
+        (ALL, "return x?.a?.(1);"),
+        (ALL, "return x?.a;"),
+        (ALL, "return x in y;"),
+        (&["record"], "return x.f(...[1, 2]);"),
+        (&["text"], "return `a\\n${x}\\`${x}`;"),
+        (&["text"], "return `hello ${x}!`;"),
+    ];
+    const ALL: &[&str] = &["list", "map", "record", "set", "text"];
+
     /// FIG-7711: every enumerated form over a known receiver that lowers
     /// prints and reads back to the same document, in a plain module and as
-    /// a published arrow capturing `x`. The captured arm is admitted for
-    /// members of every kind; operators applied to `x` are still open.
+    /// a published arrow capturing `x`, except the captured forms
+    /// [`STOPPED`] names.
     #[test]
     fn enumerated_forms_over_known_receivers_print() {
         let library = crate::tests::library();
@@ -549,8 +572,10 @@ console.log(JSON.stringify(created));
                 value,
                 prefix,
                 body,
-                member,
             } = &form;
+            let stopped = STOPPED
+                .iter()
+                .any(|(kinds, stopped)| *stopped == body && kinds.contains(kind));
             let module = format!(
                 "{prefix}export async function demo(y: any): Promise<unknown> {{ {body} }}\n"
             );
@@ -567,6 +592,9 @@ console.log(JSON.stringify(created));
             }
             let cell =
                 format!("{prefix}const demo = async (y: any): Promise<unknown> => {{ {body} }};\n");
+            if stopped {
+                continue;
+            }
             let Ok(lowered) = crate::lower(
                 &cell,
                 &environment,
@@ -593,10 +621,7 @@ console.log(JSON.stringify(created));
                 library,
                 Default::default(),
             ) {
-                let refusal = format!("captured {kind}: {body} :: {error}");
-                if *member {
-                    refusals.push(refusal);
-                }
+                refusals.push(format!("captured {kind}: {body} :: {error}"));
             }
         }
         assert!(
