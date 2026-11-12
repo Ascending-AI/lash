@@ -34,6 +34,7 @@ async fn lock_bundle_tx(
     .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
+    crate::replayable::note_sealed();
     Ok(())
 }
 
@@ -156,31 +157,34 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
         {
             return Err(missing(first));
         }
-        let referrer = holder.referrer();
-        let artifact_ref = &bundle.artifact.artifact_ref;
-        let mut tx = begin_guarded(&self.pool, &self.fence).await?;
-        lock_referrer_tx(&mut tx, &referrer)
-            .await
-            .map_err(store_sqlx_error)?;
-        if holder_ended_tx(&mut tx, &referrer).await? {
-            return Err(MaterialRetentionError::HolderEnded {
-                holder: Box::new(holder.clone()),
-            });
-        }
-        lock_bundle_tx(&mut tx, artifact_ref).await?;
-        let exists: bool =
-            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
-                .bind(TOOL_MATERIAL_NAMESPACE)
-                .bind(artifact_ref)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
+        crate::guarded_tx::retry_contended(&self.fence, || async {
+            let referrer = holder.referrer();
+            let artifact_ref = &bundle.artifact.artifact_ref;
+            let mut tx = begin_guarded(&self.pool, &self.fence).await?;
+            lock_referrer_tx(&mut tx, &referrer)
                 .await
                 .map_err(store_sqlx_error)?;
-        if !exists {
-            return Err(missing(first));
-        }
-        insert_lease_tx(&mut tx, artifact_ref, &referrer).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(bundle.held_by(holder.clone()))
+            if holder_ended_tx(&mut tx, &referrer).await? {
+                return Err(MaterialRetentionError::HolderEnded {
+                    holder: Box::new(holder.clone()),
+                });
+            }
+            lock_bundle_tx(&mut tx, artifact_ref).await?;
+            let exists: bool =
+                crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
+                    .bind(TOOL_MATERIAL_NAMESPACE)
+                    .bind(artifact_ref)
+                    .fetch_one(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(store_sqlx_error)?;
+            if !exists {
+                return Err(missing(first));
+            }
+            insert_lease_tx(&mut tx, artifact_ref, &referrer).await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(bundle.held_by(holder.clone()))
+        })
+        .await
     }
 
     async fn release_material(

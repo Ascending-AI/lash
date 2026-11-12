@@ -66,6 +66,10 @@ impl Holds<'_> {
                 .fetch_one(crate::observed_sql::executor(conn))
                 .await
                 .map_err(backend)?;
+        // The holds seal when they lock anything.
+        if !locks.is_empty() {
+            crate::replayable::note_sealed();
+        }
         match missing {
             Some(artifact_ref) => Err(ArtifactStoreError::ArtifactMissing { artifact_ref }),
             None => Ok(()),
@@ -78,7 +82,8 @@ pub(crate) fn function_ddl() -> String {
     // The referrer key spells `referrer_lock_key`; the fence read is
     // `select_is_fenced`, the missing read `select_missing_manifest`, the
     // edge write `insert_manifest_edges`.
-    r#"CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
+    crate::advisory_lock::with_after_seal(
+        r#"CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
 RETURNS boolean LANGUAGE plpgsql VOLATILE AS $lash_lock_referrer$
 BEGIN
     PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || p_kind || ':' || p_id, 0), false);
@@ -98,19 +103,22 @@ BEGIN
         PERFORM lash_lock_artifacts(p_locks);
     END IF;
     -- These statements start after every lock wait.
-    SELECT wanted.artifact_ref INTO v_missing
-    FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
-    WHERE NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS stored
-        WHERE stored.namespace = wanted.namespace AND stored.artifact_ref = wanted.artifact_ref)
-    ORDER BY wanted.ordinal LIMIT 1;
-    IF v_missing IS NOT NULL THEN
-        RETURN v_missing;
-    END IF;
-    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
-        SELECT namespace, artifact_ref, p_kind, p_id
-        FROM unnest(p_edge_namespaces, p_edge_refs) AS wanted(namespace, artifact_ref)
-        ON CONFLICT DO NOTHING;
-    RETURN NULL;
+    BEGIN
+        SELECT wanted.artifact_ref INTO v_missing
+        FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
+        WHERE NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS stored
+            WHERE stored.namespace = wanted.namespace AND stored.artifact_ref = wanted.artifact_ref)
+        ORDER BY wanted.ordinal LIMIT 1;
+        IF v_missing IS NOT NULL THEN
+            RETURN v_missing;
+        END IF;
+        INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+            SELECT namespace, artifact_ref, p_kind, p_id
+            FROM unnest(p_edge_namespaces, p_edge_refs) AS wanted(namespace, artifact_ref)
+            ON CONFLICT DO NOTHING;
+        RETURN NULL;
+    {AFTER_SEAL}
+    END;
 END
 $lash_acquire_holds$;
 CREATE OR REPLACE FUNCTION lash_acquire_env(p_env text, p_kind text, p_id text, p_write boolean)
@@ -123,27 +131,31 @@ BEGIN
     IF v_body IS NULL THEN
         RETURN ARRAY['absent', NULL];
     END IF;
-    PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0), false);
-    -- This statement starts after the closure's lock wait.
-    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
-        WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
-        RETURN ARRAY['closure', v_body];
-    END IF;
-    PERFORM lash_lock_artifacts(ARRAY['lash-artifact:process_execution_env:' || p_env]);
-    IF NOT p_write THEN
-        RETURN ARRAY['locked', v_body];
-    END IF;
-    -- This statement starts after the head's lock wait.
-    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
-        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env) THEN
-        RETURN ARRAY['missing', v_body];
-    END IF;
-    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
-        VALUES ('process_execution_env', p_env, p_kind, p_id), ('env_closure', v_body, p_kind, p_id)
-        ON CONFLICT DO NOTHING;
-    RETURN ARRAY['held', v_body];
+    -- The closure's key sorts before the head's: one sorted set, sealing.
+    PERFORM lash_lock_artifacts(ARRAY['lash-artifact:env_closure:' || v_body,
+        'lash-artifact:process_execution_env:' || p_env]);
+    -- These statements start after the lock waits.
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+            WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
+            RETURN ARRAY['closure', v_body];
+        END IF;
+        IF NOT p_write THEN
+            RETURN ARRAY['locked', v_body];
+        END IF;
+        -- This statement starts after the head's lock wait.
+        IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+            WHERE namespace = 'process_execution_env' AND artifact_ref = p_env) THEN
+            RETURN ARRAY['missing', v_body];
+        END IF;
+        INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+            VALUES ('process_execution_env', p_env, p_kind, p_id), ('env_closure', v_body, p_kind, p_id)
+            ON CONFLICT DO NOTHING;
+        RETURN ARRAY['held', v_body];
+    {AFTER_SEAL}
+    END;
 END
 $lash_acquire_env$;
-"#
-    .to_owned()
+"#,
+    )
 }

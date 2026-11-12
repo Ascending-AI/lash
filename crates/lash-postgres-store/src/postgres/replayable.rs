@@ -2,7 +2,9 @@
 //!
 //! A replayable transaction is a complete database write whose inputs are
 //! fixed before it begins: the same payload under the same epoch, with no
-//! tool or model call inside it. [`RetryPolicy::run`] runs it again from a
+//! tool or model call inside it. A clock an attempt reads itself is the one
+//! exception; only the committed attempt's timestamp persists.
+//! [`RetryPolicy::run`] runs it again from a
 //! fresh `BEGIN` when the database rolled it back for contention, so every
 //! attempt passes the writer fence and its ownership fence afresh, and an
 //! attempt fenced out stops the loop. Each pause comes after the failed
@@ -24,17 +26,92 @@ use tokio::time::Instant;
 use crate::connection_sql::connection_sql;
 use crate::host::RetryPolicy;
 
+tokio::task_local! {
+    /// What the running attempt has done toward its seal (FIG-7700).
+    static ATTEMPT: std::cell::Cell<SealRecord>;
+}
+
+/// One attempt's seal: whether it has taken its artifact locks, and
+/// whether its last contention was a wait that expired after them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SealRecord {
+    sealed: bool,
+    expired_after_seal: bool,
+}
+
+/// The message prefix the schema raises when a lock wait inside one of
+/// its sealing functions expires after that function's seal
+/// ([`crate::advisory_lock`]).
+pub(crate) const SEALED_WAIT_EXPIRED: &str = "a lock wait after the artifact locks expired";
+
+/// The refusal the schema's advisory helper raises for an advisory lock a
+/// sealed transaction did not plan ([`crate::advisory_lock`]).
+pub(crate) const UNPLANNED_ADVISORY_REFUSED: &str =
+    "an advisory lock this transaction needs after its artifact locks is held elsewhere";
+
+/// Record that the running attempt's sealing statement returned: its
+/// artifact locks are held and its `lock_timeout` is the sealed bound.
+/// Called by each Rust site that runs a sealing statement, after it
+/// succeeds; outside a retry loop it records nothing.
+pub(crate) fn note_sealed() {
+    let _ = ATTEMPT.try_with(|record| {
+        record.set(SealRecord {
+            sealed: true,
+            ..record.get()
+        });
+    });
+}
+
+/// Record one contention failure (`code`, `message`) of the running
+/// attempt: whether it is a lock wait that expired after the attempt's
+/// seal. That is the schema's own after-seal expiry (a wait inside a
+/// sealing function), or a plain lock timeout once a sealing statement has
+/// returned. The advisory helper's refusal of an unplanned lock, deadlock,
+/// serialization failure and every lock timeout before the seal are not.
+pub(crate) fn note_contention(code: &str, message: &str) {
+    let _ = ATTEMPT.try_with(|record| {
+        let current = record.get();
+        let expired_after_seal = code == "55P03"
+            && message != UNPLANNED_ADVISORY_REFUSED
+            && (message.starts_with(SEALED_WAIT_EXPIRED)
+                || (current.sealed && message == LOCK_TIMEOUT_MESSAGE));
+        record.set(SealRecord {
+            expired_after_seal,
+            ..current
+        });
+    });
+}
+
+/// PostgreSQL's message for a statement cancelled by `lock_timeout`.
+const LOCK_TIMEOUT_MESSAGE: &str = "canceling statement due to lock timeout";
+
 impl RetryPolicy {
     /// Run `attempt` until it answers anything but a failure `aborted`
-    /// accepts (one the database is known to have rolled back), at most
-    /// `attempts` times, pausing before each retry.
+    /// accepts (one the database is known to have rolled back), pausing
+    /// before each retry (FIG-5242, FIG-7700).
+    ///
+    /// - Per wait: after an attempt takes its artifact locks, each later
+    ///   lock wait lasts at most the sealed `lock_timeout`
+    ///   (`guards.sealed_lock_timeout_ms`), then the attempt rolls back.
+    /// - Attempts: an attempt that rolled back because such a wait expired
+    ///   does not spend one of the policy's `attempts`. Every other
+    ///   contention does: deadlock, serialization failure, a lock timeout
+    ///   before the seal, and the advisory helper's refusal of an advisory
+    ///   lock the attempt did not plan (a planning gap, which waiting does
+    ///   not cure, so it stays bounded by the count).
+    /// - Pauses: the policy's doubling backoff and jitter, capped at its
+    ///   longest pause, grow with every retry, spent or not.
+    /// - Deadline: `deadline`, the whole operation's, bounds the loop. A
+    ///   pause that would end at or past it is not taken, and the last
+    ///   failure, the existing contention answer, is returned. Without a
+    ///   deadline every contention spends an attempt.
     ///
     /// `attempt` runs one complete transaction from its `BEGIN`, and
     /// returns only once a failed transaction is rolled back or dropped:
-    /// no pause holds one. A pause that would end at or past `deadline`, the
-    /// whole operation's, is not taken: the last failure is the answer.
-    /// Never put a tool or model call, or another retry loop, inside
-    /// `attempt`.
+    /// no pause holds one. Each attempt runs with a fresh seal record,
+    /// which its sealing statements ([`note_sealed`]) and the contention
+    /// classification ([`note_contention`]) fill. Never put a tool or model
+    /// call, or another retry loop, inside `attempt`.
     ///
     /// # Errors
     ///
@@ -48,15 +125,34 @@ impl RetryPolicy {
     where
         Fut: Future<Output = Result<T, E>>,
     {
+        let mut spent = 0;
         let mut retry = 0;
         loop {
-            match attempt().await {
-                Err(error) if aborted(&error) && retry + 1 < self.attempts => {
+            let running = attempt();
+            // Boxed: the scope holds the whole attempt, the largest part of
+            // every caller's future.
+            let (outcome, record) = Box::pin(ATTEMPT.scope(
+                std::cell::Cell::new(SealRecord::default()),
+                async move {
+                    let outcome = running.await;
+                    (outcome, ATTEMPT.with(std::cell::Cell::get))
+                },
+            ))
+            .await;
+            match outcome {
+                Err(error) if aborted(&error) => {
+                    let free = record.expired_after_seal && deadline.is_some();
+                    if !free && spent + 1 >= self.attempts {
+                        return Err(error);
+                    }
                     let Some(pause) = self.pause_within(retry, deadline) else {
                         return Err(error);
                     };
                     tokio::time::sleep(pause).await;
-                    retry += 1;
+                    retry = retry.saturating_add(1);
+                    if !free {
+                        spent += 1;
+                    }
                 }
                 outcome => return outcome,
             }

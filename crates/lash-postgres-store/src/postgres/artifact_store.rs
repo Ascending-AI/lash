@@ -341,29 +341,7 @@ async fn lock_artifact_set_tx(
     .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(backend)?;
-    Ok(())
-}
-
-/// Lock the first artifacts of a sorted acquisition whose remainder the
-/// caller learns only under these locks, without sealing the transaction:
-/// the carried closures an end reads its modules under, as
-/// `lash_acquire_env` locks a closure before its head. Every key must sort
-/// before every key of the [`lock_artifact_set_tx`] that follows.
-async fn lock_artifact_prefix_tx(
-    tx: &mut sqlx::PgConnection,
-    artifacts: &BTreeSet<(String, String)>,
-) -> Result<(), ArtifactStoreError> {
-    for (namespace, reference) in artifacts {
-        crate::observed_sql::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_text
-                .sql(),
-        )
-        .bind(artifact_lock_key(namespace, reference))
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(backend)?;
-    }
+    crate::replayable::note_sealed();
     Ok(())
 }
 
@@ -418,7 +396,7 @@ async fn lock_admitted_referrer_tx(
     tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
 ) -> Result<(), ArtifactStoreError> {
-    lock_session_artifact_owner_tx(tx, referrer).await?;
+    lock_session_artifact_owners_tx(tx, std::slice::from_ref(referrer)).await?;
     if matches!(
         referrer,
         ArtifactReferrer::EnvironmentVersion(_) | ArtifactReferrer::Session(_)
@@ -436,18 +414,42 @@ async fn lock_admitted_referrer_tx(
     lock_live_referrer_tx(tx, referrer).await
 }
 
-/// Must precede every referrer lock, matching session deletion's order.
-async fn lock_session_artifact_owner_tx(
+/// Take the session write authority of every session that owns one of
+/// `referrers`' artifact shares (a session referrer's own, an environment
+/// owner's stored session), as one set in session order, then each
+/// environment owner's row in the referrers' order: one owner at a time
+/// would let two ends whose owners map to the same sessions in opposite
+/// owner order wait on each other (FIG-7700). Every referrer lock comes
+/// after, matching session deletion's order.
+async fn lock_session_artifact_owners_tx(
     tx: &mut sqlx::PgConnection,
-    referrer: &ArtifactReferrer,
+    referrers: &[ArtifactReferrer],
 ) -> Result<(), ArtifactStoreError> {
-    if let ArtifactReferrer::EnvironmentVersion(id) = referrer {
-        crate::durable::environment::lock_artifact_owner(tx, id)
+    let mut sessions = BTreeSet::new();
+    let mut owners = Vec::new();
+    for referrer in referrers {
+        match referrer {
+            ArtifactReferrer::EnvironmentVersion(id) => {
+                sessions.insert(
+                    crate::durable::environment::artifact_owner_session(tx, id)
+                        .await
+                        .map_err(ArtifactStoreError::from)?,
+                );
+                owners.push(id);
+            }
+            ArtifactReferrer::Session(session) => {
+                sessions.insert(session.clone());
+            }
+            _ => {}
+        }
+    }
+    for session in &sessions {
+        crate::runtime_persistence::lock_session_history_mutation_tx(tx, session)
             .await
             .map_err(ArtifactStoreError::from)?;
     }
-    if let ArtifactReferrer::Session(session) = referrer {
-        crate::runtime_persistence::lock_session_history_mutation_tx(tx, session)
+    for id in owners {
+        crate::durable::environment::lock_artifact_owner(tx, id)
             .await
             .map_err(ArtifactStoreError::from)?;
     }
@@ -1109,10 +1111,9 @@ impl PostgresLashVmArtifactStore {
         referrers.push(cleanup.referrer.clone());
         referrers.sort_by_key(referrer_lock_key);
         referrers.dedup();
-        // Lock every session history before any referrer, in stable order.
-        for referrer in &referrers {
-            lock_session_artifact_owner_tx(tx, referrer).await?;
-        }
+        // Lock every owning session's history before any referrer, as one
+        // set in session order.
+        lock_session_artifact_owners_tx(tx, &referrers).await?;
         for referrer in &referrers {
             lock_referrer_tx(tx, referrer).await.map_err(backend)?;
         }
@@ -1161,13 +1162,17 @@ impl PostgresLashVmArtifactStore {
             .iter()
             .filter(|carry| destinations.contains(&(&carry.to, true)))
             .collect();
-        // A carried environment's closure: locked first, as its key sorts
-        // before every other artifact's, then stored if it is not.
-        let closures = if namespace == PROCESS_ENV_NAMESPACE {
-            CarriedClosures::lock(tx, &live).await?
-        } else {
-            CarriedClosures::default()
-        };
+        // A carried environment's closure, and the modules to store it with
+        // when it is not stored, join the one sorted acquisition below with
+        // the sources: no artifact lock comes before it (FIG-7700).
+        // Only an environment carry has a closure.
+        let carried_envs: &[&lash_core_store::artifact_referrer::ArtifactCarry] =
+            if namespace == PROCESS_ENV_NAMESPACE {
+                &live
+            } else {
+                &[]
+            };
+        let closures = CarriedClosures::plan(tx, carried_envs).await?;
         // What the released artifacts hold, transitively, joins their one
         // sorted lock acquisition: deleting them can free it (FIG-7700).
         let mut locked: BTreeSet<(String, String)> = cleanup
@@ -1182,8 +1187,9 @@ impl PostgresLashVmArtifactStore {
             );
             locked.extend(held_closure_tx(tx, share, refs).await?);
         }
-        locked.extend(closures.module_locks());
+        locked.extend(closures.locks());
         lock_artifact_set_tx(tx, &locked).await?;
+        let closures = closures.settle(tx, carried_envs, &locked).await?;
         crate::observed_sql::query(artifact_sql().fences.insert_fence.sql())
             .bind(cleanup.referrer.kind().as_str())
             .bind(cleanup.referrer.canonical_id())
@@ -1192,7 +1198,7 @@ impl PostgresLashVmArtifactStore {
             .await
             .map_err(backend)?;
         carry_edges_tx(tx, namespace, &live, &destinations).await?;
-        closures.carry(tx, &live, &destinations).await?;
+        closures.carry(tx, carried_envs, &destinations).await?;
         for (share, refs) in &sources {
             crate::observed_sql::query(
                 artifact_sql()

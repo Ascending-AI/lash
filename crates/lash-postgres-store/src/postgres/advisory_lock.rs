@@ -16,6 +16,14 @@
 //!   caller retries. A path the plan missed therefore costs a retry, never
 //!   a deadlock.
 //!
+//! The seal also bounds every other wait the transaction makes from then
+//! on: `lash_lock_artifacts` sets its `lock_timeout` to the sealed bound
+//! ([`SEALED_LOCK_TIMEOUT`], default [`DEFAULT_SEALED_LOCK_TIMEOUT`]), so a
+//! row, foreign-key or relation lock held elsewhere ends in `55P03` too,
+//! and the operation retries. The bound is below the server's
+//! `deadlock_timeout`, so in a cycle through a sealed transaction that
+//! transaction times out, and retries, before a deadlock is detected.
+//!
 //! Every transaction-scoped advisory lock in the store's SQL is this
 //! function: statements, step programs and server functions alike.
 //! Only these raw locks remain:
@@ -34,6 +42,47 @@
 //! without the sequence pays one catalog lookup per sealed lock and
 //! nothing else.
 
+/// The transaction setting that carries the `lock_timeout` a transaction
+/// runs under once sealed, in milliseconds
+/// ([`crate::host::GuardPolicies::sealed_lock_timeout`]). The store's preludes
+/// and its one-call commit set it; a transaction begun without either (an
+/// unfenced store transaction) seals with
+/// [`DEFAULT_SEALED_LOCK_TIMEOUT`].
+pub(crate) const SEALED_LOCK_TIMEOUT: &str = "lash.sealed_lock_timeout";
+
+/// The sealed `lock_timeout` a store installs unless configured otherwise.
+pub(crate) const DEFAULT_SEALED_LOCK_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+/// The handler that closes a sealing function's block around its
+/// statements after its seal (FIG-7700). A lock wait there that expires is
+/// raised again as the schema's own after-seal expiry
+/// ([`crate::replayable::SEALED_WAIT_EXPIRED`]), so the retry loop knows
+/// it expired after the seal; the advisory helper's refusal of an unplanned
+/// lock, and an expiry an inner sealing function already named, pass
+/// through unchanged. A block that holds only what follows the seal passes
+/// `TRUE` as `sealed`; one that may begin before it (the owner commit's
+/// steps) passes the variable that records whether a step has sealed, so a
+/// wait before the seal is never renamed.
+pub(crate) fn after_seal_handler(sealed: &str) -> String {
+    format!(
+        "EXCEPTION WHEN lock_not_available THEN
+        IF NOT ({sealed}) OR SQLERRM = '{refused}' OR starts_with(SQLERRM, '{expired}') THEN
+            RAISE;
+        END IF;
+        RAISE EXCEPTION '{expired}: %', SQLERRM USING ERRCODE = '55P03';",
+        refused = crate::replayable::UNPLANNED_ADVISORY_REFUSED,
+        expired = crate::replayable::SEALED_WAIT_EXPIRED,
+    )
+}
+
+/// `ddl` with each `{AFTER_SEAL}` filled by [`after_seal_handler`] for a
+/// block that holds only what follows the seal.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn with_after_seal(ddl: &str) -> String {
+    ddl.replace("{AFTER_SEAL}", &after_seal_handler("TRUE"))
+}
+
 /// The sequence an unplanned lock advances, when a test created it.
 #[cfg(any(test, feature = "testing"))]
 pub const UNPLANNED_LOCKS: &str = "lash_unplanned_advisory_locks";
@@ -45,6 +94,7 @@ pub const UNPLANNED_LOCKS: &str = "lash_unplanned_advisory_locks";
 /// function by name alone.
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn function_ddl() -> String {
+    let refused = crate::replayable::UNPLANNED_ADVISORY_REFUSED;
     let body = |args: &str, held: &str| {
         format!(
             r#"
@@ -60,7 +110,7 @@ BEGIN
         PERFORM nextval('lash_unplanned_advisory_locks');
     END IF;
     IF NOT (CASE WHEN p_shared THEN pg_try_advisory_xact_lock_shared({args}) ELSE pg_try_advisory_xact_lock({args}) END) THEN
-        RAISE EXCEPTION 'an advisory lock this transaction needs after its artifact locks is held elsewhere'
+        RAISE EXCEPTION '{refused}'
             USING ERRCODE = '55P03';
     END IF;
 END"#
@@ -84,9 +134,16 @@ BEGIN
         PERFORM lash_advisory_xact_lock(hashtextextended(v_key, 0), false);
     END LOOP;
     PERFORM set_config('lash.artifacts_sealed', 'on', true);
+    -- Every later wait, row, foreign-key or advisory, ends in 55P03 after
+    -- the sealed bound, so the transaction retries rather than closes a
+    -- cycle (FIG-7700).
+    PERFORM set_config('lock_timeout',
+        COALESCE(NULLIF(current_setting('{sealed}', true), ''), '{default_ms}'), true);
 END
 $lash_lock_artifacts$;
 "#,
+        sealed = SEALED_LOCK_TIMEOUT,
+        default_ms = DEFAULT_SEALED_LOCK_TIMEOUT.as_millis(),
         one = body(
             "p_key",
             "objsubid = 1 AND classid = ((p_key >> 32) & 4294967295)::oid \

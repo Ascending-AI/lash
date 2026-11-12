@@ -405,6 +405,18 @@ impl PostgresStorage {
                 .check(capacity)
                 .map_err(PostgresHostError::Budget)?;
         }
+        // A sealed transaction must time out of a cycle, and retry, before
+        // the server's deadlock detector picks a victim (FIG-7700).
+        let deadlock_timeout = host::deadlock_timeout(&pools.work).await?;
+        let sealed_lock_timeout = config.guards.sealed_lock_timeout;
+        if sealed_lock_timeout >= deadlock_timeout {
+            return Err(
+                PostgresHostError::SealedLockTimeoutNotBelowDeadlockTimeout {
+                    sealed_lock_timeout,
+                    deadlock_timeout,
+                },
+            );
+        }
         let pool = pools.work.clone();
         let (catalog_id, fleet_format) =
             ensure_schema(&pool, config.schema_check, writable).await?;

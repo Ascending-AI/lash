@@ -440,6 +440,10 @@ impl Step {
                 let rows = query.fetch_all(executor).await.map_err(|error| {
                     Failure::Store(crate::artifact_store::end_local_failure(error))
                 })?;
+                // Each answered row is one call of the end, which seals.
+                if !rows.is_empty() {
+                    crate::replayable::note_sealed();
+                }
                 for row in &rows {
                     let answer: serde_json::Value = row.try_get(0)?;
                     crate::artifact_store::validate_local_end(answer).map_err(Failure::Store)?;

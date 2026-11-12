@@ -751,7 +751,7 @@ pub(super) fn changes_debt(write: &DomainWrite) -> bool {
 
 /// The call's SQL.
 pub(super) static CALL: LazyLock<String> = LazyLock::new(|| {
-    let params: Vec<String> = (1..=25).map(|index| format!("${index}")).collect();
+    let params: Vec<String> = (1..=26).map(|index| format!("${index}")).collect();
     format!("SELECT * FROM {FUNCTION}({})", params.join(", "))
 });
 
@@ -819,7 +819,7 @@ impl PostgresDurableStore {
             lash_durable::ActorKind::Session => Some(tx.actor().id()),
             lash_durable::ActorKind::Process => None,
         };
-        let (lock_timeout, statement_ms) = route.prelude.call_guards();
+        let (lock_timeout, statement_ms, sealed_lock_timeout) = route.prelude.call_guards();
         let query = crate::observed_sql::query(&CALL)
             .bind(REGISTRY.as_str())
             .bind(tx.actor().as_str())
@@ -830,6 +830,7 @@ impl PostgresDurableStore {
             .bind(&token)
             .bind(lock_timeout)
             .bind(statement_ms)
+            .bind(sealed_lock_timeout)
             .bind(&call.body_hashes)
             .bind(&call.bodies)
             .bind(&call.named)

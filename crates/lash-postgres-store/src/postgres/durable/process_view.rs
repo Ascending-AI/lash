@@ -236,35 +236,64 @@ impl PostgresDurableStore {
 /// The process view `write` carries, refreshed with its row's frontier,
 /// and that row as its lock left it: the one read of the row an owner
 /// commit makes before its writes of the process (FIG-7701).
+///
+/// Every process row the write's terminals and events lock and read is
+/// locked here, in process order, before the commit's artifact lock plan,
+/// as batch prune locks its rows before its plan (FIG-7700): a terminal
+/// without a retained preimage no longer locks its row after the plan.
+/// The row read is the one those writes would read, so the commit makes
+/// no further round trip for it.
 pub(super) async fn refresh_preimage(
     tx: &mut super::Tx,
     write: &ActorTx,
 ) -> Result<(Option<ProcessView>, Option<LockedProcess>), DurableError> {
-    let Some(mut view) = write.process_preimage().cloned() else {
-        return Ok((None, None));
-    };
-    let row = crate::observed_sql::query(SQL.control_carried.sql())
-        .bind(write.actor().id())
-        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(sqlx_failure)?;
-    let Some(row) = row else {
-        return Ok((Some(view), None));
-    };
-    refreshed(
-        &mut view,
-        get::<Option<String>>(&row, 0)?,
-        get::<i64>(&row, 1)?,
-        get::<i64>(&row, 2)?,
-        get::<Option<String>>(&row, 3)?,
-    )?;
-    let record = get::<String>(&row, 4)?;
-    let locked = LockedProcess {
-        record: crate::process_helpers::decode_process_record(&record)
-            .map_err(|error| corrupt("process record", &error.to_string()))?,
-        driver_json: get(&row, 5)?,
-    };
-    Ok((Some(view), Some(locked)))
+    let mut view = write.process_preimage().cloned();
+    let mut rows: std::collections::BTreeSet<&str> = write
+        .domain()
+        .iter()
+        .filter_map(|domain| match domain {
+            lash_durable::domain::DomainWrite::Process(
+                lash_durable::domain::ProcessWrite::Terminal { process, .. }
+                | lash_durable::domain::ProcessWrite::AppendEvent { process, .. },
+            ) => Some(process.as_str()),
+            _ => None,
+        })
+        .collect();
+    if view.is_some() {
+        rows.insert(write.actor().id());
+    }
+    let mut locked = None;
+    for process in rows {
+        let row = crate::observed_sql::query(SQL.control_carried.sql())
+            .bind(process)
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
+        let Some(row) = row else {
+            continue;
+        };
+        let own = process == write.actor().id();
+        if own && let Some(view) = view.as_mut() {
+            refreshed(
+                view,
+                get::<Option<String>>(&row, 0)?,
+                get::<i64>(&row, 1)?,
+                get::<i64>(&row, 2)?,
+                get::<Option<String>>(&row, 3)?,
+            )?;
+        }
+        // The commit carries one locked row: the actor's own, else the
+        // first; another is read again under the lock it already holds.
+        if locked.is_none() || own {
+            let record = get::<String>(&row, 4)?;
+            locked = Some(LockedProcess {
+                record: crate::process_helpers::decode_process_record(&record)
+                    .map_err(|error| corrupt("process record", &error.to_string()))?,
+                driver_json: get(&row, 5)?,
+            });
+        }
+    }
+    Ok((view, locked))
 }
 
 pub(super) async fn refresh_view(

@@ -389,11 +389,13 @@ pub(crate) fn function_ddl() -> String {
     let registry = &*REGISTRY;
     let receipt_statement = super::head_commit::RECORD_RECEIPT.name();
     let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
+    let sealed = crate::advisory_lock::SEALED_LOCK_TIMEOUT;
+    let after_seal = crate::advisory_lock::after_seal_handler("v_sealed");
     format!(
         "CREATE OR REPLACE FUNCTION {FUNCTION}(
     p_registry TEXT, p_actor TEXT, p_epoch BIGINT, p_session TEXT,
     p_fleet_low INTEGER, p_fleet_high INTEGER, p_token TEXT,
-    p_lock_timeout TEXT, p_statement_ms BIGINT,
+    p_lock_timeout TEXT, p_statement_ms BIGINT, p_sealed_lock_timeout TEXT,
     p_body_hashes BYTEA[], p_bodies BYTEA[],
     p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
@@ -452,6 +454,7 @@ DECLARE
     v_frame TEXT;
     v_debts TEXT[];
     v_environment TEXT[];
+    v_sealed BOOLEAN := FALSE;
 BEGIN
     -- Generated from this build's statements (registry {registry}); a call
     -- built from others is refused, as is any isolation but read committed.
@@ -473,6 +476,9 @@ BEGIN
     END;
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    END IF;
+    IF p_sealed_lock_timeout IS NOT NULL THEN
+        PERFORM set_config('{sealed}', p_sealed_lock_timeout, true);
     END IF;
     {fleet_fence};
     {envelope}
@@ -524,6 +530,10 @@ BEGIN
         END IF;
         {installed_bytes} INTO v_installed;
     END IF;
+    -- From the first step that seals (FIG-7700) on, a lock wait that
+    -- expires is the schema's after-seal expiry; a plpgsql variable keeps
+    -- that record through the block's rollback, a setting would not.
+    BEGIN
     FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps->'steps') LOOP
         v_index := v_index + 1;
         -- A step runs only when the slot it names holds what it names: a
@@ -544,6 +554,7 @@ BEGIN
 {branches}        ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
+        v_sealed := v_sealed OR current_setting('lash.artifacts_sealed', true) = 'on';
         -- The result is assembled from the exact successful receipt write,
         -- including the transaction's clock, without a post-commit read.
         IF v_step->>'s' = '{receipt_statement}' THEN
@@ -652,6 +663,8 @@ BEGIN
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
         v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
+    {after_seal}
+    END;
 END
 $lash_owner_commit$;
 "

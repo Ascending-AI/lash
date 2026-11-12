@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 49.
+-- lash-postgres-store schema, component version 50.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -940,7 +940,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 49, 49)
+VALUES ('lash-postgres-store', 50, 50)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable
@@ -1505,7 +1505,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_owner_commit_latches_created ON lash_owner_c
 CREATE OR REPLACE FUNCTION lash_owner_commit(
     p_registry TEXT, p_actor TEXT, p_epoch BIGINT, p_session TEXT,
     p_fleet_low INTEGER, p_fleet_high INTEGER, p_token TEXT,
-    p_lock_timeout TEXT, p_statement_ms BIGINT,
+    p_lock_timeout TEXT, p_statement_ms BIGINT, p_sealed_lock_timeout TEXT,
     p_body_hashes BYTEA[], p_bodies BYTEA[],
     p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
@@ -1564,6 +1564,7 @@ DECLARE
     v_frame TEXT;
     v_debts TEXT[];
     v_environment TEXT[];
+    v_sealed BOOLEAN := FALSE;
 BEGIN
     -- Generated from this build's statements (registry bad6811304bd104e); a call
     -- built from others is refused, as is any isolation but read committed.
@@ -1585,6 +1586,9 @@ BEGIN
     END;
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    END IF;
+    IF p_sealed_lock_timeout IS NOT NULL THEN
+        PERFORM set_config('lash.sealed_lock_timeout', p_sealed_lock_timeout, true);
     END IF;
     PERFORM pg_advisory_xact_lock_shared(715425, 0);
     WITH fenced AS ( UPDATE lash_actors SET state_revision = state_revision + 1 WHERE actor_key = (p_actor) AND epoch = (p_epoch) AND state = 'owned' AND state_revision = ((p_steps->>'expected_revision')::BIGINT) RETURNING state_revision ) SELECT (SELECT format_version FROM lash_fleet_format WHERE singleton = TRUE), (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT, pg_current_xact_id()::text, f.state_revision, c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode FROM (SELECT 1) AS one LEFT JOIN fenced f ON TRUE LEFT JOIN lash_session_runs r ON r.session_id = (p_session) AND f.state_revision IS NOT NULL AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL LEFT JOIN lash_turn_phases p ON p.session_id = r.session_id AND p.run = r.run LEFT JOIN lash_turn_cancel_requests c ON c.session_id = p.session_id AND c.turn_id = p.run
@@ -1636,6 +1640,10 @@ BEGIN
         END IF;
         SELECT COALESCE(sum(octet_length(staged.content)), 0)::bigint FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content) WHERE staged.digest = ANY((v_inserted)::bytea[]) INTO v_installed;
     END IF;
+    -- From the first step that seals (FIG-7700) on, a lock wait that
+    -- expires is the schema's after-seal expiry; a plpgsql variable keeps
+    -- that record through the block's rollback, a setting would not.
+    BEGIN
     FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps->'steps') LOOP
         v_index := v_index + 1;
         -- A step runs only when the slot it names holds what it names: a
@@ -2754,6 +2762,7 @@ BEGIN
         ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
+        v_sealed := v_sealed OR current_setting('lash.artifacts_sealed', true) = 'on';
         -- The result is assembled from the exact successful receipt write,
         -- including the transaction's clock, without a post-commit read.
         IF v_step->>'s' = 'turn_commit.insert_staged' THEN
@@ -2862,6 +2871,12 @@ BEGIN
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
         v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
+    EXCEPTION WHEN lock_not_available THEN
+        IF NOT (v_sealed) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+            RAISE;
+        END IF;
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+    END;
 END
 $lash_owner_commit$;
 CREATE OR REPLACE FUNCTION lash_advisory_xact_lock(p_key bigint, p_shared boolean)
@@ -2913,6 +2928,11 @@ BEGIN
         PERFORM lash_advisory_xact_lock(hashtextextended(v_key, 0), false);
     END LOOP;
     PERFORM set_config('lash.artifacts_sealed', 'on', true);
+    -- Every later wait, row, foreign-key or advisory, ends in 55P03 after
+    -- the sealed bound, so the transaction retries rather than closes a
+    -- cycle (FIG-7700).
+    PERFORM set_config('lock_timeout',
+        COALESCE(NULLIF(current_setting('lash.sealed_lock_timeout', true), ''), '250'), true);
 END
 $lash_lock_artifacts$;
 CREATE OR REPLACE FUNCTION lash_artifact_end_local(
@@ -2966,45 +2986,52 @@ BEGIN
         ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_locked FROM reach;
     PERFORM lash_lock_artifacts(ARRAY(SELECT 'lash-artifact:' || (value->>0) || ':' || (value->>1)
         FROM jsonb_array_elements(v_locked) ORDER BY value->>0, value->>1));
-    -- This statement starts after every lock wait. Include all remaining
-    -- readers in the answer so the client validates their canonical pairs.
-    SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(edge.referrer_kind, edge.referrer_id)), '[]'::jsonb)
-        INTO v_checks FROM lash_artifact_referrer_edges edge
-        JOIN jsonb_array_elements(v_artifacts) named ON edge.namespace = named.value->>0
-            AND edge.artifact_ref = named.value->>1;
-    INSERT INTO lash_referrer_fences (referrer_kind, referrer_id, ended_at_ms)
-        SELECT DISTINCT value->>0, value->>1, p_now FROM jsonb_array_elements(v_refs)
-        ON CONFLICT DO NOTHING;
-    IF jsonb_array_length(v_artifacts) > 0 THEN
-        DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
-            WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
-                AND edge.namespace = ANY(p_namespaces);
-        -- Delete what nothing names or holds, then, round by round, what a
-        -- deleted artifact held that nothing keeps now.
-        v_frontier := ARRAY[]::BYTEA[];
-        v_round := v_artifacts;
-        WHILE jsonb_array_length(v_round) > 0 LOOP
-            WITH gone AS (
-                DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_round) named
-                WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
-                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
-                        WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
-                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_dependency_edges dep
-                        WHERE dep.namespace = artifact.namespace AND dep.artifact_ref = artifact.artifact_ref)
-                RETURNING artifact.namespace, artifact.artifact_ref, artifact.graph_ref),
-            freed AS (
-                SELECT DISTINCT dep.namespace, dep.artifact_ref FROM gone
-                JOIN lash_artifact_dependency_edges dep ON dep.holder_namespace = gone.namespace
-                    AND dep.holder_ref = gone.artifact_ref)
-            SELECT v_frontier || ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref),
-                COALESCE((SELECT jsonb_agg(jsonb_build_array(namespace, artifact_ref)) FROM freed), '[]'::jsonb)
-                INTO v_frontier, v_round;
-        END LOOP;
-        -- A bridged artifact's row was its graph node's root: peel it
-        -- (FIG-5949).
-        PERFORM lash_graph_retire((v_frontier), (4096), (p_now));
-    END IF;
-    RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
+    BEGIN
+        -- This statement starts after every lock wait. Include all remaining
+        -- readers in the answer so the client validates their canonical pairs.
+        SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(edge.referrer_kind, edge.referrer_id)), '[]'::jsonb)
+            INTO v_checks FROM lash_artifact_referrer_edges edge
+            JOIN jsonb_array_elements(v_artifacts) named ON edge.namespace = named.value->>0
+                AND edge.artifact_ref = named.value->>1;
+        INSERT INTO lash_referrer_fences (referrer_kind, referrer_id, ended_at_ms)
+            SELECT DISTINCT value->>0, value->>1, p_now FROM jsonb_array_elements(v_refs)
+            ON CONFLICT DO NOTHING;
+        IF jsonb_array_length(v_artifacts) > 0 THEN
+            DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
+                WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
+                    AND edge.namespace = ANY(p_namespaces);
+            -- Delete what nothing names or holds, then, round by round, what a
+            -- deleted artifact held that nothing keeps now.
+            v_frontier := ARRAY[]::BYTEA[];
+            v_round := v_artifacts;
+            WHILE jsonb_array_length(v_round) > 0 LOOP
+                WITH gone AS (
+                    DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_round) named
+                    WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
+                        AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
+                            WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+                        AND NOT EXISTS (SELECT 1 FROM lash_artifact_dependency_edges dep
+                            WHERE dep.namespace = artifact.namespace AND dep.artifact_ref = artifact.artifact_ref)
+                    RETURNING artifact.namespace, artifact.artifact_ref, artifact.graph_ref),
+                freed AS (
+                    SELECT DISTINCT dep.namespace, dep.artifact_ref FROM gone
+                    JOIN lash_artifact_dependency_edges dep ON dep.holder_namespace = gone.namespace
+                        AND dep.holder_ref = gone.artifact_ref)
+                SELECT v_frontier || ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref),
+                    COALESCE((SELECT jsonb_agg(jsonb_build_array(namespace, artifact_ref)) FROM freed), '[]'::jsonb)
+                    INTO v_frontier, v_round;
+            END LOOP;
+            -- A bridged artifact's row was its graph node's root: peel it
+            -- (FIG-5949).
+            PERFORM lash_graph_retire((v_frontier), (4096), (p_now));
+        END IF;
+        RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
+    EXCEPTION WHEN lock_not_available THEN
+        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+            RAISE;
+        END IF;
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+    END;
 END
 $lash_artifact_end_local$;
 CREATE OR REPLACE FUNCTION lash_artifact_lock_plan(
@@ -3094,20 +3121,27 @@ BEGIN
             SELECT carried.namespace, carried.artifact_ref
             FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)) planned
         ORDER BY planned.namespace, planned.artifact_ref));
-    -- This statement starts after every artifact lock wait. An environment
-    -- whose head or closure moved before its locks were taken would lock
-    -- out of this plan: the transaction retries as contended.
-    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_envs) planned
-        LEFT JOIN lash_lash_vm_artifacts stored
-            ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = planned.value->>0
-        WHERE stored.body_ref IS DISTINCT FROM planned.value->>1
-            OR EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
-                WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref)
-                IS DISTINCT FROM (planned.value->>2)::boolean) THEN
-        RAISE EXCEPTION 'an acquired environment moved under its artifact lock plan'
-            USING ERRCODE = '40001';
-    END IF;
-    RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
+    BEGIN
+        -- This statement starts after every artifact lock wait. An environment
+        -- whose head or closure moved before its locks were taken would lock
+        -- out of this plan: the transaction retries as contended.
+        IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_envs) planned
+            LEFT JOIN lash_lash_vm_artifacts stored
+                ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = planned.value->>0
+            WHERE stored.body_ref IS DISTINCT FROM planned.value->>1
+                OR EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
+                    WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref)
+                    IS DISTINCT FROM (planned.value->>2)::boolean) THEN
+            RAISE EXCEPTION 'an acquired environment moved under its artifact lock plan'
+                USING ERRCODE = '40001';
+        END IF;
+        RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
+    EXCEPTION WHEN lock_not_available THEN
+        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+            RAISE;
+        END IF;
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+    END;
 END
 $lash_artifact_lock_plan$;
 CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
@@ -3130,19 +3164,26 @@ BEGIN
         PERFORM lash_lock_artifacts(p_locks);
     END IF;
     -- These statements start after every lock wait.
-    SELECT wanted.artifact_ref INTO v_missing
-    FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
-    WHERE NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS stored
-        WHERE stored.namespace = wanted.namespace AND stored.artifact_ref = wanted.artifact_ref)
-    ORDER BY wanted.ordinal LIMIT 1;
-    IF v_missing IS NOT NULL THEN
-        RETURN v_missing;
-    END IF;
-    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
-        SELECT namespace, artifact_ref, p_kind, p_id
-        FROM unnest(p_edge_namespaces, p_edge_refs) AS wanted(namespace, artifact_ref)
-        ON CONFLICT DO NOTHING;
-    RETURN NULL;
+    BEGIN
+        SELECT wanted.artifact_ref INTO v_missing
+        FROM unnest(p_check_namespaces, p_check_refs) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
+        WHERE NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS stored
+            WHERE stored.namespace = wanted.namespace AND stored.artifact_ref = wanted.artifact_ref)
+        ORDER BY wanted.ordinal LIMIT 1;
+        IF v_missing IS NOT NULL THEN
+            RETURN v_missing;
+        END IF;
+        INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+            SELECT namespace, artifact_ref, p_kind, p_id
+            FROM unnest(p_edge_namespaces, p_edge_refs) AS wanted(namespace, artifact_ref)
+            ON CONFLICT DO NOTHING;
+        RETURN NULL;
+    EXCEPTION WHEN lock_not_available THEN
+        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+            RAISE;
+        END IF;
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+    END;
 END
 $lash_acquire_holds$;
 CREATE OR REPLACE FUNCTION lash_acquire_env(p_env text, p_kind text, p_id text, p_write boolean)
@@ -3155,25 +3196,33 @@ BEGIN
     IF v_body IS NULL THEN
         RETURN ARRAY['absent', NULL];
     END IF;
-    PERFORM lash_advisory_xact_lock(hashtextextended('lash-artifact:env_closure:' || v_body, 0), false);
-    -- This statement starts after the closure's lock wait.
-    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
-        WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
-        RETURN ARRAY['closure', v_body];
-    END IF;
-    PERFORM lash_lock_artifacts(ARRAY['lash-artifact:process_execution_env:' || p_env]);
-    IF NOT p_write THEN
-        RETURN ARRAY['locked', v_body];
-    END IF;
-    -- This statement starts after the head's lock wait.
-    IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
-        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env) THEN
-        RETURN ARRAY['missing', v_body];
-    END IF;
-    INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
-        VALUES ('process_execution_env', p_env, p_kind, p_id), ('env_closure', v_body, p_kind, p_id)
-        ON CONFLICT DO NOTHING;
-    RETURN ARRAY['held', v_body];
+    -- The closure's key sorts before the head's: one sorted set, sealing.
+    PERFORM lash_lock_artifacts(ARRAY['lash-artifact:env_closure:' || v_body,
+        'lash-artifact:process_execution_env:' || p_env]);
+    -- These statements start after the lock waits.
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+            WHERE namespace = 'env_closure' AND artifact_ref = v_body) THEN
+            RETURN ARRAY['closure', v_body];
+        END IF;
+        IF NOT p_write THEN
+            RETURN ARRAY['locked', v_body];
+        END IF;
+        -- This statement starts after the head's lock wait.
+        IF NOT EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+            WHERE namespace = 'process_execution_env' AND artifact_ref = p_env) THEN
+            RETURN ARRAY['missing', v_body];
+        END IF;
+        INSERT INTO lash_artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id)
+            VALUES ('process_execution_env', p_env, p_kind, p_id), ('env_closure', v_body, p_kind, p_id)
+            ON CONFLICT DO NOTHING;
+        RETURN ARRAY['held', v_body];
+    EXCEPTION WHEN lock_not_available THEN
+        IF NOT (TRUE) OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+            RAISE;
+        END IF;
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+    END;
 END
 $lash_acquire_env$;
 CREATE OR REPLACE FUNCTION lash_publish_env_over_stored_body(

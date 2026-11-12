@@ -962,21 +962,35 @@ impl Contention for lash_core_store::tool_run::MaterialRetentionError {
 /// `attempt`, one store write from its guarded `BEGIN` through its
 /// `COMMIT`, run again while the database rolls it back for contention
 /// (FIG-5855, FIG-7700). Every transaction that can take artifact locks
-/// runs this way: after them it never waits for an advisory lock, and
-/// answers contention instead ([`crate::advisory_lock`]).
-/// - Policy: the storage's store retry policy ([`RetryPolicy::run`]).
+/// runs this way: after them it waits for no lock longer than the sealed
+/// `lock_timeout`, and never for an advisory lock, and answers contention
+/// instead ([`crate::advisory_lock`]). Contention is deadlock (`40P01`),
+/// lock-not-available (`55P03`) and serialization failure (`40001`).
+/// - Policy: the storage's store retry policy ([`RetryPolicy::run`]). A
+///   wait that expires after the seal does not spend one of its attempts;
+///   any other contention does.
 /// - Deadline: the store profile's whole-operation deadline
 ///   ([`crate::host::TransactionPrelude::bounded`]), the bound [`guarded`]
 ///   runs its body under. It bounds the loop, attempts included: an
 ///   attempt started just before the deadline is cut off at it, and the
 ///   write answers its contention ([`Contention::contended`]).
 ///
-/// The caller fixes the write's inputs before the first attempt, so every
-/// attempt is the identical write, and an attempt rolls a failed
-/// transaction back before it answers. A `COMMIT` whose answer was lost is
-/// not contention: it is never run again. After the policy's attempts the
+/// The caller fixes the write's inputs before the first attempt, except
+/// the clock: an attempt may read the time itself (an ordinary artifact or
+/// standalone head write stamps its own `now`), and only the successful
+/// attempt's timestamp persists. An attempt rolls a failed transaction
+/// back before it answers. A `COMMIT` whose answer was lost is not
+/// contention: it is never run again. Once the policy gives up, the
 /// contention is the caller's. Each attempt runs boxed, so the loop's own
 /// future stays small whatever transaction it retries.
+///
+/// What the deadline does not prove: cancelling an attempt at the deadline
+/// while its `COMMIT` is in flight leaves the server's outcome unknown, so
+/// the contention answered then does not show the transaction aborted. A
+/// side effect the caller runs after this returns (the direct registrar's
+/// wake) runs at most once, after an acknowledged commit: a commit whose
+/// acknowledgement was lost gives no wake although its rows may be
+/// committed, and the ready actor stays pollable.
 pub(crate) async fn retry_contended<T, E, F, Fut>(
     fence: &WriterFence,
     mut attempt: F,

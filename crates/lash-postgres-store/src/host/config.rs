@@ -423,6 +423,15 @@ pub struct GuardPolicies {
     #[serde(rename = "store_startup_ms", with = "serde_ms")]
     #[schemars(with = "u64")]
     pub store_startup: Duration,
+    /// The `lock_timeout` a transaction runs under once it holds its
+    /// artifact locks: every later wait, row, foreign-key or advisory, ends
+    /// in contention after it and the operation retries (FIG-7700). Keep it
+    /// below the server's `deadlock_timeout` (default 1 s), so a cycle
+    /// through a sealed transaction aborts that transaction, which retries,
+    /// before the deadlock detector picks a victim. Default 250 ms.
+    #[serde(rename = "sealed_lock_timeout_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
+    pub sealed_lock_timeout: Duration,
 }
 
 impl Default for GuardPolicies {
@@ -435,6 +444,7 @@ impl Default for GuardPolicies {
             replay: TransactionGuards::new(10_000, 30_000, 30_000, 60_000),
             inspection: TransactionGuards::new(5_000, 30_000, 30_000, 30_000),
             store_startup: Duration::from_secs(30),
+            sealed_lock_timeout: crate::advisory_lock::DEFAULT_SEALED_LOCK_TIMEOUT,
         }
     }
 }

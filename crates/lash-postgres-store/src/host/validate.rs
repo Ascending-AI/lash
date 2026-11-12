@@ -433,6 +433,7 @@ impl PostgresHostConfig {
         guards("guards.replay", &guard.replay)?;
         guards("guards.inspection", &guard.inspection)?;
         millis("guards.store_startup_ms", guard.store_startup)?;
+        millis("guards.sealed_lock_timeout_ms", guard.sealed_lock_timeout)?;
         for (field, deadline) in [
             ("guards.ordinary", guard.ordinary.operation_deadline),
             ("guards.durable", guard.durable.operation_deadline),

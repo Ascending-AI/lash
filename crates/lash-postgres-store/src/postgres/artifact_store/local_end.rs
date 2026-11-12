@@ -262,6 +262,14 @@ async fn call_plan(
         .fetch_one(crate::observed_sql::executor(tx))
         .await
         .map_err(failure)?;
+    // The plan seals unless it answers missing environments first.
+    if answer
+        .get("missing")
+        .and_then(serde_json::Value::as_array)
+        .is_none_or(Vec::is_empty)
+    {
+        crate::replayable::note_sealed();
+    }
     serde_json::from_value(answer).map_err(|error| StoreError::StoredDataCorrupt {
         record_kind: "artifact lock plan",
         message: error.to_string(),
@@ -285,6 +293,8 @@ pub(super) async fn end(
             .fetch_one(crate::observed_sql::executor(tx))
             .await
             .map_err(failure)?;
+    // The end always seals (`lash_lock_artifacts`).
+    crate::replayable::note_sealed();
     validate(answer)
 }
 
@@ -363,7 +373,8 @@ pub(crate) fn function_ddl() -> String {
     // Static SQL, generated together with the owner function. No stored
     // cleanup body changes; the typed gate key replaces the text pattern.
     // Terminals and eligible end hooks call the same helper.
-    r#"CREATE OR REPLACE FUNCTION lash_artifact_end_local(
+    crate::advisory_lock::with_after_seal(
+        &(r#"CREATE OR REPLACE FUNCTION lash_artifact_end_local(
     p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_end_local$
 DECLARE
@@ -414,45 +425,48 @@ BEGIN
         ORDER BY namespace, artifact_ref), '[]'::jsonb) INTO v_locked FROM reach;
     PERFORM lash_lock_artifacts(ARRAY(SELECT 'lash-artifact:' || (value->>0) || ':' || (value->>1)
         FROM jsonb_array_elements(v_locked) ORDER BY value->>0, value->>1));
-    -- This statement starts after every lock wait. Include all remaining
-    -- readers in the answer so the client validates their canonical pairs.
-    SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(edge.referrer_kind, edge.referrer_id)), '[]'::jsonb)
-        INTO v_checks FROM lash_artifact_referrer_edges edge
-        JOIN jsonb_array_elements(v_artifacts) named ON edge.namespace = named.value->>0
-            AND edge.artifact_ref = named.value->>1;
-    INSERT INTO lash_referrer_fences (referrer_kind, referrer_id, ended_at_ms)
-        SELECT DISTINCT value->>0, value->>1, p_now FROM jsonb_array_elements(v_refs)
-        ON CONFLICT DO NOTHING;
-    IF jsonb_array_length(v_artifacts) > 0 THEN
-        DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
-            WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
-                AND edge.namespace = ANY(p_namespaces);
-        -- Delete what nothing names or holds, then, round by round, what a
-        -- deleted artifact held that nothing keeps now.
-        v_frontier := ARRAY[]::BYTEA[];
-        v_round := v_artifacts;
-        WHILE jsonb_array_length(v_round) > 0 LOOP
-            WITH gone AS (
-                DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_round) named
-                WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
-                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
-                        WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
-                    AND NOT EXISTS (SELECT 1 FROM lash_artifact_dependency_edges dep
-                        WHERE dep.namespace = artifact.namespace AND dep.artifact_ref = artifact.artifact_ref)
-                RETURNING artifact.namespace, artifact.artifact_ref, artifact.graph_ref),
-            freed AS (
-                SELECT DISTINCT dep.namespace, dep.artifact_ref FROM gone
-                JOIN lash_artifact_dependency_edges dep ON dep.holder_namespace = gone.namespace
-                    AND dep.holder_ref = gone.artifact_ref)
-            SELECT v_frontier || ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref),
-                COALESCE((SELECT jsonb_agg(jsonb_build_array(namespace, artifact_ref)) FROM freed), '[]'::jsonb)
-                INTO v_frontier, v_round;
-        END LOOP;
-        -- A bridged artifact's row was its graph node's root: peel it
-        -- (FIG-5949).
-        {PEEL}
-    END IF;
-    RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
+    BEGIN
+        -- This statement starts after every lock wait. Include all remaining
+        -- readers in the answer so the client validates their canonical pairs.
+        SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(edge.referrer_kind, edge.referrer_id)), '[]'::jsonb)
+            INTO v_checks FROM lash_artifact_referrer_edges edge
+            JOIN jsonb_array_elements(v_artifacts) named ON edge.namespace = named.value->>0
+                AND edge.artifact_ref = named.value->>1;
+        INSERT INTO lash_referrer_fences (referrer_kind, referrer_id, ended_at_ms)
+            SELECT DISTINCT value->>0, value->>1, p_now FROM jsonb_array_elements(v_refs)
+            ON CONFLICT DO NOTHING;
+        IF jsonb_array_length(v_artifacts) > 0 THEN
+            DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
+                WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
+                    AND edge.namespace = ANY(p_namespaces);
+            -- Delete what nothing names or holds, then, round by round, what a
+            -- deleted artifact held that nothing keeps now.
+            v_frontier := ARRAY[]::BYTEA[];
+            v_round := v_artifacts;
+            WHILE jsonb_array_length(v_round) > 0 LOOP
+                WITH gone AS (
+                    DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_round) named
+                    WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
+                        AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
+                            WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+                        AND NOT EXISTS (SELECT 1 FROM lash_artifact_dependency_edges dep
+                            WHERE dep.namespace = artifact.namespace AND dep.artifact_ref = artifact.artifact_ref)
+                    RETURNING artifact.namespace, artifact.artifact_ref, artifact.graph_ref),
+                freed AS (
+                    SELECT DISTINCT dep.namespace, dep.artifact_ref FROM gone
+                    JOIN lash_artifact_dependency_edges dep ON dep.holder_namespace = gone.namespace
+                        AND dep.holder_ref = gone.artifact_ref)
+                SELECT v_frontier || ARRAY(SELECT node.hash FROM gone JOIN lash_blobs AS node ON node.id = gone.graph_ref),
+                    COALESCE((SELECT jsonb_agg(jsonb_build_array(namespace, artifact_ref)) FROM freed), '[]'::jsonb)
+                    INTO v_frontier, v_round;
+            END LOOP;
+            -- A bridged artifact's row was its graph node's root: peel it
+            -- (FIG-5949).
+            {PEEL}
+        END IF;
+        RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
+    {AFTER_SEAL}
+    END;
 END
 $lash_artifact_end_local$;
 "#
@@ -465,7 +479,8 @@ $lash_artifact_end_local$;
                 .sql()
                 .replace("$1", "scope.a")
                 .replace("$2", "scope.b"),
-        )
+            )),
+    )
 }
 
 /// [`lock_plan_tx`]'s server function. Its gated frames are the ones an
@@ -559,20 +574,23 @@ BEGIN
             SELECT carried.namespace, carried.artifact_ref
             FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)) planned
         ORDER BY planned.namespace, planned.artifact_ref));
-    -- This statement starts after every artifact lock wait. An environment
-    -- whose head or closure moved before its locks were taken would lock
-    -- out of this plan: the transaction retries as contended.
-    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_envs) planned
-        LEFT JOIN lash_lash_vm_artifacts stored
-            ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = planned.value->>0
-        WHERE stored.body_ref IS DISTINCT FROM planned.value->>1
-            OR EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
-                WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref)
-                IS DISTINCT FROM (planned.value->>2)::boolean) THEN
-        RAISE EXCEPTION 'an acquired environment moved under its artifact lock plan'
-            USING ERRCODE = '40001';
-    END IF;
-    RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
+    BEGIN
+        -- This statement starts after every artifact lock wait. An environment
+        -- whose head or closure moved before its locks were taken would lock
+        -- out of this plan: the transaction retries as contended.
+        IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_envs) planned
+            LEFT JOIN lash_lash_vm_artifacts stored
+                ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = planned.value->>0
+            WHERE stored.body_ref IS DISTINCT FROM planned.value->>1
+                OR EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
+                    WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref)
+                    IS DISTINCT FROM (planned.value->>2)::boolean) THEN
+            RAISE EXCEPTION 'an acquired environment moved under its artifact lock plan'
+                USING ERRCODE = '40001';
+        END IF;
+        RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
+    {AFTER_SEAL}
+    END;
 END
 $lash_artifact_lock_plan$;
 "#;

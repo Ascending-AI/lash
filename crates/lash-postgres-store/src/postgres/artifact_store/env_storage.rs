@@ -313,6 +313,10 @@ pub(super) async fn acquire_env_tx(
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(backend)?;
+    // Every answer but an absent head came after the acquisition's seal.
+    if !matches!(answer.first(), Some(Some(state)) if state == "absent") {
+        crate::replayable::note_sealed();
+    }
     let state = match answer.as_slice() {
         [Some(state), body] => match (state.as_str(), body) {
             ("absent", _) => EnvLock::Absent,
@@ -352,9 +356,10 @@ pub(super) async fn acquire_env_tx(
             .await
         }
         EnvLock::ClosureMissing(body) => {
-            // The closure is locked: no one else stores it. Its modules are
-            // read unlocked, then locked with the head, all after the
-            // closure's key, and rechecked.
+            // The closure and the head are locked: no one else stores the
+            // closure. Its modules are read, then locked after the seal, so
+            // one held elsewhere is contention and the operation retries
+            // (FIG-7700); they are rechecked under their locks.
             let bytes: Option<Vec<u8>> = crate::observed_sql::query_scalar(
                 artifact_sql().lash_vm_artifacts.select_bytes.sql(),
             )
@@ -422,24 +427,28 @@ async fn arm_tx(
 }
 
 /// The closures of carried environments: each live carry's head and the
-/// body it splices back, and, for each closure not stored when locked, the
+/// body it splices back, and, for each closure not stored when read, the
 /// modules to store it with (FIG-7700).
+///
+/// [`Self::plan`] reads them before any artifact lock, so the closures and
+/// the modules join the end's one sorted acquisition with its sources;
+/// [`Self::settle`] decides under those locks what is stored.
 #[derive(Default)]
 pub(super) struct CarriedClosures {
     bodies: std::collections::BTreeMap<String, String>,
+    /// Each closure not stored when planned: its modules, or the refusal
+    /// reading them gave, which waits for the carries' order.
+    planned: std::collections::BTreeMap<String, Result<BTreeSet<String>, ArtifactStoreError>>,
     missing: std::collections::BTreeMap<String, BTreeSet<String>>,
     /// The closures to store, in the carries' order.
     order: Vec<String>,
 }
 
 impl CarriedClosures {
-    /// Read each live carry's body reference, lock every closure, then read
-    /// the modules of each closure not stored. The first carry, in the
-    /// caller's order, whose head was not stored when read or whose missing
-    /// closure needs a module that is not refuses, as each carry's
-    /// environment was checked in turn before (FIG-7700): the locks are
-    /// sorted, the refusal is not.
-    pub(super) async fn lock(
+    /// Read each live carry's body reference and, for each closure not
+    /// stored, the modules from its head's bytes: the artifacts the end
+    /// locks for its carries. Nothing is locked or refused here.
+    pub(super) async fn plan(
         tx: &mut sqlx::PgConnection,
         live: &[&lash_core_store::artifact_referrer::ArtifactCarry],
     ) -> Result<Self, ArtifactStoreError> {
@@ -459,64 +468,87 @@ impl CarriedClosures {
                 .map_err(backend)?
                 .into_iter()
                 .collect();
-        let closures: BTreeSet<(String, String)> = bodies
-            .values()
-            .map(|body| (PROCESS_ENV_CLOSURE_NAMESPACE.to_owned(), body.clone()))
-            .collect();
-        lock_artifact_prefix_tx(tx, &closures).await?;
-        let wanted: Vec<&str> = closures.iter().map(|(_, body)| body.as_str()).collect();
-        let stored: BTreeSet<String> =
-            crate::observed_sql::query_scalar(artifact_sql().postgres.select_stored_refs.sql())
-                .bind(PROCESS_ENV_CLOSURE_NAMESPACE)
-                .bind(&wanted)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(backend)?
-                .into_iter()
-                .collect();
-        let mut missing = std::collections::BTreeMap::new();
-        let mut order = Vec::new();
+        let stored = stored_closures_tx(tx, &bodies).await?;
+        let mut planned = std::collections::BTreeMap::new();
         for carry in live {
             let head = carry.artifact.artifact_ref.as_str();
             let Some(body) = bodies.get(head) else {
+                continue;
+            };
+            if stored.contains(body) || planned.contains_key(body) {
+                continue;
+            }
+            let modules = head_closure_tx(tx, head).await;
+            planned.insert(body.clone(), modules);
+        }
+        Ok(Self {
+            bodies,
+            planned,
+            missing: std::collections::BTreeMap::new(),
+            order: Vec::new(),
+        })
+    }
+
+    /// Every artifact the carries need locked: each carried closure, and
+    /// the modules of each closure planned to be stored.
+    pub(super) fn locks(&self) -> impl Iterator<Item = (String, String)> + '_ {
+        let closures = self
+            .bodies
+            .values()
+            .map(|body| (PROCESS_ENV_CLOSURE_NAMESPACE.to_owned(), body.clone()));
+        let modules = self
+            .planned
+            .values()
+            .filter_map(|modules| modules.as_ref().ok())
+            .flatten()
+            .map(|module| (MODULE_ARTIFACT_NAMESPACE.to_owned(), module.clone()));
+        closures.chain(modules)
+    }
+
+    /// Under the end's locks (`locked`), read which closures are stored.
+    /// The first carry, in the caller's order, whose head was not stored
+    /// when read or whose missing closure needs a module that is not
+    /// refuses, as each carry's environment was checked in turn before
+    /// (FIG-7700): the locks are sorted, the refusal is not. A closure that
+    /// went missing since the plan, or whose modules the plan did not lock,
+    /// is contention: the operation retries and plans again.
+    pub(super) async fn settle(
+        mut self,
+        tx: &mut sqlx::PgConnection,
+        live: &[&lash_core_store::artifact_referrer::ArtifactCarry],
+        locked: &BTreeSet<(String, String)>,
+    ) -> Result<Self, ArtifactStoreError> {
+        if live.is_empty() {
+            return Ok(self);
+        }
+        let stored = stored_closures_tx(tx, &self.bodies).await?;
+        let mut planned = std::mem::take(&mut self.planned);
+        for carry in live {
+            let head = carry.artifact.artifact_ref.as_str();
+            let Some(body) = self.bodies.get(head) else {
                 return Err(ArtifactStoreError::ArtifactMissing {
                     artifact_ref: head.to_owned(),
                 });
             };
-            if stored.contains(body) || missing.contains_key(body) {
+            if stored.contains(body) || self.missing.contains_key(body) {
                 continue;
             }
-            let bytes: Option<Vec<u8>> = crate::observed_sql::query_scalar(
-                artifact_sql().lash_vm_artifacts.select_bytes.sql(),
-            )
-            .bind(PROCESS_ENV_NAMESPACE)
-            .bind(head)
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(backend)?
-            .flatten();
-            // A head gone since its read refuses at the carries' check.
-            let closure = match bytes {
-                Some(bytes) => process_env_closure_tx(tx, &bytes).await?,
-                None => BTreeSet::new(),
+            // A module missing when planned may be stored since; read again.
+            let closure = match planned.remove(body) {
+                Some(Ok(modules)) => modules,
+                Some(Err(_)) | None => head_closure_tx(tx, head).await?,
             };
-            missing.insert(body.clone(), closure);
-            order.push(body.clone());
+            if closure.iter().any(|module| {
+                !locked.contains(&(MODULE_ARTIFACT_NAMESPACE.to_owned(), module.clone()))
+            }) {
+                return Err(ArtifactStoreError::StoreFault(
+                    lash_core_store::store::StoreFault::Contended,
+                ));
+            }
+            self.missing.insert(body.clone(), closure);
+            self.order.push(body.clone());
         }
-        Ok(Self {
-            bodies,
-            missing,
-            order,
-        })
-    }
-
-    /// The modules of every closure to store, for the carries' one sorted
-    /// lock; each sorts after every closure.
-    pub(super) fn module_locks(&self) -> impl Iterator<Item = (String, String)> + '_ {
-        self.missing
-            .values()
-            .flatten()
-            .map(|module| (MODULE_ARTIFACT_NAMESPACE.to_owned(), module.clone()))
+        Ok(self)
     }
 
     /// Store each missing closure in the carries' order, refusing the first
@@ -560,6 +592,45 @@ impl CarriedClosures {
             .map_err(backend)?;
         }
         Ok(())
+    }
+}
+
+/// Which of `bodies`' closures are stored.
+async fn stored_closures_tx(
+    tx: &mut sqlx::PgConnection,
+    bodies: &std::collections::BTreeMap<String, String>,
+) -> Result<BTreeSet<String>, ArtifactStoreError> {
+    let wanted: Vec<&str> = bodies.values().map(String::as_str).collect();
+    Ok(
+        crate::observed_sql::query_scalar(artifact_sql().postgres.select_stored_refs.sql())
+            .bind(PROCESS_ENV_CLOSURE_NAMESPACE)
+            .bind(&wanted)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?
+            .into_iter()
+            .collect(),
+    )
+}
+
+/// The module closure of the environment head `head`, from its stored
+/// bytes; empty when the head is gone (a head gone since its read refuses
+/// at the carries' check).
+async fn head_closure_tx(
+    tx: &mut sqlx::PgConnection,
+    head: &str,
+) -> Result<BTreeSet<String>, ArtifactStoreError> {
+    let bytes: Option<Vec<u8>> =
+        crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
+            .bind(PROCESS_ENV_NAMESPACE)
+            .bind(head)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?
+            .flatten();
+    match bytes {
+        Some(bytes) => process_env_closure_tx(tx, &bytes).await,
+        None => Ok(BTreeSet::new()),
     }
 }
 

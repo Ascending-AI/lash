@@ -1046,6 +1046,16 @@ async fn claim_owner(
     storage: &PostgresStorage,
     session: &SessionId,
 ) -> (lash_durable::ActorKey, lash_durable::Epoch) {
+    claim_owners(storage, std::slice::from_ref(session)).await[0].clone()
+}
+
+/// Claim every session's actor on one node, in one claim, each matched to
+/// its own epoch: a claim takes any ready actor, and a second registration
+/// of the node would re-claim the first actor under a newer epoch.
+async fn claim_owners(
+    storage: &PostgresStorage,
+    sessions: &[SessionId],
+) -> Vec<(lash_durable::ActorKey, lash_durable::Epoch)> {
     use lash_durable::DurableStore as _;
     let store = storage.durable_store();
     let node = store
@@ -1061,15 +1071,33 @@ async fn claim_owner(
         })
         .await
         .expect("register the owner's node");
-    let actor = lash_durable::ActorKey::session(session.as_str()).expect("actor key");
+    let actors: Vec<_> = sessions
+        .iter()
+        .map(|session| lash_durable::ActorKey::session(session.as_str()).expect("actor key"))
+        .collect();
     let mut wake = lash_durable::MailTx::new();
-    wake.wake(actor.clone());
+    for actor in &actors {
+        wake.wake(actor.clone());
+    }
     store
         .commit_mail(wake, lash_durable::CommitLabel::new("law.wake"))
         .await
-        .expect("wake the actor");
-    let epoch = store.claim(&node, 1).await.expect("claim the actor")[0].epoch;
-    (actor, epoch)
+        .expect("wake the actors");
+    let claimed = store
+        .claim(&node, actors.len())
+        .await
+        .expect("claim the actors");
+    actors
+        .into_iter()
+        .map(|actor| {
+            let epoch = claimed
+                .iter()
+                .find(|claim| claim.actor == actor)
+                .unwrap_or_else(|| panic!("{actor:?} was not claimed"))
+                .epoch;
+            (actor, epoch)
+        })
+        .collect()
 }
 
 /// Write `commit` on `tx` as its owner's head commit.
@@ -1697,52 +1725,109 @@ async fn postgres_a_publisher_ends_at_its_operation_deadline_with_contention() {
     );
 }
 
-/// An owner write that ends an execution holding module `M` and registers
-/// execution `R` takes `R`'s referrer lock in its plan, before any
-/// artifact lock (FIG-7700). A publisher under `R` holds `R`, then locks
-/// `M`; the blocker holds `R` as it would. Taking `R` after the plan's `M`
-/// leaves the stalled commit holding `M`, so an unrelated publisher of
-/// `M` waits on it, and the publisher under `R` would deadlock with it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_an_execution_registration_beside_an_execution_end_locks_its_referrer_first() {
+/// What the racing owner write does with execution `X`, whose referrer is
+/// `R`: registers it, adopts it as stored, or seeds a resolution of its
+/// stored use.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExecutionWrite {
+    Register,
+    Adopt,
+    Seed,
+}
+
+/// An owner write that ends an execution holding module `M` and registers,
+/// adopts or seeds execution `X` takes `X`'s referrer lock `R` in its plan,
+/// before any artifact lock (FIG-7700): a registration or adoption names
+/// `R`, a seed reads it off the stored execution. A publisher under `R`
+/// holds `R`, then locks `M`; the blocker holds `R` as it would. Taking `R`
+/// after the plan's `M` leaves the stalled commit holding `M`, so an
+/// unrelated publisher of `M` waits on it, and the publisher under `R`
+/// would deadlock with it.
+async fn race_an_execution_write_beside_an_execution_end(
+    fixture: &str,
+    turn: &'static str,
+    write: ExecutionWrite,
+) {
     use lash_durable::DurableStore as _;
-    use lash_durable::resolutions::{ExecutionId, ExecutionRegistration};
+    use lash_durable::resolutions::{
+        DeferredUse, ExecutionId, ExecutionRegistration, ResolutionEntry, ResolutionKey,
+        ResolutionRecord,
+    };
     let Some((_lock, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
     count_unplanned_locks(&storage).await;
     let before = deadlocks(&storage).await;
-    let session = SessionId::fixture("lock-plan-package");
+    let session = SessionId::fixture(fixture);
     session_store(&storage, session.clone()).await;
-    let operation = "o/lock-plan-package";
-    let module = "lock-plan-package-module".to_owned();
+    let operation = format!("o/{fixture}");
+    let module = format!("{fixture}-module");
     storage
         .lash_vm_artifact_store()
         .publish_module_artifact(
-            &operation_claim(&session, operation),
+            &operation_claim(&session, &operation),
             &module,
             b"linked document",
         )
         .await
         .expect("the execution holds the module");
-    let run = lash_vocabulary::identity::TurnId::from("lock-plan-package-turn");
+    let run = lash_vocabulary::identity::TurnId::from(turn);
     let registered = ArtifactReferrer::Execution(
         lash_protocol_types::ExecutionScope::turn(session.clone(), run.clone())
             .journal_identity()
             .expect("turn journal"),
     );
-    let (actor, epoch) = claim_owner(&storage, &session).await;
-    let (blocker, holder) = hold_lock(&storage, referrer_lock(&registered)).await;
-    let durable = storage.durable_store();
-    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
-    tx.write(operation_end(&session, operation));
-    tx.register_execution(ExecutionRegistration {
-        execution: ExecutionId::cell(&session, &run, "cell"),
-        uses: Default::default(),
-        referrer: registered,
+    let execution = ExecutionId::cell(&session, &run, "cell");
+    let used = lash_kernel_value::names::OperationUse {
+        link: lash_kernel_value::package::LinkId::from_bytes([7; 32]),
+        slot: lash_kernel_value::names::ImportSlot(1).into(),
+    };
+    let requested = lash_kernel_value::names::QualifiedName {
+        package: lash_kernel_value::names::PackagePath::parse("wip").expect("package"),
+        member: lash_kernel_value::names::Segment::new("lookup").expect("member"),
+        type_member: None,
+    };
+    let registration = ExecutionRegistration {
+        execution: execution.clone(),
+        uses: [(
+            used,
+            DeferredUse {
+                requested: requested.clone(),
+                discovery: Default::default(),
+            },
+        )]
+        .into(),
+        referrer: registered.clone(),
         requirements: Default::default(),
-    });
+    };
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let durable = storage.durable_store();
+    if write != ExecutionWrite::Register {
+        let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+        tx.register_execution(registration.clone());
+        durable
+            .commit(tx, LOCK_PLAN_LAW)
+            .await
+            .expect("store the execution");
+    }
+    let (blocker, holder) = hold_lock(&storage, referrer_lock(&registered)).await;
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, &operation));
+    match write {
+        ExecutionWrite::Register => tx.register_execution(registration),
+        ExecutionWrite::Adopt => tx.adopt_execution(registration),
+        ExecutionWrite::Seed => tx.seed_resolution(ResolutionRecord {
+            key: ResolutionKey {
+                execution,
+                use_: used,
+            },
+            requested,
+            entry: ResolutionEntry::Refused {
+                note: "lock plan law".into(),
+            },
+        }),
+    };
     let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
     race_a_publisher(
         &storage,
@@ -1753,6 +1838,36 @@ async fn postgres_an_execution_registration_beside_an_execution_end_locks_its_re
     )
     .await;
     assert_no_deadlock(&storage, before).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_execution_registration_beside_an_execution_end_locks_its_referrer_first() {
+    race_an_execution_write_beside_an_execution_end(
+        "lock-plan-package",
+        "lock-plan-package-turn",
+        ExecutionWrite::Register,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_execution_adoption_beside_an_execution_end_locks_its_referrer_first() {
+    race_an_execution_write_beside_an_execution_end(
+        "lock-plan-adopt",
+        "lock-plan-adopt-turn",
+        ExecutionWrite::Adopt,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_stored_execution_seed_beside_an_execution_end_locks_its_referrer_first() {
+    race_an_execution_write_beside_an_execution_end(
+        "lock-plan-seed",
+        "lock-plan-seed-turn",
+        ExecutionWrite::Seed,
+    )
+    .await;
 }
 
 /// A detached process on environment `env`, registered directly and
@@ -2028,5 +2143,497 @@ async fn postgres_a_sealed_owner_write_retries_an_unplanned_lock_instead_of_wait
         unplanned_locks(&storage).await >= 2,
         "the owner write committed without retrying its contended attempt"
     );
+    assert_no_deadlock(&storage, before).await;
+}
+
+/// Wait until `count` backends of this database wait on a lock of any
+/// kind: advisory, row or transaction.
+async fn wait_until_backends_wait(storage: &PostgresStorage, count: i64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(storage.pool())
+        .await
+        .expect("inspect lock waits");
+        if waiting >= count {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{waiting} of {count} transactions reached their lock wait"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Wait for both tasks, then require each to succeed.
+async fn both_answer<
+    A: std::fmt::Debug,
+    B: std::fmt::Debug,
+    C: std::fmt::Debug,
+    D: std::fmt::Debug,
+>(
+    first: tokio::task::JoinHandle<Result<A, B>>,
+    second: tokio::task::JoinHandle<Result<C, D>>,
+) {
+    let within = std::time::Duration::from_secs(60);
+    let first = tokio::time::timeout(within, first)
+        .await
+        .expect("the first finishes")
+        .expect("first task");
+    let second = tokio::time::timeout(within, second)
+        .await
+        .expect("the second finishes")
+        .expect("second task");
+    assert!(first.is_ok(), "first: {first:?}");
+    assert!(second.is_ok(), "second: {second:?}");
+}
+
+/// Hold process `process`'s row in an open transaction: the transaction
+/// and its backend pid.
+async fn hold_process_row<'a>(
+    storage: &'a PostgresStorage,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> (sqlx::Transaction<'a, sqlx::Postgres>, i32) {
+    let mut tx = storage.pool().begin().await.expect("begin blocker");
+    let pid: i32 = sqlx::query_scalar(
+        "SELECT pg_backend_pid() FROM lash_processes WHERE process_id = $1 FOR UPDATE",
+    )
+    .bind(process.as_str())
+    .fetch_one(&mut *tx)
+    .await
+    .expect("lock the process row");
+    (tx, pid)
+}
+
+/// An owner terminal of process `P` with no retained preimage locks `P`'s
+/// row before its artifact locks, as a prune of `P` does (FIG-7700). The
+/// owner write ends an execution holding module `M` and writes `P`'s
+/// terminal; `P`'s environment closure holds `M` too. With `M` held, the
+/// owner write queues on it, then the prune, holding `P`'s row, or queued
+/// behind the owner write on it. Locking the row after the plan leaves the
+/// owner write, granted `M`, waiting on the row while the prune holds the
+/// row and waits on `M`: a deadlock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_owner_terminal_without_a_preimage_locks_its_process_row_before_a_prune() {
+    use lash_durable::DurableStore as _;
+    use lash_execution_contracts::process::ProcessRetention as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let before = deadlocks(&storage).await;
+    let session = SessionId::fixture("lock-plan-terminal");
+    session_store(&storage, session.clone()).await;
+    let (_, keeper) = host_pin();
+    let (env, _, module) = environment_over_document(&storage, &keeper, 73).await;
+    let process = terminal_process(&storage, &env).await;
+    let operation = "o/lock-plan-terminal";
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            &module,
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    let mut outcome = Vec::new();
+    lash_execution_contracts::process::ProcessAwaitOutput::serialize(
+        &lash_execution_contracts::process::ProcessAwaitOutput::from_tool_output(
+            lash_protocol_types::tool_output::ToolCallOutput::success(serde_json::Value::Null),
+        ),
+        &mut serde_json::Serializer::new(&mut outcome),
+    )
+    .expect("encode the terminal");
+    let outcome = String::from_utf8(outcome).expect("the terminal is text");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let (blocker, holder) = lock_artifact_mutations(&storage, &module).await;
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, operation));
+    tx.write(lash_durable::DomainWrite::Process(
+        lash_durable::domain::ProcessWrite::Terminal {
+            process,
+            outcome_json: outcome,
+        },
+    ));
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    wait_until_mutations_wait(&storage, holder, 1).await;
+    let pruning = tokio::spawn({
+        let registry = storage.process_registry();
+        async move {
+            registry
+                .prune_terminal_processes(
+                    u64::MAX,
+                    None,
+                    lash_execution_contracts::process::ProjectionWatermark::NoProjector,
+                )
+                .await
+        }
+    });
+    wait_until_backends_wait(&storage, 2).await;
+    blocker.commit().await.expect("release the module");
+    both_answer(committing, pruning).await;
+    assert_no_deadlock(&storage, before).await;
+}
+
+/// A sealed transaction never waits long for a row, and a held row does
+/// not exhaust its retries (FIG-7700): an owner write that, after its
+/// artifact locks, updates process `P`'s row another transaction holds for
+/// 3 s waits at most the sealed lock timeout per attempt, below
+/// PostgreSQL's `deadlock_timeout`, and the one `durable.commit` call
+/// commits once the row is free. Each wait on the row is one attempt's
+/// statement: more than one shows the bound fired inside the call, and
+/// more than the policy's four shows those expiries spent no attempt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_sealed_owner_write_retries_a_held_row_within_its_lock_timeout() {
+    use lash_durable::DurableStore as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let before = deadlocks(&storage).await;
+    let session = SessionId::fixture("lock-plan-sealed-row");
+    session_store(&storage, session.clone()).await;
+    let (_, keeper) = host_pin();
+    let (env, _, _) = environment_over_document(&storage, &keeper, 74).await;
+    let process = terminal_process(&storage, &env).await;
+    let operation = "o/lock-plan-sealed-row";
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            "lock-plan-sealed-row-module",
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    let deadlock_timeout: f64 = sqlx::query_scalar(
+        "SELECT setting::float8 / 1000 FROM pg_settings WHERE name = 'deadlock_timeout'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("read deadlock_timeout");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let (blocker, holder) = hold_process_row(&storage, &process).await;
+    let durable = storage.durable_store();
+    let committing = tokio::spawn(async move {
+        let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+        tx.write(operation_end(&session, operation));
+        tx.write(lash_durable::DomainWrite::Process(
+            lash_durable::domain::ProcessWrite::Published {
+                process: process.clone(),
+                through: 1,
+            },
+        ));
+        durable.commit(tx, LOCK_PLAN_LAW).await
+    });
+    let (waits, longest) = lock_waits_while_held(
+        &storage,
+        holder,
+        std::time::Duration::from_secs(3),
+        &committing,
+    )
+    .await;
+    blocker.commit().await.expect("release the row");
+    let committed = tokio::time::timeout(std::time::Duration::from_secs(30), committing)
+        .await
+        .expect("the owner write finishes")
+        .expect("commit task");
+    eprintln!("sealed owner write: {waits} waits on the row held 3 s");
+    assert!(committed.is_ok(), "owner write: {committed:?}");
+    assert!(
+        waits > 4,
+        "the owner write waited on the row {waits} time(s), not once an attempt past the policy's four"
+    );
+    assert!(
+        longest < deadlock_timeout,
+        "the sealed owner write waited {longest:.3}s on the row, past deadlock_timeout"
+    );
+    assert_no_deadlock(&storage, before).await;
+}
+
+/// How many distinct lock waits (backend, statement start) other than
+/// `holder`'s the server shows while `holder` keeps its lock for `hold`,
+/// and the longest one; `task`, the waiter, must not finish meanwhile.
+async fn lock_waits_while_held<T: std::fmt::Debug>(
+    storage: &PostgresStorage,
+    holder: i32,
+    hold: std::time::Duration,
+    task: &tokio::task::JoinHandle<T>,
+) -> (usize, f64) {
+    let mut waits = std::collections::BTreeSet::new();
+    let mut longest = 0.0_f64;
+    let held_until = std::time::Instant::now() + hold;
+    while std::time::Instant::now() < held_until {
+        let rows: Vec<(i32, String, f64)> = sqlx::query_as(
+            "SELECT pid, query_start::text,
+                    EXTRACT(EPOCH FROM clock_timestamp() - query_start)::float8
+             FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> $1",
+        )
+        .bind(holder)
+        .fetch_all(storage.pool())
+        .await
+        .expect("inspect lock waits");
+        for (pid, started, waited) in rows {
+            waits.insert((pid, started));
+            longest = longest.max(waited);
+        }
+        assert!(
+            !task.is_finished(),
+            "the waiter finished past the held row after waits {waits:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    (waits.len(), longest)
+}
+
+/// Prepare a session whose deletion seals (its frame holds an
+/// environment), and hold its head row from another transaction: the
+/// session, the blocker and the blocker's backend.
+async fn session_with_held_head(
+    storage: &PostgresStorage,
+    fixture: &str,
+) -> (SessionId, sqlx::Transaction<'static, sqlx::Postgres>, i32) {
+    let mut state = frame_state(fixture);
+    let session = state.session_id.clone();
+    let store = session_store(storage, session.clone()).await;
+    commit_frame_opens(&store, &mut state, None).await;
+    let frame_claim =
+        ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(current_frame(&state)))
+            .expect("frame claim");
+    environment_over_document(storage, &frame_claim, 76).await;
+    let mut blocker = storage.pool().begin().await.expect("begin blocker");
+    let holder: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("the blocker's backend");
+    sqlx::query("SELECT 1 FROM lash_session_head WHERE session_id = $1 FOR UPDATE")
+        .bind(session.as_str())
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("hold the head row");
+    (session, blocker, holder)
+}
+
+/// A session deletion seals when it ends its frame's edges, so a row it
+/// deletes after that is waited for at most the sealed lock timeout per
+/// attempt; such an expiry spends none of the store's attempts, so the
+/// deletion keeps retrying under its operation deadline and succeeds once
+/// the row is free (FIG-7700). Held 3 s, the head row outlasts the four
+/// attempts' sealed waits, which ended the deletion with contention.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_session_delete_retries_a_row_held_past_its_seal() {
+    use lash_core_store::store::SessionCatalogStore as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let (session, blocker, holder) =
+        session_with_held_head(&storage, "lock-plan-delete-retry").await;
+    let catalog = storage.store();
+    let deleting = tokio::spawn({
+        let session = session.clone();
+        async move { catalog.delete_session(&session).await }
+    });
+    let (waits, _) = lock_waits_while_held(
+        &storage,
+        holder,
+        std::time::Duration::from_secs(3),
+        &deleting,
+    )
+    .await;
+    blocker.commit().await.expect("release the head row");
+    let deleted = tokio::time::timeout(std::time::Duration::from_secs(60), deleting)
+        .await
+        .expect("the deletion finishes")
+        .expect("delete task");
+    eprintln!("session delete: {waits} waits on the head row held 3 s");
+    assert!(deleted.is_ok(), "session delete: {deleted:?}");
+    assert!(matches!(
+        storage.store().lookup_session(&session).await,
+        Ok(lash_core_store::store::SessionLookup::Deleted)
+    ));
+}
+
+/// The retry of sealed waits is bounded by the operation (FIG-7700): a
+/// session deletion whose head row is held past the store profile's
+/// operation deadline answers the store's contention at that deadline,
+/// not later, though its sealed expiries spent no attempt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_session_delete_ends_at_its_operation_deadline_with_contention() {
+    use lash_core_store::store::SessionCatalogStore as _;
+    let Some((database, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let deadline = std::time::Duration::from_millis(2_000);
+    let mut config = lash_postgres_store::testing::fixture_config();
+    // The ordinary guards shrink to fit under the deadline; the waits that
+    // matter are the sealed ones, 250 ms each.
+    config.guards.ordinary.lock =
+        lash_postgres_store::host::ServerTimeout::Limit(std::time::Duration::from_millis(1_000));
+    config.guards.ordinary.statement = lash_postgres_store::host::ServerTimeout::Limit(deadline);
+    config.guards.ordinary.operation_deadline = Some(deadline);
+    let bounded = lash_postgres_store::testing::connect_with(database.url(), &config)
+        .await
+        .expect("connect under a short deadline");
+    let (session, blocker, _) = session_with_held_head(&storage, "lock-plan-delete-deadline").await;
+    let started = std::time::Instant::now();
+    let deleted = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        bounded.store().delete_session(&session),
+    )
+    .await
+    .expect("the deletion answers");
+    let elapsed = started.elapsed();
+    blocker.rollback().await.expect("release the head row");
+    assert!(
+        matches!(
+            deleted,
+            Err(lash_core_store::store::MaintenanceFailure {
+                stop: lash_core_store::store::MaintenanceStop::Failed(
+                    lash_core_store::store::StoreError::Contended
+                ),
+                ..
+            })
+        ),
+        "session delete: {deleted:?}"
+    );
+    // The last pause not taken (the policy's longest, 20 ms) may end the
+    // loop just before the deadline.
+    assert!(
+        elapsed + std::time::Duration::from_millis(50) >= deadline
+            && elapsed < deadline + std::time::Duration::from_millis(300),
+        "the deletion answered after {elapsed:?}, not at its {deadline:?} deadline"
+    );
+}
+
+/// Prepare an environment owner under `actor`, session `session`'s
+/// claimed actor: its referrer.
+async fn environment_owner(
+    storage: &PostgresStorage,
+    actor: &lash_durable::ActorKey,
+    epoch: lash_durable::Epoch,
+) -> ArtifactReferrer {
+    use lash_durable::DurableStore as _;
+    use lash_durable::environment::{self as env, EnvironmentWrite};
+    let body = env::assemble(None, []).expect("environment body");
+    let owner = env::VersionOwner::preparing(body.id().clone());
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(actor, epoch, u64::MAX).await.expect("open");
+    tx.write(lash_durable::DomainWrite::Environment(
+        EnvironmentWrite::prepare(owner.clone(), &body).expect("prepare the owner"),
+    ));
+    durable
+        .commit(tx, LOCK_PLAN_LAW)
+        .await
+        .expect("commit the owner");
+    ArtifactReferrer::EnvironmentVersion(owner.id().clone())
+}
+
+/// Two ends whose carries go to environment owners of the same two
+/// sessions, in opposite session order by owner, lock both sessions in
+/// session order before any owner row (FIG-7700). End 1 carries to `x` of
+/// `S` and `y` of `T`, `x` sorting first; end 2 carries to `u` of `T` and
+/// `v` of `S`, `u` first. With `x`'s row held, end 1 queues on it, then
+/// end 2. Locking each owner's session with its row, one owner at a time,
+/// leaves end 1 holding `S` and end 2 holding `T`, each waiting on the
+/// other's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_ends_carrying_to_environment_owners_lock_their_sessions_in_session_order() {
+    use lash_core_store::artifact_referrer::{ArtifactCarry, ArtifactName, ArtifactStoreId};
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let before = deadlocks(&storage).await;
+    let mut sessions = [
+        SessionId::fixture("lock-plan-owner-a"),
+        SessionId::fixture("lock-plan-owner-b"),
+    ];
+    sessions.sort();
+    for session in &sessions {
+        session_store(&storage, session.clone()).await;
+    }
+    let claims = claim_owners(&storage, &sessions).await;
+    // Owner ids are fresh: prepare one more owner of each session until
+    // one of `S` sorts before one of `T` and another of `T` before
+    // another of `S`.
+    let mut owners: Vec<(String, ArtifactReferrer, usize)> = Vec::new();
+    let pairs = loop {
+        for (index, (actor, epoch)) in claims.iter().enumerate() {
+            let owner = environment_owner(&storage, actor, *epoch).await;
+            owners.push((referrer_lock(&owner), owner, index));
+        }
+        owners.sort_by(|left, right| left.0.cmp(&right.0));
+        let pair = |first: usize, taken: &[usize]| {
+            owners.iter().enumerate().find_map(|(at, (_, _, session))| {
+                (*session == first && !taken.contains(&at))
+                    .then_some(at)
+                    .and_then(|at| {
+                        owners
+                            .iter()
+                            .enumerate()
+                            .skip(at + 1)
+                            .find(|(later, (_, _, session))| {
+                                *session != first && !taken.contains(later)
+                            })
+                            .map(|(later, _)| (at, later))
+                    })
+            })
+        };
+        if let Some((x, y)) = pair(0, &[])
+            && let Some((u, v)) = pair(1, &[x, y])
+        {
+            break [(x, y), (u, v)];
+        }
+        assert!(owners.len() < 32, "owner ids never interleaved");
+    };
+    let store = storage.lash_vm_artifact_store();
+    let mut ends = Vec::new();
+    for (index, (first, second)) in pairs.into_iter().enumerate() {
+        let (referrer, claim) = host_pin();
+        let module = format!("lock-plan-owner-module-{index}");
+        store
+            .publish_module_artifact(&claim, &module, b"carried document")
+            .await
+            .expect("the ending pin holds the module");
+        let carries = [first, second]
+            .into_iter()
+            .map(|at| ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::KernelDocument,
+                    artifact_ref: module.clone(),
+                },
+                to: owners[at].1.clone(),
+            })
+            .collect();
+        ends.push(ResolvedArtifactCleanup { referrer, carries });
+    }
+    let ArtifactReferrer::EnvironmentVersion(x) = &ends[0].carries[0].to else {
+        unreachable!("the carries go to environment owners");
+    };
+    let mut blocker = storage.pool().begin().await.expect("begin blocker");
+    sqlx::query("SELECT 1 FROM lash_environment_owners WHERE owner_id = $1 FOR UPDATE")
+        .bind(x.to_string())
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("lock the first owner's row");
+    let mut ending = ends.into_iter().map(|cleanup| {
+        let store = store.clone();
+        tokio::spawn(async move { store.end_module_referrer(&cleanup).await })
+    });
+    let first = ending.next().expect("end 1");
+    wait_until_backends_wait(&storage, 1).await;
+    let second = ending.next().expect("end 2");
+    wait_until_backends_wait(&storage, 2).await;
+    blocker.commit().await.expect("release the owner row");
+    both_answer(first, second).await;
     assert_no_deadlock(&storage, before).await;
 }

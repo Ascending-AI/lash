@@ -198,10 +198,21 @@ pub(crate) fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64
 /// Postgres SQLSTATEs that signal transient write contention rather than a hard
 /// failure: serialization failure, deadlock, and lock-acquisition timeout.
 /// These mean the transaction can retry its identical commit unchanged.
+/// Every contention is also recorded on the running attempt, which tells
+/// the retry loop whether it was a lock wait that expired after the
+/// attempt's seal ([`crate::replayable::note_contention`]).
 pub(crate) fn is_contention_error(err: &sqlx::Error) -> bool {
-    err.as_database_error()
-        .and_then(|db| db.code())
-        .is_some_and(|code| is_contention_sqlstate(&code))
+    let Some(db) = err.as_database_error() else {
+        return false;
+    };
+    let Some(code) = db.code() else {
+        return false;
+    };
+    let contended = is_contention_sqlstate(&code);
+    if contended {
+        crate::replayable::note_contention(&code, db.message());
+    }
+    contended
 }
 
 fn is_contention_sqlstate(code: &str) -> bool {

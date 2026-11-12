@@ -316,6 +316,13 @@
           },
           "description": "Claims and the scheduler's other operations, which hold the node row\n`FOR SHARE`. Default lock 250 ms, statement 1 s, idle 1 s, operation\n2 s."
         },
+        "sealed_lock_timeout_ms": {
+          "default": 250,
+          "description": "The `lock_timeout` a transaction runs under once it holds its\nartifact locks: every later wait, row, foreign-key or advisory, ends\nin contention after it and the operation retries (FIG-7700). Keep it\nbelow the server's `deadlock_timeout` (default 1 s), so a cycle\nthrough a sealed transaction aborts that transaction, which retries,\nbefore the deadlock detector picks a victim. Default 250 ms.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "store_startup_ms": {
           "default": 30000,
           "description": "The whole store open: capacity check, pools, schema verification.\nDefault 30 s.",
@@ -1387,6 +1394,7 @@
           "statement_timeout": 1000,
           "transaction_timeout": "inherit"
         },
+        "sealed_lock_timeout_ms": 250,
         "store_startup_ms": 30000
       },
       "description": "SQL guards and whole-operation deadlines, by operation role."

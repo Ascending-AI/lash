@@ -125,22 +125,28 @@ async fn retire(tx: &mut PgConnection, id: &VersionOwnerId) -> Result<(), Durabl
     Ok(())
 }
 
-/// All callers take actor/history before this owner lock. Publication/acquire
-/// share it with retirement's SKIP LOCKED write lock; exactly one can win.
-pub(crate) async fn lock_artifact_owner(
+/// The session whose write authority environment owner `id`'s artifact
+/// share is taken under; refused when the owner is gone.
+pub(crate) async fn artifact_owner_session(
     tx: &mut PgConnection,
     id: &VersionOwnerId,
-) -> Result<(), DurableError> {
+) -> Result<lash_kernel_value::identity::SessionId, DurableError> {
     let record = authority(tx, id).await?.ok_or_else(|| {
         DurableError::Package(lash_durable::packages::PackageRefusal::ReferrerEnded(
             ArtifactReferrer::EnvironmentVersion(id.clone()),
         ))
     })?;
-    let session =
-        lash_kernel_value::identity::SessionId::parse(record.actor.id()).map_err(env::corrupt)?;
-    PostgresDurableStore::lock_session_writes(tx, &session)
-        .await
-        .map_err(store_failure)?;
+    lash_kernel_value::identity::SessionId::parse(record.actor.id()).map_err(env::corrupt)
+}
+
+/// Lock environment owner `id`'s row. Every caller holds the owner's
+/// session write authority ([`artifact_owner_session`]) first.
+/// Publication/acquire share it with retirement's SKIP LOCKED write lock;
+/// exactly one can win.
+pub(crate) async fn lock_artifact_owner(
+    tx: &mut PgConnection,
+    id: &VersionOwnerId,
+) -> Result<(), DurableError> {
     crate::observed_sql::query(PG.lock_owner.sql())
         .bind(id.to_string())
         .fetch_optional(crate::observed_sql::executor(tx))
