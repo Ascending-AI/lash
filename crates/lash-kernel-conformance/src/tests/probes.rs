@@ -3,7 +3,9 @@
 //! every slice return. Where the base is wrong the literal is derived by
 //! rule (probes/README.md): steps per `K-MACH-002` (R3, R4), hooks per R2,
 //! coverage per `K-CHG-007` and R5, and no slice return without a ready
-//! task (`K-MACH-005`).
+//! task (`K-MACH-005`). Under the L46 ruling (7bcba3681b), release 0016
+//! gives `py.add` and `py.number.iadd` natives, so their interior statements
+//! no longer make slice points, including when those natives decline.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

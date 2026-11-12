@@ -22,6 +22,13 @@ Slice returns:
   `py.print_text`, `py.repr`, `py.add`, `py.for_in.*`, `py.exc.*` and their
   closures), and no other point. A native's alternative body, entered by
   its Decline, still makes none.
+  Release 0016 (7469549ea1, L46) gives `py.add` and `py.number.iadd`
+  natives. Under the same ruling, their 52 interior statement points in
+  17 probes are removed, including fallback paths after Decline. No other
+  slice-1 point moves. Slice-7 and slice-50 returns follow the same rule
+  below using the remaining boundaries. Native-registration controls on
+  the cutover tip restore every old literal when only these two natives
+  are removed; prints, end, effect identities, charge and parks stay fixed.
 - **R2** (K-ITER-005, hooks are library calls): base points at a protocol
   hook, at a loop start or a protocol step, are dropped. 97 points.
 - **R4** (K-MACH-002, dispatching a pending return after `finally` makes no
