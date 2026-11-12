@@ -4,12 +4,11 @@
 //! Every mutating transaction this store runs begins here, and nowhere else
 //! (`scripts/check-guarded-transactions.py` holds the entry total). The fence
 //! is the writer fence's lock, taken shared ahead of the session advisory
-//! lock and every row lock, and then a separate statement that reads the
-//! recorded epoch:
+//! lock and every row lock, and then a plain read of the recorded epoch:
 //!
 //! ```sql
 //! SELECT pg_advisory_xact_lock_shared(715425, 0);
-//! SELECT lash_writer_fence(<the epoch last observed>);
+//! SELECT format_version FROM lash_fleet_format WHERE singleton;
 //! ```
 //!
 //! Finalize takes the same lock exclusive and then moves the row, in one
@@ -36,16 +35,12 @@
 //! A refused transaction wrote nothing: the fence ran first, and dropping the
 //! transaction rolls back the rest.
 //!
-//! The fence rides the transaction's `BEGIN`: the guard profile
-//! ([`TransactionPrelude`]), the lock, the check and `BEGIN` are one simple
-//! query, so the lock's wait is bounded by the profile's `lock_timeout`
-//! (FIG-5240) and the fence costs no round trip of its own (FIG-7701). The
-//! check expects the epoch the fence last observed and raises with the
-//! recorded one otherwise, before `BEGIN` runs; an epoch the writer may
-//! still write under is observed and the `BEGIN` sent again expecting it.
-//! A durable commit reads the epoch in its first statement, with the clock
-//! and its other envelope reads ([`Locked`]); a writer on a dedicated
-//! connection reads it as its first data statement.
+//! The lock rides the transaction's `BEGIN`: the guard profile
+//! ([`TransactionPrelude`]), the lock and `BEGIN` are one simple query, so
+//! the lock's wait is bounded by the profile's `lock_timeout` (FIG-5240) and
+//! costs no round trip of its own. A durable commit reads the epoch in its
+//! first statement, with the clock and its other envelope reads
+//! ([`Locked`]); every other writer reads it as its first data statement.
 //!
 //! A transaction stages the change-feed changes it writes; their feed
 //! sequences are assigned after it commits ([`crate::change_feed`]), so no
@@ -253,23 +248,6 @@ impl WriterFence {
             ))
         })?;
         self.accept(recorded).await
-    }
-
-    /// The epoch a fence check read in place of the one it expected: refused
-    /// as [`Self::admit`] refuses it, or, inside the writable range, observed
-    /// and answered for the next `BEGIN` to expect.
-    fn moved(&self, recorded: Option<i32>) -> Result<u32, StoreError> {
-        let Some(recorded) = recorded else {
-            return Err(missing_fence_row("the fleet-format row is absent"));
-        };
-        let recorded = u32::try_from(recorded).map_err(|_| {
-            missing_fence_row(&format!(
-                "lash_fleet_format.format_version is not an epoch: {recorded}"
-            ))
-        })?;
-        FleetFormat::fence(recorded, self.state.writable)?;
-        self.observe(recorded);
-        Ok(recorded)
     }
 
     /// Admit the epoch the fence read against the writable range, and record
@@ -629,9 +607,7 @@ pub(crate) enum GuardedEntry<'c, 'p> {
     /// A checkout of its own, which the transaction owns: it outlives the
     /// borrow of the pool.
     Pool(&'p PgPool),
-    /// A connection the caller checked out of `pool`: a `BEGIN` refused
-    /// because `F` moved checks out another from the same pool.
-    Pooled(PoolConnection<Postgres>, &'p PgPool),
+    Pooled(PoolConnection<Postgres>),
     Connection(&'c mut DedicatedConnection),
 }
 
@@ -647,9 +623,9 @@ impl<'c> From<&'c mut DedicatedConnection> for GuardedEntry<'c, 'c> {
     }
 }
 
-impl<'p> From<(PoolConnection<Postgres>, &'p PgPool)> for GuardedEntry<'_, 'p> {
-    fn from((connection, pool): (PoolConnection<Postgres>, &'p PgPool)) -> Self {
-        Self::Pooled(connection, pool)
+impl From<PoolConnection<Postgres>> for GuardedEntry<'_, '_> {
+    fn from(connection: PoolConnection<Postgres>) -> Self {
+        Self::Pooled(connection)
     }
 }
 
@@ -674,64 +650,21 @@ pub(crate) async fn begin_pooled(
     }
 }
 
-/// The fence's check, which a guarded writer's `BEGIN` runs after the fence
-/// lock ([`crate::host::TransactionPrelude::fenced_expecting`]).
-pub(crate) const WRITER_FENCE_FUNCTION: &str = "lash_writer_fence";
-
-/// The SQLSTATE the fence's check raises when the fleet row does not record
-/// the epoch the writer expected; its detail is the recorded epoch, empty
-/// when the row is absent.
-const FENCE_UNEXPECTED: &str = "LF001";
-
-/// What a fenced `BEGIN` that expected an epoch answers.
-enum Fenced<T> {
-    /// The row recorded the expected epoch: the transaction is open under it.
-    Admitted(T),
-    /// The row recorded another epoch, or none; nothing was begun.
-    Unexpected(Option<i32>),
-}
-
-/// `error` as the fence check's refusal, when it is one: the epoch it read.
-fn fence_unexpected(error: &sqlx::Error) -> Option<Option<i32>> {
-    let database = error.as_database_error()?;
-    if database.code().as_deref() != Some(FENCE_UNEXPECTED) {
-        return None;
-    }
-    let detail = database
-        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()?
-        .detail()
-        .unwrap_or_default();
-    if detail.is_empty() {
-        Some(None)
-    } else {
-        // The function renders an INTEGER column: a detail that is not one
-        // is no epoch, which the admission refuses closed.
-        Some(Some(detail.parse().unwrap_or(-1)))
-    }
-}
-
-/// Begin on `pool`, or on `connection` when given, with `statement`, a
-/// fenced `BEGIN` expecting an epoch.
-async fn begin_expecting(
-    pool: &PgPool,
-    connection: Option<PoolConnection<Postgres>>,
-    statement: String,
-) -> Result<Fenced<Transaction<'static, Postgres>>, sqlx::Error> {
-    let shape = statement.clone();
-    let begun = crate::observed_sql::control(&shape, async {
-        let connection = match connection {
-            Some(connection) => connection,
-            None => pool.acquire().await?,
-        };
-        begin_pooled(connection, statement).await
-    })
-    .await;
-    match begun {
-        Ok(tx) => Ok(Fenced::Admitted(tx)),
-        Err(error) => match fence_unexpected(&error) {
-            Some(recorded) => Ok(Fenced::Unexpected(recorded)),
-            None => Err(error),
-        },
+impl<'c> GuardedEntry<'c, '_> {
+    /// Begin with `statement`, the prelude's fenced `BEGIN`.
+    async fn transaction(
+        self,
+        statement: String,
+    ) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
+        let shape = statement.clone();
+        crate::observed_sql::control(&shape, async {
+            match self {
+                Self::Pool(pool) => begin_pooled(pool.acquire().await?, statement).await,
+                Self::Pooled(connection) => begin_pooled(connection, statement).await,
+                Self::Connection(connection) => connection.transaction(Some(statement)).await,
+            }
+        })
+        .await
     }
 }
 
@@ -760,53 +693,20 @@ impl<'c> Locked<'c> {
     }
 }
 
-/// `BEGIN` with the fence's guard profile, its lock and its check, in one
-/// simple query.
-///
-/// The check expects the epoch the fence last observed, the one the fleet
-/// almost always still records. When the row records another, nothing was
-/// begun: an epoch outside the writable range refuses as the fence does, an
-/// absent row fails closed, and an epoch inside it is observed and the
-/// `BEGIN` runs again expecting it, so the transaction proceeds under the
-/// epoch its own fence read, as one that read the row with a statement of its
-/// own does.
-///
-/// A dedicated connection begins under the lock and reads the epoch as its
-/// first data statement: a refused attempt cannot hand its borrow to the
-/// next.
+/// `BEGIN` with the fence's guard profile and its lock, then the fence's
+/// read as the transaction's first data statement.
 pub(crate) async fn begin_guarded<'c, 'p>(
     entry: impl Into<GuardedEntry<'c, 'p>>,
     fence: &WriterFence,
 ) -> Result<GuardedTx<'c>, StoreError> {
-    let (pool, mut connection) = match entry.into() {
-        GuardedEntry::Pool(pool) => (pool, None),
-        GuardedEntry::Pooled(connection, pool) => (pool, Some(connection)),
-        GuardedEntry::Connection(connection) => {
-            let statement = fence.state.prelude.fenced().to_owned();
-            let tx = crate::observed_sql::control(&statement.clone(), async {
-                connection.transaction(Some(statement)).await
-            })
-            .await
-            .map_err(|error| fence.refused(store_sqlx_error(error)))?;
-            let mut locked = Locked { tx };
-            let recorded = fence.read(locked.connection()).await?;
-            return locked.admit(fence, recorded).await;
-        }
-    };
-    let mut expected = fence.state.observed.load(Ordering::Acquire);
-    loop {
-        let statement = fence.state.prelude.fenced_expecting(expected);
-        match begin_expecting(pool, connection.take(), statement)
-            .await
-            .map_err(|error| fence.refused(store_sqlx_error(error)))?
-        {
-            Fenced::Admitted(tx) => {
-                let fleet = fence.accept(expected).await?;
-                return Ok(GuardedTx::admitted(tx, fleet, fence));
-            }
-            Fenced::Unexpected(recorded) => expected = fence.moved(recorded)?,
-        }
-    }
+    let tx = entry
+        .into()
+        .transaction(fence.state.prelude.fenced().to_owned())
+        .await
+        .map_err(|error| fence.refused(store_sqlx_error(error)))?;
+    let mut locked = Locked { tx };
+    let recorded = fence.read(locked.connection()).await?;
+    locked.admit(fence, recorded).await
 }
 
 /// Durable entry with checkout observed separately from the transaction:

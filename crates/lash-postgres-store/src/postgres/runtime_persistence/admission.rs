@@ -30,7 +30,7 @@ pub(crate) async fn admit_at_checkpoint_postgres(
     }
     let session_id = &request.session_id;
     let connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
-    let mut tx = begin_guarded((connection, &store.pool), &store.fence).await?;
+    let mut tx = begin_guarded(connection, &store.fence).await?;
     #[cfg(any(test, feature = "testing"))]
     store
         .set_transaction_lease_clock_for_testing(&mut tx)

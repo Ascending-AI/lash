@@ -286,80 +286,198 @@ async fn pg_fence_encodes_again_when_f_moves() {
     assert_eq!(storage.fleet_format().version(), NEXT);
 }
 
+/// How long a writer on the one-connection pool may wait for its connection.
+const WRITER_DEADLINE: Duration = Duration::from_secs(5);
+
+/// A writer pool of one connection: a second borrower queues behind the
+/// writer, and a checkout times out after [`WRITER_DEADLINE`].
+async fn one_connection_pool(database: &IsolatedDatabase) -> sqlx::PgPool {
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(WRITER_DEADLINE)
+        .connect(database.url())
+        .await
+        .expect("open the one-connection writer pool")
+}
+
+/// A guarded `BEGIN` on `writers` whose fence lock waits behind a finalize,
+/// spawned: its answer, the epoch it admitted, and how long it took.
+fn spawn_writer(
+    storage: &PostgresStorage,
+    writers: &sqlx::PgPool,
+) -> tokio::task::JoinHandle<(Result<u32, StoreError>, Duration)> {
+    let fence = storage.fence.clone();
+    let writers = writers.clone();
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let answer = async {
+            let tx = super::begin_guarded(&writers, &fence).await?;
+            let admitted = tx.fleet.version();
+            tx.commit().await.map_err(crate::store_sqlx_error)?;
+            Ok(admitted)
+        }
+        .await;
+        (answer, started.elapsed())
+    })
+}
+
+/// A finalize that moves `F` within this build's writable range while a
+/// writer's fence lock waits behind it, with another borrower queued on the
+/// writer's one-connection pool: the writer admits the epoch finalize
+/// committed on the connection and lock it waited with, and commits within
+/// its deadline. A writer that gave its connection back on the moved epoch
+/// and checked out again would wait behind the borrower and time out.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pg_fence_admits_an_in_range_move_on_the_connection_it_waited_with() {
+    let Some(database) = isolated().await else {
+        return;
+    };
+    let storage = standing(
+        crate::testing::connect(database.url())
+            .await
+            .expect("open the isolated store"),
+        VersionRange::between(1, NEXT),
+        FleetFormat::from_version(1),
+    );
+    let writers = one_connection_pool(&database).await;
+    let held = HeldFinalize::begin(storage.pool(), NEXT)
+        .await
+        .expect("finalize holds the fence lock");
+    let writer = spawn_writer(&storage, &writers);
+    until_a_lock_waiter(&storage).await;
+
+    let (released, release) = tokio::sync::oneshot::channel::<()>();
+    let borrower = tokio::spawn({
+        let writers = writers.clone();
+        async move {
+            let connection = writers.acquire().await;
+            // Hold the connection until the writer answered, or for longer
+            // than the writer's deadline.
+            let _ = tokio::time::timeout(2 * WRITER_DEADLINE, release).await;
+            connection.map(drop)
+        }
+    });
+    // Let the borrower queue on the pool before finalize commits.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    held.commit().await.expect("finalize commits");
+
+    let (answer, took) = writer.await.expect("join the writer");
+    let _ = released.send(());
+    assert_eq!(
+        answer.expect("the writer admits the in-range epoch finalize committed"),
+        NEXT
+    );
+    assert!(
+        took < WRITER_DEADLINE,
+        "the writer answered within its deadline, took {took:?}"
+    );
+    borrower
+        .await
+        .expect("join the borrower")
+        .expect("the borrower checks out after the writer");
+}
+
 /// A writer whose fence lock waits behind a finalize that moves `F` past
 /// this build's range, or removes the fleet row, reads what that finalize
-/// committed once the lock is granted: it is refused, typed, and writes
-/// nothing. A fence that read the row with a snapshot taken before its lock
-/// wait would admit the old epoch and write.
+/// committed once the lock is granted: it is refused, typed. A fence that
+/// read the row with a snapshot taken before its lock wait would admit the
+/// old epoch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn pg_fence_reads_what_a_finalize_it_waited_behind_committed() {
-    for (case, change) in [
-        (
-            "moved",
-            format!("UPDATE lash_fleet_format SET format_version = {PAST_WRITABLE}"),
-        ),
-        ("removed", "DELETE FROM lash_fleet_format".to_owned()),
-    ] {
+async fn pg_fence_refuses_what_a_finalize_it_waited_behind_committed() {
+    for removed in [false, true] {
         let Some(database) = isolated().await else {
             return;
         };
         let storage = crate::testing::connect(database.url())
             .await
             .expect("open the isolated store");
+        let writers = one_connection_pool(&database).await;
         let mut finalize = crate::host::begin_unfenced(storage.pool())
             .await
             .expect("begin the finalize");
-        sqlx::query("SELECT pg_advisory_xact_lock(715425, 0)")
-            .execute(&mut *finalize)
-            .await
-            .expect("finalize takes the fence lock exclusive");
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_fleet_fence
+                .sql(),
+        )
+        .execute(&mut *finalize)
+        .await
+        .expect("finalize takes the fence lock exclusive");
+        let change = if removed {
+            "DELETE FROM lash_fleet_format".to_owned()
+        } else {
+            format!("UPDATE lash_fleet_format SET format_version = {PAST_WRITABLE}")
+        };
         sqlx::query(&change)
             .execute(&mut *finalize)
             .await
             .expect("finalize changes the fleet row");
 
-        let session_id = SessionId::from(match case {
-            "moved" => "fence-waits-moved",
-            _ => "fence-waits-removed",
-        });
-        let writer = tokio::spawn({
-            let store = storage.store();
-            let meta = root_meta(&session_id);
-            async move {
-                store
-                    .admit_session(
-                        &lash_core_execution::testing::store_fixtures::session_request_from_meta_for_test(meta),
-                    )
-                    .await
-            }
-        });
+        let writer = spawn_writer(&storage, &writers);
         until_a_lock_waiter(&storage).await;
         finalize.commit().await.expect("finalize commits");
 
-        let error = writer
-            .await
-            .expect("join the writer")
-            .expect_err("the waiting writer reads the committed fleet row");
-        match case {
-            "moved" => assert!(
+        let (answer, _) = writer.await.expect("join the writer");
+        let error = answer.expect_err("the waiting writer reads the committed fleet row");
+        if removed {
+            assert!(
+                matches!(error, StoreError::Incompatible { .. }),
+                "expected Incompatible for an absent fleet row, got {error:?}"
+            );
+        } else {
+            assert!(
                 matches!(
                     error,
                     StoreError::WriterFenced { recorded: PAST_WRITABLE, writable }
                         if writable == FleetFormat::writable()
                 ),
                 "expected WriterFenced at epoch {PAST_WRITABLE}, got {error:?}"
-            ),
-            _ => assert!(
-                matches!(error, StoreError::Incompatible { .. }),
-                "expected Incompatible for an absent fleet row, got {error:?}"
-            ),
+            );
         }
-        assert_eq!(
-            meta_rows(&storage, &session_id).await,
-            0,
-            "{case}: zero writes"
-        );
     }
+}
+
+/// A writer whose fence lock wait outlasts its lock timeout is refused
+/// `Contended`, and its connection goes back to the pool idle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pg_fence_lock_timeout_refuses_contended_and_frees_the_connection() {
+    let Some(database) = isolated().await else {
+        return;
+    };
+    let storage = standing(
+        crate::testing::connect_with(database.url(), &{
+            let mut config = crate::PostgresHostConfig::default();
+            config.guards.ordinary.lock =
+                crate::host::ServerTimeout::Limit(Duration::from_millis(100));
+            config
+        })
+        .await
+        .expect("open the isolated store"),
+        VersionRange::between(1, NEXT),
+        FleetFormat::from_version(1),
+    );
+    let writers = one_connection_pool(&database).await;
+    let held = HeldFinalize::begin(storage.pool(), NEXT)
+        .await
+        .expect("finalize holds the fence lock");
+    let (answer, _) = spawn_writer(&storage, &writers)
+        .await
+        .expect("join the writer");
+    let error = answer.expect_err("the fence lock wait times out");
+    assert!(
+        matches!(error, StoreError::Contended),
+        "expected Contended, got {error:?}"
+    );
+    let mut connection = tokio::time::timeout(Duration::from_secs(1), writers.acquire())
+        .await
+        .expect("the refused writer's connection is back in the pool")
+        .expect("check out the connection");
+    sqlx::query("SELECT 1")
+        .execute(&mut *connection)
+        .await
+        .expect("the connection is not left in an aborted transaction");
+    drop(connection);
+    held.commit().await.expect("finalize commits");
 }
 
 /// A fence that meets contention behind a finalize retries from a fresh

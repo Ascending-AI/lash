@@ -2182,30 +2182,6 @@ async fn environment_dependency_retention_round_trips_ignore_the_dependency_coun
     );
 }
 
-/// A guarded transaction's writer fence rides its `BEGIN`: the lock, the
-/// check of the fleet epoch and `BEGIN` are one simple query, so a
-/// transaction that writes nothing pays its `BEGIN` and its `COMMIT` only
-/// (FIG-7701 R4).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_guarded_transaction_fences_within_its_begin() {
-    let Some(database_url) = crate::postgres_test_support::database_url() else {
-        eprintln!("skipping the guarded-transaction round-trip budget: database URL is not set");
-        return;
-    };
-    let database = IsolatedDatabase::create(&database_url).await;
-    let storage = crate::testing::connect(database.url())
-        .await
-        .expect("open the isolated store");
-    let (_, trips) = round_trips(async {
-        let tx = crate::guarded_tx::begin_guarded(storage.pool(), &storage.fence)
-            .await
-            .expect("the fence admits the recorded epoch");
-        tx.commit().await.expect("commit");
-    })
-    .await;
-    assert_eq!(trips, 2, "BEGIN with its fence, then COMMIT");
-}
-
 /// An artifact read is one statement: the referrer edges it decodes and
 /// the bytes it answers come back together (FIG-7701 R1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2234,7 +2210,7 @@ async fn an_artifact_read_is_one_statement() {
     assert_eq!(trips, 1, "edges and bytes in one statement");
 }
 
-/// A module acquisition is its guarded BEGIN, one call that locks the
+/// A module acquisition is its guarded BEGIN and fence read, one call that locks the
 /// referrer and reads its fence, one that locks the artifact, checks it
 /// and writes the edge, and COMMIT (FIG-7701 R3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2262,10 +2238,10 @@ async fn a_module_acquisition_is_two_calls_in_its_transaction() {
         .expect("pin claim");
     let (held, trips) = round_trips(store.acquire_module_artifact(&holder, &document)).await;
     held.expect("acquire the document");
-    assert_eq!(trips, 4, "BEGIN, referrer, holds, COMMIT");
+    assert_eq!(trips, 5, "BEGIN, fence read, referrer, holds, COMMIT");
 }
 
-/// Publishing an environment over a stored body is its guarded BEGIN,
+/// Publishing an environment over a stored body is its guarded BEGIN and fence read,
 /// the plugin writers' admission, the referrer call, one closure read per
 /// dependency level (the link, then its document), the sorted lock
 /// statement, one call that compares the body, stores the head and writes
@@ -2293,7 +2269,7 @@ async fn a_publication_over_a_stored_body_is_one_call_after_its_locks() {
     let (published, trips) = round_trips(store.publish_process_env(&claim, &env_ref, &bytes)).await;
     published.expect("publish over the stored body");
     assert_eq!(
-        trips, 7,
-        "BEGIN, admission, referrer, two closure levels, locks, the call, COMMIT"
+        trips, 8,
+        "BEGIN, fence read, admission, referrer, two closure levels, locks, the call, COMMIT"
     );
 }
