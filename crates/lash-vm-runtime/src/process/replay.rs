@@ -521,6 +521,11 @@ impl KernelProcessEngine {
         .map_err(|error| ReplayFault(error.to_string()))?;
         let host = Arc::new(ReplayHost::of(reads));
         program.functions = closure.body().identities().collect();
+        let evidence = self
+            .documents
+            .run_evidence(input.code.evidence(), &content.documents)
+            .await
+            .map_err(|error| ReplayFault(error.to_string()))?;
         let machines = lash_vm_client::RemoteMachines::new(
             self.workers.clone(),
             VmOwner::new(format!("process:{}", request.process)),
@@ -552,6 +557,7 @@ impl KernelProcessEngine {
                     .collect(),
                 host: Vec::new(),
                 save: None,
+                evidence,
             },
             settings.bounds(),
             closure,

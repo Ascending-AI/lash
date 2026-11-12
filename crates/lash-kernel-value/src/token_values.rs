@@ -1,4 +1,5 @@
 //! Canonical encodings of neutral leaves, moved without changing bytes.
+use crate::content_ids::{EvidenceSetId, SourceEvidenceId};
 use crate::names::*;
 
 use crate::operations::*;
@@ -149,7 +150,7 @@ macro_rules! digest_codec {
     )*};
 }
 
-digest_codec!(FunctionId, DocumentId);
+digest_codec!(FunctionId, DocumentId, SourceEvidenceId, EvidenceSetId);
 
 // Types and signatures.
 

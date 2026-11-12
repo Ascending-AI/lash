@@ -369,6 +369,7 @@ impl InlineStarts for KernelInlineStarts {
                     start: LinkedStart {
                         link: fulfilled.content.identity(),
                         selector,
+                        evidence: None,
                     },
                 }
             }
@@ -416,6 +417,18 @@ impl InlineStarts for KernelInlineStarts {
                 .documents
                 .hold(claim, &ContentRef::Link(link))
                 .await?;
+        }
+        // A run of a publication holds the publication's evidence with its
+        // code, so a restart reads the annotations it started with.
+        if let super::InlineRequest::Linked {
+            start:
+                LinkedStart {
+                    evidence: Some(set),
+                    ..
+                },
+        } = &code
+        {
+            self.engine.documents.hold_evidence(claim, *set).await?;
         }
         // A fresh load validates the retained origin after every acquisition.
         self.engine

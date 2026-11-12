@@ -688,6 +688,7 @@ mod tests {
             LinkedStart {
                 link,
                 selector: StartSelector::Main,
+                evidence: None,
             },
             &BTreeMap::new(),
         )

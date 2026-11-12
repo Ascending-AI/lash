@@ -447,10 +447,16 @@ pub enum StartSelector {
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-/// The immutable Link and selected start that determine process definition identity.
+/// The immutable Link and selected start that determine process definition
+/// identity, and the publication's source evidence a run of it reads.
 pub struct LinkedStart {
     pub link: LinkId,
     pub selector: StartSelector,
+    /// The publication's source evidence: absent when the published document
+    /// carried none, and then not serialized, so an evidence-less start keeps
+    /// its encoding. Evidence never changes what runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<crate::EvidenceSetId>,
 }
 
 impl std::fmt::Display for Brand {

@@ -574,6 +574,7 @@ fn signature_view(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
             let reference = lash_kernel_value::LinkedStart {
                 link,
                 selector: lash_kernel_value::StartSelector::Main,
+                evidence: None,
             };
             let context = lash_kernel_view::ViewContext::new(
                 reference.clone().into(),

@@ -214,7 +214,9 @@ impl KernelDocuments {
         claim: &lash_core::ReferrerClaim,
         request: &WorkflowPublishRequest,
     ) -> Result<LinkedStart, EnginePortError> {
-        let document = self.admit_document(claim, &request.document).await?;
+        let (document, evidence) = self
+            .admit_published_document(claim, &request.document)
+            .await?;
         let fulfilled = artifact_phase(
             "fulfil",
             tracing::debug_span!("lash.artifacts.fulfil", document_id = %document),
@@ -235,6 +237,7 @@ impl KernelDocuments {
         let start = LinkedStart {
             link: fulfilled.content.identity(),
             selector: request.selector.clone(),
+            evidence,
         };
         self.hold_publications(claim, &request.environment.snapshot)
             .await?;

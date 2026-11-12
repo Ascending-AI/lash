@@ -88,7 +88,7 @@ pub enum HelperUpgradeSafety {
 /// version_surface = "coexist"
 /// format_outside_manifest = "host response JSON, not durable execution state"
 /// version_guard(roots(HelperRunUpgrade), items(from_json))
-pub const HELPER_RUN_UPGRADE_VERSION: u32 = 2;
+pub const HELPER_RUN_UPGRADE_VERSION: u32 = 3;
 
 /// The artifact prepared by this request, coupled to the succession result.
 /// A publication is not evidence that the owner has applied the successor.

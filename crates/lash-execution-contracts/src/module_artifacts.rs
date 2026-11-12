@@ -276,6 +276,15 @@ pub enum ModuleArtifactHold<'a> {
         module_ref: &'a str,
         body: ModuleArtifactBody<'a>,
     },
+    /// Stored and verified as [`Self::Publish`], and holding each artifact
+    /// of `holds` through the store-internal holder relation, written with
+    /// it in the batch's one transaction. Every artifact it holds is in the
+    /// batch or already stored; the holder's row going releases them.
+    Holder {
+        module_ref: &'a str,
+        body: ModuleArtifactBody<'a>,
+        holds: &'a [&'a str],
+    },
 }
 
 impl<'a> ModuleArtifactHold<'a> {
@@ -283,14 +292,30 @@ impl<'a> ModuleArtifactHold<'a> {
         match self {
             Self::Publish { module_ref, .. }
             | Self::Acquire { module_ref, .. }
+            | Self::Holder { module_ref, .. }
             | Self::Retain { module_ref } => module_ref,
         }
     }
 
     pub fn body(&self) -> Option<ModuleArtifactBody<'a>> {
         match self {
-            Self::Publish { body, .. } | Self::Acquire { body, .. } => Some(*body),
+            Self::Publish { body, .. } | Self::Acquire { body, .. } | Self::Holder { body, .. } => {
+                Some(*body)
+            }
             Self::Retain { .. } => None,
+        }
+    }
+
+    /// Whether stored bytes must equal the hold's body.
+    pub fn verified(&self) -> bool {
+        matches!(self, Self::Publish { .. } | Self::Holder { .. })
+    }
+
+    /// The artifacts the hold's artifact itself keeps alive.
+    pub fn holds(&self) -> &'a [&'a str] {
+        match self {
+            Self::Holder { holds, .. } => holds,
+            Self::Publish { .. } | Self::Acquire { .. } | Self::Retain { .. } => &[],
         }
     }
 }

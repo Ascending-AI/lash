@@ -21,6 +21,10 @@
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
+    "EvidenceSetId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -191,8 +195,19 @@
     },
     "LinkedStart": {
       "additionalProperties": false,
-      "description": "The immutable Link and selected start that determine process definition identity.",
+      "description": "The immutable Link and selected start that determine process definition\nidentity, and the publication's source evidence a run of it reads.",
       "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceSetId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The publication's source evidence: absent when the published document\ncarried none, and then not serialized, so an evidence-less start keeps\nits encoding. Evidence never changes what runs."
+        },
         "link": {
           "$ref": "#/$defs/LinkId"
         },
@@ -275,7 +290,7 @@
       ]
     }
   },
-  "$id": "https://lash.dev/schemas/kernel-helper-run-upgrade/v2",
+  "$id": "https://lash.dev/schemas/kernel-helper-run-upgrade/v3",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -292,6 +307,6 @@
   ],
   "title": "HelperRunUpgrade",
   "type": "object",
-  "x-lash-schema-version": 2,
+  "x-lash-schema-version": 3,
   "x-lash-version-constant": "HELPER_RUN_UPGRADE_VERSION"
 }

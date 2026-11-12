@@ -212,6 +212,7 @@ fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
             selector: lash_kernel_value::names::StartSelector::Export(
                 lash_kernel_value::names::Name::new("worker"),
             ),
+            evidence: None,
         }),
         entry_name: "main".to_string(),
         engine_execution_id: None,
@@ -1083,6 +1084,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
         lash_kernel_value::names::LinkedStart {
             link: lash_kernel_value::content_ids::LinkId::from_bytes([2; 32]),
             selector: lash_kernel_value::names::StartSelector::Main,
+            evidence: None,
         }
         .into(),
         [lash_protocol_types::effect_identity_fixture("then", 1).position()],

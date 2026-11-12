@@ -50,6 +50,7 @@ pub fn process_language_observation(
                         selector: lash_kernel_value::names::StartSelector::Export(
                             lash_kernel_value::names::Name::new("fixture"),
                         ),
+                        evidence: None,
                     },
                 ),
                 entry_name: "fixture".to_string(),

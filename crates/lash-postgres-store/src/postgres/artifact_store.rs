@@ -739,15 +739,22 @@ impl PostgresLashVmArtifactStore {
                     lash_execution_contracts::module_artifacts::ModuleArtifactHold::Retain {
                         ..
                     } => true,
+                    lash_execution_contracts::module_artifacts::ModuleArtifactHold::Holder {
+                        ..
+                    } => true,
                     lash_execution_contracts::module_artifacts::ModuleArtifactHold::Acquire {
                         module_ref,
                         ..
                     } => unheld.contains(*module_ref),
                 })
                 .collect();
+        // A holder's targets join the one sorted acquisition: every artifact
+        // the batch writes or holds is locked before any is written.
         let mut locked: Vec<&str> = artifacts
             .iter()
-            .map(|artifact| artifact.module_ref())
+            .flat_map(|artifact| {
+                std::iter::once(artifact.module_ref()).chain(artifact.holds().iter().copied())
+            })
             .collect();
         locked.sort_unstable();
         locked.dedup();
@@ -759,12 +766,13 @@ impl PostgresLashVmArtifactStore {
                 .await
                 .map_err(ArtifactStoreError::from)?;
         }
+        let mut holders = Vec::new();
         for artifact in artifacts {
             let artifact_ref = artifact.module_ref();
-            let verified = matches!(
-                artifact,
-                lash_execution_contracts::module_artifacts::ModuleArtifactHold::Publish { .. }
-            );
+            let verified = artifact.verified();
+            if !artifact.holds().is_empty() {
+                holders.push(artifact);
+            }
             if let Some(body) = artifact.body() {
                 match body.node_kind() {
                     None => {
@@ -805,6 +813,36 @@ impl PostgresLashVmArtifactStore {
                 .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
+        }
+        // Each holder's edges, after every artifact of the batch is stored.
+        for holder in holders {
+            let targets: BTreeSet<String> = holder
+                .holds()
+                .iter()
+                .map(|target| (*target).to_owned())
+                .collect();
+            let stored: BTreeSet<String> = crate::observed_sql::query_scalar::<_, String>(
+                artifact_sql().postgres.select_stored_refs.sql(),
+            )
+            .bind(MODULE_ARTIFACT_NAMESPACE)
+            .bind(targets.iter().map(String::as_str).collect::<Vec<_>>())
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(backend)?
+            .into_iter()
+            .collect();
+            if let Some(missing) = targets.difference(&stored).next() {
+                return Err(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: missing.clone(),
+                });
+            }
+            env_storage::insert_dependency_edges_tx(
+                &mut tx,
+                MODULE_ARTIFACT_NAMESPACE,
+                &targets,
+                (MODULE_ARTIFACT_NAMESPACE, holder.module_ref()),
+            )
+            .await?;
         }
         tx.commit().await.map_err(backend)
     }

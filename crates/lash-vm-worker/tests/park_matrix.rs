@@ -371,6 +371,7 @@ fn start(program: &Program) -> RunStart {
         modes: Default::default(),
         host: Vec::new(),
         save: None,
+        evidence: Vec::new(),
     }
 }
 

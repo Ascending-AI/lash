@@ -126,6 +126,7 @@ async fn measure(iterations: u32) -> Result<()> {
             lash::package::LinkedStart {
                 link: link.identity(),
                 selector: lash::package::StartSelector::Main,
+                evidence: None,
             },
             library,
         )?;

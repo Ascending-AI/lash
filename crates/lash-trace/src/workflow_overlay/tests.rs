@@ -53,6 +53,7 @@ fn reference() -> LinkedStart {
     LinkedStart {
         link: LinkId::from_bytes([1; 32]),
         selector: StartSelector::Main,
+        evidence: None,
     }
 }
 

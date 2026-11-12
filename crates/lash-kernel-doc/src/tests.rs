@@ -932,3 +932,73 @@ fn source_evidence_never_reaches_a_documents_bytes_or_identity() {
     assert_eq!(evidenced.id(), bare.id());
     assert_eq!(evidenced.body(), bare.body());
 }
+
+/// FIG-7711: retained evidence is bound to the one document it was authored
+/// for. A record read under another document, naming a function its document
+/// lacks, declaring a local twice, or whose bytes are not the content its
+/// reference names, is refused, never applied to the wrong functions.
+#[test]
+fn misbound_source_evidence_is_refused() {
+    use crate::{
+        DeclaredLocal, Document, EvidenceRecord, EvidenceRefusal, NumberPolicy, SourceEvidence,
+    };
+    use lash_kernel_value::Name;
+    let document = |body: &str| {
+        let definition = parse_definition(&format!(
+            "function f(x: Int) -> Int\nkernel 1\nmetering statements\nbody {{ return {body} }}\n"
+        ))
+        .unwrap();
+        let mut document = Document::new(NumberPolicy::Float, Vec::new());
+        let function = definition.identity();
+        document.functions.insert(function, definition);
+        (document.identity(), function, document)
+    };
+    let (a_id, a_fn, a) = document("x");
+    let (b_id, b_fn, b) = document("1");
+    assert_ne!(a_fn, b_fn);
+    let local = |name: &str| DeclaredLocal {
+        name: Name::new(name),
+        ty: lash_kernel_value::Type::Json,
+    };
+    let record = |document, function, locals| EvidenceRecord {
+        document,
+        entries: [(
+            function,
+            SourceEvidence {
+                implicit_text_conversions: Vec::new(),
+                declared_locals: locals,
+            },
+        )]
+        .into(),
+    };
+    let bound = record(a_id, a_fn, vec![local("us")]);
+    assert_eq!(bound.validate(a_id, &a), Ok(()));
+    assert_eq!(
+        bound.validate(b_id, &b),
+        Err(EvidenceRefusal::Document {
+            named: a_id,
+            actual: b_id
+        })
+    );
+    assert_eq!(
+        record(b_id, a_fn, vec![local("us")]).validate(b_id, &b),
+        Err(EvidenceRefusal::Function { function: a_fn })
+    );
+    assert_eq!(
+        record(a_id, a_fn, vec![local("us"), local("us")]).validate(a_id, &a),
+        Err(EvidenceRefusal::Duplicate {
+            function: a_fn,
+            name: Name::new("us")
+        })
+    );
+    let bytes = bound.encode();
+    assert_eq!(
+        EvidenceRecord::decode(&bytes, bound.id()),
+        Ok(bound.clone())
+    );
+    let other = record(a_id, a_fn, vec![local("vs")]);
+    assert_eq!(
+        EvidenceRecord::decode(&other.encode(), bound.id()),
+        Err(EvidenceRefusal::Digest)
+    );
+}

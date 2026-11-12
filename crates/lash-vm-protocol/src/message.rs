@@ -290,6 +290,12 @@ pub struct Start {
     /// run alone executes. Empty when the node holds every one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub definitions: Vec<StoredDefinition>,
+    /// The source evidence record of each run document that carries one,
+    /// as the run's publication retained it. It crosses whatever the
+    /// documents' form, saved or not, and the worker never takes another
+    /// record for the same document: its cache is keyed by both.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<StoredEvidence>,
     /// The selected executable reach; retained documents can contain unrelated code.
     pub functions: std::collections::BTreeSet<lash_kernel_value::names::FunctionId>,
     pub from: StartFrom,
@@ -365,6 +371,17 @@ impl StoredDocument {
             | Self::Cached { document } => *document,
         }
     }
+}
+
+/// One document's source evidence record: its canonical bytes under the
+/// digest the run's publication names, which the worker checks the body
+/// against, and the document it describes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredEvidence {
+    pub document: lash_kernel_value::names::DocumentId,
+    pub digest: lash_kernel_value::SourceEvidenceId,
+    pub body: EncodedPayload,
 }
 
 /// An ordinary foreign function's definition as the store keeps it: the token body

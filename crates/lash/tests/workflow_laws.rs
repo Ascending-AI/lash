@@ -965,6 +965,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             start: lash::package::LinkedStart {
                 link: publication.start.link,
                 selector: lash::package::StartSelector::Export(Name::new("worker")),
+                evidence: None,
             },
         },
     })
@@ -1573,6 +1574,10 @@ mod coarse;
 #[cfg(feature = "typescript")]
 #[path = "workflow_laws/crossing.rs"]
 mod crossing;
+
+#[cfg(feature = "typescript")]
+#[path = "workflow_laws/source_evidence.rs"]
+mod source_evidence;
 
 #[path = "workflow_laws/inline_starts.rs"]
 mod inline_starts;

@@ -105,6 +105,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                         lash_kernel_value::names::LinkedStart {
                             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
                             selector: lash_kernel_value::names::StartSelector::Main,
+                            evidence: None,
                         },
                     ),
                     entry_name: "main".to_string(),

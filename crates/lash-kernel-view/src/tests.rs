@@ -82,6 +82,7 @@ fn closure_view_uses_retained_anonymous_body_and_unit() {
     let reference = LinkedStart {
         link: link.identity(),
         selector: StartSelector::Main,
+        evidence: None,
     };
     let context = crate::ViewContext::new(
         reference.clone().into(),
@@ -171,6 +172,7 @@ fn helper_view_reads_walk_admission_edges_once_per_link() {
         LinkedStart {
             link: links[0],
             selector: StartSelector::Main,
+            evidence: None,
         }
         .into(),
         content,

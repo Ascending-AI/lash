@@ -355,6 +355,7 @@ mod work_laws {
         let start = LinkedStart {
             link: link.identity(),
             selector: lash_kernel_value::StartSelector::Export(lash_kernel_value::Name::new("run")),
+            evidence: None,
         };
         let held = Arc::new(release.functions.clone());
         for _ in 0..2 {

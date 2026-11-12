@@ -749,6 +749,7 @@ mod tests {
         let document = LinkedStart {
             link: lash_kernel_value::content_ids::LinkId::from_bytes([7; 32]),
             selector: lash_kernel_value::names::StartSelector::Main,
+            evidence: None,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let at = lash_protocol_types::effect_identity_fixture("effect", 0);
@@ -903,6 +904,7 @@ mod tests {
         let document = LinkedStart {
             link: lash_kernel_value::content_ids::LinkId::from_bytes([7; 32]),
             selector: lash_kernel_value::names::StartSelector::Main,
+            evidence: None,
         };
         let live = |frame, ran: Vec<(u32, u64)>| {
             let identity = TraceLanguageExecutionIdentity {
@@ -1016,6 +1018,7 @@ mod tests {
         let document = LinkedStart {
             link: lash_kernel_value::content_ids::LinkId::from_bytes([7; 32]),
             selector: lash_kernel_value::names::StartSelector::Main,
+            evidence: None,
         };
         let mut committed = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let mut live = ProcessWorkflowOverlayAccumulator::new(process.clone());
@@ -1161,6 +1164,7 @@ mod tests {
         let document = LinkedStart {
             link: lash_kernel_value::content_ids::LinkId::from_bytes([7; 32]),
             selector: lash_kernel_value::names::StartSelector::Main,
+            evidence: None,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let observation = LanguageExecutionObservation {
@@ -1243,6 +1247,7 @@ mod tests {
         let document = LinkedStart {
             link: lash_kernel_value::content_ids::LinkId::from_bytes([3; 32]),
             selector: lash_kernel_value::names::StartSelector::Main,
+            evidence: None,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let at = lash_protocol_types::effect_identity_fixture("effect", 0);

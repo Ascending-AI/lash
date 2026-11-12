@@ -110,6 +110,7 @@ fn holder(
     let start = LinkedStart {
         link: link.identity(),
         selector: StartSelector::Main,
+        evidence: None,
     };
     let mut context = lash::workflow::view::ViewContext::new(
         start.clone().into(),

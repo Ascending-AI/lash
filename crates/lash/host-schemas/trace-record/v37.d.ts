@@ -704,6 +704,8 @@ export type EffectRefusal = {
   [key: string]: unknown;
 };
 
+export type EvidenceSetId = string;
+
 /**
  * Why an `exec_code` effect failed before the executor produced a response.
  *
@@ -984,9 +986,16 @@ export type LimitCause = ("execution_slice" | "execution_total" | "wait_deadline
 export type LinkId = string;
 
 /**
- * The immutable Link and selected start that determine process definition identity.
+ * The immutable Link and selected start that determine process definition
+ * identity, and the publication's source evidence a run of it reads.
  */
 export type LinkedStart = {
+  /**
+   * The publication's source evidence: absent when the published document
+   * carried none, and then not serialized, so an evidence-less start keeps
+   * its encoding. Evidence never changes what runs.
+   */
+  "evidence"?: (EvidenceSetId | null);
   "link": LinkId;
   "selector": StartSelector;
 };

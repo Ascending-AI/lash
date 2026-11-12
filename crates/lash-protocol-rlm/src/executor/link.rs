@@ -75,6 +75,7 @@ pub(super) async fn link_cell(
             &lash_kernel_value::LinkedStart {
                 link: envelope.link,
                 selector: lash_kernel_value::StartSelector::Main,
+                evidence: None,
             },
             &envelope.environment.authored,
         )

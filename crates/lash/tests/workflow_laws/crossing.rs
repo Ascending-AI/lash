@@ -34,7 +34,7 @@ fn capture_definition() -> lash::tools::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn capture_component(workflows: bool) -> lash::process::StaticProcessComponent {
+pub(super) fn capture_component(workflows: bool) -> lash::process::StaticProcessComponent {
     let mut definitions = vec![capture_definition()];
     let mut roots = [lash::package::Segment::new("tools").unwrap()]
         .into_iter()

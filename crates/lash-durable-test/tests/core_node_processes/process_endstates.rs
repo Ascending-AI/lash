@@ -12,6 +12,7 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
             start: lash_kernel_value::LinkedStart {
                 link: missing,
                 selector: lash_kernel_value::StartSelector::Main,
+                evidence: None,
             },
         },
         args: Default::default(),

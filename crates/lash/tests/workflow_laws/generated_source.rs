@@ -131,6 +131,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             lash::package::LinkedStart {
                 link: link.identity(),
                 selector: lash::package::StartSelector::Main,
+                evidence: None,
             },
             embedding.library(),
         )

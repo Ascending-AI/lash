@@ -109,6 +109,16 @@ impl HelperLibraryId {
     }
 }
 
+digest!(/// Content identity of one document's source evidence record: the
+ /// typed authoring facts a publication keeps beside the document, outside
+ /// every executable identity.
+ SourceEvidenceId);
+
+digest!(/// Content identity of one publication's source evidence: which record
+ /// each of its documents carries. A run names it to read the publication's
+ /// annotations, never another publication's of the same document.
+ EvidenceSetId);
+
 digest!(/// Identity of a helper operation declaration, independent of its local body slot.
  HelperOperationId);
 

@@ -64,6 +64,9 @@ pub struct RunStart {
     /// How a session cell's end saves its functions, fresh or resumed;
     /// none for a run that saves none.
     pub save: Option<wire::SaveWire>,
+    /// The source evidence records the run's publication retained for its
+    /// documents, which cross to every checkout whether or not it saves.
+    pub evidence: Vec<lash_vm_protocol::StoredEvidence>,
 }
 
 /// The parent's decision at a worker run's memory bound (FIG-6768): what
@@ -292,6 +295,7 @@ impl RemoteMachines {
                     body: EncodedPayload(body.to_vec()),
                 })
                 .collect(),
+            evidence: self.start.evidence.clone(),
             from,
             bounds: RunBounds {
                 memory_meter: match self.bounds.memory_meter {
@@ -952,6 +956,7 @@ mod reservation_tests {
             instances: EncodedPayload(Vec::new()),
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             definitions: Vec::new(),
+            evidence: Vec::new(),
             functions: Default::default(),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
             bounds: RunBounds {

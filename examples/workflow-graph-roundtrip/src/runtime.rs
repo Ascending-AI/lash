@@ -1094,6 +1094,7 @@ mod tests {
             LinkedStart {
                 link,
                 selector: StartSelector::Main,
+                evidence: None,
             },
             lash::vm::helper_release().unwrap().helpers.as_ref(),
         )
@@ -1147,6 +1148,7 @@ mod tests {
                     document: lash::tracing::TraceExecutionCode::Start(LinkedStart {
                         link: LinkId::from_bytes([1; 32]),
                         selector: StartSelector::Main,
+                        evidence: None,
                     }),
                     entry_name: "main".into(),
                     engine_execution_id: None,

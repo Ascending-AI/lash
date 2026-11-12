@@ -431,6 +431,7 @@ impl ProcessFeedSource {
                         ProcessDocumentIdentity::Available(lash_kernel_value::names::LinkedStart {
                             link,
                             selector,
+                            evidence: None,
                         })
                     }
                     // The workflow view supports Main and top-level Exports.

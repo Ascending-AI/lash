@@ -122,6 +122,7 @@ fn work_start(
             body: EncodedPayload(document.canonical_bytes()),
         }],
         definitions: Vec::new(),
+        evidence: Vec::new(),
         functions: document.functions.keys().copied().collect(),
         from: StartFrom::Fresh(
             wire::encode(

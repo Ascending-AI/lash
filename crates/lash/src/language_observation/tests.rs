@@ -43,6 +43,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
                         lash_kernel_value::names::LinkedStart {
                             link: lash_kernel_value::content_ids::LinkId::from_bytes([7; 32]),
                             selector: lash_kernel_value::names::StartSelector::Main,
+                            evidence: None,
                         },
                     ),
                     entry_name: "main".into(),

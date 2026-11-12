@@ -692,6 +692,7 @@ async fn run_linked_cell(
     let start = lash_kernel_value::names::LinkedStart {
         link: host.envelope.link,
         selector: lash_kernel_value::names::StartSelector::Main,
+        evidence: None,
     };
     let retained_code = loaded.clone();
     let prepared = match (services.kernel.library(), state.documents.as_ref()) {
@@ -755,6 +756,7 @@ async fn run_linked_cell(
             host: Vec::new(),
             modes,
             save: Some(save),
+            evidence: Vec::new(),
         },
         bounds,
         closure,

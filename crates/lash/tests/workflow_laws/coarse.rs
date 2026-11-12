@@ -17,6 +17,7 @@ fn checked(text: &str, _entry: &str) -> lash::workflow::WorkflowDocument {
         lash::package::LinkedStart {
             link: link.identity(),
             selector: lash::package::StartSelector::Main,
+            evidence: None,
         },
         lash::vm::helper_release().unwrap().helpers.as_ref(),
     )
@@ -520,6 +521,7 @@ fn coarse_spans() {
         lash::package::LinkedStart {
             link: link.identity(),
             selector: lash::package::StartSelector::Export(Name::new("flow")),
+            evidence: None,
         },
         lash::vm::helper_release().unwrap().helpers.as_ref(),
     )
@@ -583,6 +585,7 @@ fn coarse_spans() {
         lash::package::LinkedStart {
             link: link.identity(),
             selector: lash::package::StartSelector::Export(Name::new("flow")),
+            evidence: None,
         },
         lash::vm::helper_release().unwrap().helpers.as_ref(),
     )

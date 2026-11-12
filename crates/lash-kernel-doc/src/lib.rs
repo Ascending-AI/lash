@@ -55,7 +55,10 @@ mod function_capture;
 mod implicit_text;
 pub use implicit_text::{ImplicitTextConversion, SourceOperandType};
 mod source_evidence;
-pub use source_evidence::{DeclaredLocal, SourceEvidence};
+pub use source_evidence::{
+    DeclaredLocal, EVIDENCE_MAX_BYTES, EVIDENCE_VERSION, EvidenceRecord, EvidenceRefusal,
+    EvidenceSet, SourceEvidence,
+};
 pub mod function_value;
 pub use function_capture::CaptureValue;
 mod graph_codec;
@@ -73,7 +76,10 @@ pub use native_resources::{
     NativeResourceHolding, NativeResourceOrigin, NativeResourceOwner, NativeResourceRelease,
 };
 mod identified;
-pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
+pub use document_bytes::{
+    DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal, DocumentEnvelope,
+    EnvelopeEvidence,
+};
 pub use identified::{IdentifiedDocument, document_work};
 /// One root-based snapshot of live code: what a saved function and a
 /// crossing function share (`K-CLO-004`).

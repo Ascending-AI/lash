@@ -55,6 +55,13 @@ impl Service {
                 document: document.canonical_bytes(),
                 captions: captions.cloned(),
                 options,
+                evidence: (!document.source_evidence.is_empty()).then(|| {
+                    lash_kernel_doc::EvidenceRecord {
+                        document: document.identity(),
+                        entries: document.source_evidence.clone(),
+                    }
+                    .encode()
+                }),
             })
             .await?;
         let result = match response {
@@ -100,10 +107,25 @@ impl Service {
                 document,
                 source_map,
                 captions,
+                evidence,
                 ..
             } => {
-                let document = IdentifiedDocument::decode_standard(&document)
+                let mut document = IdentifiedDocument::decode_standard(&document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                // The evidence is the import's own, read and checked against
+                // its document as a publication checks it.
+                if let Some(bytes) = evidence {
+                    let record = lash_kernel_doc::EvidenceRecord::decode(
+                        &bytes,
+                        lash_kernel_doc::EvidenceRecord::id_of(&bytes),
+                    )
+                    .and_then(|record| {
+                        record.validate(document.id(), document.document())?;
+                        Ok(record)
+                    })
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                    document = document.with_source_evidence(record.entries);
+                }
                 // A module import answers the map and the captions of the
                 // source it read.
                 let (map, captions) = source_map.zip(captions).ok_or_else(|| {

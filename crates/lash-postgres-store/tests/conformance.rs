@@ -400,6 +400,7 @@ lash_conformance::artifact_store_reopenable_tests!(@catalogue {
             (lash_vm_abandoned_start_reclaims_module, "lash-vm-artifact-abandoned-start"),
             (lash_vm_carry_preserves_module, "lash-vm-artifact-carry"),
             (lash_vm_batch_holds_all_or_nothing, "lash-vm-artifact-batch"),
+            (lash_vm_holders_keep_what_they_name, "lash-vm-artifact-holders"),
             (lash_vm_ended_referrer_fences_late_publication, "lash-vm-artifact-referrer-fence"),
             (lash_vm_hostile_module_references_are_rejected, "lash-vm-artifact-hostile-reference"),
             (lash_vm_artifact_survives_reopen, "lash-vm-artifact-reopen"),

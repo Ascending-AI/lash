@@ -15,6 +15,8 @@ use lash_kernel_value::names::SourceMapId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::Instrument as _;
+
+mod evidence;
 use {lash_kernel_value::names::*, lash_kernel_value::package::*, lash_vocabulary::package::*};
 
 pub(super) async fn artifact_phase<T>(
@@ -361,37 +363,11 @@ impl KernelDocuments {
         claim: &ReferrerClaim,
         document: &IdentifiedDocument,
     ) -> Result<DocumentId, EnginePortError> {
-        let span = tracing::debug_span!("lash.artifacts.admit", document_id = %document.id(), document_bytes = document.body().len());
-        async {
-            self.check_identified_document(document)?;
-            let artifact = document_artifact(&document.id());
-            #[cfg(feature = "testing")]
-            {
-                lash_vm_client::packages::helper_document_work::published(document);
-                lash_vm_client::packages::helper_document_work::staged(document);
-            }
-            async {
-                self.store
-                    .hold_module_artifacts(
-                        claim,
-                        &[ModuleArtifactHold::Publish {
-                            module_ref: &artifact.artifact_ref,
-                            body: ModuleArtifactBody::Document(document.body()),
-                        }],
-                    )
-                    .await
-                    .inspect_err(store_write_refused)
-            }
-            .instrument(
-                tracing::debug_span!("lash.artifacts.store_write", document_id = %document.id()),
-            )
+        self.admit_with_evidence(claim, document, None)
             .await
-            .map_err(artifact_error)?;
-            Ok(document.id())
-        }
-        .instrument(span)
-        .await
+            .map(|(id, _)| id)
     }
+
     fn check_identified_document(
         &self,
         document: &IdentifiedDocument,
@@ -1162,10 +1138,23 @@ impl KernelDocuments {
             &ReachSelection::Start(start.selector.clone()),
         )
         .map_err(map_link_refusal)?;
-        let document = content
-            .document(content.link(start.link).map_err(map_link_refusal)?.document)
-            .map_err(map_link_refusal)?
-            .clone();
+        let id = content.link(start.link).map_err(map_link_refusal)?.document;
+        let shared = Arc::new(content.document(id).map_err(map_link_refusal)?.clone());
+        // The read carries the publication's own annotations, as its runs
+        // do; the stored document is not changed.
+        let evidence = self
+            .run_evidence(start.evidence, &BTreeMap::from([(id, Arc::clone(&shared))]))
+            .await?;
+        let mut document = Arc::try_unwrap(shared).unwrap_or_else(|shared| (*shared).clone());
+        if let Some(stored) = evidence.first() {
+            let record = lash_kernel_doc::EvidenceRecord::decode(&stored.body.0, stored.digest)
+                .map_err(|e| {
+                    EnginePortError::Refused(AdmissionRefusal::InvalidDocument {
+                        message: e.to_string(),
+                    })
+                })?;
+            document.source_evidence = record.entries;
+        }
         lash_kernel_check::WorkflowDocument::entered(document, start.clone(), self.helpers.as_ref())
             .map_err(|error| match error {
                 lash_kernel_check::WorkflowDocumentError::Refused(refusal) => {

@@ -90,6 +90,13 @@ where
     crate::module_artifact_store::batch_holds_all_or_nothing(make().open.artifacts).await;
 }
 
+pub async fn lash_vm_holders_keep_what_they_name<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    crate::module_artifact_store::holders_keep_what_they_name(make().open.artifacts).await;
+}
+
 pub async fn lash_vm_ended_referrer_fences_late_publication<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,

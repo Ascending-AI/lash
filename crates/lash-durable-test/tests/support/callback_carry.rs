@@ -460,6 +460,7 @@ fn run_callback_on(
                     LinkedStart {
                         link: next_link,
                         selector: StartSelector::Main,
+                        evidence: None,
                     },
             } = input.code
             else {

@@ -215,6 +215,7 @@ async fn execution_environment(
             &lash::process::LinkTarget::Linked(lash::package::LinkedStart {
                 link: function.callable.link,
                 selector: lash::package::StartSelector::Main,
+                evidence: None,
             }),
             &packages,
             &Default::default(),
@@ -1586,6 +1587,7 @@ async fn released_pin_publications_keep_the_typed_artifact_refusal() {
     let start = lash::package::LinkedStart {
         link: function.callable.link,
         selector: lash::package::StartSelector::Main,
+        evidence: None,
     };
     let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
         code: lash::vm::KernelInlineRequest::Linked { start },

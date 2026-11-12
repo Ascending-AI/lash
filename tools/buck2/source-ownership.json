@@ -62,6 +62,7 @@
         "tests/workflow_laws/packages.rs",
         "tests/workflow_laws/returned_lists.rs",
         "tests/workflow_laws/sleep_resume_at.rs",
+        "tests/workflow_laws/source_evidence.rs",
         "tests/workflow_laws/support.rs"
       ],
       "workflow_view_laws": [

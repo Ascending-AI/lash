@@ -375,6 +375,9 @@ impl Graph {
                 signature_origin = written.signature_origin;
                 implicit_text_conversions = written.implicit_text_conversions;
                 declared_locals = written.declared_locals;
+            } else if let Some(evidence) = origins.evidence.get(&callable.function) {
+                implicit_text_conversions = evidence.implicit_text_conversions.clone();
+                declared_locals = evidence.declared_locals.clone();
             }
             let start = lash_kernel_doc::snapshot::closure_at(document, site, run.helpers)
                 .and_then(|closure| closure.presentation.as_ref())

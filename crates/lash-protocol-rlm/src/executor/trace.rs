@@ -133,6 +133,7 @@ impl CellTrace {
                     lash_kernel_value::names::LinkedStart {
                         link,
                         selector: lash_kernel_value::names::StartSelector::Main,
+                        evidence: None,
                     },
                 ),
                 entry_name: "main".to_owned(),

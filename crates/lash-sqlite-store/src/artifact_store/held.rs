@@ -140,6 +140,8 @@ pub(super) struct HeldArtifact {
     /// The graph node kind the body is stored as; none for bytes.
     pub(super) node: Option<lash_core_store::checkpoint_graph::NodeKind>,
     pub(super) verified: bool,
+    /// What the artifact itself keeps alive, through the holder relation.
+    pub(super) holds: Vec<String>,
 }
 
 impl SqliteStore {
@@ -306,6 +308,30 @@ impl SqliteStore {
                         referrer.canonical_id()
                     ],
                 )?;
+                // Each holder's edges, after every artifact of the batch is
+                // stored: a target must be stored, in the batch or before.
+                for holder in artifacts.iter().filter(|artifact| !artifact.holds.is_empty()) {
+                    let targets = json_set(&holder.holds)?;
+                    let present: BTreeSet<String> = tx
+                        .statement(HELD_SQL.held.select_blob_refs.sql())?
+                        .query_map(params![MODULE_ARTIFACT_NAMESPACE, targets], |row| row.get(0))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    if let Some(missing) = holder.holds.iter().find(|target| !present.contains(*target)) {
+                        return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                            artifact_ref: missing.clone(),
+                        }));
+                    }
+                    crate::conn::cached_execute(
+                        tx,
+                        HELD_SQL.held.insert_dependency_edges.sql(),
+                        params![
+                            MODULE_ARTIFACT_NAMESPACE,
+                            targets,
+                            MODULE_ARTIFACT_NAMESPACE,
+                            holder.artifact_ref
+                        ],
+                    )?;
+                }
                 Ok(())
             })
             .await

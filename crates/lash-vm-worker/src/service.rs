@@ -68,6 +68,7 @@ pub(crate) fn perform(
                             .dialects
                             .get(&dialect)
                             .and_then(|package| package.function_values.clone()),
+                        evidence: None,
                     }
                 }
                 Some(Err(diagnostic)) => Response::DialectRefused(diagnostic),
@@ -88,12 +89,20 @@ pub(crate) fn perform(
                 Some(Err(diagnostic)) => Response::DialectRefused(diagnostic),
                 Some(Ok(lowered)) => {
                     embedding.documents.keep(lowered.document.clone(), None);
+                    let evidence = (!lowered.document.source_evidence.is_empty()).then(|| {
+                        lash_kernel_doc::EvidenceRecord {
+                            document: lowered.document.id(),
+                            entries: lowered.document.source_evidence.clone(),
+                        }
+                        .encode()
+                    });
                     Response::Lowered {
                         document: lowered.document.body().to_vec(),
                         source_map: lowered.source_map,
                         written: lowered.written,
                         captions: Some(lowered.captions),
                         function_values: None,
+                        evidence,
                     }
                 }
             }
@@ -104,9 +113,27 @@ pub(crate) fn perform(
             document,
             captions,
             options,
+            evidence,
         } => {
             let dialect = format.dialect();
-            let document = decoded_document(document)?;
+            let mut document = decoded_document(document)?;
+            if let Some(bytes) = evidence {
+                let record = lash_kernel_doc::EvidenceRecord::decode(
+                    &bytes,
+                    lash_kernel_doc::EvidenceRecord::id_of(&bytes),
+                )
+                .and_then(|record| {
+                    record.validate(document.identity(), &document)?;
+                    Ok(record)
+                })
+                .map_err(|error| {
+                    PoolError::refused(RunRefusal::Undecodable {
+                        input: RunInput::Document,
+                        detail: Detail::new(error),
+                    })
+                })?;
+                document.source_evidence = record.entries;
+            }
             match embedding
                 .dialects
                 .get(dialect)
@@ -377,6 +404,7 @@ mod tests {
             document: document.canonical_bytes(),
             captions: None,
             options: Default::default(),
+            evidence: None,
         };
         let encoded = EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"));
         let response = perform(&embedding, &encoded).expect("print response");
@@ -488,6 +516,7 @@ mod tests {
                         source_map,
                         ..Default::default()
                     },
+                    evidence: None,
                 };
                 let encoded = EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"));
                 let response = perform(&embedding, &encoded).expect("print response");

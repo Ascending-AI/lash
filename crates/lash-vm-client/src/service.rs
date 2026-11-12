@@ -67,6 +67,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         captions: Option<lash_kernel_doc::Captions>,
         options: lash_kernel_dialect::PrintOptions,
+        /// `document`'s source evidence (an encoded `EvidenceRecord`), which
+        /// spells the declared types its bytes do not carry.
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_bytes")]
+        evidence: Option<Vec<u8>>,
     },
     /// Read exported source back against `base` (its token body), the
     /// document it was printed from, without admission or helper resolution.
@@ -241,6 +245,13 @@ pub enum Response {
         /// the functions a cell binds for later cells
         /// ([`lash_kernel_dialect::Dialect::function_values`]).
         function_values: Option<lash_kernel_doc::FunctionRepresentation>,
+        /// The source evidence typed authoring kept beside a workflow
+        /// import's document, as [`lash_kernel_doc::EvidenceRecord`] bytes;
+        /// the document's bytes never hold it. The host checks it against
+        /// the document before it keeps it. A cell answers none: its
+        /// functions carry what the source wrote in `written`.
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_bytes")]
+        evidence: Option<Vec<u8>>,
     },
     Printed(lash_kernel_dialect::PrintedSource),
     /// The exact callable or main region has no authored source spelling.

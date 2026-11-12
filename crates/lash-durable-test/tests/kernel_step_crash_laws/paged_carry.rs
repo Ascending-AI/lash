@@ -495,6 +495,7 @@ async fn atomic_carry(tier: super::served::Tier) {
                 start: LinkedStart {
                     link,
                     selector: StartSelector::Main,
+                    evidence: None,
                 },
             },
             args: Default::default(),
@@ -701,7 +702,8 @@ async fn atomic_carry(tier: super::served::Tier) {
             lash_vm_runtime::process::InlineRequest::Linked {
                 start: LinkedStart {
                     link: link_b,
-                    selector: StartSelector::Main
+                    selector: StartSelector::Main,
+                    evidence: None,
                 }
             }
         );

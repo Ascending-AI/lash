@@ -312,6 +312,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         dialect: DIALECT.into(),
         document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
+        evidence: Vec::new(),
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
@@ -366,6 +367,7 @@ fn resumed(
         dialect: dialect.into(),
         document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
+        evidence: Vec::new(),
         from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
         bounds: bounds(),
         binding: BINDING,

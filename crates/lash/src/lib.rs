@@ -266,7 +266,7 @@ pub mod sync {
     pub use lash_core::sync::*;
 }
 mod send;
-pub use lash_kernel_value::content_ids::InvalidDigest;
+pub use lash_kernel_value::content_ids::{EvidenceSetId, InvalidDigest, SourceEvidenceId};
 pub use lash_vocabulary::identity::RunId;
 mod session;
 mod session_binding;

@@ -69,6 +69,13 @@ pub enum InlineRequest {
     },
 }
 impl InlineRequest {
+    /// The publication's evidence set a linked start names.
+    pub fn evidence(&self) -> Option<lash_kernel_value::EvidenceSetId> {
+        match self {
+            Self::Linked { start } => start.evidence,
+            Self::Callable { .. } | Self::Unlinked { .. } => None,
+        }
+    }
     pub fn linked(
         &self,
     ) -> Option<(
@@ -114,6 +121,21 @@ impl InlineRequest {
             .into_iter()
             .map(documents::link_artifact)
             .collect();
+        // A run of a publication keeps the evidence it started with: the
+        // set rides with its definition onto the run's record.
+        if let Self::Linked {
+            start:
+                lash_kernel_value::names::LinkedStart {
+                    evidence: Some(set),
+                    ..
+                },
+        } = self
+        {
+            artifacts.push(lash_core::ArtifactName {
+                store: lash_core::ArtifactStoreId::KernelDocument,
+                artifact_ref: lash_kernel_doc::EvidenceSet::artifact_ref(*set),
+            });
+        }
         if let Self::Callable { origin, .. } = self {
             artifacts.extend(
                 origin

@@ -311,6 +311,111 @@ pub async fn batch_holds_all_or_nothing(store: Arc<dyn ModuleArtifactStore>) {
     }
 }
 
+/// FIG-7711: a holder artifact keeps the artifacts it names for as long as
+/// any referrer holds it, though no referrer holds them directly: a run that
+/// retains a publication's evidence set keeps its records after the
+/// publication ends, and ending the run reclaims both. A holder naming an
+/// artifact that is not stored refuses its whole batch.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn holders_keep_what_they_name(store: Arc<dyn ModuleArtifactStore>) {
+    let [record, set, other] = ["holder-record", "holder-set", "holder-other"].map(module);
+    let bytes = |artifact: &SampleArtifact| artifact.to_store_bytes().expect("module bytes");
+    let (record_bytes, set_bytes, other_bytes) = (bytes(&record), bytes(&set), bytes(&other));
+    let (publication, publication_claim) = host_claim();
+    store
+        .hold_module_artifacts(
+            &publication_claim,
+            &[
+                ModuleArtifactHold::Publish {
+                    module_ref: record.key(),
+                    body: ModuleArtifactBody::Bytes(&record_bytes),
+                },
+                ModuleArtifactHold::Holder {
+                    module_ref: set.key(),
+                    body: ModuleArtifactBody::Bytes(&set_bytes),
+                    holds: &[record.key()],
+                },
+            ],
+        )
+        .await
+        .expect("publish the holder and what it names");
+    let (run, run_claim) = host_claim();
+    store
+        .hold_module_artifacts(
+            &run_claim,
+            &[ModuleArtifactHold::Retain {
+                module_ref: set.key(),
+            }],
+        )
+        .await
+        .expect("retain the holder");
+    store
+        .end_module_referrer(&end(publication))
+        .await
+        .expect("end the publication");
+    for (artifact, bytes) in [(&record, &record_bytes), (&set, &set_bytes)] {
+        assert_eq!(
+            store
+                .get_module_artifact(artifact.key())
+                .await
+                .expect("read"),
+            Some(bytes.clone()),
+            "the retained holder keeps `{}`",
+            artifact.key()
+        );
+    }
+    store
+        .end_module_referrer(&end(run))
+        .await
+        .expect("end the run");
+    for artifact in [&record, &set] {
+        assert_eq!(
+            store
+                .get_module_artifact(artifact.key())
+                .await
+                .expect("read"),
+            None,
+            "the last holder's end reclaims `{}`",
+            artifact.key()
+        );
+    }
+    let absent = module("holder-absent");
+    let (_, claim) = host_claim();
+    let refusal = store
+        .hold_module_artifacts(
+            &claim,
+            &[
+                ModuleArtifactHold::Publish {
+                    module_ref: other.key(),
+                    body: ModuleArtifactBody::Bytes(&other_bytes),
+                },
+                ModuleArtifactHold::Holder {
+                    module_ref: set.key(),
+                    body: ModuleArtifactBody::Bytes(&set_bytes),
+                    holds: &[absent.key()],
+                },
+            ],
+        )
+        .await
+        .expect_err("a holder naming nothing stored");
+    assert!(
+        matches!(&refusal, ArtifactStoreError::ArtifactMissing { artifact_ref } if artifact_ref == absent.key()),
+        "{refusal:?}"
+    );
+    for artifact in [&other, &set] {
+        assert_eq!(
+            store
+                .get_module_artifact(artifact.key())
+                .await
+                .expect("read"),
+            None
+        );
+    }
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance law validates each store step"

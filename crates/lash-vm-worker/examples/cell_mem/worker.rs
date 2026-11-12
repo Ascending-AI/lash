@@ -152,6 +152,7 @@ pub(super) fn run(
                 program.document.canonical_bytes(),
             )),
             definitions: Vec::new(),
+            evidence: Vec::new(),
             from: StartFrom::Fresh(wire::encode(
                 PayloadKind::Start,
                 &StartWire::of(

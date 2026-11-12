@@ -937,10 +937,12 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for SqliteS
                     artifact_ref: artifact.module_ref().to_owned(),
                     bytes: artifact.body().map(|body| body.bytes().to_vec()),
                     node: artifact.body().and_then(|body| body.node_kind()),
-                    verified: matches!(
-                        artifact,
-                        lash_execution_contracts::module_artifacts::ModuleArtifactHold::Publish { .. }
-                    ),
+                    verified: artifact.verified(),
+                    holds: artifact
+                        .holds()
+                        .iter()
+                        .map(|target| (*target).to_owned())
+                        .collect(),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

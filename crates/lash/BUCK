@@ -1257,6 +1257,7 @@ lash_rust_integration_test(
         "tests/workflow_laws/packages.rs",
         "tests/workflow_laws/returned_lists.rs",
         "tests/workflow_laws/sleep_resume_at.rs",
+        "tests/workflow_laws/source_evidence.rs",
         "tests/workflow_laws/support.rs",
     ],
     data_exclude = [
@@ -1505,15 +1506,15 @@ export_file(
 )
 
 export_file(
-    name = "host-schemas/kernel-helper-run-upgrade/v2.d.ts",
-    src = "host-schemas/kernel-helper-run-upgrade/v2.d.ts",
+    name = "host-schemas/kernel-helper-run-upgrade/v3.d.ts",
+    src = "host-schemas/kernel-helper-run-upgrade/v3.d.ts",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/kernel-helper-run-upgrade/v2.schema.json",
-    src = "host-schemas/kernel-helper-run-upgrade/v2.schema.json",
+    name = "host-schemas/kernel-helper-run-upgrade/v3.schema.json",
+    src = "host-schemas/kernel-helper-run-upgrade/v3.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
@@ -1645,43 +1646,43 @@ export_file(
 )
 
 export_file(
-    name = "host-schemas/turn-activity/v9.d.ts",
-    src = "host-schemas/turn-activity/v9.d.ts",
+    name = "host-schemas/turn-activity/v10.d.ts",
+    src = "host-schemas/turn-activity/v10.d.ts",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/turn-activity/v9.schema.json",
-    src = "host-schemas/turn-activity/v9.schema.json",
+    name = "host-schemas/turn-activity/v10.schema.json",
+    src = "host-schemas/turn-activity/v10.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-page-reply/v11.schema.json",
-    src = "host-schemas/worker-page-reply/v11.schema.json",
+    name = "host-schemas/worker-page-reply/v12.schema.json",
+    src = "host-schemas/worker-page-reply/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-page-request/v11.schema.json",
-    src = "host-schemas/worker-page-request/v11.schema.json",
+    name = "host-schemas/worker-page-request/v12.schema.json",
+    src = "host-schemas/worker-page-request/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-seal-batch/v11.schema.json",
-    src = "host-schemas/worker-seal-batch/v11.schema.json",
+    name = "host-schemas/worker-seal-batch/v12.schema.json",
+    src = "host-schemas/worker-seal-batch/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-start/v11.schema.json",
-    src = "host-schemas/worker-start/v11.schema.json",
+    name = "host-schemas/worker-start/v12.schema.json",
+    src = "host-schemas/worker-start/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )

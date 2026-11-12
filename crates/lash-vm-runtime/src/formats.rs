@@ -41,13 +41,13 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 /// version_surface = "migrate"
 /// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
 #[cfg(not(feature = "synthetic-next"))]
-pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 7;
+pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 8;
 /// The synthetic successor of kernel document schema version 7.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"
 /// version_unguarded = "kernel token encoding: pre-1.0 changes require a reset, never a record upcaster"
-pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 8;
+pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 9;
 
 #[cfg(not(feature = "synthetic-next"))]
 const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION);
@@ -85,13 +85,13 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 18;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 19;
 /// The synthetic successor's parked-run format.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 19;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 20;
 
 /// A saved function: a function a session keeps between cells, held in an
 /// immutable FunctionBundle node with every saved function it uses. Its
@@ -119,7 +119,7 @@ pub const KERNEL_PARKED_STATE_VERSION: u32 = 19;
 /// format_manifest = "KernelSavedFunction"
 /// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"
 /// version_surface = "migrate"
-pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 7;
+pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 8;
 
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored

@@ -318,6 +318,7 @@ async fn a_callable_reports_root_and_captured_operation_uses_before_save_and_lin
         .inspect_target(&lash::process::LinkTarget::Linked(LinkedStart {
             link: helper.callable.link,
             selector: StartSelector::Export(Name::new("saved")),
+            evidence: None,
         }))
         .await
         .unwrap();

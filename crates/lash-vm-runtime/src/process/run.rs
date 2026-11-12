@@ -507,6 +507,11 @@ async fn kernel_run(
             .as_ref()
             .map_or_else(|| "entry".to_owned(), |parked| parked.page.root.to_hex()),
     });
+    let evidence = engine
+        .documents
+        .run_evidence(process_input.code.evidence(), &content.documents)
+        .await
+        .map_err(|error| RunFault(error.to_string()))?;
     let machines = lash_vm_client::RemoteMachines::new(
         engine.workers.clone(),
         VmOwner::new(format!("process:{}", run.process)),
@@ -534,6 +539,7 @@ async fn kernel_run(
             modes,
             host: Vec::new(),
             save: None,
+            evidence,
         },
         settings.bounds(),
         closure,

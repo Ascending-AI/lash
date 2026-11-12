@@ -608,10 +608,27 @@ impl<'embedding> Server<'embedding> {
                 })
             })
             .transpose()?;
-        let function_origins = save
+        let mut function_origins = save
             .as_ref()
             .map(|save| lash_kernel_vm::interface::FunctionOrigins::of(program.link, &save.written))
             .unwrap_or_default();
+        // The publication's evidence reaches crossing whether or not the
+        // run saves: each record is checked against the run's own document.
+        for stored in &start.evidence {
+            let document = program.documents.get(&stored.document).ok_or_else(|| {
+                PoolError::refused(RunRefusal::Undecodable {
+                    input: RunInput::Start,
+                    detail: Detail::new("source evidence names a document the run does not load"),
+                })
+            })?;
+            let record = self.embedding.evidence.record(stored, document)?;
+            function_origins.evidence.extend(
+                record
+                    .entries
+                    .iter()
+                    .map(|(function, evidence)| (*function, evidence.clone())),
+            );
+        }
         let captions = save
             .as_ref()
             .map(|save| {

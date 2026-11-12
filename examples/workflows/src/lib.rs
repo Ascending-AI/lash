@@ -473,6 +473,7 @@ pub(crate) fn render_with(
                     LinkedStart {
                         link,
                         selector: entry,
+                        evidence: None,
                     },
                     env.library,
                 )?;

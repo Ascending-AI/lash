@@ -40,8 +40,8 @@ pub use message::{
     BorrowedParentFrame, BorrowedParentMessage, BoundReached, Charge, CheckpointStart, Delivery,
     EncodedPayload, HostReadId, HostReadKind, LimitDecision, LimitedBound, MemoryMeter,
     MessageFence, MessageHeader, ParentFrame, ParentMessage, PoolStart, PoolStartParts,
-    PoolStarted, RunBounds, RunMeters, Start, StartFrom, StoredDefinition, WorkerFrame,
-    WorkerMessage, WorkerPhase, WorkerResources, WorkerWork,
+    PoolStarted, RunBounds, RunMeters, Start, StartFrom, StoredDefinition, StoredEvidence,
+    WorkerFrame, WorkerMessage, WorkerPhase, WorkerResources, WorkerWork,
 };
 pub use state::VmOwner;
 pub use version::{

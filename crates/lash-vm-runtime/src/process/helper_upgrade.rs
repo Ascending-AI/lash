@@ -162,6 +162,7 @@ pub(super) fn rewritten_code(
             start: LinkedStart {
                 link: planned.links[&start.link],
                 selector: start.selector.clone(),
+                evidence: start.evidence,
             },
         },
         super::InlineRequest::Callable {

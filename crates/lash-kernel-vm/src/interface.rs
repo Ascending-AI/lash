@@ -902,6 +902,9 @@ pub struct FunctionOrigins {
     /// an earlier cell made keeps that cell's link and creation site, which
     /// the running cell's facts do not name.
     pub functions: BTreeMap<FunctionId, lash_kernel_dialect::Written>,
+    /// The source evidence the run's publication retained, by function:
+    /// what crossing records of a function no saved origin names.
+    pub evidence: BTreeMap<FunctionId, lash_kernel_doc::SourceEvidence>,
 }
 
 impl FunctionOrigins {

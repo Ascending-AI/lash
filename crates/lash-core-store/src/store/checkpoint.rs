@@ -31,14 +31,14 @@ mod arc_serde_bytes {
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "SessionCheckpointManifest"
-pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 3;
+pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 4's shape; its registered lift reads what N wrote.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
 /// format_manifest = "SessionCheckpointManifest"
-pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 4;
+pub const SESSION_CHECKPOINT_SCHEMA_VERSION: u32 = 5;
 
 /// Encoding implemented for checkpoint-component logical bytes in this build.
 ///

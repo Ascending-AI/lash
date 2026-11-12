@@ -99,6 +99,10 @@
       "pattern": "^e:([0-9a-f]{2})+$",
       "type": "string"
     },
+    "EvidenceSetId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "ExecutionBoundFact": {
       "description": "The bound that ended a kernel execution, with only the receipts received.",
       "properties": {
@@ -243,8 +247,19 @@
     },
     "LinkedStart": {
       "additionalProperties": false,
-      "description": "The immutable Link and selected start that determine process definition identity.",
+      "description": "The immutable Link and selected start that determine process definition\nidentity, and the publication's source evidence a run of it reads.",
       "properties": {
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceSetId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The publication's source evidence: absent when the published document\ncarried none, and then not serialized, so an evidence-less start keeps\nits encoding. Evidence never changes what runs."
+        },
         "link": {
           "$ref": "#/$defs/LinkId"
         },
