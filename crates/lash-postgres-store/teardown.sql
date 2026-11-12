@@ -178,7 +178,7 @@ DROP FUNCTION IF EXISTS lash_owner_commit CASCADE;
 
 DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
 
-DROP FUNCTION IF EXISTS lash_artifact_lock_ends CASCADE;
+DROP FUNCTION IF EXISTS lash_artifact_lock_plan CASCADE;
 
 DROP FUNCTION IF EXISTS lash_lock_referrer CASCADE;
 

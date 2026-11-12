@@ -423,6 +423,27 @@ pub(super) async fn apply_owner(
         graph::install(tx, &checked).await?;
     }
     let (process_view, locked) = super::process_view::refresh_preimage(tx, write).await?;
+    let ending = crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
+        .await
+        .map_err(store_failure)?;
+    // Every artifact lock the transaction's ends, carries and environment
+    // acquisitions take, in one sorted acquisition before any of them,
+    // read off the whole write (FIG-7700).
+    let (mut plan, transitions) =
+        super::lock_plan::of_writes(write.actor(), write.domain(), &ending);
+    crate::runtime_persistence::plan_carries_tx(tx, &mut plan, transitions.iter())
+        .await
+        .map_err(store_failure)?;
+    // The plan reads each ended leaf frame under its session's write
+    // authority, taken first as every session writer takes it.
+    for (_, session) in super::lock_plan::session_writes(&plan).map_err(store_failure)? {
+        super::PostgresDurableStore::lock_session_writes(tx, &session)
+            .await
+            .map_err(store_failure)?;
+    }
+    let planned = crate::artifact_store::lock_plan_tx(tx, &plan)
+        .await
+        .map_err(store_failure)?;
     let mut committing = Committing {
         process_views: lash_durable::domain::processes::ProcessPostimages::from_view(process_view),
         checkpoint_ref_chunk: pools.maintenance.checkpoint_ref_chunk as usize,
@@ -432,35 +453,9 @@ pub(super) async fn apply_owner(
         fleet,
         retired: Retired::default(),
         configs: &pools.configs,
-        ending: Vec::new(),
         locked: std::sync::Mutex::new(locked),
+        planned,
     };
-    let ending = crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
-        .await
-        .map_err(store_failure)?;
-    // The artifact locks of every end the transaction runs are taken in
-    // one sorted acquisition before any of them (FIG-7700): by its head
-    // commit, which alone knows the frames it leaves, else now.
-    if write
-        .domain()
-        .iter()
-        .any(|domain| matches!(domain, DomainWrite::SessionCommit(_)))
-    {
-        committing.ending = ending;
-    } else {
-        crate::artifact_store::lock_ends_tx(
-            tx,
-            &ending
-                .iter()
-                .cloned()
-                .map(lash_core_store::artifact_referrer::ArtifactReferrer::Execution)
-                .collect::<Vec<_>>(),
-            &ending.iter().collect::<Vec<_>>(),
-            &[],
-        )
-        .await
-        .map_err(store_failure)?;
-    }
     let mut session_heads = Vec::new();
     for domain in write.domain() {
         committing.follow(domain);

@@ -254,7 +254,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &park::SET_PARK,
         // A turn's terminal (FIG-5942).
         &turns::LOCK_KEY,
-        &turns::LOCK_ENDS,
+        &turns::LOCK_PLAN,
         &turns::END_RUN,
         &turns::MARK_TERMINAL,
         &turns::RETENTION,
@@ -522,7 +522,7 @@ impl Call {
         // The executions the commit ends are locked next, as publication
         // locks them: referrer, then artifact.
         steps.extend(
-            turns::lock_ending_executions(tx.domain())
+            turns::lock_ending_executions(tx.actor(), tx.domain())
                 .ok()?
                 .iter()
                 .map(step_json),

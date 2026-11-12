@@ -238,6 +238,8 @@ async fn register_within(
         {
             Err(refused(error.to_string()))
         }
+        // A lock race PostgreSQL aborted is contention, which replay runs
+        // again as the whole commit (FIG-7700).
         Err(error) => Err(DurableError::Store(StoreFailure {
             code: match &error {
                 lash_execution_contracts::plugin_error::PluginError::StoreUnavailable { fault } => {
@@ -245,7 +247,12 @@ async fn register_within(
                 }
                 _ => None,
             },
-            kind: StoreFailureKind::Unavailable,
+            kind: match &error {
+                lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                    fault: lash_core_store::store::StoreFault::Contended,
+                } => StoreFailureKind::Contended,
+                _ => StoreFailureKind::Unavailable,
+            },
             message: error.to_string(),
         })),
     }

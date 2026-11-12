@@ -923,27 +923,61 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, lash_execution_contracts::plugin_error::PluginError>>,
 {
+    retry_while(
+        fence,
+        |error: &lash_execution_contracts::plugin_error::PluginError| {
+            matches!(
+                error,
+                lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
+                    fault: lash_core_store::store::StoreFault::Contended,
+                }
+            )
+        },
+        attempt,
+    )
+    .await
+}
+
+/// [`retry_contended`] for an artifact writer, whose contention is
+/// [`lash_core_store::store::StoreFault::Contended`] too (FIG-7700).
+pub(crate) async fn retry_artifact_contended<T, F, Fut>(
+    fence: &WriterFence,
+    attempt: F,
+) -> Result<T, lash_execution_contracts::module_artifacts::ArtifactStoreError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, lash_execution_contracts::module_artifacts::ArtifactStoreError>>,
+{
+    retry_while(
+        fence,
+        |error: &lash_execution_contracts::module_artifacts::ArtifactStoreError| {
+            matches!(
+                error,
+                lash_execution_contracts::module_artifacts::ArtifactStoreError::StoreFault(
+                    lash_core_store::store::StoreFault::Contended
+                )
+            )
+        },
+        attempt,
+    )
+    .await
+}
+
+async fn retry_while<T, E, F, Fut>(
+    fence: &WriterFence,
+    contended: impl Fn(&E) -> bool,
+    attempt: F,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
     let deadline = fence
         .state
         .prelude
         .deadline()
         .map(|deadline| tokio::time::Instant::now() + deadline);
-    fence
-        .state
-        .retry
-        .run(
-            deadline,
-            |error: &lash_execution_contracts::plugin_error::PluginError| {
-                matches!(
-                    error,
-                    lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
-                        fault: lash_core_store::store::StoreFault::Contended,
-                    }
-                )
-            },
-            attempt,
-        )
-        .await
+    fence.state.retry.run(deadline, contended, attempt).await
 }
 
 /// A store refusal as an attempt's failure: contention rolled the attempt

@@ -72,6 +72,7 @@ mod claim_facts;
 pub(crate) mod environment;
 mod graph;
 mod head_commit;
+mod lock_plan;
 pub(crate) mod packages;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
@@ -130,10 +131,10 @@ pub(crate) struct Committing<'a> {
     /// The storage's validated configurations, which a head commit reuses
     /// read-only.
     pub(crate) configs: &'a lash_core_store::store_backend_support::ConfigCache,
-    /// The executions the transaction ends, whose artifact locks its head
-    /// commit takes with its own frames' (FIG-7700); empty when the
-    /// transaction took them already.
-    pub(crate) ending: Vec<lash_protocol_types::EffectJournalIdentity>,
+    /// The artifact lock plan the transaction took from its whole write
+    /// before its first artifact lock (FIG-7700), which its head commits
+    /// check their frames and carries against.
+    pub(crate) planned: crate::artifact_store::Planned,
     /// The actor's own process row, as the transaction's lock on it
     /// leaves it, while each write since is one that keeps it current
     /// (FIG-7701); `None` once a write could have changed it unseen.

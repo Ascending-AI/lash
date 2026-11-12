@@ -262,10 +262,16 @@ pub(super) static TERMINAL_STATE: Entry = Entry::new(
 .collecting(Collect::PhaseEnd("checkpoint_ref"))
 .collecting(Collect::Closure("working_execution_ref"))
 .collecting(Collect::Closures("closure_roots"));
-/// The artifact locks of a transaction's ends, in one sorted acquisition.
-pub(super) static LOCK_ENDS: Entry = Entry::new(
-    || &crate::artifact_store::artifact_sql().postgres.lock_ends,
+/// A transaction's artifact lock plan, in one sorted acquisition
+/// (FIG-7700).
+pub(super) static LOCK_PLAN: Entry = Entry::new(
+    || &crate::artifact_store::artifact_sql().postgres.lock_plan,
     &[
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
         Ty::Texts,
         Ty::Texts,
         Ty::Texts,
@@ -307,11 +313,12 @@ pub(super) fn end_local_step(
 
 /// The locks of the executions `writes` end, as steps, in key order:
 /// taken before a head commit takes frame and artifact locks, as
-/// publication takes them referrer first. Then every artifact lock their
-/// ends take, in one sorted acquisition (FIG-7700): a one-call commit
-/// leaves no frame and carries nothing, so its executions' ends are all the
-/// ends it runs.
+/// publication takes them referrer first. Then the transaction's artifact
+/// lock plan, read off the whole of `writes` committed by `actor`
+/// (FIG-7700): a one-call commit carries nothing and acquires no
+/// environment, so the plan never asks for an environment's modules.
 pub(super) fn lock_ending_executions(
+    actor: &lash_durable::ActorKey,
     writes: &[lash_durable::DomainWrite],
 ) -> Result<Vec<Step>, lash_core_store::store::StoreError> {
     let ending = crate::obligation_ledger::ending_executions(writes)?;
@@ -326,21 +333,24 @@ pub(super) fn lock_ending_executions(
             )
         })
         .collect();
-    if !ending.is_empty() {
-        let none: [&str; 0] = [];
+    let journals: Vec<_> = ending
+        .into_iter()
+        .filter_map(|referrer| match referrer {
+            ArtifactReferrer::Execution(journal) => Some(journal),
+            _ => None,
+        })
+        .collect();
+    let (plan, _) = super::lock_plan::of_writes(actor, writes, &journals);
+    if !plan.is_empty() {
+        for (actor, session) in super::lock_plan::session_writes(&plan)? {
+            steps.push(Step::any(
+                &super::head_commit::LOCK_SESSION,
+                vec![Value::text(actor.as_str()), Value::text(session.as_str())],
+            ));
+        }
         steps.push(Step::any(
-            &LOCK_ENDS,
-            vec![
-                Value::texts(ending.iter().map(|referrer| referrer.kind().as_str())),
-                Value::texts(ending.iter().map(ArtifactReferrer::canonical_id)),
-                Value::texts(ending.iter().filter_map(|referrer| match referrer {
-                    ArtifactReferrer::Execution(journal) => Some(journal.key()),
-                    _ => None,
-                })),
-                Value::texts(crate::artifact_store::LocalEndArguments::NAMESPACES),
-                Value::texts(none),
-                Value::texts(none),
-            ],
+            &LOCK_PLAN,
+            plan.arguments().into_iter().map(Value::texts).collect(),
         ));
     }
     Ok(steps)
@@ -728,7 +738,7 @@ pub(super) async fn apply_session_commit(
         &commit.steps(),
         commit.checkpoint_ref_chunk,
         commit.configs,
-        &commit.ending,
+        Some(&commit.planned),
     )
     .await
     .map_err(|error| refused(&error))

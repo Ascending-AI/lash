@@ -1565,9 +1565,9 @@ DECLARE
     v_debts TEXT[];
     v_environment TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry d985b98a02a29ec0); a call
+    -- Generated from this build's statements (registry 60d035997862f9b4); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'd985b98a02a29ec0'
+    IF p_registry IS DISTINCT FROM '60d035997862f9b4'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2017,9 +2017,9 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
-        WHEN 'artifact_referrer_edge.lock_ends' THEN
+        WHEN 'artifact_referrer_edge.lock_plan' THEN
             v_rows := 0;
-            FOR v_row IN SELECT lash_artifact_lock_ends((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) LOOP
+            FOR v_row IN SELECT lash_artifact_lock_plan((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->6) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->7) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->8) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->9) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->10) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2958,16 +2958,29 @@ BEGIN
     RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
 END
 $lash_artifact_end_local$;
-CREATE OR REPLACE FUNCTION lash_artifact_lock_ends(
+CREATE OR REPLACE FUNCTION lash_artifact_lock_plan(
     p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[],
-    p_carry_namespaces text[], p_carry_refs text[]
-) RETURNS void LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_ends$
+    p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[],
+    p_sessions text[], p_envs text[], p_supplied text[]
+) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_plan$
 DECLARE
     v_refs jsonb;
+    v_held jsonb;
+    v_envs jsonb;
+    v_missing jsonb;
     held record;
 BEGIN
+    -- The caller holds each session's write authority: its leaf frame is
+    -- the one its head names until this transaction commits.
     SELECT COALESCE(jsonb_agg(jsonb_build_array(ended.kind, ended.id)), '[]'::jsonb) INTO v_refs
         FROM unnest(p_kinds, p_ids) AS ended(kind, id);
+    SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array('frame_environment',
+            '[' || to_json(head.session_id)::TEXT || ',' || to_json(leaf.frame_node_id)::TEXT || ']')), '[]'::jsonb)
+        INTO v_refs
+        FROM lash_session_head AS head JOIN lash_session_revisions AS revision
+            ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+        JOIN lash_graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
+        WHERE head.session_id = ANY(p_sessions) AND leaf.frame_node_id IS NOT NULL;
     SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(gated.referrer_kind, gated.referrer_id)), '[]'::jsonb)
         INTO v_refs
         FROM (SELECT referrer_kind, referrer_id, gate_execution, cleanup_json::jsonb AS body
@@ -2975,16 +2988,42 @@ BEGIN
             WHERE referrer_kind = 'frame_environment' AND gate_execution = ANY(p_gates)) gated
         WHERE gated.body->>'plan' = 'ended' AND gated.body->>'gate' = gated.gate_execution
             AND gated.body->'carries' = '[]'::jsonb;
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(named.kind, named.id)), '[]'::jsonb) INTO v_held
+        FROM unnest(p_held_kinds, p_held_ids) AS named(kind, id);
     FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
-        FROM jsonb_array_elements(v_refs) ORDER BY kind, id LOOP
+        FROM jsonb_array_elements(v_refs || v_held) ORDER BY kind, id LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
     END LOOP;
-    -- This statement starts after the referrer lock waits.
+    -- This statement starts after the referrer lock waits: each acquired
+    -- environment's head, the body it names and whether that body's
+    -- closure is stored.
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(env.ref, stored.body_ref,
+            EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
+                WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref))), '[]'::jsonb)
+        INTO v_envs
+        FROM (SELECT DISTINCT ref FROM unnest(p_envs) AS named(ref)) env
+        LEFT JOIN lash_lash_vm_artifacts stored
+            ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = env.ref;
+    -- A closure acquisition stores is the head's modules, which only the
+    -- client reads: ask for them before any artifact lock.
+    SELECT COALESCE(jsonb_agg(planned.value->>0), '[]'::jsonb) INTO v_missing
+        FROM jsonb_array_elements(v_envs) planned
+        WHERE planned.value->>1 IS NOT NULL AND NOT (planned.value->>2)::boolean
+            AND NOT (planned.value->>0 = ANY(p_supplied));
+    IF jsonb_array_length(v_missing) > 0 THEN
+        RETURN jsonb_build_object('ended', v_refs, 'missing', v_missing);
+    END IF;
     FOR held IN WITH RECURSIVE reach(namespace, artifact_ref) AS (
             SELECT edge.namespace, edge.artifact_ref FROM lash_artifact_referrer_edges edge
             JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
                 AND edge.referrer_id = ref.value->>1
             WHERE edge.namespace = ANY(p_namespaces)
+            UNION
+            SELECT 'process_execution_env', planned.value->>0 FROM jsonb_array_elements(v_envs) planned
+            WHERE planned.value->>1 IS NOT NULL
+            UNION
+            SELECT 'env_closure', planned.value->>1 FROM jsonb_array_elements(v_envs) planned
+            WHERE planned.value->>1 IS NOT NULL
             UNION
             SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
             JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
@@ -2995,8 +3034,22 @@ BEGIN
         ORDER BY namespace, artifact_ref LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
     END LOOP;
+    -- This statement starts after every artifact lock wait. An environment
+    -- whose head or closure moved before its locks were taken would lock
+    -- out of this plan: the transaction retries as contended.
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_envs) planned
+        LEFT JOIN lash_lash_vm_artifacts stored
+            ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = planned.value->>0
+        WHERE stored.body_ref IS DISTINCT FROM planned.value->>1
+            OR EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
+                WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref)
+                IS DISTINCT FROM (planned.value->>2)::boolean) THEN
+        RAISE EXCEPTION 'an acquired environment moved under its artifact lock plan'
+            USING ERRCODE = '40001';
+    END IF;
+    RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
 END
-$lash_artifact_lock_ends$;
+$lash_artifact_lock_plan$;
 CREATE OR REPLACE FUNCTION lash_lock_referrer(p_kind text, p_id text)
 RETURNS boolean LANGUAGE plpgsql VOLATILE AS $lash_lock_referrer$
 BEGIN
@@ -3165,7 +3218,7 @@ DECLARE
     v_when JSONB;
     v_debts TEXT[];
 BEGIN
-    IF p_registry IS DISTINCT FROM 'd985b98a02a29ec0'
+    IF p_registry IS DISTINCT FROM '60d035997862f9b4'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_register_process_execution: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;

@@ -1039,3 +1039,498 @@ async fn postgres_frames_one_commit_leaves_never_deadlock_a_closure_publisher() 
         );
     }
 }
+
+/// Claim `session`'s actor for owner writes, as a node claims it: its key
+/// and epoch. Heads committed through the store path come first.
+async fn claim_owner(
+    storage: &PostgresStorage,
+    session: &SessionId,
+) -> (lash_durable::ActorKey, lash_durable::Epoch) {
+    use lash_durable::DurableStore as _;
+    let store = storage.durable_store();
+    let node = store
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("lock-plan-owner"),
+            decodes: vec![
+                lash_durable::FormatSet::unstarted_session(),
+                lash_durable::FormatSet::new(lash_durable::domain::SESSION_ACTOR_FORMATS),
+            ],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 60_000,
+        })
+        .await
+        .expect("register the owner's node");
+    let actor = lash_durable::ActorKey::session(session.as_str()).expect("actor key");
+    let mut wake = lash_durable::MailTx::new();
+    wake.wake(actor.clone());
+    store
+        .commit_mail(wake, lash_durable::CommitLabel::new("law.wake"))
+        .await
+        .expect("wake the actor");
+    let epoch = store.claim(&node, 1).await.expect("claim the actor")[0].epoch;
+    (actor, epoch)
+}
+
+/// Write `commit` on `tx` as its owner's head commit.
+fn write_head(tx: &mut lash_durable::ActorTx, commit: &lash_core_store::store::RuntimeCommit) {
+    let encoded = lash_core_store::store::encode_session_commit(commit).expect("encode the head");
+    match encoded.descriptor {
+        Some(descriptor) => {
+            tx.stage([descriptor]);
+        }
+        None => {
+            if let Some(root) = encoded.execution {
+                tx.require(root);
+            }
+        }
+    }
+    tx.write(lash_durable::DomainWrite::SessionCommit(
+        lash_durable::domain::SessionCommitWrite {
+            session: commit.session_id.clone(),
+            expected_head: commit.expected_head_revision,
+            commit_json: encoded.json,
+            execution: encoded.execution,
+        },
+    ));
+}
+
+/// A claim of session operation `operation`'s execution.
+fn operation_claim(session: &SessionId, operation: &str) -> ReferrerClaim {
+    ReferrerClaim::guarded(lash_core_store::artifact_referrer::ReferrerGuard::Journal(
+        lash_protocol_types::ExecutionScope::session_operation(session.clone(), operation)
+            .journal_identity()
+            .expect("operation journal"),
+    ))
+}
+
+/// The write that ends session operation `operation`'s execution.
+fn operation_end(session: &SessionId, operation: &str) -> lash_durable::DomainWrite {
+    lash_durable::DomainWrite::Process(lash_durable::domain::ProcessWrite::ScopeClosed {
+        scope: lash_durable::domain::ScopeKey::Operation(session.clone(), operation.to_owned()),
+    })
+}
+
+/// Hold advisory lock `key` in an open transaction: the transaction and
+/// its backend pid.
+async fn hold_lock(
+    storage: &PostgresStorage,
+    key: String,
+) -> (sqlx::Transaction<'_, sqlx::Postgres>, i32) {
+    let mut tx = storage.pool().begin().await.expect("begin blocker");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(key)
+        .execute(&mut *tx)
+        .await
+        .expect("take the blocker's lock");
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("read blocker pid");
+    (tx, pid)
+}
+
+fn referrer_lock(referrer: &ArtifactReferrer) -> String {
+    format!(
+        "lash-artifact-referrer:{}:{}",
+        referrer.kind().as_str(),
+        referrer.canonical_id()
+    )
+}
+
+/// Race `committing`, stalled on `blocker`'s lock, against a publisher
+/// that republishes `env` under an unrelated pin, then release the
+/// blocker. A commit that takes every artifact lock of its transaction in
+/// one sorted acquisition before its first holds none while it stalls on
+/// a lock that is not an artifact's, so the publisher finishes first; one
+/// that took an artifact lock early holds it, and the publisher, holding
+/// the environment's closure, waits on it: a deadlock once the blocker
+/// lets the commit go on.
+async fn race_a_publisher<A: std::fmt::Debug, B: std::fmt::Debug>(
+    storage: &PostgresStorage,
+    blocker: sqlx::Transaction<'_, sqlx::Postgres>,
+    holder: i32,
+    committing: tokio::task::JoinHandle<Result<A, B>>,
+    env: lash_execution_contracts::process::ProcessEnvRef,
+    bytes: Vec<u8>,
+) {
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+    wait_until_mutations_wait(storage, holder, 1).await;
+    let publishing = tokio::spawn({
+        let artifacts = storage.lash_vm_artifact_store();
+        let (_, pin) = host_pin();
+        async move { artifacts.publish_process_env(&pin, &env, &bytes).await }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let waits: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+        )
+        .fetch_one(storage.pool())
+        .await
+        .expect("inspect lock waits");
+        if publishing.is_finished() || waits >= 2 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "publisher neither finished nor waited"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let published_while_stalled = publishing.is_finished();
+    blocker.commit().await.expect("release the blocker");
+    let within = std::time::Duration::from_secs(60);
+    let committed = tokio::time::timeout(within, committing)
+        .await
+        .expect("the commit finishes")
+        .expect("commit task");
+    let republished = tokio::time::timeout(within, publishing)
+        .await
+        .expect("the publisher finishes")
+        .expect("publish task");
+    assert!(committed.is_ok(), "owner commit: {committed:?}");
+    assert!(republished.is_ok(), "publisher: {republished:?}");
+    assert!(
+        published_while_stalled,
+        "the publisher waited on an artifact lock the stalled commit held"
+    );
+}
+
+const LOCK_PLAN_LAW: lash_durable::CommitLabel = lash_durable::CommitLabel::new("law.lock-plan");
+
+/// An owner write that ends an execution holding module `M`, then
+/// registers a process on environment `H`, whose closure `C` holds `M`,
+/// takes the artifact locks of both in one sorted acquisition before
+/// either (FIG-7700). Ending the execution first holds `M` while the
+/// registration waits on its process record's lock; a publisher of `H`
+/// then holds `C` and waits on `M`, and the registration's `C` closes the
+/// cycle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_execution_end_beside_a_registration_locks_its_environment_with_it() {
+    use lash_durable::DurableStore as _;
+    use lash_execution_contracts::process::{
+        EngineLaunch, Lifetime, ProcessInput, ProcessProvenance, ProcessRegistrar as _,
+        ProcessRegistration, StagedRegistration,
+    };
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let session = SessionId::fixture("lock-plan-registration");
+    session_store(&storage, session.clone()).await;
+    let (_, keeper) = host_pin();
+    let (env, bytes, module) = environment_over_document(&storage, &keeper, 51).await;
+    let operation = "o/lock-plan-registration";
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            &module,
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    let prepared = storage
+        .process_registry()
+        .prepare_process_registration(
+            ProcessRegistration::new(
+                ProcessInput::Engine {
+                    kind: "lock-plan".into(),
+                    payload: serde_json::json!({}),
+                    launch: EngineLaunch::new(env.clone(), None),
+                },
+                ProcessProvenance::host(),
+                Lifetime::Detached,
+            ),
+            &[],
+        )
+        .await
+        .expect("prepare the registration");
+    let (registration, observers, process_id, _, prepared_at_ms) = prepared.into_commit();
+    let rows = StagedRegistration {
+        execution: None,
+        initial_resolutions: Vec::new(),
+        registration,
+        observers,
+        process_id: process_id.clone(),
+        prepared_at_ms,
+    }
+    .rows()
+    .expect("the start's rows");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let (blocker, holder) = hold_lock(
+        &storage,
+        referrer_lock(&ArtifactReferrer::ProcessRecord(process_id)),
+    )
+    .await;
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, operation));
+    tx.write(lash_durable::DomainWrite::Process(
+        lash_durable::domain::ProcessWrite::Register(rows),
+    ));
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    race_a_publisher(&storage, blocker, holder, committing, env, bytes).await;
+}
+
+/// An owner write ordered [execution end, head] takes the artifact locks
+/// of the execution's end and of the frame the head leaves in one sorted
+/// acquisition before either (FIG-7700). The execution holds `M`; the
+/// left frame `F` holds environment `H` through closure `C`, which holds
+/// `M`. Ending the execution first holds `M` while the head waits on
+/// `F`'s referrer lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_execution_end_before_a_head_locks_the_frame_it_leaves_with_it() {
+    use lash_durable::DurableStore as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("lock-plan-head");
+    let session = state.session_id.clone();
+    let store = session_store(&storage, session.clone()).await;
+    commit_frame_opens(&store, &mut state, None).await;
+    let left = current_frame(&state);
+    let left_claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(left.clone()))
+        .expect("frame claim");
+    let (env, bytes, module) = environment_over_document(&storage, &left_claim, 52).await;
+    let operation = "o/lock-plan-head";
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            &module,
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    open_resident_frame(&mut state, "lock-plan-next");
+    let head = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state);
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let (blocker, holder) = hold_lock(
+        &storage,
+        referrer_lock(&ArtifactReferrer::FrameEnvironment(left.clone())),
+    )
+    .await;
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, operation));
+    write_head(&mut tx, &head);
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    race_a_publisher(&storage, blocker, holder, committing, env, bytes).await;
+    assert!(
+        frame_end(&storage, &left).await.0,
+        "the head ends the frame it leaves"
+    );
+}
+
+/// A fresh owner write whose head is already recorded answers the head
+/// from its receipt and still ends its executions; their artifact locks
+/// are taken in one sorted acquisition, whether or not the head runs
+/// (FIG-7700). The first execution holds `M`; the second holds two
+/// environments, through closures `X` and `C`, `X` sorting first and `C`
+/// holding `M`. Ending the first execution alone holds `M` while the
+/// second's end waits on `X`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_executions_ended_beside_a_recorded_head_lock_their_artifacts_once() {
+    use lash_durable::DurableStore as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("lock-plan-recorded");
+    let session = state.session_id.clone();
+    let store = session_store(&storage, session.clone()).await;
+    commit_frame_opens(&store, &mut state, None).await;
+    let (first, second) = ("o/lock-plan-first", "o/lock-plan-second");
+    let second_claim = operation_claim(&session, second);
+    let mut published = Vec::new();
+    for round in [53, 54] {
+        let (env_ref, bytes, document) =
+            environment_over_document(&storage, &second_claim, round).await;
+        let closure = closure_holding(&storage, &document).await;
+        published.push((closure, env_ref, bytes, document));
+    }
+    published.sort_by(|left, right| left.0.cmp(&right.0));
+    let earlier = published[0].0.clone();
+    let (_, later_env, later_bytes, module) = published[1].clone();
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, first),
+            &module,
+            b"linked document",
+        )
+        .await
+        .expect("the first execution holds the module");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let head = lash_core_store::store::append_request_commit_with_clock_for_testing(
+        &mut state,
+        "lock-plan-recorded",
+        &[
+            lash_protocol_types::session_model::SessionAppendNode::message(
+                lash_protocol_types::plugin::PluginMessage::text(
+                    lash_protocol_types::session_model::MessageRole::Assistant,
+                    "recorded",
+                ),
+            ),
+        ],
+        None,
+        &lash_core_ids::clock::SystemClock,
+    )
+    .expect("the head commit");
+    let durable = storage.durable_store();
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    write_head(&mut tx, &head);
+    durable
+        .commit(tx, LOCK_PLAN_LAW)
+        .await
+        .expect("record the head");
+    let (blocker, holder) =
+        hold_lock(&storage, format!("lash-artifact:env_closure:{earlier}")).await;
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    write_head(&mut tx, &head);
+    tx.write(operation_end(&session, first));
+    tx.write(operation_end(&session, second));
+    let committing = tokio::spawn(async move { durable.commit(tx, LOCK_PLAN_LAW).await });
+    race_a_publisher(
+        &storage,
+        blocker,
+        holder,
+        committing,
+        later_env,
+        later_bytes,
+    )
+    .await;
+}
+
+/// An owner write that ends an execution and deletes its session takes
+/// the artifact locks of the execution's end and of the deleted session's
+/// frame in one sorted acquisition before either (FIG-7700). The
+/// execution holds `M`; the session's frame `F` holds environment `H`
+/// through closure `C`, which holds `M`. Ending the execution first holds
+/// `M` while the delete waits on `F`'s referrer lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_an_execution_end_beside_a_session_delete_locks_the_deleted_frame_with_it() {
+    use lash_durable::DurableStore as _;
+    use lash_durable::domain::{SessionCloseStep, SessionCloseWrite};
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("lock-plan-delete");
+    let session = state.session_id.clone();
+    let store = session_store(&storage, session.clone()).await;
+    commit_frame_opens(&store, &mut state, None).await;
+    let frame = current_frame(&state);
+    let frame_claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(frame.clone()))
+        .expect("frame claim");
+    let (env, bytes, module) = environment_over_document(&storage, &frame_claim, 55).await;
+    let operation = "o/lock-plan-delete";
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(
+            &operation_claim(&session, operation),
+            &module,
+            b"linked document",
+        )
+        .await
+        .expect("the execution holds the module");
+    let (actor, epoch) = claim_owner(&storage, &session).await;
+    let durable = storage.durable_store();
+    for (label, write) in [
+        (
+            lash_durable::CommitLabel::SESSION_CLOSE_BEGIN,
+            SessionCloseWrite::Begin {
+                session: session.clone(),
+            },
+        ),
+        (
+            lash_durable::CommitLabel::SESSION_CLOSE_CANCEL,
+            SessionCloseWrite::Step {
+                session: session.clone(),
+                step: SessionCloseStep::Cancel,
+            },
+        ),
+        (
+            lash_durable::CommitLabel::SESSION_CLOSE_REVOKE,
+            SessionCloseWrite::Step {
+                session: session.clone(),
+                step: SessionCloseStep::Revoke,
+            },
+        ),
+        (
+            lash_durable::CommitLabel::SESSION_CLOSE_END_SCOPE,
+            SessionCloseWrite::Step {
+                session: session.clone(),
+                step: SessionCloseStep::EndScope,
+            },
+        ),
+    ] {
+        let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+        tx.write(lash_durable::DomainWrite::SessionClose(write));
+        durable.commit(tx, label).await.expect("the close step");
+    }
+    let (blocker, holder) = hold_lock(
+        &storage,
+        referrer_lock(&ArtifactReferrer::FrameEnvironment(frame.clone())),
+    )
+    .await;
+    let mut tx = durable.begin(&actor, epoch, u64::MAX).await.expect("open");
+    tx.write(operation_end(&session, operation));
+    tx.write(lash_durable::DomainWrite::SessionClose(
+        SessionCloseWrite::Step {
+            session: session.clone(),
+            step: SessionCloseStep::Artifacts,
+        },
+    ));
+    let committing = tokio::spawn(async move {
+        durable
+            .commit(tx, lash_durable::CommitLabel::SESSION_CLOSE_ARTIFACTS)
+            .await
+    });
+    race_a_publisher(&storage, blocker, holder, committing, env, bytes).await;
+    assert!(
+        frame_end(&storage, &frame).await.0,
+        "the delete ends the session's frame"
+    );
+}
+
+/// A publisher that loses a lock race publishes on its retry (FIG-7700).
+/// A raw transaction holds module `M`'s lock; a publisher of environment
+/// `H`, whose closure `C` holds `M`, takes `C` and waits on `M`; the raw
+/// transaction then asks for `C`. PostgreSQL aborts one side of the
+/// cycle; the publication still succeeds once the raw transaction ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_a_publisher_that_loses_a_lock_race_publishes_on_its_retry() {
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let (_, keeper) = host_pin();
+    let (env, bytes, module) = environment_over_document(&storage, &keeper, 56).await;
+    let closure = closure_holding(&storage, &module).await;
+    let (mut blocker, holder) = lock_artifact_mutations(&storage, &module).await;
+    let publishing = tokio::spawn({
+        let artifacts = storage.lash_vm_artifact_store();
+        let (_, pin) = host_pin();
+        async move { artifacts.publish_process_env(&pin, &env, &bytes).await }
+    });
+    wait_until_mutations_wait(&storage, holder, 1).await;
+    let raw = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("lash-artifact:env_closure:{closure}"))
+        .execute(&mut *blocker)
+        .await;
+    match raw {
+        Ok(_) => blocker.commit().await.expect("end the raw transaction"),
+        Err(_) => blocker.rollback().await.expect("end the raw transaction"),
+    }
+    let republished = tokio::time::timeout(std::time::Duration::from_secs(60), publishing)
+        .await
+        .expect("the publisher finishes")
+        .expect("publish task");
+    assert!(republished.is_ok(), "publisher: {republished:?}");
+}

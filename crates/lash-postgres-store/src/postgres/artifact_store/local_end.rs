@@ -2,6 +2,8 @@
 //! volatile function get a fresh snapshot after advisory-lock waits; one
 //! data-modifying CTE would miss an edge a concurrent publisher just committed.
 
+use std::collections::BTreeSet;
+
 use lash_core_store::artifact_referrer::ArtifactCleanup;
 use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_core_store::store::StoreError;
@@ -21,43 +23,186 @@ struct Answer {
     plans: Vec<(String, String, String)>,
 }
 
-/// Lock, in the one sorted order, every artifact the ends of `ended` and
-/// of the frames whose ended cleanups are gated on one of `gates` can
-/// delete, with `carries`, before the transaction takes any of them: the
-/// referrers' locks, then (a statement after those waits) what their edges
-/// in `namespaces` name and hold, transitively, joined with the carried
-/// artifacts. Each end the transaction then runs takes locks it already
-/// holds, so a publisher's sorted set never waits on a lock that this
-/// transaction took out of order (FIG-7700).
-pub(crate) async fn lock_ends_tx(
-    tx: &mut sqlx::PgConnection,
-    ended: &[ArtifactReferrer],
-    gates: &[&EffectJournalIdentity],
-    carries: &[(&str, String)],
-) -> Result<(), StoreError> {
-    if ended.is_empty() && carries.is_empty() {
-        return Ok(());
+/// One transaction's artifact lock plan (FIG-7700): every artifact any
+/// end, carry or environment acquisition it runs can lock, taken in the one
+/// sorted order before the transaction takes any of them. Referrers lock
+/// first, then (a statement after those waits) what the ended referrers'
+/// edges in [`NAMESPACES`] name and hold, transitively, joined with the
+/// carried artifacts and each acquired environment's head, closure and the
+/// closure's modules. Each end, carry or acquisition the transaction then
+/// runs takes locks it already holds, so a publisher's sorted set never
+/// waits on a lock this transaction took out of order.
+#[derive(Default)]
+pub(crate) struct LockPlan {
+    /// Referrers whose ends the transaction runs.
+    pub(crate) ended: Vec<ArtifactReferrer>,
+    /// Executions whose ended frame cleanups the transaction's ends run.
+    pub(crate) gates: Vec<EffectJournalIdentity>,
+    /// Referrers the transaction locks without ending them.
+    pub(crate) held: Vec<ArtifactReferrer>,
+    /// Sessions whose stored leaf frame the transaction ends, read under
+    /// each session's write authority, which the caller takes first
+    /// (`PostgresDurableStore::lock_session_writes`, in actor order).
+    pub(crate) sessions: Vec<lash_kernel_value::identity::SessionId>,
+    /// Artifacts the transaction carries.
+    pub(crate) carries: Vec<(&'static str, String)>,
+    /// Environment heads the transaction acquires.
+    pub(crate) envs: Vec<String>,
+}
+
+/// What a taken [`LockPlan`] covers: the referrers it ended, its stored
+/// leaf frames among them, and the artifacts it carried.
+#[derive(Default)]
+pub(crate) struct Planned {
+    ended: BTreeSet<(String, String)>,
+    carries: BTreeSet<(String, String)>,
+}
+
+impl Planned {
+    /// Whether the plan locked what `referrer`'s end can delete.
+    pub(crate) fn ends(&self, referrer: &ArtifactReferrer) -> bool {
+        self.ended
+            .contains(&(referrer.kind().as_str().to_owned(), referrer.canonical_id()))
     }
-    let (kinds, ids): (Vec<&str>, Vec<String>) = ended
-        .iter()
-        .map(|referrer| (referrer.kind().as_str(), referrer.canonical_id()))
-        .unzip();
-    let gates: Vec<&str> = gates.iter().map(|gate| gate.key()).collect();
-    let (carry_namespaces, carry_refs): (Vec<&str>, Vec<&str>) = carries
-        .iter()
-        .map(|(namespace, artifact_ref)| (*namespace, artifact_ref.as_str()))
-        .unzip();
-    crate::observed_sql::query(super::artifact_sql().postgres.lock_ends.sql())
-        .bind(&kinds)
-        .bind(&ids)
-        .bind(&gates)
-        .bind(&NAMESPACES[..])
-        .bind(&carry_namespaces)
-        .bind(&carry_refs)
-        .execute(crate::observed_sql::executor(tx))
+
+    /// Whether the plan locked carried artifact `artifact_ref` of
+    /// `namespace`.
+    pub(crate) fn carries(&self, namespace: &str, artifact_ref: &str) -> bool {
+        self.carries
+            .contains(&(namespace.to_owned(), artifact_ref.to_owned()))
+    }
+}
+
+impl LockPlan {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.ended.is_empty()
+            && self.held.is_empty()
+            && self.sessions.is_empty()
+            && self.carries.is_empty()
+            && self.envs.is_empty()
+    }
+
+    /// The plan's arguments, in the server function's order.
+    pub(crate) fn arguments(&self) -> [Vec<String>; 11] {
+        let kinds = |referrers: &[ArtifactReferrer]| {
+            referrers
+                .iter()
+                .map(|referrer| referrer.kind().as_str().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let ids = |referrers: &[ArtifactReferrer]| {
+            referrers
+                .iter()
+                .map(ArtifactReferrer::canonical_id)
+                .collect::<Vec<_>>()
+        };
+        [
+            kinds(&self.ended),
+            ids(&self.ended),
+            self.gates
+                .iter()
+                .map(|gate| gate.key().to_owned())
+                .collect(),
+            NAMESPACES
+                .iter()
+                .map(|namespace| (*namespace).to_owned())
+                .collect(),
+            self.carries
+                .iter()
+                .map(|(namespace, _)| (*namespace).to_owned())
+                .collect(),
+            self.carries
+                .iter()
+                .map(|(_, artifact_ref)| artifact_ref.clone())
+                .collect(),
+            kinds(&self.held),
+            ids(&self.held),
+            self.sessions
+                .iter()
+                .map(|session| session.as_str().to_owned())
+                .collect(),
+            self.envs.clone(),
+            Vec::new(),
+        ]
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PlanAnswer {
+    ended: Vec<(String, String)>,
+    missing: Vec<String>,
+}
+
+/// Take `plan`'s locks in `tx`. An acquired environment whose closure is
+/// not stored is acquired by storing it from the head's modules, which the
+/// client reads: the server answers those heads before it takes any
+/// artifact lock, and the plan is taken again with their modules.
+pub(crate) async fn lock_plan_tx(
+    tx: &mut sqlx::PgConnection,
+    plan: &LockPlan,
+) -> Result<Planned, StoreError> {
+    if plan.is_empty() {
+        return Ok(Planned::default());
+    }
+    let mut arguments = plan.arguments();
+    let mut answer = call_plan(tx, &arguments).await?;
+    if !answer.missing.is_empty() {
+        for env in std::mem::take(&mut answer.missing) {
+            let bytes: Option<Vec<u8>> = crate::observed_sql::query_scalar(
+                super::artifact_sql().lash_vm_artifacts.select_bytes.sql(),
+            )
+            .bind(super::PROCESS_ENV_NAMESPACE)
+            .bind(&env)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(crate::support::store_sqlx_error)?
+            .flatten();
+            // A head whose modules do not read is refused by its
+            // acquisition, which then locks only its head.
+            if let Some(bytes) = bytes
+                && let Ok(modules) = super::env_storage::process_env_closure_tx(tx, &bytes).await
+            {
+                for module in modules {
+                    arguments[4].push(super::MODULE_ARTIFACT_NAMESPACE.to_owned());
+                    arguments[5].push(module);
+                }
+            }
+            arguments[10].push(env);
+        }
+        answer = call_plan(tx, &arguments).await?;
+    }
+    if !answer.missing.is_empty() {
+        return Err(StoreError::Backend(
+            "the artifact lock plan asked twice for an environment's modules".to_owned(),
+        ));
+    }
+    Ok(Planned {
+        ended: answer.ended.into_iter().collect(),
+        carries: arguments[4]
+            .iter()
+            .cloned()
+            .zip(arguments[5].iter().cloned())
+            .collect(),
+    })
+}
+
+async fn call_plan(
+    tx: &mut sqlx::PgConnection,
+    arguments: &[Vec<String>; 11],
+) -> Result<PlanAnswer, StoreError> {
+    let mut query =
+        crate::observed_sql::query_scalar(super::artifact_sql().postgres.lock_plan.sql());
+    for argument in arguments {
+        query = query.bind(argument);
+    }
+    let answer: serde_json::Value = query
+        .fetch_one(crate::observed_sql::executor(tx))
         .await
         .map_err(failure)?;
-    Ok(())
+    serde_json::from_value(answer).map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: "artifact lock plan",
+        message: error.to_string(),
+    })
 }
 
 pub(super) async fn end(
@@ -92,9 +237,6 @@ pub(crate) struct EndArguments {
 }
 
 impl EndArguments {
-    /// The namespaces every local end severs.
-    pub(crate) const NAMESPACES: &'static [&'static str] = &NAMESPACES;
-
     pub(crate) fn of(
         referrer: &ArtifactReferrer,
         gate: Option<&EffectJournalIdentity>,
@@ -254,22 +396,36 @@ END
 $lash_artifact_end_local$;
 "#
     .replace("{PEEL}", &crate::durable::retire_graph())
-        + LOCK_ENDS_DDL
+        + LOCK_PLAN_DDL
 }
 
-/// [`lock_ends_tx`]'s server function. Its gated frames are the ones an
-/// end gated on the same execution severs.
+/// [`lock_plan_tx`]'s server function. Its gated frames are the ones an
+/// end gated on the same execution severs; a session's leaf frame is read
+/// under the session's write authority, which every head writer takes.
 #[cfg(any(test, feature = "testing"))]
-const LOCK_ENDS_DDL: &str = r#"CREATE OR REPLACE FUNCTION lash_artifact_lock_ends(
+const LOCK_PLAN_DDL: &str = r#"CREATE OR REPLACE FUNCTION lash_artifact_lock_plan(
     p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[],
-    p_carry_namespaces text[], p_carry_refs text[]
-) RETURNS void LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_ends$
+    p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[],
+    p_sessions text[], p_envs text[], p_supplied text[]
+) RETURNS jsonb LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_plan$
 DECLARE
     v_refs jsonb;
+    v_held jsonb;
+    v_envs jsonb;
+    v_missing jsonb;
     held record;
 BEGIN
+    -- The caller holds each session's write authority: its leaf frame is
+    -- the one its head names until this transaction commits.
     SELECT COALESCE(jsonb_agg(jsonb_build_array(ended.kind, ended.id)), '[]'::jsonb) INTO v_refs
         FROM unnest(p_kinds, p_ids) AS ended(kind, id);
+    SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array('frame_environment',
+            '[' || to_json(head.session_id)::TEXT || ',' || to_json(leaf.frame_node_id)::TEXT || ']')), '[]'::jsonb)
+        INTO v_refs
+        FROM lash_session_head AS head JOIN lash_session_revisions AS revision
+            ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+        JOIN lash_graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
+        WHERE head.session_id = ANY(p_sessions) AND leaf.frame_node_id IS NOT NULL;
     SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(gated.referrer_kind, gated.referrer_id)), '[]'::jsonb)
         INTO v_refs
         FROM (SELECT referrer_kind, referrer_id, gate_execution, cleanup_json::jsonb AS body
@@ -277,16 +433,42 @@ BEGIN
             WHERE referrer_kind = 'frame_environment' AND gate_execution = ANY(p_gates)) gated
         WHERE gated.body->>'plan' = 'ended' AND gated.body->>'gate' = gated.gate_execution
             AND gated.body->'carries' = '[]'::jsonb;
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(named.kind, named.id)), '[]'::jsonb) INTO v_held
+        FROM unnest(p_held_kinds, p_held_ids) AS named(kind, id);
     FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
-        FROM jsonb_array_elements(v_refs) ORDER BY kind, id LOOP
+        FROM jsonb_array_elements(v_refs || v_held) ORDER BY kind, id LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
     END LOOP;
-    -- This statement starts after the referrer lock waits.
+    -- This statement starts after the referrer lock waits: each acquired
+    -- environment's head, the body it names and whether that body's
+    -- closure is stored.
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(env.ref, stored.body_ref,
+            EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
+                WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref))), '[]'::jsonb)
+        INTO v_envs
+        FROM (SELECT DISTINCT ref FROM unnest(p_envs) AS named(ref)) env
+        LEFT JOIN lash_lash_vm_artifacts stored
+            ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = env.ref;
+    -- A closure acquisition stores is the head's modules, which only the
+    -- client reads: ask for them before any artifact lock.
+    SELECT COALESCE(jsonb_agg(planned.value->>0), '[]'::jsonb) INTO v_missing
+        FROM jsonb_array_elements(v_envs) planned
+        WHERE planned.value->>1 IS NOT NULL AND NOT (planned.value->>2)::boolean
+            AND NOT (planned.value->>0 = ANY(p_supplied));
+    IF jsonb_array_length(v_missing) > 0 THEN
+        RETURN jsonb_build_object('ended', v_refs, 'missing', v_missing);
+    END IF;
     FOR held IN WITH RECURSIVE reach(namespace, artifact_ref) AS (
             SELECT edge.namespace, edge.artifact_ref FROM lash_artifact_referrer_edges edge
             JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
                 AND edge.referrer_id = ref.value->>1
             WHERE edge.namespace = ANY(p_namespaces)
+            UNION
+            SELECT 'process_execution_env', planned.value->>0 FROM jsonb_array_elements(v_envs) planned
+            WHERE planned.value->>1 IS NOT NULL
+            UNION
+            SELECT 'env_closure', planned.value->>1 FROM jsonb_array_elements(v_envs) planned
+            WHERE planned.value->>1 IS NOT NULL
             UNION
             SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
             JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
@@ -297,6 +479,20 @@ BEGIN
         ORDER BY namespace, artifact_ref LOOP
         PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
     END LOOP;
+    -- This statement starts after every artifact lock wait. An environment
+    -- whose head or closure moved before its locks were taken would lock
+    -- out of this plan: the transaction retries as contended.
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(v_envs) planned
+        LEFT JOIN lash_lash_vm_artifacts stored
+            ON stored.namespace = 'process_execution_env' AND stored.artifact_ref = planned.value->>0
+        WHERE stored.body_ref IS DISTINCT FROM planned.value->>1
+            OR EXISTS (SELECT 1 FROM lash_lash_vm_artifacts closure
+                WHERE closure.namespace = 'env_closure' AND closure.artifact_ref = stored.body_ref)
+                IS DISTINCT FROM (planned.value->>2)::boolean) THEN
+        RAISE EXCEPTION 'an acquired environment moved under its artifact lock plan'
+            USING ERRCODE = '40001';
+    END IF;
+    RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
 END
-$lash_artifact_lock_ends$;
+$lash_artifact_lock_plan$;
 "#;

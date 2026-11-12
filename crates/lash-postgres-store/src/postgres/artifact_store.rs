@@ -19,10 +19,15 @@ use crate::*;
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
         end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5)";
-        /// Lock every artifact the ends of referrers `?1`/`?2`, and of the
-        /// frames gated on `?3`, can delete in namespaces `?4`, with the
-        /// carried `?5`/`?6`, in one sorted acquisition (FIG-7700).
-        lock_ends = "SELECT lash_artifact_lock_ends(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4::TEXT[], ?5::TEXT[], ?6::TEXT[])";
+        /// One transaction's artifact lock plan (FIG-7700): the write
+        /// authority of sessions `?9`/`?10`, then referrers `?1`/`?2`, the
+        /// frames gated on `?3`, the leaf frames of `?10` and held referrers
+        /// `?7`/`?8`, then, in one sorted acquisition, what the ended ones
+        /// can delete in namespaces `?4`, the carried `?5`/`?6` and each
+        /// acquired environment of `?11`; an environment whose closure is
+        /// not stored and not among `?12` is answered before any artifact
+        /// lock.
+        lock_plan = "SELECT lash_artifact_lock_plan(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4::TEXT[], ?5::TEXT[], ?6::TEXT[], ?7::TEXT[], ?8::TEXT[], ?9::TEXT[], ?10::TEXT[], ?11::TEXT[])";
         /// Lock referrer `?1`/`?2`, then whether it ended (FIG-7701 R3).
         lock_referrer = "SELECT lash_lock_referrer(?1, ?2)";
         /// Lock keys `?1` in order, then the first of `?2`/`?3` not stored,
@@ -215,8 +220,8 @@ pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 #[path = "artifact_store/local_end.rs"]
 mod local_end;
 pub(crate) use local_end::{
-    EndArguments as LocalEndArguments, failure as end_local_failure, lock_ends_tx,
-    validate as validate_local_end,
+    EndArguments as LocalEndArguments, LockPlan, Planned, failure as end_local_failure,
+    lock_plan_tx, validate as validate_local_end,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -284,8 +289,15 @@ fn definition_manifest(
         .collect()
 }
 
-fn backend(error: impl ToString) -> ArtifactStoreError {
-    ArtifactStoreError::Backend(error.to_string())
+/// A failed artifact statement: a lock race PostgreSQL aborted is
+/// contention, as every store writer reports it (FIG-7700), which the
+/// artifact writers retry; anything else is the backend's.
+fn backend(error: sqlx::Error) -> ArtifactStoreError {
+    if crate::support::is_contention_error(&error) {
+        ArtifactStoreError::StoreFault(lash_core_store::store::StoreFault::Contended)
+    } else {
+        ArtifactStoreError::Backend(error.to_string())
+    }
 }
 
 /// The advisory lock key of `referrer`.
@@ -563,7 +575,23 @@ fn decode_referrer(kind: &str, id: &str) -> Result<ArtifactReferrer, ArtifactSto
 }
 
 impl PostgresLashVmArtifactStore {
+    /// Publish `bytes` as `artifact_ref` of `namespace` under `claim`, or,
+    /// without bytes, acquire it. A transaction PostgreSQL aborts in a lock
+    /// race is run again within the writer's retry policy (FIG-7700).
     async fn write_namespaced(
+        &self,
+        namespace: &str,
+        artifact_ref: &str,
+        bytes: Option<&[u8]>,
+        claim: &ReferrerClaim,
+    ) -> Result<(), ArtifactStoreError> {
+        crate::guarded_tx::retry_artifact_contended(&self.fence, || {
+            self.write_namespaced_once(namespace, artifact_ref, bytes, claim)
+        })
+        .await
+    }
+
+    async fn write_namespaced_once(
         &self,
         namespace: &str,
         artifact_ref: &str,
@@ -1264,7 +1292,9 @@ impl PostgresLashVmArtifactStore {
             }
             round = freed;
         }
-        crate::durable::peel(tx, bridged).await.map_err(backend)?;
+        crate::durable::peel(tx, bridged)
+            .await
+            .map_err(|error| ArtifactStoreError::Backend(error.to_string()))?;
         Ok(())
     }
 

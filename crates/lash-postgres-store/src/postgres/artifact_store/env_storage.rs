@@ -320,9 +320,17 @@ pub(super) async fn acquire_env_tx(
             ("held", Some(_)) => return Ok(()),
             ("missing", _) => return Err(missing()),
             ("locked", Some(body)) => EnvLock::Locked(body.clone()),
-            _ => return Err(backend("unexpected environment acquisition answer")),
+            _ => {
+                return Err(ArtifactStoreError::Backend(
+                    "unexpected environment acquisition answer".to_owned(),
+                ));
+            }
         },
-        _ => return Err(backend("unexpected environment acquisition answer")),
+        _ => {
+            return Err(ArtifactStoreError::Backend(
+                "unexpected environment acquisition answer".to_owned(),
+            ));
+        }
     };
     match state {
         EnvLock::Absent => {
