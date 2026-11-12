@@ -7,15 +7,25 @@ use crate::session_sql::session_sql;
 /// every ended frame, the session and a transition's successor, in key
 /// order (§2.3); each ended frame's cleanup decision; and the artifacts a
 /// transition carries out of its `ended` frame, one of `left`, into the
-/// successor, each locked and held by the ended frame.
+/// successor, each held by the ended frame. Every artifact lock the
+/// commit's ends and carries need, and those of the executions `ending` the
+/// same transaction ends, is taken here in one sorted acquisition
+/// ([`crate::artifact_store::lock_ends_tx`]).
 pub(crate) async fn frames_left_facts_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     commit: &RuntimeCommit,
     left: &[lash_core_store::session_identity::FrameNodeId],
+    ending: &[lash_protocol_types::EffectJournalIdentity],
 ) -> Result<FramesLeft, StoreError> {
     use lash_core_store::artifact_referrer::ArtifactReferrer;
     use lash_core_store::artifact_referrer::FrameEnvironmentId;
+    let executions = ending
+        .iter()
+        .map(|journal| ArtifactReferrer::Execution(journal.clone()))
+        .collect::<Vec<_>>();
+    let gates = ending.iter().collect::<Vec<_>>();
     if left.is_empty() {
+        crate::artifact_store::lock_ends_tx(tx, &executions, &gates, &[]).await?;
         return Ok((Vec::new(), Vec::new()));
     }
     let session_id = &commit.session_id;
@@ -59,6 +69,15 @@ pub(crate) async fn frames_left_facts_tx(
         Some(transition) => carries_into_successor_tx(tx, transition).await?,
         None => Vec::new(),
     };
+    // Every artifact lock the commit's ends and carries take, in one
+    // sorted acquisition before any of them: each left frame, ended now or
+    // by its gate's terminal, and each execution the commit ends.
+    let mut ended_referrers = ended_frames.clone();
+    ended_referrers.extend(executions);
+    crate::artifact_store::lock_ends_tx(tx, &ended_referrers, &gates, &carries).await?;
+    if let Some(transition) = transition {
+        carried_from_ended_tx(tx, transition, &carries).await?;
+    }
     let mut ended = Vec::with_capacity(ended_frames.len());
     for frame in ended_frames {
         let decision = crate::obligation_ledger::cleanup_decision_tx(
@@ -86,14 +105,14 @@ pub(crate) type FramesLeft = (
 );
 
 /// The artifacts the transition carries out of its `ended` frame into the
-/// successor, under referrer locks the caller already holds: each locked,
-/// and held by the ended frame. A fenced successor refuses the transition.
+/// successor, under referrer locks the caller already holds. A fenced
+/// successor refuses the transition. The caller locks them with the
+/// commit's ends, then checks [`carried_from_ended_tx`].
 async fn carries_into_successor_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     transition: &lash_core_store::store::FrameTransition,
 ) -> Result<Vec<(&'static str, String)>, StoreError> {
     use lash_core_store::artifact_referrer::ArtifactReferrer;
-    let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     let sql = crate::artifact_store::artifact_sql();
     let successor_fenced: bool =
@@ -146,19 +165,21 @@ async fn carries_into_successor_tx(
         .collect::<Result<Vec<_>, StoreError>>()?;
     carries.sort_unstable();
     carries.dedup();
-    for (namespace, artifact_ref) in &carries {
-        let key = format!("lash-artifact:{namespace}:{artifact_ref}");
-        crate::observed_sql::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_text
-                .sql(),
-        )
-        .bind(key)
-        .execute(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
-    }
-    for (namespace, artifact_ref) in &carries {
+    Ok(carries)
+}
+
+/// Whether the transition's `ended` frame holds each of `carries`, under
+/// their locks: one it does not refuses the transition.
+async fn carried_from_ended_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transition: &lash_core_store::store::FrameTransition,
+    carries: &[(&'static str, String)],
+) -> Result<(), StoreError> {
+    use lash_core_store::artifact_referrer::ArtifactReferrer;
+    let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
+    let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
+    let sql = crate::artifact_store::artifact_sql();
+    for (namespace, artifact_ref) in carries {
         let source_edge: bool =
             crate::observed_sql::query_scalar(sql.edges.select_edge_exists.sql())
                 .bind(namespace)
@@ -175,7 +196,7 @@ async fn carries_into_successor_tx(
             });
         }
     }
-    Ok(carries)
+    Ok(())
 }
 
 #[async_trait::async_trait]

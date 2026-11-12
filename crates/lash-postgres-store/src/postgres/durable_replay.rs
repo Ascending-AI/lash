@@ -423,7 +423,7 @@ pub(super) async fn apply_owner(
         graph::install(tx, &checked).await?;
     }
     let process_view = super::process_view::refresh_preimage(tx, write).await?;
-    let committing = Committing {
+    let mut committing = Committing {
         process_views: lash_durable::domain::processes::ProcessPostimages::from_view(process_view),
         checkpoint_ref_chunk: pools.maintenance.checkpoint_ref_chunk as usize,
         actor: write.actor(),
@@ -432,10 +432,34 @@ pub(super) async fn apply_owner(
         fleet,
         retired: Retired::default(),
         configs: &pools.configs,
+        ending: Vec::new(),
     };
-    crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
+    let ending = crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
         .await
         .map_err(store_failure)?;
+    // The artifact locks of every end the transaction runs are taken in
+    // one sorted acquisition before any of them (FIG-7700): by its head
+    // commit, which alone knows the frames it leaves, else now.
+    if write
+        .domain()
+        .iter()
+        .any(|domain| matches!(domain, DomainWrite::SessionCommit(_)))
+    {
+        committing.ending = ending;
+    } else {
+        crate::artifact_store::lock_ends_tx(
+            tx,
+            &ending
+                .iter()
+                .cloned()
+                .map(lash_core_store::artifact_referrer::ArtifactReferrer::Execution)
+                .collect::<Vec<_>>(),
+            &ending.iter().collect::<Vec<_>>(),
+            &[],
+        )
+        .await
+        .map_err(store_failure)?;
+    }
     let mut session_heads = Vec::new();
     for domain in write.domain() {
         match domain {

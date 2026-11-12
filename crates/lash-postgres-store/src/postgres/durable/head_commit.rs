@@ -1097,6 +1097,7 @@ pub(super) async fn read_facts(
     writer: HeadWriter,
     chunk_size: usize,
     configs: &lash_core_store::store_backend_support::ConfigCache,
+    ending: &[lash_protocol_types::EffectJournalIdentity],
 ) -> Result<Result<Box<Held>, RuntimeCommitReceipt>, StoreError> {
     let commit = planner.commit();
     let fleet = tx.fleet();
@@ -1228,7 +1229,7 @@ pub(super) async fn read_facts(
     );
     let released = crate::runtime_persistence::released_rows_tx(&mut *tx, commit).await?;
     let (ended, carries) =
-        crate::runtime_persistence::frames_left_facts_tx(&mut *tx, commit, &left).await?;
+        crate::runtime_persistence::frames_left_facts_tx(&mut *tx, commit, &left, ending).await?;
     Ok(Ok(Box::new(Held {
         head,
         read: ReadFacts {
@@ -1434,6 +1435,7 @@ pub(super) async fn apply(
     context: &super::steps::Context<'_>,
     chunk_size: usize,
     configs: &lash_core_store::store_backend_support::ConfigCache,
+    ending: &[lash_protocol_types::EffectJournalIdentity],
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let commit = planner.commit();
     if writer == HeadWriter::Store
@@ -1441,7 +1443,7 @@ pub(super) async fn apply(
     {
         super::PostgresDurableStore::lock_cross_target(tx, &commit.session_id).await?;
     }
-    let held = match read_facts(tx, planner, writer, chunk_size, configs).await? {
+    let held = match read_facts(tx, planner, writer, chunk_size, configs, ending).await? {
         Ok(held) => held,
         Err(replayed) => return Ok(replayed),
     };
@@ -1498,6 +1500,7 @@ pub(crate) async fn apply_store_commit(
         &context,
         chunk_size,
         configs,
+        &[],
     )
     .await?;
     super::pages::hold_retired(tx, retired, now)

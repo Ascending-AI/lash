@@ -131,6 +131,10 @@ pub(crate) struct Committing<'a> {
     /// The storage's validated configurations, which a head commit reuses
     /// read-only.
     pub(crate) configs: &'a lash_core_store::store_backend_support::ConfigCache,
+    /// The executions the transaction ends, whose artifact locks its head
+    /// commit takes with its own frames' (FIG-7700); empty when the
+    /// transaction took them already.
+    pub(crate) ending: Vec<lash_protocol_types::EffectJournalIdentity>,
 }
 
 impl Committing<'_> {

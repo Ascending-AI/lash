@@ -19,6 +19,10 @@ use crate::*;
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
         end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5)";
+        /// Lock every artifact the ends of referrers `?1`/`?2`, and of the
+        /// frames gated on `?3`, can delete in namespaces `?4`, with the
+        /// carried `?5`/`?6`, in one sorted acquisition (FIG-7700).
+        lock_ends = "SELECT lash_artifact_lock_ends(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4::TEXT[], ?5::TEXT[], ?6::TEXT[])";
         /// Lock referrer `?1`/`?2`, then whether it ended (FIG-7701 R3).
         lock_referrer = "SELECT lash_lock_referrer(?1, ?2)";
         /// Lock keys `?1` in order, then the first of `?2`/`?3` not stored,
@@ -242,7 +246,8 @@ pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 #[path = "artifact_store/local_end.rs"]
 mod local_end;
 pub(crate) use local_end::{
-    EndArguments as LocalEndArguments, failure as end_local_failure, validate as validate_local_end,
+    EndArguments as LocalEndArguments, failure as end_local_failure, lock_ends_tx,
+    validate as validate_local_end,
 };
 
 #[cfg(any(test, feature = "testing"))]

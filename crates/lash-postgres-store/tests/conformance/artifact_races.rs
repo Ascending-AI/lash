@@ -877,3 +877,181 @@ async fn cleanup_kind_mismatch_is_stored_corruption() {
         );
     }
 }
+
+/// Publish, under `claim`, an environment over one link to document
+/// `round`, with the document and the link: the environment's reference,
+/// its bytes and the document's reference.
+async fn environment_over_document(
+    storage: &PostgresStorage,
+    claim: &ReferrerClaim,
+    round: u8,
+) -> (
+    lash_execution_contracts::process::ProcessEnvRef,
+    Vec<u8>,
+    String,
+) {
+    use lash_durable::packages::PackageStore as _;
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+
+    let store = storage.lash_vm_artifact_store();
+    let document = lash_kernel_value::names::DocumentId::from_bytes([round; 32]);
+    store
+        .publish_module_artifact(claim, &document.to_string(), b"linked document")
+        .await
+        .expect("publish the document");
+    let link = lash_kernel_value::package::Link {
+        helper_fills: Default::default(),
+        document,
+        fills: Default::default(),
+    };
+    let link = lash_core_store::packages::LinkRecord {
+        id: link.identity(),
+        link,
+    };
+    store.put_link(claim, &link, &[]).await.expect("link");
+    let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+        lash_vocabulary::claims::RegistryKind::Process,
+    );
+    execution.authored.insert(link.id);
+    let env = lash_core_store::process_env::ProcessEnv::builder(
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
+    )
+    .execution(execution)
+    .build()
+    .expect("environment");
+    let env_ref = env.stable_ref().expect("environment reference");
+    let bytes = env.to_store_bytes().expect("environment bytes");
+    store
+        .publish_process_env(claim, &env_ref, &bytes)
+        .await
+        .expect("publish the environment");
+    (env_ref, bytes, document.to_string())
+}
+
+/// The closure that holds `document`.
+async fn closure_holding(storage: &PostgresStorage, document: &str) -> String {
+    sqlx::query_scalar(
+        "SELECT holder_ref FROM lash_artifact_dependency_edges
+         WHERE holder_namespace = 'env_closure' AND namespace = 'kernel_document'
+           AND artifact_ref = $1",
+    )
+    .bind(document)
+    .fetch_one(storage.pool())
+    .await
+    .expect("read the closure holding the document")
+}
+
+/// One head commit that leaves two frames takes every artifact lock of both
+/// ends in one sorted acquisition, so it never waits on a publisher's
+/// sorted set while holding a lock that set needs (FIG-7700). Frame `first`
+/// holds module `M` directly; frame `closures` holds two environments
+/// through their closures, the later `C` holding `M`, the earlier `X`
+/// sorting first. With `X` held, the commit stalls inside the ends; a
+/// publisher under an unrelated pin republishes `C`'s environment, which
+/// locks `C`, then `M`. Ending `first` before taking `closures`' locks
+/// leaves the commit holding `M` while the publisher holds `C`: a deadlock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_frames_one_commit_leaves_never_deadlock_a_closure_publisher() {
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("two-frame-end-lock-order");
+    let store = session_store(&storage, state.session_id.clone()).await;
+    commit_frame_opens(&store, &mut state, None).await;
+    let first = current_frame(&state);
+    let closures = open_resident_frame(&mut state, "closures");
+    let closures_claim =
+        ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(closures.clone()))
+            .expect("frame claim");
+    let mut published = Vec::new();
+    for round in [41, 42] {
+        let (env_ref, bytes, document) =
+            environment_over_document(&storage, &closures_claim, round).await;
+        let closure = closure_holding(&storage, &document).await;
+        published.push((closure, env_ref, bytes, document));
+    }
+    published.sort_by(|left, right| left.0.cmp(&right.0));
+    let (earlier, _, _, _) = &published[0];
+    let (_, later_env, later_bytes, module) = published[1].clone();
+    let first_claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(first.clone()))
+        .expect("frame claim");
+    storage
+        .lash_vm_artifact_store()
+        .publish_module_artifact(&first_claim, &module, b"linked document")
+        .await
+        .expect("first frame holds the module directly");
+    open_resident_frame(&mut state, "head");
+    let commit = lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state);
+
+    let mut blocker = storage.pool().begin().await.expect("begin blocker");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("lash-artifact:env_closure:{earlier}"))
+        .execute(&mut *blocker)
+        .await
+        .expect("hold the earlier closure's lock");
+    let holder: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await
+        .expect("read blocker pid");
+    let committing = tokio::spawn({
+        let store = store.clone();
+        async move { store.commit_runtime_state(commit).await }
+    });
+    wait_until_mutations_wait(&storage, holder, 1).await;
+    let publishing = tokio::spawn({
+        let artifacts = storage.lash_vm_artifact_store();
+        let (_, pin) = host_pin();
+        async move {
+            artifacts
+                .publish_process_env(&pin, &later_env, &later_bytes)
+                .await
+        }
+    });
+    // The publisher completes, or waits on a lock the commit holds.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let waits: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+        )
+        .fetch_one(storage.pool())
+        .await
+        .expect("inspect lock waits");
+        if publishing.is_finished() || waits >= 2 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "publisher neither finished nor waited"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    blocker.commit().await.expect("release the earlier closure");
+    let within = std::time::Duration::from_secs(60);
+    let committed = tokio::time::timeout(within, committing)
+        .await
+        .expect("the commit finishes")
+        .expect("commit task");
+    let republished = tokio::time::timeout(within, publishing)
+        .await
+        .expect("the publisher finishes")
+        .expect("publish task");
+    assert!(committed.is_ok(), "head commit: {committed:?}");
+    assert!(republished.is_ok(), "publisher: {republished:?}");
+    for frame in [&first, &closures] {
+        assert_eq!(
+            frame_end(&storage, frame).await,
+            (
+                true,
+                Some(ArtifactCleanup::ended(
+                    ArtifactReferrer::FrameEnvironment(frame.clone()),
+                    Vec::new(),
+                    None,
+                ))
+            ),
+            "{frame:?}"
+        );
+    }
+}

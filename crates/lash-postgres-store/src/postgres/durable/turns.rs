@@ -7,6 +7,7 @@
 
 use std::sync::LazyLock;
 
+use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::store::HeadWriter;
 use lash_core_store::store::RunAdmissionRecord;
@@ -261,6 +262,19 @@ pub(super) static TERMINAL_STATE: Entry = Entry::new(
 .collecting(Collect::PhaseEnd("checkpoint_ref"))
 .collecting(Collect::Closure("working_execution_ref"))
 .collecting(Collect::Closures("closure_roots"));
+/// The artifact locks of a transaction's ends, in one sorted acquisition.
+pub(super) static LOCK_ENDS: Entry = Entry::new(
+    || &crate::artifact_store::artifact_sql().postgres.lock_ends,
+    &[
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+        Ty::Texts,
+    ],
+    Shape::Select,
+);
 /// A referrer's or an artifact's advisory lock, by its key.
 pub(super) static LOCK_KEY: Entry = Entry::new(
     || &crate::connection_sql::connection_sql().lock_xact_by_text,
@@ -293,11 +307,15 @@ pub(super) fn end_local_step(
 
 /// The locks of the executions `writes` end, as steps, in key order:
 /// taken before a head commit takes frame and artifact locks, as
-/// publication takes them referrer first.
+/// publication takes them referrer first. Then every artifact lock their
+/// ends take, in one sorted acquisition (FIG-7700): a one-call commit
+/// leaves no frame and carries nothing, so its executions' ends are all the
+/// ends it runs.
 pub(super) fn lock_ending_executions(
     writes: &[lash_durable::DomainWrite],
 ) -> Result<Vec<Step>, lash_core_store::store::StoreError> {
-    Ok(crate::obligation_ledger::ending_executions(writes)?
+    let ending = crate::obligation_ledger::ending_executions(writes)?;
+    let mut steps: Vec<Step> = ending
         .iter()
         .map(|referrer| {
             Step::any(
@@ -307,7 +325,25 @@ pub(super) fn lock_ending_executions(
                 ))],
             )
         })
-        .collect())
+        .collect();
+    if !ending.is_empty() {
+        let none: [&str; 0] = [];
+        steps.push(Step::any(
+            &LOCK_ENDS,
+            vec![
+                Value::texts(ending.iter().map(|referrer| referrer.kind().as_str())),
+                Value::texts(ending.iter().map(ArtifactReferrer::canonical_id)),
+                Value::texts(ending.iter().filter_map(|referrer| match referrer {
+                    ArtifactReferrer::Execution(journal) => Some(journal.key()),
+                    _ => None,
+                })),
+                Value::texts(crate::artifact_store::LocalEndArguments::NAMESPACES),
+                Value::texts(none),
+                Value::texts(none),
+            ],
+        ));
+    }
+    Ok(steps)
 }
 
 /// A terminal's program: run `run` of `session` ends with `cause` at head
@@ -692,6 +728,7 @@ pub(super) async fn apply_session_commit(
         &commit.steps(),
         commit.checkpoint_ref_chunk,
         commit.configs,
+        &commit.ending,
     )
     .await
     .map_err(|error| refused(&error))

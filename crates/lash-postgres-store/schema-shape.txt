@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 47
+version 48
 table lash_abandoned_consumer_holds
   column abandoned_at_ms bigint not-null
   column hold_key text not-null
@@ -741,6 +741,7 @@ table lash_waits
 function lash_acquire_env (p_env text, p_kind text, p_id text, p_write boolean) -> text[]
 function lash_acquire_holds (p_locks text[], p_check_namespaces text[], p_check_refs text[], p_kind text, p_id text, p_edge_namespaces text[], p_edge_refs text[]) -> text
 function lash_artifact_end_local (p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]) -> jsonb
+function lash_artifact_lock_ends (p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[], p_carry_namespaces text[], p_carry_refs text[]) -> void
 function lash_graph_peel_delete (p_gone bytea[]) -> bytea[]
 function lash_graph_peel_plan (p_roots bytea[], p_limit bigint, p_closure boolean) -> TABLE(candidates bytea[], locked bytea[], gone bytea[], deferred bytea[])
 function lash_graph_retire (p_roots bytea[], p_limit bigint, p_now bigint) -> void

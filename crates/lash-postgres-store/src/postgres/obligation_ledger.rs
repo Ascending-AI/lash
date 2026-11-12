@@ -184,19 +184,23 @@ pub(crate) async fn arm_cleanup_tx(
 }
 
 /// Take terminal executions' referrer locks before a head commit takes
-/// frame and artifact locks. Publication follows the same referrer-first
-/// order, so a publisher cannot hold an execution lock while the terminal
-/// holds the artifact it needs.
+/// frame and artifact locks, and answer their journals. Publication follows
+/// the same referrer-first order, so a publisher cannot hold an execution
+/// lock while the terminal holds the artifact it needs.
 pub(crate) async fn lock_ending_executions_tx(
     tx: &mut sqlx::PgConnection,
     writes: &[lash_durable::DomainWrite],
-) -> Result<(), StoreError> {
+) -> Result<Vec<lash_protocol_types::EffectJournalIdentity>, StoreError> {
+    let mut journals = Vec::new();
     for referrer in ending_executions(writes)? {
         crate::artifact_store::lock_referrer_tx(tx, &referrer)
             .await
             .map_err(store_sqlx_error)?;
+        if let ArtifactReferrer::Execution(journal) = referrer {
+            journals.push(journal);
+        }
     }
-    Ok(())
+    Ok(journals)
 }
 
 /// The executions `writes` end, as referrers in lock order.

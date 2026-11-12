@@ -254,6 +254,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &park::SET_PARK,
         // A turn's terminal (FIG-5942).
         &turns::LOCK_KEY,
+        &turns::LOCK_ENDS,
         &turns::END_RUN,
         &turns::MARK_TERMINAL,
         &turns::RETENTION,

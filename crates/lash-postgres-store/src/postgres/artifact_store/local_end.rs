@@ -21,6 +21,45 @@ struct Answer {
     plans: Vec<(String, String, String)>,
 }
 
+/// Lock, in the one sorted order, every artifact the ends of `ended` and
+/// of the frames whose ended cleanups are gated on one of `gates` can
+/// delete, with `carries`, before the transaction takes any of them: the
+/// referrers' locks, then (a statement after those waits) what their edges
+/// in `namespaces` name and hold, transitively, joined with the carried
+/// artifacts. Each end the transaction then runs takes locks it already
+/// holds, so a publisher's sorted set never waits on a lock that this
+/// transaction took out of order (FIG-7700).
+pub(crate) async fn lock_ends_tx(
+    tx: &mut sqlx::PgConnection,
+    ended: &[ArtifactReferrer],
+    gates: &[&EffectJournalIdentity],
+    carries: &[(&str, String)],
+) -> Result<(), StoreError> {
+    if ended.is_empty() && carries.is_empty() {
+        return Ok(());
+    }
+    let (kinds, ids): (Vec<&str>, Vec<String>) = ended
+        .iter()
+        .map(|referrer| (referrer.kind().as_str(), referrer.canonical_id()))
+        .unzip();
+    let gates: Vec<&str> = gates.iter().map(|gate| gate.key()).collect();
+    let (carry_namespaces, carry_refs): (Vec<&str>, Vec<&str>) = carries
+        .iter()
+        .map(|(namespace, artifact_ref)| (*namespace, artifact_ref.as_str()))
+        .unzip();
+    crate::observed_sql::query(super::artifact_sql().postgres.lock_ends.sql())
+        .bind(&kinds)
+        .bind(&ids)
+        .bind(&gates)
+        .bind(&NAMESPACES[..])
+        .bind(&carry_namespaces)
+        .bind(&carry_refs)
+        .execute(crate::observed_sql::executor(tx))
+        .await
+        .map_err(failure)?;
+    Ok(())
+}
+
 pub(super) async fn end(
     tx: &mut sqlx::PgConnection,
     referrer: &ArtifactReferrer,
@@ -53,6 +92,9 @@ pub(crate) struct EndArguments {
 }
 
 impl EndArguments {
+    /// The namespaces every local end severs.
+    pub(crate) const NAMESPACES: &'static [&'static str] = &NAMESPACES;
+
     pub(crate) fn of(
         referrer: &ArtifactReferrer,
         gate: Option<&EffectJournalIdentity>,
@@ -212,4 +254,49 @@ END
 $lash_artifact_end_local$;
 "#
     .replace("{PEEL}", &crate::durable::retire_graph())
+        + LOCK_ENDS_DDL
 }
+
+/// [`lock_ends_tx`]'s server function. Its gated frames are the ones an
+/// end gated on the same execution severs.
+#[cfg(any(test, feature = "testing"))]
+const LOCK_ENDS_DDL: &str = r#"CREATE OR REPLACE FUNCTION lash_artifact_lock_ends(
+    p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[],
+    p_carry_namespaces text[], p_carry_refs text[]
+) RETURNS void LANGUAGE plpgsql VOLATILE AS $lash_artifact_lock_ends$
+DECLARE
+    v_refs jsonb;
+    held record;
+BEGIN
+    SELECT COALESCE(jsonb_agg(jsonb_build_array(ended.kind, ended.id)), '[]'::jsonb) INTO v_refs
+        FROM unnest(p_kinds, p_ids) AS ended(kind, id);
+    SELECT v_refs || COALESCE(jsonb_agg(jsonb_build_array(gated.referrer_kind, gated.referrer_id)), '[]'::jsonb)
+        INTO v_refs
+        FROM (SELECT referrer_kind, referrer_id, gate_execution, cleanup_json::jsonb AS body
+            FROM lash_artifact_cleanup_obligations
+            WHERE referrer_kind = 'frame_environment' AND gate_execution = ANY(p_gates)) gated
+        WHERE gated.body->>'plan' = 'ended' AND gated.body->>'gate' = gated.gate_execution
+            AND gated.body->'carries' = '[]'::jsonb;
+    FOR held IN SELECT DISTINCT value->>0 AS kind, value->>1 AS id
+        FROM jsonb_array_elements(v_refs) ORDER BY kind, id LOOP
+        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:' || held.kind || ':' || held.id, 0));
+    END LOOP;
+    -- This statement starts after the referrer lock waits.
+    FOR held IN WITH RECURSIVE reach(namespace, artifact_ref) AS (
+            SELECT edge.namespace, edge.artifact_ref FROM lash_artifact_referrer_edges edge
+            JOIN jsonb_array_elements(v_refs) ref ON edge.referrer_kind = ref.value->>0
+                AND edge.referrer_id = ref.value->>1
+            WHERE edge.namespace = ANY(p_namespaces)
+            UNION
+            SELECT dep.namespace, dep.artifact_ref FROM lash_artifact_dependency_edges dep
+            JOIN reach ON dep.holder_namespace = reach.namespace AND dep.holder_ref = reach.artifact_ref)
+        SELECT namespace, artifact_ref FROM reach
+        UNION
+        SELECT carried.namespace, carried.artifact_ref
+        FROM unnest(p_carry_namespaces, p_carry_refs) AS carried(namespace, artifact_ref)
+        ORDER BY namespace, artifact_ref LOOP
+        PERFORM pg_advisory_xact_lock(hashtextextended('lash-artifact:' || held.namespace || ':' || held.artifact_ref, 0));
+    END LOOP;
+END
+$lash_artifact_lock_ends$;
+"#;
