@@ -135,9 +135,68 @@ pub(crate) struct Committing<'a> {
     /// commit takes with its own frames' (FIG-7700); empty when the
     /// transaction took them already.
     pub(crate) ending: Vec<lash_protocol_types::EffectJournalIdentity>,
+    /// The actor's own process row, as the transaction's lock on it
+    /// leaves it, while each write since is one that keeps it current
+    /// (FIG-7701); `None` once a write could have changed it unseen.
+    pub(crate) locked: std::sync::Mutex<Option<crate::process_helpers::LockedProcess>>,
 }
 
 impl Committing<'_> {
+    /// The carried row of `process`, taken: its write hands back the row it
+    /// leaves with [`Self::relock`].
+    pub(crate) fn take_locked(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Option<crate::process_helpers::LockedProcess> {
+        let mut locked = self
+            .locked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if locked.as_ref().is_some_and(|row| row.record.id == *process) {
+            locked.take()
+        } else {
+            None
+        }
+    }
+
+    /// Carry `row` on.
+    pub(crate) fn relock(&self, row: Option<crate::process_helpers::LockedProcess>) {
+        *self
+            .locked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = row;
+    }
+
+    /// Keep the carry through `domain` only when it is a write the carry
+    /// follows (FIG-7701): an append or terminal of the carried process,
+    /// which hand its row back; a publication mark, outside the carried
+    /// columns; or an advance or format write of another process's row.
+    /// Any other write drops it, including the carried process's own
+    /// advance or format write, so its next append or terminal reads its
+    /// row again (a lost reuse, not stale data).
+    pub(crate) fn follow(&self, domain: &DomainWrite) {
+        let mut locked = self
+            .locked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(row) = locked.as_mut() else {
+            return;
+        };
+        let own = |process: &lash_vocabulary::identity::ProcessId| row.record.id == *process;
+        match domain {
+            DomainWrite::Process(
+                lash_durable::domain::ProcessWrite::AppendEvent { .. }
+                | lash_durable::domain::ProcessWrite::Terminal { .. }
+                | lash_durable::domain::ProcessWrite::Published { .. },
+            ) => {}
+            DomainWrite::Process(
+                lash_durable::domain::ProcessWrite::Advance { process, .. }
+                | lash_durable::domain::ProcessWrite::ComponentFormats { process, .. },
+            ) if !own(process) => {}
+            _ => *locked = None,
+        }
+    }
+
     /// What the commit's step programs run under.
     fn steps(&self) -> steps::Context<'_> {
         steps::Context {

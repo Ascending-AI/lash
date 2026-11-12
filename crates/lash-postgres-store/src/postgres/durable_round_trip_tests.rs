@@ -2534,3 +2534,88 @@ async fn a_created_process_execution_answers_its_writes_in_order() {
     );
     assert_eq!(processes(process).await, 0, "a refusal commits nothing");
 }
+
+/// The most round trips a process's terminal commit pays (FIG-7701; 25
+/// before it): its frontier read under the process row's lock answers the
+/// registry record and driver the terminal then writes from, so the
+/// terminal does not lock and read the row again, nor read its driver
+/// before the save.
+const PROCESS_TERMINAL_ROUND_TRIPS: u64 = 23;
+
+/// A process owner's terminal commit stays within its round-trip budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_process_terminal_commit_stays_within_its_round_trip_budget() {
+    use lash_core_execution::runtime::actor::process::record_terminal;
+    use lash_execution_contracts::process::{
+        EngineLaunch, LifetimeDecision, ProcessInput, ProcessOutcome, ProcessProvenance,
+        ProcessRegistrar as _, ProcessRegistration,
+    };
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the process terminal round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let stores = crate::PostgresStoreSet::new(
+        &storage,
+        std::sync::Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+    );
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let process = stores
+        .process_registry()
+        .register_process(ProcessRegistration::new(
+            ProcessInput::Engine {
+                kind: "terminal-round-trips".to_owned(),
+                payload: serde_json::json!({}),
+                launch: EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            ProcessProvenance::host(),
+            LifetimeDecision::Detached,
+        ))
+        .await
+        .expect("register the process")
+        .id;
+    let store = storage.durable_store();
+    let actor = ActorKey::process(process.as_str()).expect("actor key");
+    let formats = store
+        .actor(&actor)
+        .await
+        .expect("read the actor")
+        .expect("the process's actor")
+        .formats;
+    let node = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("round-trips"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register");
+    let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
+    let (mut tx, view) = store
+        .open_process(&actor, epoch, u64::MAX)
+        .await
+        .expect("open the process");
+    tx.retain_process(view);
+    let outcome = ProcessOutcome::from_tool_output(lash_protocol_types::ToolCallOutput::success(
+        serde_json::json!({}),
+    ));
+    record_terminal(&mut tx, &process, &outcome).expect("record the terminal");
+    let (receipt, trips) = round_trips(store.commit(tx, CommitLabel::PROCESS_TERMINAL)).await;
+    receipt.expect("commit the terminal");
+    within(
+        "a process's terminal commit",
+        trips,
+        PROCESS_TERMINAL_ROUND_TRIPS,
+    );
+}

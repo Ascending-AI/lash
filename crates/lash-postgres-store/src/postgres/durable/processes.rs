@@ -319,9 +319,19 @@ pub(super) async fn apply(
                     commit.fleet,
                 )
                 .map_err(|error| registry_failure(&error))?;
-            let record = record_event_tx(tx, process, request, millis(commit.now)?, commit.fleet)
-                .await
-                .map_err(|error| registry_failure(&error))?;
+            let (record, locked) = record_event_tx(
+                tx,
+                process,
+                commit.take_locked(process),
+                request,
+                millis(commit.now)?,
+                commit.fleet,
+            )
+            .await
+            .map_err(|error| registry_failure(&error))?;
+            if locked.is_some() {
+                commit.relock(locked);
+            }
             let json = lash_execution_contracts::process::registry_transitions::encode_view_record(
                 &record,
             )
@@ -339,9 +349,10 @@ pub(super) async fn apply(
             let output: lash_execution_contracts::process::ProcessAwaitOutput =
                 serde_json::from_str(outcome_json)
                     .map_err(|_| corrupt("process terminal", outcome_json))?;
-            let (ended, record) = record_terminal_tx(
+            let (ended, record, locked) = record_terminal_tx(
                 tx,
                 process,
+                commit.take_locked(process),
                 &output,
                 integer::<u64>(commit.epoch.0)?,
                 millis(commit.now)?,
@@ -349,6 +360,9 @@ pub(super) async fn apply(
             )
             .await
             .map_err(|error| registry_failure(&error))?;
+            if locked.is_some() {
+                commit.relock(locked);
+            }
             let json = lash_execution_contracts::process::registry_transitions::encode_view_record(
                 &record,
             )

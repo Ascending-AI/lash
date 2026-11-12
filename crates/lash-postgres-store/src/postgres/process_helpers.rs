@@ -4,7 +4,7 @@ use lash_vocabulary::identity::ProcessId;
 
 use crate::process_sql::process_sql;
 
-fn decode_process_record(json: &str) -> Result<ProcessRecord, PluginError> {
+pub(crate) fn decode_process_record(json: &str) -> Result<ProcessRecord, PluginError> {
     lash_execution_contracts::process::registry_transitions::decode_record(json)
 }
 
@@ -99,6 +99,33 @@ pub(crate) async fn require_process_tx(
     ))
 }
 
+/// A process row its transaction holds `FOR UPDATE`, read under that lock
+/// and kept current by each of the transaction's own writes to the row
+/// since (FIG-7701). While the lock is held no other transaction can
+/// change the row, so this is what a reread of it would answer: an owner
+/// commit's writes of its own process use it instead of locking and
+/// reading the row again.
+#[derive(Clone, Debug)]
+pub(crate) struct LockedProcess {
+    /// The registry record.
+    pub(crate) record: ProcessRecord,
+    /// The row's `driver_json`.
+    pub(crate) driver_json: Option<String>,
+}
+
+/// The registry record of `process_id` under its row lock: the one
+/// `locked` carries, else the row read and locked now.
+async fn locked_record_tx(
+    tx: &mut sqlx::PgConnection,
+    process_id: &ProcessId,
+    locked: Option<&LockedProcess>,
+) -> Result<ProcessRecord, PluginError> {
+    match locked {
+        Some(locked) => Ok(locked.record.clone()),
+        None => require_process_tx(tx, process_id).await,
+    }
+}
+
 /// Save `record`'s mutable columns, staged on the process feed: its change
 /// sequence is assigned after the transaction commits (FIG-5276).
 pub(crate) async fn save_process_tx(
@@ -106,15 +133,33 @@ pub(crate) async fn save_process_tx(
     record: &ProcessRecord,
     execution_changed: bool,
 ) -> Result<(), PluginError> {
-    let terminal_driver = if record.is_terminal() {
-        let stored = crate::observed_sql::query_scalar::<_, Option<String>>(
-            process_sql().process.select_driver_json_by_id.sql(),
-        )
-        .bind(record.id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+    save_locked_process_tx(tx, record, execution_changed, None)
         .await
-        .map_err(plugin_sqlx_error)?
-        .flatten();
+        .map(drop)
+}
+
+/// [`save_process_tx`] of a row whose `driver_json` the transaction
+/// carries in `driver`, when it does ([`LockedProcess`]): a terminal save
+/// derives its driver from it instead of reading the column again.
+/// Answers the row's `driver_json` after the save when `driver` was given.
+async fn save_locked_process_tx(
+    tx: &mut GuardedTx<'_>,
+    record: &ProcessRecord,
+    execution_changed: bool,
+    driver: Option<Option<String>>,
+) -> Result<Option<Option<String>>, PluginError> {
+    let terminal_driver = if record.is_terminal() {
+        let stored = match &driver {
+            Some(stored) => stored.clone(),
+            None => crate::observed_sql::query_scalar::<_, Option<String>>(
+                process_sql().process.select_driver_json_by_id.sql(),
+            )
+            .bind(record.id.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(plugin_sqlx_error)?
+            .flatten(),
+        };
         lash_durable::domain::processes::terminal_driver_json(stored.as_deref())
             .map_err(process_decode_error)?
     } else {
@@ -137,11 +182,12 @@ pub(crate) async fn save_process_tx(
         query
     };
     query
-        .bind(terminal_driver)
+        .bind(terminal_driver.as_deref())
         .execute(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(plugin_sqlx_error)?;
-    Ok(())
+    // The save writes `COALESCE(terminal_driver, driver_json)`.
+    Ok(driver.map(|stored| terminal_driver.or(stored)))
 }
 
 /// Read the immutable header and match its digest before restoring the
@@ -256,10 +302,22 @@ impl ProcessEventBatch {
         tx: &mut GuardedTx<'_>,
         record: &ProcessRecord,
     ) -> Result<(), PluginError> {
+        self.commit_locked(tx, record, None).await.map(drop)
+    }
+
+    /// [`Self::commit`] of a row whose `driver_json` the transaction
+    /// carries in `driver`, answering it after the save
+    /// ([`save_locked_process_tx`]).
+    async fn commit_locked(
+        self,
+        tx: &mut GuardedTx<'_>,
+        record: &ProcessRecord,
+        driver: Option<Option<String>>,
+    ) -> Result<Option<Option<String>>, PluginError> {
         if self.record_changed {
-            save_process_tx(tx, record, self.execution_changed).await?;
+            return save_locked_process_tx(tx, record, self.execution_changed, driver).await;
         }
-        Ok(())
+        Ok(driver)
     }
 }
 
@@ -453,17 +511,22 @@ pub(crate) async fn record_cancel_tx(
 /// End `process_id` with `output` under its actor's `epoch`, on a durable
 /// commit's connection. A process already terminal keeps its first
 /// terminal; answers whether this call ended it (L6, FIG-5175).
+///
+/// `locked` is the row as the transaction already holds it, when it does;
+/// the third answer is then the row after this write.
 pub(crate) async fn record_terminal_tx(
     tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
+    locked: Option<LockedProcess>,
     output: &ProcessAwaitOutput,
     epoch: u64,
     now_ms: u64,
     fleet_format: lash_core_store::store::FleetFormat,
-) -> Result<(bool, ProcessRecord), PluginError> {
-    let mut record = require_process_tx(tx, process_id).await?;
+) -> Result<(bool, ProcessRecord, Option<LockedProcess>), PluginError> {
+    let mut record = locked_record_tx(tx, process_id, locked.as_ref()).await?;
+    let driver = locked.map(|locked| locked.driver_json);
     if record.is_terminal() {
-        return Ok((false, record));
+        return Ok((false, record.clone(), relocked(record, driver)));
     }
     let authority =
         lash_execution_contracts::process::ProcessCompletionAuthority::ActorEpoch { epoch };
@@ -474,20 +537,35 @@ pub(crate) async fn record_terminal_tx(
         Some(&authority),
     );
     batch.stage(tx, &mut record, request, now_ms).await?;
-    batch.commit(tx, &record).await?;
-    Ok((true, record))
+    let driver = batch.commit_locked(tx, &record, driver).await?;
+    Ok((true, record.clone(), relocked(record, driver)))
 }
 
 /// Append `request`, replay-keyed, to `process_id` on a durable commit's
 /// connection: a repeat under the same key is a no-op (L6, FIG-5175).
+///
+/// `locked` is the row as the transaction already holds it, when it does;
+/// the second answer is then the row after this write.
 pub(crate) async fn record_event_tx(
     tx: &mut GuardedTx<'_>,
     process_id: &ProcessId,
+    locked: Option<LockedProcess>,
     request: ProcessEventAppendRequest,
     now_ms: u64,
     fleet_format: lash_core_store::store::FleetFormat,
-) -> Result<ProcessRecord, PluginError> {
-    let mut record = require_process_tx(tx, process_id).await?;
-    append_process_event_tx(tx, &mut record, request, now_ms, fleet_format).await?;
-    Ok(record)
+) -> Result<(ProcessRecord, Option<LockedProcess>), PluginError> {
+    let mut record = locked_record_tx(tx, process_id, locked.as_ref()).await?;
+    let driver = locked.map(|locked| locked.driver_json);
+    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
+    batch.stage(tx, &mut record, request, now_ms).await?;
+    let driver = batch.commit_locked(tx, &record, driver).await?;
+    Ok((record.clone(), relocked(record, driver)))
+}
+
+/// The row a locked write leaves, when its driver is known.
+fn relocked(record: ProcessRecord, driver: Option<Option<String>>) -> Option<LockedProcess> {
+    driver.map(|driver_json| LockedProcess {
+        record,
+        driver_json,
+    })
 }

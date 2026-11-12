@@ -422,7 +422,7 @@ pub(super) async fn apply_owner(
         graph::validate_exact_reads(tx, write.exact_reads()).await?;
         graph::install(tx, &checked).await?;
     }
-    let process_view = super::process_view::refresh_preimage(tx, write).await?;
+    let (process_view, locked) = super::process_view::refresh_preimage(tx, write).await?;
     let mut committing = Committing {
         process_views: lash_durable::domain::processes::ProcessPostimages::from_view(process_view),
         checkpoint_ref_chunk: pools.maintenance.checkpoint_ref_chunk as usize,
@@ -433,6 +433,7 @@ pub(super) async fn apply_owner(
         retired: Retired::default(),
         configs: &pools.configs,
         ending: Vec::new(),
+        locked: std::sync::Mutex::new(locked),
     };
     let ending = crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
         .await
@@ -462,6 +463,7 @@ pub(super) async fn apply_owner(
     }
     let mut session_heads = Vec::new();
     for domain in write.domain() {
+        committing.follow(domain);
         match domain {
             DomainWrite::SessionCommit(head) => {
                 let receipt = super::turns::apply_session_commit(tx, &committing, head).await?;

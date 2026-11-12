@@ -13,6 +13,7 @@ use sqlx::Row;
 use sqlx::postgres::PgRow;
 
 use super::{PostgresDurableStore, corrupt, get, processes, snapshots, sqlx_failure};
+use crate::process_helpers::LockedProcess;
 
 lash_store_sql::statements! {
     /// The process owner's open, as PostgreSQL reads it: the store's clock
@@ -47,6 +48,16 @@ lash_store_sql::statements! {
                     (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
                     (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
                     (lifecycle_json::jsonb -> 'external_ref')::text
+             FROM processes WHERE process_id = ?1 FOR UPDATE";
+        /// Process `?1`'s frontier, as `control`, with its registry
+        /// record and `driver_json`, under the row lock an owner commit
+        /// then carries through its writes of the process (FIG-7701).
+        control_carried = "SELECT (lifecycle_json::jsonb -> 'cancel_request')::text,
+                    (lifecycle_json::jsonb ->> 'last_event_sequence')::bigint,
+                    (lifecycle_json::jsonb ->> 'updated_at_ms')::bigint,
+                    (lifecycle_json::jsonb -> 'external_ref')::text,
+                    (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)),
+                    driver_json
              FROM processes WHERE process_id = ?1 FOR UPDATE";
         /// Authority, bounded pending mail and current cancellation only.
         frontier = lash_store_sql::mailbox_query!("?3", "?4", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
@@ -222,11 +233,38 @@ impl PostgresDurableStore {
     }
 }
 
+/// The process view `write` carries, refreshed with its row's frontier,
+/// and that row as its lock left it: the one read of the row an owner
+/// commit makes before its writes of the process (FIG-7701).
 pub(super) async fn refresh_preimage(
     tx: &mut super::Tx,
     write: &ActorTx,
-) -> Result<Option<ProcessView>, DurableError> {
-    refresh_view(tx, write.actor(), write.process_preimage().cloned()).await
+) -> Result<(Option<ProcessView>, Option<LockedProcess>), DurableError> {
+    let Some(mut view) = write.process_preimage().cloned() else {
+        return Ok((None, None));
+    };
+    let row = crate::observed_sql::query(SQL.control_carried.sql())
+        .bind(write.actor().id())
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let Some(row) = row else {
+        return Ok((Some(view), None));
+    };
+    refreshed(
+        &mut view,
+        get::<Option<String>>(&row, 0)?,
+        get::<i64>(&row, 1)?,
+        get::<i64>(&row, 2)?,
+        get::<Option<String>>(&row, 3)?,
+    )?;
+    let record = get::<String>(&row, 4)?;
+    let locked = LockedProcess {
+        record: crate::process_helpers::decode_process_record(&record)
+            .map_err(|error| corrupt("process record", &error.to_string()))?,
+        driver_json: get(&row, 5)?,
+    };
+    Ok((Some(view), Some(locked)))
 }
 
 pub(super) async fn refresh_view(

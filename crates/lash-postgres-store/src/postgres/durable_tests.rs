@@ -1236,3 +1236,27 @@ async fn lo_process_receipt_when_configured() {
         .await
         .unwrap();
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_process_terminal_settles_when_configured() {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    let backend = lash_execution_contracts::backend::Backend::assemble(
+        lash_execution_contracts::backend::BackendParts {
+            formats: Vec::new(),
+            stores: Arc::new(crate::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+            )),
+            settings: lash_core_execution::runtime::actor::process_laws::settings(),
+            engines: Vec::new(),
+        },
+    )
+    .unwrap();
+    lash_core_execution::runtime::actor::process_laws::lo_process_terminal_settles_on_its_locked_row(&backend)
+        .await
+        .unwrap();
+}

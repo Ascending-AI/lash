@@ -88,6 +88,7 @@ pub use passes::{
     a_once_process_body_survives_one_revision_conflict,
     a_process_terminal_retires_its_optional_execution_debt, lo_process_receipt_is_exact,
     lo_process_retains_acknowledged_state, lo_process_retains_candidate_pages,
+    lo_process_terminal_settles_on_its_locked_row,
     ready_step_completions_commit_together_up_to_the_member_bound,
 };
 
