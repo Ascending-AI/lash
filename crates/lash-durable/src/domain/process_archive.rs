@@ -635,7 +635,12 @@ impl<'a> ProcessArchive<'a> {
         Ok(None)
     }
 
-    fn children(&self, node: &ArchiveNode<'_>) -> Decoded<Vec<ArchiveNode<'a>>> {
+    /// The nodes `node`'s stored edges name, in stored order.
+    ///
+    /// # Errors
+    ///
+    /// [`ArchiveCorrupt`] for an edge that does not decode.
+    pub fn children(&self, node: &ArchiveNode<'_>) -> Decoded<Vec<ArchiveNode<'a>>> {
         let at = self.nodes_at + node.index * NODE_ENTRY;
         let start = u32_at(self.bytes, at + 40)? as usize;
         let count = usize::from(u16::from_le_bytes([

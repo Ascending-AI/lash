@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
+use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal, NodeId};
 use lash_core_store::model_calls::ModelCallRecord;
 use lash_durable::domain::process_archive::{
     self as archive, ArchiveContents, ArchivedCall, ArchivedFact, ArchivedModelCall, ArchivedNode,
@@ -56,6 +56,31 @@ lash_store_sql::statements! {
         edges = "SELECT edge.parent_id, child.hash FROM blob_edges AS edge
              JOIN blobs AS child ON child.id = edge.child_id
              WHERE edge.parent_id = ANY(?1)";
+
+        /// Restore archived nodes `?1` (raw digests) with bytes `?2` and
+        /// encodings `?3` as live blobs, in digest order, unless one is
+        /// stored under its address; answers the digests it restored.
+        restore_nodes = "INSERT INTO blobs (hash, content, encoding)
+             SELECT staged.digest, staged.content, staged.encoding
+             FROM UNNEST(?1::bytea[], ?2::bytea[], ?3::smallint[]) AS staged(digest, content, encoding)
+             ORDER BY staged.digest
+             ON CONFLICT (hash) DO NOTHING
+             RETURNING hash";
+
+        /// The stored blobs of `?1` (raw digests), key-share locked in digest
+        /// order: a live node a restore keeps is held against a peel until
+        /// its commit ends.
+        lock_live = "SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[]) ORDER BY hash FOR KEY SHARE";
+
+        /// Restore every stored edge of parents `?1` to children `?2` (raw
+        /// digests), all live.
+        restore_edges = "INSERT INTO blob_edges (parent_id, child_id)
+             SELECT parent.id, child.id
+             FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)
+             JOIN blobs AS parent ON parent.hash = staged.parent
+             JOIN blobs AS child ON child.hash = staged.child
+             ORDER BY 1, 2
+             ON CONFLICT (parent_id, child_id) DO NOTHING";
     }
 }
 static POSTGRES: LazyLock<ProcessHistoryPostgresStatements> =
@@ -203,6 +228,92 @@ pub(super) async fn model_records(
         .await
         .map_err(DurableError::Graph)?;
     super::model_calls::decode_records(rows, nodes, limits)
+}
+
+/// Make root `root` of packed history archive `bytes` live again, in the
+/// caller's transaction, before a lease on it is issued: every node its
+/// closure reaches along stored edges that no live blob holds is restored
+/// with its exact bytes, encoding and edges. A node stored live already
+/// keeps its stored copy, key-share locked until the commit so no peel
+/// removes it first, and the closure under it is live with it. The lease
+/// then holds what it restored as it holds any live root, and its release
+/// or reaping retires it as it retires any other.
+pub(super) async fn restore(
+    tx: &mut PgConnection,
+    bytes: &[u8],
+    root: NodeId,
+) -> Result<(), GraphRefusal> {
+    let refused = |error: archive::ArchiveCorrupt| super::graph::from_durable(error.into());
+    let archive = ProcessArchive::open(bytes).map_err(refused)?;
+    let mut seen = BTreeSet::from([root]);
+    let mut level = vec![root];
+    let mut edges: Vec<(NodeId, NodeId)> = Vec::new();
+    while !level.is_empty() {
+        let mut nodes = Vec::with_capacity(level.len());
+        for id in &level {
+            nodes.push(
+                archive
+                    .node(id)
+                    .map_err(refused)?
+                    .ok_or(GraphRefusal::MissingNode(*id))?,
+            );
+        }
+        let digests: Vec<&[u8]> = nodes.iter().map(|node| &node.id.0[..]).collect();
+        let contents: Vec<&[u8]> = nodes.iter().map(|node| node.bytes).collect();
+        let encodings: Vec<i16> = nodes.iter().map(|node| i16::from(node.encoding)).collect();
+        let restored: BTreeSet<Vec<u8>> =
+            crate::observed_sql::query_scalar(POSTGRES.restore_nodes.sql())
+                .bind(&digests)
+                .bind(&contents)
+                .bind(&encodings)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(super::graph::db)?
+                .into_iter()
+                .collect();
+        let live: Vec<&[u8]> = digests
+            .iter()
+            .copied()
+            .filter(|digest| !restored.contains(*digest))
+            .collect();
+        let locked: BTreeSet<Vec<u8>> = if live.is_empty() {
+            BTreeSet::new()
+        } else {
+            crate::observed_sql::query_scalar(POSTGRES.lock_live.sql())
+                .bind(&live)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(super::graph::db)?
+                .into_iter()
+                .collect()
+        };
+        let mut next = Vec::new();
+        for node in &nodes {
+            if restored.contains(&node.id.0[..]) {
+                for child in archive.children(node).map_err(refused)? {
+                    edges.push((node.id, child.id));
+                    if seen.insert(child.id) {
+                        next.push(child.id);
+                    }
+                }
+            } else if !locked.contains(&node.id.0[..]) {
+                // Peeled between the insert and the lock: restore it again.
+                next.push(node.id);
+            }
+        }
+        level = next;
+    }
+    for chunk in edges.chunks(1024) {
+        let parents: Vec<&[u8]> = chunk.iter().map(|(parent, _)| &parent.0[..]).collect();
+        let children: Vec<&[u8]> = chunk.iter().map(|(_, child)| &child.0[..]).collect();
+        crate::observed_sql::query(POSTGRES.restore_edges.sql())
+            .bind(&parents)
+            .bind(&children)
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(super::graph::db)?;
+    }
+    Ok(())
 }
 
 /// What one pack did.

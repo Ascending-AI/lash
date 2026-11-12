@@ -417,14 +417,12 @@ pub(super) fn encoding_of(stored: i64) -> Result<BlobEncoding, GraphRefusal> {
     }
 }
 
-/// `owner`'s current root, or none when its row is gone or holds none.
-pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<NodeId>> {
-    Ok(root_in(tx, owner)?.map(|root| root.map(|(root, _)| root)))
-}
-
 /// `owner`'s current root, with the process history archive that names it
 /// when its row was packed.
-fn root_in(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<(NodeId, Option<Vec<u8>>)>> {
+pub(super) fn root_in(
+    tx: &Connection,
+    owner: &RootOwner,
+) -> GraphAnswer<Option<(NodeId, Option<Vec<u8>>)>> {
     fn one(
         tx: &Connection,
         sql: &str,

@@ -707,12 +707,12 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
         .map_err(db)
 }
 
-/// The root `owner` names now, read on the caller's connection: none when
-/// the owner is gone or holds no root.
-pub(super) async fn root_of(
+/// The root `owner` names now, with the process history archive that names
+/// it when its row was packed.
+pub(super) async fn root_in(
     connection: &mut PgConnection,
     owner: &RootOwner,
-) -> Answer<Option<NodeId>> {
+) -> Answer<Option<(NodeId, Option<Vec<u8>>)>> {
     let sql = &*SQL;
     let query = |statement| crate::keys::query_scalar::<Option<String>>(statement);
     let bound = match owner {
@@ -723,11 +723,12 @@ pub(super) async fn root_of(
                     .fetch_optional(crate::observed_sql::executor(&mut *connection))
                     .await
                     .map_err(db)?;
-            return row
+            return Ok(row
                 .and_then(|(_, root)| root)
                 .as_deref()
                 .map(node_of)
-                .transpose();
+                .transpose()?
+                .map(|root| (root, None)));
         }
         RootOwner::RunFact {
             owner,
@@ -788,8 +789,8 @@ pub(super) async fn root_of(
         .as_deref()
         .map(node_of)
         .transpose()?;
-    if root.is_some() {
-        return Ok(root);
+    if let Some(root) = root {
+        return Ok(Some((root, None)));
     }
     let Some(process) = process_archive::root_process(owner) else {
         return Ok(None);
@@ -798,7 +799,7 @@ pub(super) async fn root_of(
         .await
         .map_err(db)?
     {
-        Some(bytes) => archived_root(&bytes, owner),
+        Some(bytes) => Ok(archived_root(&bytes, owner)?.map(|root| (root, Some(bytes)))),
         None => Ok(None),
     }
 }

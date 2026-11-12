@@ -57,6 +57,17 @@ lash_store_sql::statements! {
         edges = "SELECT edge.parent_id, child.hash FROM blob_edges AS edge
              JOIN blobs AS child ON child.id = edge.child_id
              WHERE edge.parent_id IN (SELECT value FROM json_each(?1))";
+
+        /// Restore archived node `?1` with bytes `?2` and encoding `?3` as a
+        /// live blob, unless one is stored under its address.
+        restore_node = "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, ?3)
+             ON CONFLICT (hash) DO NOTHING";
+
+        /// Restore the stored edge from node `?1` to node `?2`, both live.
+        restore_edge = "INSERT INTO blob_edges (parent_id, child_id)
+             SELECT parent.id, child.id FROM blobs AS parent, blobs AS child
+             WHERE parent.hash = ?1 AND child.hash = ?2
+             ON CONFLICT (parent_id, child_id) DO NOTHING";
     }
 }
 static SQLITE: LazyLock<ProcessHistorySqliteStatements> =
@@ -197,6 +208,63 @@ pub(super) fn model_records(
     let nodes =
         super::graph::walk_archive(&archive, &roots, &limits).map_err(DurableError::Graph)?;
     super::model_calls::decode_records(rows, nodes, limits)
+}
+
+/// Make root `root` of packed history archive `bytes` live again, in the
+/// caller's write transaction, before a lease on it is issued: every node
+/// its closure reaches along stored edges that no live blob holds is
+/// restored with its exact bytes, encoding and edges. A node stored live
+/// already keeps its stored copy, and the closure under it is live with
+/// it. The lease then holds what it restored as it holds any live root,
+/// and its release or reaping retires it as it retires any other.
+pub(super) fn restore(tx: &Connection, bytes: &[u8], root: NodeId) -> Answer<()> {
+    let archive = match ProcessArchive::open(bytes) {
+        Ok(archive) => archive,
+        Err(error) => return Ok(Err(error.into())),
+    };
+    let mut seen = BTreeSet::from([root]);
+    let mut level = vec![root];
+    let mut edges = Vec::new();
+    while !level.is_empty() {
+        let mut next = Vec::new();
+        for id in level {
+            let node = match archive.node(&id) {
+                Ok(Some(node)) => node,
+                Ok(None) => {
+                    return Ok(Err(DurableError::Graph(
+                        lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(id),
+                    )));
+                }
+                Err(error) => return Ok(Err(error.into())),
+            };
+            let restored = tx
+                .statement(SQLITE.restore_node.sql())?
+                .execute(rusqlite::params![
+                    &id.0[..],
+                    node.bytes,
+                    i64::from(node.encoding)
+                ])?;
+            if restored == 0 {
+                continue;
+            }
+            let children = match archive.children(&node) {
+                Ok(children) => children,
+                Err(error) => return Ok(Err(error.into())),
+            };
+            for child in children {
+                edges.push((id, child.id));
+                if seen.insert(child.id) {
+                    next.push(child.id);
+                }
+            }
+        }
+        level = next;
+    }
+    for (parent, child) in edges {
+        tx.statement(SQLITE.restore_edge.sql())?
+            .execute(rusqlite::params![&parent.0[..], &child.0[..]])?;
+    }
+    Ok(Ok(()))
 }
 
 /// What one pack did.

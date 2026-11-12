@@ -8,7 +8,7 @@
 //! only the reads that reach it. Prune removes the archive with its process.
 
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core_store::checkpoint_graph::{DecodeLimits, GraphReadPolicy, GraphRefusal, NodeId};
 use lash_durable::DurableError;
@@ -215,6 +215,33 @@ impl Raw {
         }
     }
 
+    /// Which of `nodes` a live blob holds.
+    async fn live(&self, nodes: &BTreeSet<NodeId>) -> BTreeSet<NodeId> {
+        let mut live = BTreeSet::new();
+        for node in nodes {
+            let found: i64 = match self {
+                Self::Sqlite(path) => Self::sqlite(path)
+                    .query_row(
+                        "SELECT count(*) FROM blobs WHERE hash = ?1",
+                        [&node.0[..]],
+                        |row| row.get(0),
+                    )
+                    .unwrap(),
+                Self::Postgres(url) => {
+                    sqlx::query_scalar("SELECT count(*) FROM lash_blobs WHERE hash = $1")
+                        .bind(&node.0[..])
+                        .fetch_one(&mut Self::pg(url).await)
+                        .await
+                        .unwrap()
+                }
+            };
+            if found > 0 {
+                live.insert(*node);
+            }
+        }
+        live
+    }
+
     async fn set_archive(&self, process: &ProcessId, bytes: &[u8]) {
         match self {
             Self::Sqlite(path) => {
@@ -335,6 +362,12 @@ fn core_over(stores: Arc<dyn StoreSet>, answer_bytes: usize) -> (lash::Backend, 
 /// Run one workflow process making `reads` source reads to its successful
 /// end.
 async fn run_one(core: &lash::LashCore, reads: usize) -> ProcessId {
+    Box::pin(run_observed(core, reads, false)).await
+}
+
+/// Run one workflow process making `reads` source reads to its successful
+/// end, observed at counts when `counted` so its segments replay.
+async fn run_observed(core: &lash::LashCore, reads: usize, counted: bool) -> ProcessId {
     let pin = lash_core::HostArtifactPin::mint();
     let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(16))
         .model(lash_core::ProcessModel::new(
@@ -411,10 +444,19 @@ async fn run_one(core: &lash::LashCore, reads: usize) -> ProcessId {
         )
         .await
         .unwrap();
-    let settings = core
-        .processes()
-        .engine_defaults(lash_vm_runtime::LASH_VM_ENGINE_KIND, &serde_json::json!({}))
-        .unwrap();
+    let settings = if counted {
+        Some(
+            core.processes()
+                .kernel_engine_defaults()
+                .unwrap()
+                .observing(lash_kernel_value::observation::RunObservation::Counts)
+                .into_engine_settings(),
+        )
+    } else {
+        core.processes()
+            .engine_defaults(lash_vm_runtime::LASH_VM_ENGINE_KIND, &serde_json::json!({}))
+            .unwrap()
+    };
     let request = lash::process::ProcessStartRequest::definition(
         definition.id.clone(),
         Some(definition.signature.clone()),
@@ -936,3 +978,204 @@ async fn a_history_over_the_cap_keeps_its_rows(tier: Tier) {
 }
 
 on_every_tier!(a_history_over_the_cap_keeps_its_rows: sqlite_memory, postgres);
+
+/// The page store's retirement, run until a step does nothing.
+async fn drain(pages: &dyn lash_durable::domain::pages::PageStore) {
+    let budget = lash_durable::domain::pages::RetirementBudget { nodes: 4096 };
+    while pages.retire_step(budget).await.unwrap()
+        != lash_durable::domain::pages::RetirementProgress::default()
+    {}
+}
+
+/// A reader's lease on run fact `root` of `owner`.
+fn reader(owner: RootOwner, root: NodeId) -> lash_durable::domain::pages::RootLeaseRequest {
+    lash_durable::domain::pages::RootLeaseRequest {
+        owner,
+        expected: root,
+        fence: lash_durable::domain::pages::LeaseFence::Reader,
+        ttl_millis: 3_600_000,
+    }
+}
+
+/// A packed history's roots lease as they did from its rows (FIG-7701,
+/// review finding 1). A reader's lease taken before the pack keeps reading
+/// through the pack, the peel of the rows' roots, the prune of the process
+/// and the retirement after each; a lease taken after the pack restores the
+/// live closure it reads, and its pages, renewals and a parked replay
+/// answer as from the rows. A shared node's last other live copy retires
+/// while a restored lease still reads it. Released, the restored copies
+/// retire with nothing left behind.
+async fn a_packed_history_leases_as_its_rows(tier: Tier) {
+    let (stores, raw, _keep) = raw_stores(tier).await;
+    let (backend, core) = core_over(stores, 400);
+    let first = Box::pin(run_observed(&core, 2, true)).await;
+    let second = Box::pin(run_observed(&core, 2, true)).await;
+    let durable = Arc::clone(backend.durable());
+    let pages = durable.pages().expect("the store publishes heap pages");
+    let limits = GraphReadPolicy::standard().owner();
+    let replay = |process: ProcessId| {
+        let core = &core;
+        async move {
+            core.processes()
+                .replay(&process, lash::workflow::ReplaySegments::All)
+                .await
+                .unwrap()
+        }
+    };
+
+    // Every run fact of both processes: its root, the graph pages a lease
+    // on it reads, and what they read from the rows.
+    let mut facts = Vec::new();
+    for process in [&first, &second] {
+        let owner = OwnerKey::Process(process.clone());
+        for row in durable.run_facts(&owner).await.unwrap().rows {
+            let at = fact(&owner, row.run, row.ordinal);
+            let graph = durable.hydrate(at.clone(), None, limits).await.unwrap();
+            let ids: Vec<NodeId> = graph
+                .nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.encoding == lash_core_store::checkpoint_graph::BlobEncoding::Graph
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            let lease = pages
+                .acquire_root_lease(reader(at.clone(), graph.root))
+                .await
+                .unwrap();
+            let read = format!("{:?}", pages.read_pages(&lease, &ids).await);
+            pages.release_root_lease(lease.id).await.unwrap();
+            facts.push((process.clone(), at, graph.root, ids, read));
+        }
+    }
+    let first_facts: Vec<usize> = (0..facts.len())
+        .filter(|at| facts[*at].0 == first)
+        .collect();
+    let second_facts: Vec<usize> = (0..facts.len())
+        .filter(|at| facts[*at].0 == second)
+        .collect();
+    assert!(first_facts.len() >= 2 && !second_facts.is_empty());
+    let replayed = replay(first.clone()).await;
+    assert!(
+        replayed.iter().any(|segment| segment.segment > 0
+            && matches!(
+                segment.answer,
+                lash::workflow::SegmentAnswer::Verified { .. }
+            )),
+        "a segment after a park replays from its parked page: {replayed:?}"
+    );
+    let every: BTreeSet<NodeId> = facts
+        .iter()
+        .flat_map(|fact| fact.3.iter().copied())
+        .collect();
+
+    // A lease taken before the pack.
+    let (_, early_at, early_root, early_ids, early_read) = &facts[first_facts[0]];
+    let early = pages
+        .acquire_root_lease(reader(early_at.clone(), *early_root))
+        .await
+        .unwrap();
+    assert_eq!(durable.pack_finished_histories(16).await.unwrap(), 2);
+    assert_eq!(raw.rows(&first).await + raw.rows(&second).await, 0);
+    drain(pages.as_ref()).await;
+    let held_by_others = raw.live(&every).await;
+    assert_eq!(
+        &format!("{:?}", pages.read_pages(&early, early_ids).await),
+        early_read,
+        "a lease taken before the pack reads through it"
+    );
+    let early = pages.renew_root_lease(&early).await.unwrap();
+
+    // Leases taken after the pack, on every fact.
+    for (_, at, root, ids, read) in &facts {
+        let lease = pages
+            .acquire_root_lease(reader(at.clone(), *root))
+            .await
+            .unwrap();
+        assert_eq!(
+            &format!("{:?}", pages.read_pages(&lease, ids).await),
+            read,
+            "a lease taken after the pack reads as from the rows"
+        );
+        let lease = pages.renew_root_lease(&lease).await.unwrap();
+        pages.release_root_lease(lease.id).await.unwrap();
+    }
+    drain(pages.as_ref()).await;
+    assert_eq!(
+        replay(first.clone()).await,
+        replayed,
+        "a parked replay answers as from the rows"
+    );
+    drain(pages.as_ref()).await;
+    assert_eq!(
+        raw.live(&every).await,
+        held_by_others,
+        "released leases leave no restored copy"
+    );
+
+    // A shared node: a restored lease on the first process holds it while
+    // the second process's lease, its other live copy, ends and retires.
+    let (_, kept_at, kept_root, kept_ids, kept_read) = &facts[*first_facts.last().unwrap()];
+    let kept = pages
+        .acquire_root_lease(reader(kept_at.clone(), *kept_root))
+        .await
+        .unwrap();
+    let (_, other_at, other_root, other_ids, _) = &facts[second_facts[0]];
+    let other = pages
+        .acquire_root_lease(reader(other_at.clone(), *other_root))
+        .await
+        .unwrap();
+    let shared: Vec<NodeId> = kept_ids
+        .iter()
+        .filter(|id| other_ids.contains(id) && !held_by_others.contains(id))
+        .copied()
+        .collect();
+    pages.release_root_lease(other.id).await.unwrap();
+    drain(pages.as_ref()).await;
+    assert_eq!(
+        &format!("{:?}", pages.read_pages(&kept, kept_ids).await),
+        kept_read,
+        "the restored lease reads the {} shared nodes after their other copy retired",
+        shared.len()
+    );
+
+    // Prune: both leases read on, and renew.
+    let pruned = core
+        .processes()
+        .prune(
+            u64::MAX,
+            None,
+            lash::process::ProjectionWatermark::NoProjector,
+        )
+        .await
+        .unwrap();
+    assert_eq!(pruned.pruned_processes, 2);
+    drain(pages.as_ref()).await;
+    for (lease, ids, read) in [
+        (&early, early_ids, early_read),
+        (&kept, kept_ids, kept_read),
+    ] {
+        assert_eq!(
+            &format!("{:?}", pages.read_pages(lease, ids).await),
+            read,
+            "a lease reads on after its process is pruned"
+        );
+        pages.renew_root_lease(lease).await.unwrap();
+    }
+    assert!(matches!(
+        pages
+            .acquire_root_lease(reader(kept_at.clone(), *kept_root))
+            .await,
+        Err(DurableError::Graph(GraphRefusal::RootRetired))
+    ));
+    pages.release_root_lease(early.id).await.unwrap();
+    pages.release_root_lease(kept.id).await.unwrap();
+    drain(pages.as_ref()).await;
+    assert!(
+        raw.live(&every).await.is_subset(&held_by_others),
+        "the released leases leave nothing behind"
+    );
+    core.shutdown().await.unwrap();
+}
+
+on_every_tier!(a_packed_history_leases_as_its_rows: sqlite_memory, postgres);
