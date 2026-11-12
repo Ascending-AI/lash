@@ -1659,29 +1659,29 @@ export_file(
 )
 
 export_file(
-    name = "host-schemas/worker-page-reply/v11.schema.json",
-    src = "host-schemas/worker-page-reply/v11.schema.json",
+    name = "host-schemas/worker-page-reply/v12.schema.json",
+    src = "host-schemas/worker-page-reply/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-page-request/v11.schema.json",
-    src = "host-schemas/worker-page-request/v11.schema.json",
+    name = "host-schemas/worker-page-request/v12.schema.json",
+    src = "host-schemas/worker-page-request/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-seal-batch/v11.schema.json",
-    src = "host-schemas/worker-seal-batch/v11.schema.json",
+    name = "host-schemas/worker-seal-batch/v12.schema.json",
+    src = "host-schemas/worker-seal-batch/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
 
 export_file(
-    name = "host-schemas/worker-start/v11.schema.json",
-    src = "host-schemas/worker-start/v11.schema.json",
+    name = "host-schemas/worker-start/v12.schema.json",
+    src = "host-schemas/worker-start/v12.schema.json",
     mode = "reference",
     visibility = ["PUBLIC"],
 )
