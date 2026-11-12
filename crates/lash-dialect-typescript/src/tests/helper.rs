@@ -7,6 +7,15 @@ pub(crate) struct Helper<'a> {
     pub(crate) library: &'a lash_kernel_dialect::NamedLibrary,
     pub(crate) name: &'static str,
     pub(crate) id: Option<lash_kernel_value::FunctionId>,
+    /// An identity the library no longer retains: no definition, header or
+    /// registration answers for it.
+    pub(crate) retired: Option<lash_kernel_value::FunctionId>,
+}
+
+impl Helper<'_> {
+    fn retains(&self, function: &lash_kernel_value::FunctionId) -> bool {
+        self.retired != Some(*function)
+    }
 }
 
 impl lash_kernel_doc::FunctionCatalog for Helper<'_> {
@@ -26,19 +35,25 @@ impl lash_kernel_doc::FunctionCatalog for Helper<'_> {
         &self,
         function: &lash_kernel_value::FunctionId,
     ) -> Option<&lash_kernel_doc::FunctionDefinition> {
-        self.library.definition(function)
+        self.library
+            .definition(function)
+            .filter(|_| self.retains(function))
     }
     fn registered(
         &self,
         function: &lash_kernel_value::FunctionId,
     ) -> Option<&lash_kernel_doc::RegisteredFunction> {
-        self.library.registered(function)
+        self.library
+            .registered(function)
+            .filter(|_| self.retains(function))
     }
     fn header(
         &self,
         function: &lash_kernel_value::FunctionId,
     ) -> Option<std::sync::Arc<lash_kernel_doc::FunctionHeader>> {
-        self.library.header(function)
+        self.library
+            .header(function)
+            .filter(|_| self.retains(function))
     }
     fn registration(
         &self,

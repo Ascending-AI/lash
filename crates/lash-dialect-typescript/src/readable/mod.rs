@@ -719,6 +719,41 @@ console.log(JSON.stringify(created));
         let reading_k = "Cannot read properties of undefined or null (reading 'k')";
         // `text.join`'s own check of its members.
         const JOIN_REFUSAL: &str = "join requires text members";
+        // A publication reads back through the release its document pins:
+        // with the original helper retained beside a newer one under the
+        // same name, the document reads back to the original's identity;
+        // once the original is retired, it is refused, never read back to
+        // the newer helper the name now resolves to.
+        fn retained_reads_back(
+            document: &k::Document,
+            newer: &crate::tests::helper::Helper<'_>,
+            original: Option<lash_kernel_value::FunctionId>,
+        ) {
+            let original = original.expect("the original helper");
+            assert_ne!(newer.id, Some(original));
+            let (canonical, _) = crate::constructs::conventions::CONVENTIONS
+                .verify_inverse(document, newer)
+                .expect("the retained release reads back");
+            // The readback names the original helper's identity, never the
+            // newer one the name now resolves to.
+            let bytes = canonical.canonical_bytes();
+            let names = |id: &lash_kernel_value::FunctionId| {
+                bytes.windows(32).any(|window| window == id.as_bytes())
+            };
+            assert!(names(&original));
+            assert!(!names(&newer.id.expect("the newer helper")));
+            let retired = crate::tests::helper::Helper {
+                retired: Some(original),
+                ..*newer
+            };
+            let refused =
+                crate::constructs::conventions::CONVENTIONS.verify_inverse(document, &retired);
+            assert!(
+                refused.is_err(),
+                "{:?}",
+                refused.map(|(read, _)| read.identity())
+            );
+        }
         let record_y = k::Datum::Record(vec![("7,8,9".into(), k::Datum::Bool(true))]);
         // (x's literal, its fill, body, y, the result JavaScript gives or
         // the failure message it raises, where the case has one).
@@ -918,6 +953,7 @@ console.log(JSON.stringify(created));
             library,
             name: "ts.in",
             id: None,
+            retired: None,
         };
         let refused = crate::lower(
             &printed.source,
@@ -946,6 +982,7 @@ console.log(JSON.stringify(created));
             library,
             name: "ts.in",
             id: library.resolve("ts.has"),
+            retired: None,
         };
         assert!(renamed.id.is_some());
         let refused = print(
@@ -958,6 +995,7 @@ console.log(JSON.stringify(created));
             matches!(refused, Err(PrintError::Unprintable { .. })),
             "{refused:?}"
         );
+        retained_reads_back(&opened.document, &renamed, library.resolve("ts.in"));
         // A template's join keeps `text.join`'s identity: the printed
         // callable spells it, and a library naming another helper so does
         // not print it.
@@ -988,6 +1026,7 @@ console.log(JSON.stringify(created));
             library,
             name: "text.join",
             id: library.resolve("text.concat"),
+            retired: None,
         };
         assert!(renamed.id.is_some());
         let refused = print(
@@ -1000,6 +1039,7 @@ console.log(JSON.stringify(created));
             matches!(refused, Err(PrintError::Unprintable { .. })),
             "{refused:?}"
         );
+        retained_reads_back(&joined.document, &renamed, library.resolve("text.join"));
         // No package claims the spelling's root.
         let claimed = lash_kernel_dialect::Namespaces::new(
             Default::default(),
