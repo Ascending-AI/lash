@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 42
+version 43
 table lash_abandoned_consumer_holds
   column abandoned_at_ms bigint not-null
   column hold_key text not-null
@@ -744,5 +744,5 @@ function lash_graph_retire (p_roots bytea[], p_limit bigint, p_now bigint) -> vo
 function lash_lock_referrer (p_kind text, p_id text) -> boolean
 function lash_node_renew (p_node text, p_boot text, p_ttl bigint, p_fleet_low integer, p_fleet_high integer, p_lock_timeout text, p_statement_ms bigint, p_now bigint) -> TABLE(o_fleet integer, o_expires bigint)
 function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint, p_requires text, p_profile boolean) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text, o_session_heads jsonb, o_inserted bytea[], o_root_leases bigint[], o_answered jsonb)
-function lash_republish_process_env (p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea, p_modules text[], p_kind text, p_id text, OUT stored boolean, OUT missing text) -> record
+function lash_publish_env_over_stored_body (p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea, p_modules text[], p_kind text, p_id text, OUT stored boolean, OUT missing text) -> record
 function lash_writer_fence (p_expected integer) -> void

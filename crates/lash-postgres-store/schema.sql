@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 42.
+-- lash-postgres-store schema, component version 43.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -962,7 +962,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 42, 42)
+VALUES ('lash-postgres-store', 43, 43)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable
@@ -3008,19 +3008,25 @@ BEGIN
     RETURN NULL;
 END
 $lash_acquire_holds$;
-CREATE OR REPLACE FUNCTION lash_republish_process_env(
+CREATE OR REPLACE FUNCTION lash_publish_env_over_stored_body(
     p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea,
     p_modules text[], p_kind text, p_id text,
     OUT stored boolean, OUT missing text
-) LANGUAGE plpgsql VOLATILE AS $lash_republish_process_env$
+) LANGUAGE plpgsql VOLATILE AS $lash_publish_env_over_stored_body$
 BEGIN
-    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS head
-        JOIN lash_lash_vm_artifacts AS body
-            ON body.namespace = 'process_env_body' AND body.artifact_ref = head.body_ref
-        WHERE head.namespace = 'process_execution_env' AND head.artifact_ref = p_env_ref
-            AND head.storage_kind = 2 AND head.body_ref = p_body_ref
-            AND head.body_at = p_at AND head.artifact_bytes = p_head
-            AND body.artifact_bytes = p_body);
+    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = 'process_env_body' AND artifact_ref = p_body_ref
+            AND artifact_bytes = p_body);
+    IF NOT stored THEN
+        RETURN;
+    END IF;
+    INSERT INTO lash_lash_vm_artifacts (namespace, artifact_ref, storage_kind, artifact_bytes, body_ref, body_at)
+        VALUES ('process_execution_env', p_env_ref, 2, p_head, p_body_ref, p_at)
+        ON CONFLICT (namespace, artifact_ref) DO NOTHING;
+    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = 'process_execution_env' AND artifact_ref = p_env_ref
+            AND storage_kind = 2 AND body_ref = p_body_ref
+            AND body_at = p_at AND artifact_bytes = p_head);
     IF NOT stored THEN
         RETURN;
     END IF;
@@ -3043,7 +3049,7 @@ BEGIN
         VALUES ('process_execution_env', p_env_ref, p_kind, p_id)
         ON CONFLICT DO NOTHING;
 END
-$lash_republish_process_env$;
+$lash_publish_env_over_stored_body$;
 CREATE OR REPLACE FUNCTION lash_node_renew(
     p_node TEXT, p_boot TEXT, p_ttl BIGINT, p_fleet_low INTEGER, p_fleet_high INTEGER,
     p_lock_timeout TEXT, p_statement_ms BIGINT, p_now BIGINT)

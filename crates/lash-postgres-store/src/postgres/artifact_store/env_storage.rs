@@ -189,7 +189,7 @@ impl EnvPublication {
                 None => None,
             };
         if let (Some(split), Some(at), Ok(closure)) = (&self.split, at, &self.closure)
-            && republish_tx(tx, env_ref, split, at, closure, referrer).await?
+            && publish_over_stored_body_tx(tx, env_ref, split, at, closure, referrer).await?
         {
             return Ok(());
         }
@@ -262,15 +262,16 @@ impl EnvPublication {
     }
 }
 
-/// Republish an environment stored exactly as `split` stores it, in one
-/// call under the head's, the body's and every closure module's lock
-/// (FIG-7701 R5): the stored head and body compared with `split`, then the
-/// first missing module of `closure` refused, else the closure's, the
-/// body's and the referrer's edges written as a first publication writes
-/// them. `false` when the stored rows differ from `split` in any way or are
-/// absent: nothing is written, and the caller stores as a first
+/// Publish an environment over a body already stored with exactly its
+/// bytes, in one call under the head's, the body's and every closure
+/// module's lock (FIG-7701 R5): the stored body compared with `split`'s,
+/// the head stored and compared with `split`'s, then the first missing
+/// module of `closure` refused, else the closure's, the body's and the
+/// referrer's edges written as a first publication writes them. `false`
+/// when the stored body or a stored head differs from `split`, or the body
+/// is absent: nothing is written, and the caller stores the body as a first
 /// publication does, so missing, corrupt and Immutable answers are its.
-async fn republish_tx(
+async fn publish_over_stored_body_tx(
     tx: &mut sqlx::PgConnection,
     env_ref: &str,
     split: &lash_core_store::process_env::stored::StoredSplit,
@@ -280,7 +281,7 @@ async fn republish_tx(
 ) -> Result<bool, ArtifactStoreError> {
     let modules: Vec<&str> = closure.iter().map(String::as_str).collect();
     let (stored, missing): (bool, Option<String>) =
-        crate::observed_sql::query_as(artifact_sql().postgres.republish_process_env.sql())
+        crate::observed_sql::query_as(artifact_sql().postgres.publish_over_stored_body.sql())
             .bind(env_ref)
             .bind(&split.head)
             .bind(&split.body_ref)
@@ -298,27 +299,34 @@ async fn republish_tx(
     }
 }
 
-/// The republication call. Its statements start after the caller's lock
-/// statement, so they read what any holder of those locks committed.
+/// The call over a stored body. Its statements start after the caller's
+/// lock statement, so they read what any holder of those locks committed.
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn function_ddl() -> String {
-    // The comparison is the splice `select_bytes` reads, taken apart as
-    // `stored::split` takes it; then `select_missing_manifest`,
-    // `insert_dependency_edges` twice and the referrer `insert_edge`.
+    // The head is `insert_head`'s, and the two comparisons are the splice
+    // `select_bytes` reads, taken apart as `stored::split` takes it; then
+    // `select_missing_manifest`, `insert_dependency_edges` twice and the
+    // referrer `insert_edge`.
     format!(
-        r#"CREATE OR REPLACE FUNCTION lash_republish_process_env(
+        r#"CREATE OR REPLACE FUNCTION lash_publish_env_over_stored_body(
     p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea,
     p_modules text[], p_kind text, p_id text,
     OUT stored boolean, OUT missing text
-) LANGUAGE plpgsql VOLATILE AS $lash_republish_process_env$
+) LANGUAGE plpgsql VOLATILE AS $lash_publish_env_over_stored_body$
 BEGIN
-    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts AS head
-        JOIN lash_lash_vm_artifacts AS body
-            ON body.namespace = '{body}' AND body.artifact_ref = head.body_ref
-        WHERE head.namespace = '{env}' AND head.artifact_ref = p_env_ref
-            AND head.storage_kind = 2 AND head.body_ref = p_body_ref
-            AND head.body_at = p_at AND head.artifact_bytes = p_head
-            AND body.artifact_bytes = p_body);
+    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = '{body}' AND artifact_ref = p_body_ref
+            AND artifact_bytes = p_body);
+    IF NOT stored THEN
+        RETURN;
+    END IF;
+    INSERT INTO lash_lash_vm_artifacts (namespace, artifact_ref, storage_kind, artifact_bytes, body_ref, body_at)
+        VALUES ('{env}', p_env_ref, 2, p_head, p_body_ref, p_at)
+        ON CONFLICT (namespace, artifact_ref) DO NOTHING;
+    stored := EXISTS (SELECT 1 FROM lash_lash_vm_artifacts
+        WHERE namespace = '{env}' AND artifact_ref = p_env_ref
+            AND storage_kind = 2 AND body_ref = p_body_ref
+            AND body_at = p_at AND artifact_bytes = p_head);
     IF NOT stored THEN
         RETURN;
     END IF;
@@ -341,7 +349,7 @@ BEGIN
         VALUES ('{env}', p_env_ref, p_kind, p_id)
         ON CONFLICT DO NOTHING;
 END
-$lash_republish_process_env$;
+$lash_publish_env_over_stored_body$;
 "#,
         env = PROCESS_ENV_NAMESPACE,
         body = PROCESS_ENV_BODY_NAMESPACE,

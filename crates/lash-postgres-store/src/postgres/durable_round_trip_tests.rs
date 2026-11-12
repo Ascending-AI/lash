@@ -2265,18 +2265,20 @@ async fn a_module_acquisition_is_two_calls_in_its_transaction() {
     assert_eq!(trips, 4, "BEGIN, referrer, holds, COMMIT");
 }
 
-/// Republishing a stored environment is its guarded BEGIN, the plugin
-/// writers' admission, the referrer call, one closure read per dependency
-/// level (the link, then its document), the sorted lock statement, one
-/// call that compares the stored rows and writes the edges, and COMMIT
-/// (FIG-7701 R5).
+/// Publishing an environment over a stored body is its guarded BEGIN,
+/// the plugin writers' admission, the referrer call, one closure read per
+/// dependency level (the link, then its document), the sorted lock
+/// statement, one call that compares the body, stores the head and writes
+/// the edges, and COMMIT (FIG-7701 R5).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_environment_republication_is_one_call_after_its_locks() {
+async fn a_publication_over_a_stored_body_is_one_call_after_its_locks() {
     use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
     use lash_execution_contracts::process::ProcessEnvStore as _;
 
     let Some(database_url) = crate::postgres_test_support::database_url() else {
-        eprintln!("skipping the republication round-trip budget: database URL is not set");
+        eprintln!(
+            "skipping the stored-body publication round-trip budget: database URL is not set"
+        );
         return;
     };
     let database = IsolatedDatabase::create(&database_url).await;
@@ -2286,15 +2288,12 @@ async fn an_environment_republication_is_one_call_after_its_locks() {
     let store = storage.process_env_store();
     let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
         .expect("pin claim");
-    let (env_ref, bytes, _) =
-        crate::artifact_store::tests::published_environment(&store, &claim, 23).await;
-    let republisher = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
-        .expect("pin claim");
-    let (republished, trips) =
-        round_trips(store.publish_process_env(&republisher, &env_ref, &bytes)).await;
-    republished.expect("republish the environment");
+    crate::artifact_store::tests::published_environment(&store, &claim, 23).await;
+    let (env_ref, bytes) = crate::artifact_store::tests::environment_over(23, Some("other"));
+    let (published, trips) = round_trips(store.publish_process_env(&claim, &env_ref, &bytes)).await;
+    published.expect("publish over the stored body");
     assert_eq!(
         trips, 7,
-        "BEGIN, admission, referrer, two closure levels, locks, republication, COMMIT"
+        "BEGIN, admission, referrer, two closure levels, locks, the call, COMMIT"
     );
 }

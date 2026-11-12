@@ -657,7 +657,7 @@ $lash_owner_commit$;
 "
     ) + &crate::artifact_store::local_end_function_ddl()
         + &crate::artifact_store::holds_function_ddl()
-        + &crate::artifact_store::republish_function_ddl()
+        + &crate::artifact_store::env_over_body_function_ddl()
         + &renewal_ddl()
         + &super::graph::retirement_function_ddl()
 }

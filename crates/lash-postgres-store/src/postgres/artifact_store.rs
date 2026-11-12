@@ -24,10 +24,10 @@ lash_store_sql::statements! {
         /// Lock keys `?1` in order, then the first of `?2`/`?3` not stored,
         /// else edges from referrer `?4`/`?5` to each of `?6`/`?7`.
         acquire_holds = "SELECT lash_acquire_holds(?1::TEXT[], ?2::TEXT[], ?3::TEXT[], ?4, ?5, ?6::TEXT[], ?7::TEXT[])";
-        /// Republish environment `?1` if stored exactly as head `?2`, body
-        /// `?3`/`?5` at `?4`: its first missing module of `?6`, else its
-        /// edges and referrer `?7`/`?8`'s (FIG-7701 R5).
-        republish_process_env = "SELECT stored, missing FROM lash_republish_process_env(?1, ?2, ?3, ?4, ?5, ?6::TEXT[], ?7, ?8)";
+        /// Publish environment `?1` as head `?2` over body `?3`/`?5` at
+        /// `?4` if that body is stored: its first missing module of `?6`,
+        /// else its edges and referrer `?7`/`?8`'s (FIG-7701 R5).
+        publish_over_stored_body = "SELECT stored, missing FROM lash_publish_env_over_stored_body(?1, ?2, ?3, ?4, ?5, ?6::TEXT[], ?7, ?8)";
         /// Delete each artifact of `?2` in namespace `?1` that no referrer
         /// edge and no dependency edge names. Each deleted row answers the
         /// graph node it rooted, if bridged, once per artifact it held: its
@@ -239,7 +239,7 @@ use holds::{Holds, lock_live_referrer_tx};
 pub(crate) use holds::function_ddl as holds_function_ddl;
 
 #[cfg(any(test, feature = "testing"))]
-pub(crate) use env_storage::function_ddl as republish_function_ddl;
+pub(crate) use env_storage::function_ddl as env_over_body_function_ddl;
 
 #[path = "artifact_store/env_storage.rs"]
 mod env_storage;
