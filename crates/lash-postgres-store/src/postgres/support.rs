@@ -210,13 +210,20 @@ pub(crate) fn is_contention_error(err: &sqlx::Error) -> bool {
     };
     let contended = is_contention_sqlstate(&code);
     if contended {
-        crate::replayable::note_contention(&code, db.message());
+        crate::replayable::note_contention(&code);
     }
     contended
 }
 
 fn is_contention_sqlstate(code: &str) -> bool {
-    matches!(code, "40001" | "40P01" | "55P03")
+    matches!(
+        code,
+        "40001"
+            | "40P01"
+            | "55P03"
+            | crate::replayable::SEALED_WAIT_EXPIRED_SQLSTATE
+            | crate::replayable::UNPLANNED_ADVISORY_REFUSED_SQLSTATE
+    )
 }
 
 pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {

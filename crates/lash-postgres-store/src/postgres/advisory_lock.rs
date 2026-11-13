@@ -12,7 +12,7 @@
 //! - It takes a lock with the try form.
 //! - A lock this transaction already holds is granted at once, so a
 //!   complete plan never notices the seal.
-//! - A lock held elsewhere raises `55P03`, the typed contention every
+//! - A lock held elsewhere raises `LZ002`, the typed contention every
 //!   caller retries. A path the plan missed therefore costs a retry, never
 //!   a deadlock.
 //!
@@ -68,12 +68,12 @@ pub(crate) const DEFAULT_SEALED_LOCK_TIMEOUT: std::time::Duration =
 pub(crate) fn after_seal_handler(sealed: &str) -> String {
     format!(
         "EXCEPTION WHEN lock_not_available THEN
-        IF ({sealed}) IS NOT TRUE OR SQLERRM = '{refused}' OR starts_with(SQLERRM, '{expired}') THEN
+        IF ({sealed}) IS NOT TRUE THEN
             RAISE;
         END IF;
-        RAISE EXCEPTION '{expired}: %', SQLERRM USING ERRCODE = '55P03';",
-        refused = crate::replayable::UNPLANNED_ADVISORY_REFUSED,
+        RAISE EXCEPTION '{expired}: %', SQLERRM USING ERRCODE = '{expired_code}';",
         expired = crate::replayable::SEALED_WAIT_EXPIRED,
+        expired_code = crate::replayable::SEALED_WAIT_EXPIRED_SQLSTATE,
     )
 }
 
@@ -96,6 +96,7 @@ pub const UNPLANNED_LOCKS: &str = "lash_unplanned_advisory_locks";
 #[cfg(any(test, feature = "testing"))]
 pub(crate) fn function_ddl() -> String {
     let refused = crate::replayable::UNPLANNED_ADVISORY_REFUSED;
+    let refused_code = crate::replayable::UNPLANNED_ADVISORY_REFUSED_SQLSTATE;
     let body = |args: &str, held: &str| {
         format!(
             r#"
@@ -112,7 +113,7 @@ BEGIN
     END IF;
     IF NOT (CASE WHEN p_shared THEN pg_try_advisory_xact_lock_shared({args}) ELSE pg_try_advisory_xact_lock({args}) END) THEN
         RAISE EXCEPTION '{refused}'
-            USING ERRCODE = '55P03';
+            USING ERRCODE = '{refused_code}';
     END IF;
 END"#
         )

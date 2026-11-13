@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 50.
+-- lash-postgres-store schema, component version 51.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -940,7 +940,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- the fleet epoch, the transactional clock rows, and the catalog identity.
 -- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
-VALUES ('lash-postgres-store', 50, 50)
+VALUES ('lash-postgres-store', 51, 51)
 ON CONFLICT (component) DO NOTHING;
 
 -- The fleet epoch starts at the floor of the installing build's writable
@@ -2873,10 +2873,10 @@ BEGIN
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
         v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
     EXCEPTION WHEN lock_not_available THEN
-        IF (v_sealed) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (v_sealed) IS NOT TRUE THEN
             RAISE;
         END IF;
-        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = 'LZ001';
     END;
 END
 $lash_owner_commit$;
@@ -2896,7 +2896,7 @@ BEGIN
     END IF;
     IF NOT (CASE WHEN p_shared THEN pg_try_advisory_xact_lock_shared(p_key) ELSE pg_try_advisory_xact_lock(p_key) END) THEN
         RAISE EXCEPTION 'an advisory lock this transaction needs after its artifact locks is held elsewhere'
-            USING ERRCODE = '55P03';
+            USING ERRCODE = 'LZ002';
     END IF;
 END
 $lash_advisory_xact_lock$;
@@ -2916,7 +2916,7 @@ BEGIN
     END IF;
     IF NOT (CASE WHEN p_shared THEN pg_try_advisory_xact_lock_shared(p_class, p_key) ELSE pg_try_advisory_xact_lock(p_class, p_key) END) THEN
         RAISE EXCEPTION 'an advisory lock this transaction needs after its artifact locks is held elsewhere'
-            USING ERRCODE = '55P03';
+            USING ERRCODE = 'LZ002';
     END IF;
 END
 $lash_advisory_xact_lock_pair$;
@@ -3028,10 +3028,10 @@ BEGIN
         END IF;
         RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
     EXCEPTION WHEN lock_not_available THEN
-        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE THEN
             RAISE;
         END IF;
-        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = 'LZ001';
     END;
 END
 $lash_artifact_end_local$;
@@ -3138,10 +3138,10 @@ BEGIN
         END IF;
         RETURN jsonb_build_object('ended', v_refs, 'missing', '[]'::jsonb);
     EXCEPTION WHEN lock_not_available THEN
-        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE THEN
             RAISE;
         END IF;
-        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = 'LZ001';
     END;
 END
 $lash_artifact_lock_plan$;
@@ -3180,10 +3180,10 @@ BEGIN
             ON CONFLICT DO NOTHING;
         RETURN NULL;
     EXCEPTION WHEN lock_not_available THEN
-        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE THEN
             RAISE;
         END IF;
-        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = 'LZ001';
     END;
 END
 $lash_acquire_holds$;
@@ -3219,10 +3219,10 @@ BEGIN
             ON CONFLICT DO NOTHING;
         RETURN ARRAY['held', v_body];
     EXCEPTION WHEN lock_not_available THEN
-        IF (TRUE) IS NOT TRUE OR SQLERRM = 'an advisory lock this transaction needs after its artifact locks is held elsewhere' OR starts_with(SQLERRM, 'a lock wait after the artifact locks expired') THEN
+        IF (TRUE) IS NOT TRUE THEN
             RAISE;
         END IF;
-        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = '55P03';
+        RAISE EXCEPTION 'a lock wait after the artifact locks expired: %', SQLERRM USING ERRCODE = 'LZ001';
     END;
 END
 $lash_acquire_env$;

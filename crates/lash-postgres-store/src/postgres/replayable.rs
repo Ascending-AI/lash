@@ -39,6 +39,12 @@ struct SealRecord {
     expired_after_seal: bool,
 }
 
+/// Private SQLSTATE class LZ: these codes are emitted only by Lash's schema.
+/// A nested handler catches only raw 55P03, so already classified errors pass
+/// through without depending on their display message.
+pub(crate) const SEALED_WAIT_EXPIRED_SQLSTATE: &str = "LZ001";
+pub(crate) const UNPLANNED_ADVISORY_REFUSED_SQLSTATE: &str = "LZ002";
+
 /// The message prefix the schema raises when a lock wait inside one of
 /// its sealing functions expires after that function's seal
 /// ([`crate::advisory_lock`]).
@@ -62,28 +68,23 @@ pub(crate) fn note_sealed() {
     });
 }
 
-/// Record one contention failure (`code`, `message`) of the running
+/// Record one contention failure's SQLSTATE on the running
 /// attempt: whether it is a lock wait that expired after the attempt's
 /// seal. That is the schema's own after-seal expiry (a wait inside a
 /// sealing function), or a plain lock timeout once a sealing statement has
 /// returned. The advisory helper's refusal of an unplanned lock, deadlock,
 /// serialization failure and every lock timeout before the seal are not.
-pub(crate) fn note_contention(code: &str, message: &str) {
+pub(crate) fn note_contention(code: &str) {
     let _ = ATTEMPT.try_with(|record| {
         let current = record.get();
-        let expired_after_seal = code == "55P03"
-            && message != UNPLANNED_ADVISORY_REFUSED
-            && (message.starts_with(SEALED_WAIT_EXPIRED)
-                || (current.sealed && message == LOCK_TIMEOUT_MESSAGE));
+        let expired_after_seal =
+            code == SEALED_WAIT_EXPIRED_SQLSTATE || (code == "55P03" && current.sealed);
         record.set(SealRecord {
             expired_after_seal,
             ..current
         });
     });
 }
-
-/// PostgreSQL's message for a statement cancelled by `lock_timeout`.
-const LOCK_TIMEOUT_MESSAGE: &str = "canceling statement due to lock timeout";
 
 impl RetryPolicy {
     /// Run `attempt` until it answers anything but a failure `aborted`
@@ -344,4 +345,70 @@ async fn recorded_status(
     status
         .fetch_one(crate::observed_sql::executor(settle.pool))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Connection as _;
+
+    /// A database error's localized/rendered message cannot choose a retry
+    /// class. Exercise real server ErrorResponse values through the production
+    /// classifier, including messages that imitate another condition.
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL; run through kiln gate"]
+    async fn contention_classification_uses_sqlstate_and_attempt_record_not_message() {
+        let url = crate::testing::required_database_url();
+        let mut connection = PgConnection::connect(&url).await.expect("database");
+        sqlx::query("CREATE FUNCTION pg_temp.lash_classification_error(code text, message text) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE = code, MESSAGE = message; END $$")
+            .execute(&mut connection).await.expect("error producer");
+        let messages = [
+            "canceling statement due to lock timeout",
+            "a lock wait after the artifact locks expired: original detail",
+            "an advisory lock this transaction needs after its artifact locks is held elsewhere",
+            "verrou indisponible, message remplace",
+        ];
+        for (code, sealed, contended, expired) in [
+            ("LZ001", false, true, true),
+            ("LZ001", true, true, true),
+            ("LZ002", false, true, false),
+            ("LZ002", true, true, false),
+            ("55P03", false, true, false),
+            ("55P03", true, true, true),
+            ("40P01", true, true, false),
+            ("40001", true, true, false),
+            ("23505", true, false, false),
+        ] {
+            for message in messages {
+                ATTEMPT
+                    .scope(
+                        std::cell::Cell::new(SealRecord {
+                            sealed,
+                            expired_after_seal: false,
+                        }),
+                        async {
+                            let error =
+                                sqlx::query("SELECT pg_temp.lash_classification_error($1, $2)")
+                                    .bind(code)
+                                    .bind(message)
+                                    .execute(&mut connection)
+                                    .await
+                                    .expect_err("server refusal");
+                            assert_eq!(
+                                crate::support::is_contention_error(&error),
+                                contended,
+                                "{code}, {sealed}, {message}"
+                            );
+                            assert_eq!(
+                                ATTEMPT.with(|record| record.get().expired_after_seal),
+                                expired,
+                                "{code}, {sealed}, {message}"
+                            );
+                        },
+                    )
+                    .await;
+            }
+        }
+        connection.close().await.expect("close database");
+    }
 }
