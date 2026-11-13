@@ -15,6 +15,8 @@ mod patterns;
 mod primitives;
 mod source;
 mod statements;
+mod switches;
+mod updates;
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -19,16 +19,28 @@ impl Lifter<'_> {
                 if let k::Rhs::Expr(value) = value
                     && let Some(function) = self.closure(value)?
                 {
-                    return Ok(StmtKind::Const(name, Expr::arrow(function)));
+                    let value = match super::closures::authored_name(value) {
+                        Some(authored) if authored != name => {
+                            Expr::Function(authored.to_owned(), Box::new(function))
+                        }
+                        _ => Expr::arrow(function),
+                    };
+                    return Ok(StmtKind::Const(name, value));
                 }
                 let value = self.rhs(value)?;
+                if site.unit == lash_kernel_value::sites::Unit::Main
+                    && !self.lexical_scopes.is_empty()
+                    && !self.document.private_bindings.contains(kernel)
+                {
+                    return Ok(StmtKind::Var(name, Some(value)));
+                }
                 // A local's declared type is spelled again where its source
                 // evidence names one an annotation writes; readback proves
                 // it lowers alike.
                 if let Some(ty) = self.evidence.get(kernel).cloned()
                     && let Ok(ty) = self.ts_type(None, &ty, &k::FieldRoot::Result, &mut Vec::new())
                 {
-                    let constant = !self.reassigned(&name);
+                    let constant = !self.reassigned(kernel.as_str());
                     return Ok(StmtKind::Declared {
                         constant,
                         name,
@@ -39,7 +51,24 @@ impl Lifter<'_> {
                         },
                     });
                 }
-                if self.reassigned(&name) {
+                if self.style.exact
+                    && matches!(value, Expr::Number(_) | Expr::Text(_) | Expr::Bool(_))
+                {
+                    return Ok(StmtKind::Declared {
+                        constant: false,
+                        name,
+                        ty: source::Type::Word("any"),
+                        value: Some(value),
+                    });
+                }
+                if self.style.exact
+                    && matches!(value, Expr::Undefined)
+                    && site.unit == lash_kernel_value::sites::Unit::Main
+                    && !self.document.private_bindings.contains(kernel)
+                {
+                    return Ok(StmtKind::Var(name, None));
+                }
+                if self.reassigned(kernel.as_str()) {
                     match value {
                         Expr::Undefined => StmtKind::Let(name, None),
                         value => StmtKind::Let(name, Some(value)),
@@ -52,6 +81,11 @@ impl Lifter<'_> {
                 place,
                 value,
                 order: k::AssignOrder::ValueFirst,
+            } => self.assign(place, value)?,
+            k::Stmt::Assign {
+                place,
+                value,
+                order: k::AssignOrder::PlaceFirst,
             } => self.assign(place, value)?,
             // A discarded dynamic member write is the exact ts.set import
             // call; retain the source's place-before-value evaluation order.
@@ -115,12 +149,26 @@ impl Lifter<'_> {
                 ) else {
                     return refuse("a property enumeration the dialect does not lower to");
                 };
-                StmtKind::For {
+                let (binding, taken, declaration) =
+                    self.iteration_binding(enumeration.binding, enumeration.body)?;
+                let kind = StmtKind::For {
                     operator: "in",
-                    binding: self.binding(enumeration.binding)?,
+                    declaration: if declaration.is_empty()
+                        && !matches!(binding, source::Pattern::Name(_))
+                    {
+                        "var"
+                    } else {
+                        declaration
+                    },
+                    binding,
                     iterable: self.operand(enumeration.subject, "value.operand")?,
-                    body: self.block_at(enumeration.body, &site.child(1).child(0).child(1), 1)?,
-                }
+                    body: self.block_at(
+                        &enumeration.body[taken..],
+                        &site.child(1).child(0).child(1),
+                        taken,
+                    )?,
+                };
+                self.labeled(kind)
             }
             k::Stmt::For {
                 metered: 0,
@@ -130,11 +178,13 @@ impl Lifter<'_> {
                 body,
                 else_block,
             } if else_block.is_empty() && self.for_of(via) => {
+                let (pattern, taken, declaration) = self.iteration_binding(binding, body)?;
                 let kind = StmtKind::For {
                     operator: "of",
-                    binding: self.binding(binding)?,
+                    binding: pattern,
+                    declaration,
                     iterable: self.expr(iterable)?,
-                    body: self.block(body, &site.child(1))?,
+                    body: self.block_at(&body[taken..], &site.child(1), taken)?,
                 };
                 self.labeled(kind)
             }
@@ -144,9 +194,16 @@ impl Lifter<'_> {
                 body,
                 else_block,
             } if else_block.is_empty() => {
-                let kind = StmtKind::While {
-                    condition: self.condition(condition)?,
-                    body: self.block(body, &site.child(1))?,
+                let kind = match self.for_continuation_update(body) {
+                    Some((target, operator)) => StmtKind::ForClassic {
+                        condition: self.condition(condition)?,
+                        update: Expr::Unary(operator, Box::new(Expr::Ident(self.binding(target)?))),
+                        body: self.block(&body[..body.len() - 1], &site.child(1))?,
+                    },
+                    None => StmtKind::While {
+                        condition: self.condition(condition)?,
+                        body: self.block(body, &site.child(1))?,
+                    },
                 };
                 self.labeled(kind)
             }
@@ -192,13 +249,32 @@ impl Lifter<'_> {
                     Some(catch) => {
                         let arm = site.child(child);
                         child += 1;
-                        let binding = self.binding(&catch.binding)?;
+                        let skipped = catch
+                            .body
+                            .iter()
+                            .take_while(|stmt| self.label_machinery(stmt))
+                            .count();
+                        let (binding, taken) = if super::lift::temporary(&catch.binding) {
+                            match self.bound_pattern(&catch.body[skipped..], &catch.binding)? {
+                                Some((pattern, taken)) => (Some(pattern), taken),
+                                None => (None, 0),
+                            }
+                        } else {
+                            (
+                                Some(source::Pattern::Name(self.binding(&catch.binding)?)),
+                                0,
+                            )
+                        };
                         Some((
                             Arm {
                                 caption: self.arm_caption(&arm),
-                                body: self.block(&catch.body, &arm)?,
+                                body: self.block_at(
+                                    &catch.body[skipped + taken..],
+                                    &arm,
+                                    skipped + taken,
+                                )?,
                             },
-                            Some(binding),
+                            binding,
                         ))
                     }
                     None => None,
@@ -249,7 +325,7 @@ impl Lifter<'_> {
         }
     }
 
-    fn assign(&mut self, place: &k::Place, value: &k::Rhs) -> Lift<StmtKind> {
+    pub(super) fn assign(&mut self, place: &k::Place, value: &k::Rhs) -> Lift<StmtKind> {
         match place {
             k::Place::Variable(name) => {
                 let name = self.binding(name)?;

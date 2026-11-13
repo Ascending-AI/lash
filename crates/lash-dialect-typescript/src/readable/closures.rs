@@ -15,6 +15,80 @@ pub(super) use crate::constructs::callables::authored_name;
 use crate::constructs::callables::{self, Token};
 
 impl Lifter<'_> {
+    pub(super) fn declaration(
+        &mut self,
+        block: &[k::Stmt],
+    ) -> Lift<Option<(super::source::StmtKind, usize)>> {
+        let [
+            k::Stmt::Let {
+                name: positional,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Variable(target),
+                value: k::Rhs::Expr(k::Expr::Closure(body)),
+                ..
+            },
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(token),
+            },
+            ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        if positional != target {
+            return Ok(None);
+        }
+        let Some(token) = callables::decode(token) else {
+            return Ok(None);
+        };
+        let Some(start) = &token.closure.presentation else {
+            return Ok(None);
+        };
+        let Some(definition) = self.document.functions.get(&body.function) else {
+            return Ok(None);
+        };
+        if definition.signature.params.len() != start.signature.params.len() + 1 {
+            return Ok(None);
+        }
+        let Some(implementation) = definition.body() else {
+            return Ok(None);
+        };
+        let mut params = Vec::new();
+        for parameter in &start.signature.params {
+            params.push(Param {
+                caption: None,
+                name: self.binding(&parameter.name)?,
+                optional: parameter.optional,
+                default: None,
+                ty: self.callable_annotation(&parameter.ty)?,
+            });
+        }
+        self.positional
+            .insert(positional.clone(), self.binding(name)?);
+        let mut inner = self.in_function(body.function);
+        let statements = inner.block(
+            &implementation.block,
+            &Site::new(
+                lash_kernel_value::sites::Unit::Library(body.function),
+                Vec::new(),
+            ),
+        )?;
+        let function = Function {
+            ordinary: None,
+            is_async: false,
+            params,
+            result: self.callable_annotation(&start.signature.result)?,
+            body: Body::Block(statements),
+        };
+        Ok(Some((
+            super::source::StmtKind::Function(self.binding(name)?, function),
+            3,
+        )))
+    }
+
     /// Recover a captured module function's body form. Block bodies can
     /// come from either a declaration or a const-bound function; read-back
     /// selects the declaration form that recreates the capture.
@@ -95,7 +169,7 @@ impl Lifter<'_> {
             .iter()
             .map(|param| param.name.clone())
             .collect::<Vec<_>>();
-        let [_, args] = params.as_slice() else {
+        let [receiver, args] = params.as_slice() else {
             return refuse("a function value's callable takes `this` and its arguments");
         };
         let mut params = Vec::with_capacity(arity);
@@ -114,7 +188,7 @@ impl Lifter<'_> {
             Vec::new(),
         );
         let wrapper = self.in_function(closure.function);
-        let (is_async, args, body, site, projection) = match definition
+        let (is_async, receiver, args, body, site, projection) = match definition
             .body()
             .ok_or_else(|| "closure has no body".to_owned())?
             .block
@@ -149,11 +223,12 @@ impl Lifter<'_> {
                     .get(&inner.function)
                     .ok_or_else(|| "missing async body".to_owned())?;
                 let inner_params = &inner_definition.signature.params;
-                let [_, inner_param] = inner_params.as_slice() else {
+                let [inner_receiver, inner_param] = inner_params.as_slice() else {
                     return refuse("an async function's body takes `this` and its arguments");
                 };
                 (
                     true,
+                    &inner_receiver.name,
                     &inner_param.name,
                     inner_definition
                         .body()
@@ -167,7 +242,7 @@ impl Lifter<'_> {
                     inner_definition.projection,
                 )
             }
-            body => (false, args, body, site, definition.projection),
+            body => (false, receiver, args, body, site, definition.projection),
         };
         let names: Vec<&Name> = start
             .signature
@@ -179,6 +254,9 @@ impl Lifter<'_> {
             return refuse("a function body outside its defining unit");
         };
         let mut inner = self.in_function(*body_function);
+        let ordinary = (super::lift::reads_name(k::Node::Block(body), receiver) || body.iter().any(|statement| matches!(statement, k::Stmt::Let { value, .. } if inner.helper_read(value, "ts.arguments").is_some())))
+            .then(|| authored_name(value).unwrap_or("").to_owned());
+        inner.bindings.insert(receiver.clone(), "this".into());
         let implicit_end = projection == k::ProjectionRole::ImplicitReturn;
         let body = inner.function_body(
             (is_async, implicit_end),
@@ -196,6 +274,7 @@ impl Lifter<'_> {
             return refuse("a function value whose arity is not its parameters'");
         }
         Ok(Some(Function {
+            ordinary,
             is_async,
             result: self.callable_annotation(&start.signature.result)?,
             params,
@@ -242,12 +321,19 @@ impl Lifter<'_> {
             }
         }
         // Its statements, after those that bind its arguments.
-        let skip = if names.is_empty() {
+        let mut skip = if names.is_empty() {
             0
         } else {
             arguments_before(self, args, names, params, body)
                 .ok_or_else(|| "a function value's arguments are bound another way".to_owned())?
         };
+        if let Some(k::Stmt::Let { name, value }) = body.get(skip)
+            && self.helper_read(value, "ts.arguments").is_some()
+        {
+            self.substitutions
+                .insert(name.clone(), Expr::Ident("arguments".into()));
+            skip += 1;
+        }
         let mut statements = &body[skip..];
         if let [rest @ .., last] = statements {
             let implicit = match last {
@@ -456,6 +542,9 @@ impl Lifter<'_> {
 impl Expr {
     /// An arrow of `function`.
     pub(super) fn arrow(function: Function) -> Self {
-        Self::Arrow(Box::new(function))
+        match function.ordinary.clone() {
+            Some(name) => Self::Function(name, Box::new(function)),
+            None => Self::Arrow(Box::new(function)),
+        }
     }
 }

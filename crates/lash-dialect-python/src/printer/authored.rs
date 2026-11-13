@@ -351,10 +351,29 @@ impl Renderer<'_> {
                 self.padding();
                 self.out.write("except ");
                 self.out.write(classes);
+                let named = match then_block.as_slice() {
+                    [
+                        k::Stmt::Assign {
+                            place: k::Place::Variable(name),
+                            value: k::Rhs::Expr(k::Expr::Variable(_)),
+                            ..
+                        },
+                        k::Stmt::Try(scope),
+                    ] if scope.catch.is_none()
+                        && matches!(scope.finally.as_deref(), Some([k::Stmt::Assign { place: k::Place::Variable(cleared), value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)), .. }]) if cleared == name) =>
+                    {
+                        Some((name, &scope.body))
+                    }
+                    _ => None,
+                };
+                if let Some((name, _)) = named {
+                    self.out.write(" as ");
+                    self.name(name);
+                }
                 self.out.write(":\n");
                 self.out.begin_node(None); // the test
                 self.implicit();
-                self.readable_block(then_block);
+                self.readable_block(named.map_or(*then_block, |(_, body)| body));
                 self.caption_next();
                 self.out.begin_node(None); // the other clauses
                 self.except(rest);
@@ -526,6 +545,7 @@ pub(super) fn authored_awaits(body: &k::Block, sync: &BTreeSet<Name>) -> bool {
 pub(super) struct Comprehension {
     element: k::Expr,
     key: Option<k::Expr>,
+    filters: Vec<k::Expr>,
     collection: crate::constructs::collections::Collection,
     binding: Name,
     source_binding: Name,
@@ -553,6 +573,37 @@ impl Renderer<'_> {
         let mut index = range.start;
         while index < range.end {
             let statement = &block[index];
+            if let [
+                k::Stmt::Let {
+                    name: held,
+                    value: k::Rhs::Expr(value),
+                },
+                k::Stmt::Assign {
+                    place: k::Place::Variable(target),
+                    value: k::Rhs::Expr(k::Expr::Variable(input)),
+                    ..
+                },
+                result,
+                ..,
+            ] = &block[index..range.end]
+                && temporary_name(held)
+                && input == held
+                && let Some((name, k::Rhs::Expr(k::Expr::Variable(read)))) = binding_value(result)
+                && read == held
+            {
+                self.padding();
+                self.name(name);
+                self.out.write(" = (");
+                self.name(target);
+                self.out.write(" := ");
+                self.inline_expr(value);
+                self.out.write(")\n");
+                for _ in 0..3 {
+                    self.implicit();
+                }
+                index += 3;
+                continue;
+            }
             let structured = self.structured_statements(&block[index..range.end]);
             if structured > 0 {
                 for _ in 0..structured {
@@ -735,8 +786,19 @@ impl Renderer<'_> {
     }
 
     fn lift_comprehension(&self, statements: &[k::Stmt]) -> Option<(Name, Comprehension)> {
+        let mut normalized = statements.to_vec();
+        let mut pending = vec![k::NodeMut::Block(&mut normalized)];
+        while let Some(mut node) = pending.pop() {
+            if let k::NodeMut::Stmt(k::Stmt::Let { value, .. } | k::Stmt::Assign { value, .. }) =
+                &mut node
+                && let k::Rhs::Action(action) = value
+            {
+                *value = k::Rhs::Expr(action.clone().into());
+            }
+            pending.extend(node.children());
+        }
         let found = crate::constructs::collections::COMPREHENSION
-            .recognize(statements, &|id, name| {
+            .recognize(&normalized, &|id, name| {
                 self.operators.unique(name) == Some(*id)
             })?;
         let crate::constructs::collections::Comprehension {
@@ -747,6 +809,7 @@ impl Renderer<'_> {
             via,
             value,
             key,
+            filters,
             collection,
             rest,
         } = found;
@@ -762,6 +825,7 @@ impl Renderer<'_> {
             Comprehension {
                 element,
                 key: key.cloned(),
+                filters: filters.into_iter().cloned().collect(),
                 collection,
                 binding: binding.clone(),
                 source_binding,
@@ -808,6 +872,23 @@ impl Renderer<'_> {
             self.out.write(view);
             self.out.write("()");
         }
+        let previous = self.substitutions.insert(
+            comprehension.binding.clone(),
+            k::Expr::Variable(comprehension.source_binding.clone()),
+        );
+        for filter in &comprehension.filters {
+            self.out.write(" if ");
+            self.inline_expr(filter);
+        }
+        match previous {
+            Some(value) => {
+                self.substitutions
+                    .insert(comprehension.binding.clone(), value);
+            }
+            None => {
+                self.substitutions.remove(&comprehension.binding);
+            }
+        }
         self.out
             .write(if matches!(comprehension.collection, Collection::List) {
                 "]"
@@ -828,7 +909,7 @@ impl Renderer<'_> {
         else {
             return false;
         };
-        if name.as_str() != spelling {
+        if self.aliases.get(name).unwrap_or(name).as_str() != spelling {
             return false;
         }
         self.name(name);
@@ -930,7 +1011,13 @@ fn assigned(block: &[k::Stmt], name: &Name) -> bool {
 
 fn reads(block: &[k::Stmt], name: &Name) -> usize {
     fn count(node: k::Node<'_>, name: &Name) -> usize {
+        if let k::Node::Action(action) = node {
+            return count(k::Node::Expr(&action.clone().into()), name);
+        }
         usize::from(matches!(node, k::Node::Expr(k::Expr::Variable(read)) if read == name))
+            + usize::from(
+                matches!(node, k::Node::Expr(k::Expr::Act(act)) if matches!(&act.kind, k::ActKind::Call(k::Callee::Value(read)) if read == name)),
+            )
             + node
                 .children()
                 .into_iter()

@@ -621,6 +621,7 @@ impl Renderer<'_> {
                 self.root_block(
                     &body.block,
                     Some(&lash_kernel_value::sites::Unit::Library(c.function)),
+                    0,
                 );
                 self.main = outer_main;
                 self.scope = parent;

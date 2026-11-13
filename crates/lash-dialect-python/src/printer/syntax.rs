@@ -17,6 +17,59 @@ impl Renderer<'_> {
             self.out.write(")");
             return true;
         }
+        if let k::Expr::Let { name, value, body } = expr {
+            if let k::Expr::If { cond, then, r#else } = &**body {
+                let truth = matches!(&**cond, k::Expr::Act(act) if matches!(&act.kind, k::ActKind::Call(k::Callee::Local(id)) if self.operators.is(id, "py.truth")) && act.args.as_slice() == [k::Expr::Variable(name.clone())])
+                    || **cond == k::Expr::Variable(name.clone());
+                if truth
+                    && (**then == k::Expr::Variable(name.clone())
+                        || **r#else == k::Expr::Variable(name.clone()))
+                {
+                    let (operator, right) = if **then == k::Expr::Variable(name.clone()) {
+                        (" or ", r#else)
+                    } else {
+                        (" and ", then)
+                    };
+                    self.out.write("(");
+                    self.inline_expr(value);
+                    self.out.write(operator);
+                    self.inline_expr(right);
+                    self.out.write(")");
+                    return true;
+                }
+            }
+            if let k::Expr::Act(binding) = &**value
+                && matches!(&binding.kind, k::ActKind::Call(k::Callee::Local(id)) if self.operators.is(id, "py.bind"))
+                && let [_, _, positional, keywords, _] = binding.args.as_slice()
+                && let k::Expr::Act(call) = &**body
+                && let k::ActKind::Call(k::Callee::Value(callee)) = &call.kind
+                && call.args.iter().enumerate().all(|(index, argument)| matches!(argument, k::Expr::Member(member) if matches!(&**member, k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Int(at)) } if target == name && *at == k::Integer::from(index as i64))))
+            {
+                return self.packed_call(&[k::Expr::Variable(callee.clone()), positional.clone(), keywords.clone()], self.asynchronous.contains(callee));
+            }
+        }
+        if let k::Expr::Act(act) = expr
+            && let k::ActKind::Call(k::Callee::Local(id)) = &act.kind
+        {
+            if self.operators.is(id, "py.getattr")
+                && let [target, k::Expr::Literal(k::Literal::Text(field))] = act.args.as_slice()
+                && super::attribute_identifier(field)
+            {
+                self.member_target(target, true);
+                self.out.write(".");
+                self.out.write(field);
+                return true;
+            }
+            if let Some(module) = self
+                .operators
+                .name(id)
+                .and_then(|name| name.strip_prefix("py.module.").map(str::to_owned))
+                && act.args.is_empty()
+            {
+                self.out.write(&module);
+                return true;
+            }
+        }
         match expr {
             k::Expr::Call { function, args }
                 if self.operators.is(function, "text.join")
@@ -349,82 +402,5 @@ impl Renderer<'_> {
             }
         }
         self.out.write(delimiters.1);
-    }
-
-    pub(super) fn unpack(&mut self, statements: &[k::Stmt]) -> usize {
-        let Some(k::Stmt::Let {
-            name: temporary,
-            value,
-        }) = statements.first()
-        else {
-            return 0;
-        };
-        let value = match value {
-            k::Rhs::Expr(value) => value.clone(),
-            k::Rhs::Action(action) => action.clone().into(),
-        };
-        let k::Expr::Act(act) = value else {
-            return 0;
-        };
-        let k::ActKind::Call(k::Callee::Local(id)) = &act.kind else {
-            return 0;
-        };
-        let (input, count, star) = match act.args.as_slice() {
-            [input, k::Expr::Literal(k::Literal::Int(count))]
-                if self.operators.is(id, "py.unpack") =>
-            {
-                (input, count, None)
-            }
-            [
-                input,
-                k::Expr::Literal(k::Literal::Int(count)),
-                k::Expr::Literal(k::Literal::Int(star)),
-            ] if self.operators.is(id, "py.unpack.star") => (input, count, Some(star)),
-            _ => return 0,
-        };
-        let Some(count) = count
-            .to_string()
-            .parse::<usize>()
-            .ok()
-            .filter(|count| *count < statements.len())
-        else {
-            return 0;
-        };
-        let mut names = Vec::new();
-        for (index, statement) in statements[1..=count].iter().enumerate() {
-            let k::Stmt::Let {
-                name,
-                value: k::Rhs::Expr(k::Expr::Member(member)),
-            } = statement
-            else {
-                return 0;
-            };
-            if !matches!(member.as_ref(), k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Int(at)) } if target == temporary && at == &k::Integer::from(index as i64))
-            {
-                return 0;
-            }
-            names.push(name);
-        }
-        self.padding();
-        for (index, name) in names.into_iter().enumerate() {
-            if index > 0 {
-                self.out.write(", ");
-            }
-            if star == Some(&k::Integer::from(index as i64)) {
-                self.out.write("*");
-            }
-            self.name(name);
-            self.scope.bind(name, None);
-        }
-        if count == 1 {
-            self.out.write(",");
-        }
-        self.out.write(" = ");
-        self.inline_expr(input);
-        self.out.write("\n");
-        for _ in 0..=count {
-            self.implicit();
-        }
-        count + 1
     }
 }

@@ -144,10 +144,16 @@ impl Renderer<'_> {
         let mut enters = None;
         let mut exits = None;
         let mut entered = None;
+        let mut asynchronous = false;
         for (index, statement) in statements.iter().enumerate().skip(1).take(18) {
             if let k::Stmt::Let {
                 name,
                 value: k::Rhs::Expr(value),
+            }
+            | k::Stmt::Assign {
+                place: k::Place::Variable(name),
+                value: k::Rhs::Expr(value),
+                ..
             } = statement
             {
                 if let Some(
@@ -163,6 +169,14 @@ impl Renderer<'_> {
                     match member.as_str() {
                         "__enter__" => enters = Some(name),
                         "__exit__" => exits = Some(name),
+                        "__aenter__" => {
+                            enters = Some(name);
+                            asynchronous = true;
+                        }
+                        "__aexit__" => {
+                            exits = Some(name);
+                            asynchronous = true;
+                        }
                         _ => return None,
                     }
                 }
@@ -189,7 +203,8 @@ impl Renderer<'_> {
                     _ => (None, scope.body.as_slice()),
                 };
                 self.padding();
-                self.out.write("with ");
+                self.out
+                    .write(if asynchronous { "async with " } else { "with " });
                 self.inline_expr(value);
                 if let Some(binding) = binding {
                     self.out.write(" as ");
@@ -203,62 +218,11 @@ impl Renderer<'_> {
         }
         None
     }
-
-    pub(super) fn unpacked_loop(&mut self, binding: &Name, body: &[k::Stmt]) -> Option<usize> {
-        let k::Stmt::Let {
-            name: packed,
-            value,
-        } = body.first()?
-        else {
-            return None;
-        };
-        let value = match value {
-            k::Rhs::Expr(value) => value.clone(),
-            k::Rhs::Action(action) => action.clone().into(),
-        };
-        let [
-            k::Expr::Variable(input),
-            k::Expr::Literal(k::Literal::Int(count)),
-        ] = self.syntax_call(&value, "py.unpack")?
-        else {
-            return None;
-        };
-        if input != binding {
-            return None;
-        }
-        let count = count.to_string().parse::<usize>().ok()?;
-        let mut names = Vec::new();
-        for statement in body.get(1..=count)? {
-            let k::Stmt::Assign {
-                place: k::Place::Variable(name),
-                value: k::Rhs::Expr(k::Expr::Member(member)),
-                ..
-            } = statement
-            else {
-                return None;
-            };
-            if !matches!(member.as_ref(), k::Member::Index { target: k::Expr::Variable(target), .. } if target == packed)
-            {
-                return None;
-            }
-            names.push(name);
-        }
-        for (index, name) in names.iter().enumerate() {
-            if index > 0 {
-                self.out.write(", ");
-            }
-            self.name(name);
-            self.scope.introduce(name);
-        }
-        if count == 1 {
-            self.out.write(",");
-        }
-        Some(count + 1)
-    }
 }
 
 #[derive(Clone)]
 enum Pattern {
+    Wildcard,
     Capture(Name),
     Value(k::Expr),
     Sequence(Vec<(bool, Pattern)>),
@@ -341,6 +305,16 @@ impl Renderer<'_> {
             let pattern =
                 self.match_pattern(pattern, &k::Expr::Variable(subject.clone()), ok, &bindings)?;
             let body = matched.get(offset..)?;
+            let (guard, body) = match body {
+                [
+                    k::Stmt::If {
+                        condition,
+                        then_block,
+                        else_block,
+                    },
+                ] if else_block.is_empty() => (Some(condition), then_block.as_slice()),
+                body => (None, body),
+            };
             let [
                 k::Stmt::Assign {
                     place: k::Place::Variable(completed),
@@ -354,7 +328,7 @@ impl Renderer<'_> {
             if completed != done {
                 return None;
             }
-            cases.push((pattern, body));
+            cases.push((pattern, guard, body));
             let count = captures + 1;
             taken += count;
             rest = &rest[count..];
@@ -367,10 +341,14 @@ impl Renderer<'_> {
         self.inline_expr(value);
         self.out.write(":\n");
         self.indent += 1;
-        for (pattern, body) in cases {
+        for (pattern, guard, body) in cases {
             self.padding();
             self.out.write("case ");
             self.match_pattern_source(&pattern);
+            if let Some(guard) = guard {
+                self.out.write(" if ");
+                self.inline_expr(guard);
+            }
             self.out.write(":\n");
             self.readable_block(&body.to_vec());
         }
@@ -408,6 +386,9 @@ impl Renderer<'_> {
             && let Some(binding) = bindings.get(slot)
         {
             return Some(Pattern::Capture(binding.clone()));
+        }
+        if block.is_empty() {
+            return Some(Pattern::Wildcard);
         }
         let Some(k::Stmt::Assign {
             value: k::Rhs::Expr(test),
@@ -500,6 +481,7 @@ impl Renderer<'_> {
 
     fn match_pattern_source(&mut self, pattern: &Pattern) {
         match pattern {
+            Pattern::Wildcard => self.out.write("_"),
             Pattern::Capture(name) => {
                 self.name(name);
                 self.scope.introduce(name);

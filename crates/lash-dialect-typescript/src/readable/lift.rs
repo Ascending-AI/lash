@@ -183,6 +183,9 @@ pub(super) struct Lifter<'a> {
     /// The bindings a primitive text method's receiver check tested: a row
     /// both a list and a text have is the text's on them.
     pub(super) text_checked: BTreeSet<Name>,
+    pub(super) switch_continuations: BTreeSet<Name>,
+    pub(super) positional: BTreeMap<Name, String>,
+    pub(super) lexical_scopes: BTreeSet<Name>,
 }
 
 impl<'a> Lifter<'a> {
@@ -227,7 +230,11 @@ impl<'a> Lifter<'a> {
             let mut pending = vec![(k::Node::Block(body), 0)];
             while let Some((node, depth)) = pending.pop() {
                 let names: Vec<&Name> = match node {
-                    k::Node::Stmt(k::Stmt::Let { name, .. }) if depth > 0 => vec![name],
+                    k::Node::Stmt(k::Stmt::Let { name, .. })
+                        if depth > 0 || document.private_bindings.contains(name) =>
+                    {
+                        vec![name]
+                    }
                     k::Node::Stmt(k::Stmt::For { binding, .. }) => vec![binding],
                     k::Node::Stmt(k::Stmt::Try(scope)) => {
                         scope.catch.iter().map(|catch| &catch.binding).collect()
@@ -275,6 +282,8 @@ impl<'a> Lifter<'a> {
                     ] = parts.as_slice()
                     && tag == "ts.function"
                     && source::identifier(original)
+                    && document.private_bindings.contains(name)
+                    && name.as_str().starts_with(&format!("{original}_"))
                 {
                     bindings.insert(name.clone(), original.clone());
                 }
@@ -302,6 +311,9 @@ impl<'a> Lifter<'a> {
                 _ => BTreeMap::new(),
             },
             text_checked: BTreeSet::new(),
+            switch_continuations: BTreeSet::new(),
+            positional: BTreeMap::new(),
+            lexical_scopes: BTreeSet::new(),
         };
         if let Some(body) = body {
             lifter.labels = lifter.label_tokens(body);
@@ -352,6 +364,7 @@ impl<'a> Lifter<'a> {
             self.library,
             self.style,
         );
+        inner.positional.extend(self.positional.clone());
         inner.bindings.extend(self.bindings.clone());
         inner.module_helpers.extend(self.module_helpers.clone());
         inner.templates.extend(self.templates.clone());
@@ -521,17 +534,24 @@ impl<'a> Lifter<'a> {
         let prelude = skip;
         let mut skip = skip;
         if packed {
+            if let Some(receiver) = function.signature.params.first() {
+                self.bindings.insert(receiver.name.clone(), "this".into());
+            }
             // The entry binder pads its supplied list, then binds each source parameter.
-            if !matches!(
-                statements.get(skip),
-                Some(k::Stmt::Let {
-                    value: k::Rhs::Expr(k::Expr::If { .. }),
-                    ..
-                })
-            ) {
+            if !entry.signature.params.is_empty()
+                && !matches!(
+                    statements.get(skip),
+                    Some(k::Stmt::Let {
+                        value: k::Rhs::Expr(k::Expr::If { .. }),
+                        ..
+                    })
+                )
+            {
                 return refuse("a packed entry's parameter binder");
             }
-            skip += 1 + entry.signature.params.len();
+            if !entry.signature.params.is_empty() {
+                skip += 1 + entry.signature.params.len();
+            }
             if let Some(k::Stmt::Let { name, value }) = statements.get(skip)
                 && self.helper_read(value, "ts.arguments").is_some()
             {
@@ -1053,6 +1073,62 @@ impl<'a> Lifter<'a> {
         site: &Site,
         first: usize,
     ) -> Lift<Vec<Stmt>> {
+        if site.unit == Unit::Main
+            && site.path.is_empty()
+            && let Some((start, name)) =
+                block
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, statement)| match statement {
+                        k::Stmt::Let { name, .. }
+                            if self.document.private_bindings.contains(name)
+                                && self.bindings.contains_key(name)
+                                && !self.lexical_scopes.contains(name)
+                                && !temporary(name) =>
+                        {
+                            Some((index, name.clone()))
+                        }
+                        _ => None,
+                    })
+        {
+            let mut start = start;
+            loop {
+                let earlier = (0..start).find(|&index| match &block[index] {
+                    k::Stmt::Let { name, .. } if temporary(name) => {
+                        mentions_name(k::Node::Block(&block[start..]), name)
+                    }
+                    _ => false,
+                });
+                match earlier {
+                    Some(index) => start = index,
+                    None => break,
+                }
+            }
+            let mut end = start + 1;
+            let mut at = start;
+            while at < end {
+                if let k::Stmt::Let { name, .. } = &block[at]
+                    && self.document.private_bindings.contains(name)
+                {
+                    for (index, statement) in block.iter().enumerate().skip(at + 1) {
+                        if mentions_name(k::Node::Stmt(statement), name) {
+                            end = end.max(index + 1);
+                        }
+                    }
+                }
+                at += 1;
+            }
+            let mut out = self.block_at(&block[..start], site, first)?;
+            self.lexical_scopes.insert(name.clone());
+            let body = self.block_at(&block[start..end], site, first + start);
+            self.lexical_scopes.remove(&name);
+            out.push(Stmt {
+                caption: None,
+                kind: source::StmtKind::Block(body?),
+            });
+            out.extend(self.block_at(&block[end..], site, first + end)?);
+            return Ok(out);
+        }
         let outer = self.pending.len();
         let mut out = Vec::new();
         let mut index = 0;
@@ -1074,10 +1150,11 @@ impl<'a> Lifter<'a> {
                 && !temporary(name)
                 && let Some((name, value)) = self.array_callback_statement(&block[index..])?
             {
+                let mutable = self.reassigned(name.as_str());
                 let name = self.binding(&name)?;
                 out.push(Stmt {
                     caption,
-                    kind: if self.reassigned(&name) {
+                    kind: if mutable {
                         source::StmtKind::Let(name, Some(value))
                     } else {
                         source::StmtKind::Const(name, value)
@@ -1114,7 +1191,20 @@ impl<'a> Lifter<'a> {
             if let Some((pattern, value, taken)) = self.binding_pattern(&block[index..])? {
                 out.push(Stmt {
                     caption,
-                    kind: source::StmtKind::Pattern(pattern, value),
+                    kind: if !self.lexical_scopes.is_empty()
+                        && pattern_names(&pattern).iter().all(|name| {
+                            !self
+                                .document
+                                .private_bindings
+                                .iter()
+                                .any(|private| self.binding(private).ok().as_ref() == Some(name))
+                        }) {
+                        source::StmtKind::VarPattern(pattern, value)
+                    } else if self.pattern_reassigned(&pattern, &block[index..index + taken]) {
+                        source::StmtKind::LetPattern(pattern, value)
+                    } else {
+                        source::StmtKind::Pattern(pattern, value)
+                    },
                 });
                 index += taken;
                 continue;
@@ -1134,6 +1224,40 @@ impl<'a> Lifter<'a> {
             if let Some(body) = self.exit_handler(&block[index], &here)? {
                 out.extend(body);
                 index += 1;
+                continue;
+            }
+            if matches!(&block[index..], [k::Stmt::Assign { place: k::Place::Variable(name), value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(true))), .. }, k::Stmt::Break, ..] if self.switch_continuations.contains(name))
+            {
+                out.push(Stmt {
+                    caption,
+                    kind: source::StmtKind::Continue(None),
+                });
+                index += 2;
+                continue;
+            }
+            if let Some((kind, taken)) = self.declaration(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.enum_statement(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.logical_assignment(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.compound_assignment(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.switch_statement(&block[index..], &here)? {
+                out.push(Stmt { caption, kind });
+                index += taken;
                 continue;
             }
             let pended = self.pend(&block[index..], site, first + index)?;
@@ -1404,6 +1528,36 @@ pub(super) fn reads_name(node: k::Node<'_>, name: &Name) -> bool {
             .children()
             .into_iter()
             .any(|child| reads_name(child, name)),
+    }
+}
+
+fn mentions_name(node: k::Node<'_>, name: &Name) -> bool {
+    reads_name(node, name)
+        || matches!(node, k::Node::Stmt(k::Stmt::Assign {
+            place: k::Place::Variable(target), ..
+        }) if target == name)
+        || node
+            .children()
+            .into_iter()
+            .any(|child| mentions_name(child, name))
+}
+
+pub(super) fn pattern_names(pattern: &source::Pattern) -> Vec<String> {
+    match pattern {
+        source::Pattern::Name(name) => vec![name.clone()],
+        source::Pattern::Default(pattern, _) => pattern_names(pattern),
+        source::Pattern::Object(fields, rest) => fields
+            .iter()
+            .map(|(_, pattern)| pattern)
+            .chain(rest.iter().map(|pattern| &**pattern))
+            .flat_map(pattern_names)
+            .collect(),
+        source::Pattern::Array(elements, rest) => elements
+            .iter()
+            .flatten()
+            .chain(rest.iter().map(|pattern| &**pattern))
+            .flat_map(pattern_names)
+            .collect(),
     }
 }
 

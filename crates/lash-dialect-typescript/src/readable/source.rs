@@ -33,6 +33,7 @@ pub(super) enum Expr {
     As(Box<Expr>, Type),
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     Optional(Box<Expr>),
+    Grouped(Box<Expr>),
     Spread(Box<Expr>),
     Hole,
     Array(Vec<Expr>),
@@ -42,6 +43,7 @@ pub(super) enum Expr {
     TemplateObject(Vec<String>),
     Tagged(Box<Expr>, Vec<String>, Vec<Expr>),
     Arrow(Box<Function>),
+    Function(String, Box<Function>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +63,7 @@ pub(super) enum Part {
 /// An arrow function or a nested function declaration's shape.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Function {
+    pub(super) ordinary: Option<String>,
     pub(super) is_async: bool,
     pub(super) params: Vec<Param>,
     pub(super) result: Option<Type>,
@@ -115,8 +118,11 @@ pub(super) struct Stmt {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum StmtKind {
     Pattern(Pattern, Expr),
+    VarPattern(Pattern, Expr),
+    LetPattern(Pattern, Expr),
     Const(String, Expr),
     Let(String, Option<Expr>),
+    Var(String, Option<Expr>),
     /// `const name: ty = value`, or `let` for a binding something assigns.
     Declared {
         constant: bool,
@@ -134,12 +140,24 @@ pub(super) enum StmtKind {
     },
     For {
         operator: &'static str,
-        binding: String,
+        binding: Pattern,
+        declaration: &'static str,
         iterable: Expr,
         body: Vec<Stmt>,
     },
+    Function(String, Function),
+    Enum(String, Vec<(String, Expr)>),
+    Switch {
+        discriminant: Expr,
+        cases: Vec<(Option<Expr>, Vec<Stmt>)>,
+    },
     While {
         condition: Expr,
+        body: Vec<Stmt>,
+    },
+    ForClassic {
+        condition: Expr,
+        update: Expr,
         body: Vec<Stmt>,
     },
     DoWhile {
@@ -156,7 +174,7 @@ pub(super) enum StmtKind {
     Block(Vec<Stmt>),
     Try {
         body: Vec<Stmt>,
-        catch: Option<(Arm, Option<String>)>,
+        catch: Option<(Arm, Option<Pattern>)>,
         finally: Option<Arm>,
     },
 }
@@ -258,6 +276,7 @@ impl Writer {
             self.out.push_str(" = ");
             self.expr(
                 &Expr::arrow(Function {
+                    ordinary: None,
                     is_async: item.is_async,
                     params: item.params.clone(),
                     result: item.result.clone(),
@@ -489,8 +508,17 @@ impl Writer {
 
     fn statement_kind(&mut self, kind: &StmtKind) {
         match kind {
-            StmtKind::Pattern(pattern, value) => {
-                self.out.push_str("const ");
+            StmtKind::Pattern(pattern, value)
+            | StmtKind::VarPattern(pattern, value)
+            | StmtKind::LetPattern(pattern, value) => {
+                self.out
+                    .push_str(if matches!(kind, StmtKind::VarPattern(..)) {
+                        "var "
+                    } else if matches!(kind, StmtKind::LetPattern(..)) {
+                        "let "
+                    } else {
+                        "const "
+                    });
                 self.pattern(pattern);
                 self.out.push_str(" = ");
                 self.expr(value, ASSIGN);
@@ -503,8 +531,12 @@ impl Writer {
                 self.expr(value, ASSIGN);
                 self.out.push(';');
             }
-            StmtKind::Let(name, value) => {
-                self.out.push_str("let ");
+            StmtKind::Let(name, value) | StmtKind::Var(name, value) => {
+                self.out.push_str(if matches!(kind, StmtKind::Var(..)) {
+                    "var "
+                } else {
+                    "let "
+                });
                 self.out.push_str(name);
                 if let Some(value) = value {
                     self.out.push_str(" = ");
@@ -565,11 +597,14 @@ impl Writer {
             StmtKind::For {
                 operator,
                 binding,
+                declaration,
                 iterable,
                 body,
             } => {
-                self.out.push_str("for (const ");
-                self.out.push_str(binding);
+                self.out.push_str("for (");
+                self.out.push_str(declaration);
+                self.out.push(' ');
+                self.pattern(binding);
                 self.out.push(' ');
                 self.out.push_str(operator);
                 self.out.push(' ');
@@ -577,9 +612,67 @@ impl Writer {
                 self.out.push_str(") ");
                 self.block(body);
             }
+            StmtKind::Function(name, function) => {
+                self.expr(&Expr::Function(name.clone(), Box::new(function.clone())), 0)
+            }
+            StmtKind::Enum(name, members) => {
+                self.out.push_str("enum ");
+                self.out.push_str(name);
+                self.out.push_str(" {\n");
+                self.indent += 1;
+                for (name, value) in members {
+                    self.pad();
+                    self.out.push_str(&property_key(name));
+                    self.out.push_str(" = ");
+                    self.expr(value, ASSIGN);
+                    self.out.push_str(",\n");
+                }
+                self.indent -= 1;
+                self.pad();
+                self.out.push('}');
+            }
+            StmtKind::Switch {
+                discriminant,
+                cases,
+            } => {
+                self.out.push_str("switch (");
+                self.expr(discriminant, 0);
+                self.out.push_str(") {\n");
+                self.indent += 1;
+                for (test, body) in cases {
+                    self.pad();
+                    if let Some(test) = test {
+                        self.out.push_str("case ");
+                        self.expr(test, 0);
+                        self.out.push_str(":\n");
+                    } else {
+                        self.out.push_str("default:\n");
+                    }
+                    self.indent += 1;
+                    for statement in body {
+                        self.statement(statement);
+                    }
+                    self.indent -= 1;
+                }
+                self.indent -= 1;
+                self.pad();
+                self.out.push('}');
+            }
             StmtKind::While { condition, body } => {
                 self.out.push_str("while (");
                 self.expr(condition, 0);
+                self.out.push_str(") ");
+                self.block(body);
+            }
+            StmtKind::ForClassic {
+                condition,
+                update,
+                body,
+            } => {
+                self.out.push_str("for (; ");
+                self.expr(condition, 0);
+                self.out.push_str("; ");
+                self.expr(update, 0);
                 self.out.push_str(") ");
                 self.block(body);
             }
@@ -633,7 +726,7 @@ impl Writer {
                     match binding {
                         Some(binding) => {
                             self.out.push_str("catch (");
-                            self.out.push_str(binding);
+                            self.pattern(binding);
                             self.out.push_str(") ");
                         }
                         None => self.out.push_str("catch "),
@@ -889,6 +982,31 @@ impl Writer {
                 }
                 self.out.push('`');
             }
+            Expr::Function(name, function) => {
+                if function.is_async {
+                    self.out.push_str("async ");
+                }
+                self.out.push_str("function ");
+                self.out.push_str(name);
+                self.params(&function.params);
+                if let Some(result) = &function.result {
+                    self.out.push_str(": ");
+                    self.ty(result);
+                }
+                self.out.push(' ');
+                match &function.body {
+                    Body::Block(body) => self.block(body),
+                    Body::Expr(value) => self.block(&[Stmt {
+                        caption: None,
+                        kind: StmtKind::Return(Some(value.clone())),
+                    }]),
+                }
+            }
+            Expr::Grouped(value) => {
+                self.out.push('(');
+                self.expr(value, 0);
+                self.out.push(')');
+            }
             Expr::Arrow(function) => {
                 if function.is_async {
                     self.out.push_str("async ");
@@ -998,7 +1116,7 @@ fn nullish_guard(op: &str, operand: &Expr) -> u8 {
 
 fn precedence(expr: &Expr) -> u8 {
     match expr {
-        Expr::Arrow(_) => ASSIGN,
+        Expr::Arrow(_) | Expr::Function(..) => ASSIGN,
         Expr::Conditional(..) => CONDITIONAL,
         Expr::Binary(op, ..) => binary_precedence(op),
         Expr::Unary(..) => UNARY,
@@ -1010,7 +1128,7 @@ fn precedence(expr: &Expr) -> u8 {
 
 fn starts_ambiguously(expr: &Expr) -> bool {
     match expr {
-        Expr::Object(_) | Expr::BuiltObject(_) | Expr::Arrow(_) => true,
+        Expr::Object(_) | Expr::BuiltObject(_) | Expr::Arrow(_) | Expr::Function(..) => true,
         Expr::Field(target, _) | Expr::Index(target, _) | Expr::Call(target, _) => {
             starts_ambiguously(target)
         }

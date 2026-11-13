@@ -1155,3 +1155,435 @@ fn syntax_lowered_helpers_have_source_spellings() {
     println!("{} emitted syntax helpers checked", inventory.len());
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// FIG-7711: every admitted statement and expression form has a faithful
+/// source spelling in a cell and in module main. Refused inputs are listed
+/// separately and never counted as successful round trips.
+#[test]
+fn enumerated_statements_and_expressions_print_and_relower() {
+    let library = machine::library();
+    let namespaces = Default::default();
+    let environment = Environment::new(library, &namespaces);
+    let forms = [
+        ("pass", "pass"),
+        ("block", "if True:\n    x=1"),
+        ("assign", "x=1\ny=x"),
+        ("chained assignment", "x=y=1"),
+        ("annotated", "x:int=1"),
+        ("annotation only", "x:int"),
+        ("tuple assignment", "x,y=(1,2)"),
+        ("starred assignment", "x,*rest=[1,2,3]"),
+        ("nested assignment", "x,(y,z)=(1,(2,3))"),
+        ("attribute assignment", "obj={\"x\":1}\nobj.x=2"),
+        ("item assignment", "xs=[1,2]\nxs[0]=3"),
+        ("slice assignment", "xs=[1,2,3]\nxs[1:]=[4]"),
+        ("delete name", "x=1\ndel x"),
+        ("delete item", "xs=[1,2]\ndel xs[0]"),
+        ("delete slice", "xs=[1,2,3]\ndel xs[1:]"),
+        ("if", "x=1\nif x:\n    x=2"),
+        (
+            "elif else",
+            "x=1\nif x==0:\n    x=2\nelif x==1:\n    x=3\nelse:\n    x=4",
+        ),
+        ("while", "x=0\nwhile x<2:\n    x+=1"),
+        ("while else", "x=0\nwhile x<2:\n    x+=1\nelse:\n    x=3"),
+        (
+            "while exits",
+            "x=0\nwhile True:\n    x+=1\n    if x==1:\n        continue\n    break",
+        ),
+        ("for", "for x in [1,2]:\n    y=x"),
+        ("for destructuring", "for x,y in [(1,2)]:\n    z=x+y"),
+        ("for starred", "for x,*rest in [(1,2,3)]:\n    z=rest"),
+        ("for else", "for x in [1,2]:\n    y=x\nelse:\n    y=3"),
+        (
+            "nested for exits",
+            "for x in [1,2]:\n    for y in [3,4]:\n        if y==3:\n            continue\n        break",
+        ),
+        (
+            "function",
+            "def local(x:int)->int:\n    return x+1\nresult=local(2)",
+        ),
+        (
+            "async function",
+            "async def local(x:int)->int:\n    return x+1\nresult=await local(2)",
+        ),
+        ("bare return function", "def local()->None:\n    return"),
+        ("return", "return 1"),
+        ("break", "break"),
+        ("continue", "continue"),
+        ("raise", "raise ValueError(\"bad\")"),
+        ("assert", "assert True,\"message\""),
+        (
+            "global",
+            "x=1\ndef local()->int:\n    global x\n    x=2\n    return x",
+        ),
+        (
+            "nonlocal",
+            "def outer()->int:\n    x=1\n    def local():\n        nonlocal x\n        x=2\n    local()\n    return x",
+        ),
+        ("lambda", "f=lambda x:x+1\nresult=f(2)"),
+        ("class", "class Box:\n    x:int=1"),
+        ("with", "resource=None\nwith resource as x:\n    result=x"),
+        (
+            "with two",
+            "resource=None\nwith resource as x, resource as y:\n    result=x",
+        ),
+        (
+            "async with",
+            "resource=None\nasync with resource as x:\n    result=x",
+        ),
+        ("async for", "xs=[]\nasync for x in xs:\n    result=x"),
+        ("import", "import math\nresult=math.sqrt(4)"),
+        ("from import", "from math import sqrt\nresult=sqrt(4)"),
+        ("type alias", "type Scalar=int\nx:Scalar=1"),
+        (
+            "match literal",
+            "x=1\nmatch x:\n    case 1:\n        result=2\n    case _:\n        result=3",
+        ),
+        (
+            "match sequence",
+            "x=[1,2]\nmatch x:\n    case [first,*rest]:\n        result=rest",
+        ),
+        (
+            "match mapping",
+            "x={\"a\":1,\"b\":2}\nmatch x:\n    case {\"a\":a,**rest}:\n        result=rest",
+        ),
+        (
+            "match guard",
+            "x=1\nmatch x:\n    case value if value>0:\n        result=value\n    case _:\n        result=0",
+        ),
+        (
+            "try bare else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2",
+        ),
+        (
+            "try bare else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try bare else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try bare else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2",
+        ),
+        (
+            "try ValueError else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try ValueError else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2",
+        ),
+        (
+            "try (ValueError,TypeError) else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try (ValueError,TypeError) else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError as error else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2",
+        ),
+        (
+            "try ValueError as error else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try ValueError as error else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError as error else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try finally",
+            "result=0\ntry:\n    result=1\nfinally:\n    result=2",
+        ),
+        ("augmented x +", "x=2\nx+=1"),
+        ("augmented xs[0] +", "xs=[2]\nxs[0]+=1"),
+        ("augmented x -", "x=2\nx-=1"),
+        ("augmented xs[0] -", "xs=[2]\nxs[0]-=1"),
+        ("augmented x *", "x=2\nx*=1"),
+        ("augmented xs[0] *", "xs=[2]\nxs[0]*=1"),
+        ("augmented x /", "x=2\nx/=1"),
+        ("augmented xs[0] /", "xs=[2]\nxs[0]/=1"),
+        ("augmented x //", "x=2\nx//=1"),
+        ("augmented xs[0] //", "xs=[2]\nxs[0]//=1"),
+        ("augmented x %", "x=2\nx%=1"),
+        ("augmented xs[0] %", "xs=[2]\nxs[0]%=1"),
+        ("augmented x **", "x=2\nx**=1"),
+        ("augmented xs[0] **", "xs=[2]\nxs[0]**=1"),
+        ("augmented x <<", "x=2\nx<<=1"),
+        ("augmented xs[0] <<", "xs=[2]\nxs[0]<<=1"),
+        ("augmented x >>", "x=2\nx>>=1"),
+        ("augmented xs[0] >>", "xs=[2]\nxs[0]>>=1"),
+        ("augmented x &", "x=2\nx&=1"),
+        ("augmented xs[0] &", "xs=[2]\nxs[0]&=1"),
+        ("augmented x |", "x=2\nx|=1"),
+        ("augmented xs[0] |", "xs=[2]\nxs[0]|=1"),
+        ("augmented x ^", "x=2\nx^=1"),
+        ("augmented xs[0] ^", "xs=[2]\nxs[0]^=1"),
+        (
+            "expression none",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=None",
+        ),
+        (
+            "expression bool",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=True",
+        ),
+        (
+            "expression int",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=1",
+        ),
+        (
+            "expression float",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=1.5",
+        ),
+        (
+            "expression text",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=\"text\"",
+        ),
+        (
+            "expression bytes",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=b\"text\"",
+        ),
+        (
+            "expression ellipsis",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=...",
+        ),
+        (
+            "expression tuple",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=(x,y)",
+        ),
+        (
+            "expression list",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=[1,*xs]",
+        ),
+        (
+            "expression dict",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={\"a\":x,**obj}",
+        ),
+        (
+            "expression set",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={x,*xs}",
+        ),
+        (
+            "expression slice",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=xs[1:3:2]",
+        ),
+        (
+            "expression attribute",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=obj.a",
+        ),
+        (
+            "expression index",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=xs[x]",
+        ),
+        (
+            "expression conditional",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=x if x else y",
+        ),
+        (
+            "expression walrus",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=(z:=x)",
+        ),
+        (
+            "expression lambda",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=lambda z:z+1",
+        ),
+        (
+            "expression call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(x)",
+        ),
+        (
+            "expression starred call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(*xs)",
+        ),
+        (
+            "expression keyword call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(z=x)",
+        ),
+        (
+            "expression double starred call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(**{\"z\":x})",
+        ),
+        (
+            "expression fstring",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f\"value {x}\"",
+        ),
+        (
+            "expression list comprehension",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=[v+1 for v in xs if v]",
+        ),
+        (
+            "expression dict comprehension",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={v:v+1 for v in xs}",
+        ),
+        (
+            "expression set comprehension",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={v+1 for v in xs}",
+        ),
+        (
+            "expression generator",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=(v+1 for v in xs)",
+        ),
+        (
+            "expression await",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=await f(x)",
+        ),
+        ("binary +", "x=1\ny=2\nresult=x + y"),
+        ("binary -", "x=1\ny=2\nresult=x - y"),
+        ("binary *", "x=1\ny=2\nresult=x * y"),
+        ("binary /", "x=1\ny=2\nresult=x / y"),
+        ("binary //", "x=1\ny=2\nresult=x // y"),
+        ("binary %", "x=1\ny=2\nresult=x % y"),
+        ("binary **", "x=1\ny=2\nresult=x ** y"),
+        ("binary <<", "x=1\ny=2\nresult=x << y"),
+        ("binary >>", "x=1\ny=2\nresult=x >> y"),
+        ("binary &", "x=1\ny=2\nresult=x & y"),
+        ("binary |", "x=1\ny=2\nresult=x | y"),
+        ("binary ^", "x=1\ny=2\nresult=x ^ y"),
+        ("binary <", "x=1\ny=2\nresult=x < y"),
+        ("binary <=", "x=1\ny=2\nresult=x <= y"),
+        ("binary >", "x=1\ny=2\nresult=x > y"),
+        ("binary >=", "x=1\ny=2\nresult=x >= y"),
+        ("binary ==", "x=1\ny=2\nresult=x == y"),
+        ("binary !=", "x=1\ny=2\nresult=x != y"),
+        ("binary is", "x=1\ny=2\nresult=x is y"),
+        ("binary is not", "x=1\ny=2\nresult=x is not y"),
+        ("binary in", "x=1\ny=2\nresult=x in y"),
+        ("binary not in", "x=1\ny=2\nresult=x not in y"),
+        ("binary and", "x=1\ny=2\nresult=x and y"),
+        ("binary or", "x=1\ny=2\nresult=x or y"),
+        ("unary +", "x=1\nresult=+x"),
+        ("unary -", "x=1\nresult=-x"),
+        ("unary ~", "x=1\nresult=~x"),
+        ("unary not", "x=1\nresult=not x"),
+    ];
+    let mut refused = Vec::new();
+    let mut failures = Vec::new();
+    let mut admitted = 0;
+    for (name, body) in forms {
+        for module in [false, true] {
+            let context = if module { "module" } else { "cell" };
+            let source = if module {
+                format!("async def entry() -> int:\n    return 1\n{body}\n")
+            } else {
+                body.into()
+            };
+            let mode = if module {
+                Mode::Module
+            } else {
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            };
+            let lowered = match crate::lower(&source, &environment, mode) {
+                Ok(lowered) => lowered,
+                Err(error) => {
+                    refused.push(format!("{context} {name}: {error}"));
+                    continue;
+                }
+            };
+            admitted += 1;
+            let printed = match crate::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                lash_kernel_dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(printed) => printed,
+                Err(error) => {
+                    failures.push(format!("{context} {name}: print: {error}"));
+                    continue;
+                }
+            };
+            match crate::lower(&printed.source, &environment, mode) {
+                Ok(read)
+                    if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
+                {
+                    printed
+                        .source_map
+                        .unwrap()
+                        .validate(&lowered.document, &printed.source)
+                        .unwrap();
+                }
+                Ok(read) => failures.push(format!(
+                    "{context} {name}: different document; private {:?} -> {:?}; source {}",
+                    lowered.document.private_bindings,
+                    read.document.private_bindings,
+                    printed.source
+                )),
+                Err(error) => failures.push(format!("{context} {name}: lower print: {error}")),
+            }
+        }
+    }
+    eprintln!(
+        "Python enumerated: admitted={admitted}, passed={}, failed={}, refused={}\nREFUSED:\n{}",
+        admitted - failures.len(),
+        failures.len(),
+        refused.len(),
+        refused.join("\n")
+    );
+    assert_eq!(admitted, 284, "admitted forms must not disappear");
+    let mut refused_forms = refused
+        .iter()
+        .map(|failure| failure.split(':').next().unwrap())
+        .collect::<Vec<_>>();
+    refused_forms.sort_unstable();
+    let mut expected = [
+        "attribute assignment",
+        "return",
+        "break",
+        "continue",
+        "class",
+        "async for",
+    ]
+    .into_iter()
+    .flat_map(|name| [format!("cell {name}"), format!("module {name}")])
+    .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert_eq!(
+        refused_forms, expected,
+        "lower-refused forms must be explicit"
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

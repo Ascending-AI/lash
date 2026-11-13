@@ -2,6 +2,7 @@
 use crate::generated_scope::BindingScope;
 mod authored;
 mod direct;
+mod environment;
 mod names;
 mod packed;
 mod readable;
@@ -9,6 +10,7 @@ mod signature;
 mod structured;
 mod syntax;
 mod task;
+mod unpack;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
     check_document_depth,
@@ -49,6 +51,7 @@ pub(crate) fn print_regions(
         authored: true,
         sync: synchronous.clone(),
         asynchronous: BTreeSet::new(),
+        aliases: BTreeMap::new(),
         substitutions: BTreeMap::new(),
         direct: BTreeMap::new(),
         comprehensions: BTreeMap::new(),
@@ -68,6 +71,17 @@ pub(crate) fn print_regions(
         r.out.write("import time\n");
     }
     if asyncio || time {
+        r.out.write("\n");
+    }
+    let modules: BTreeSet<_> = r
+        .operators
+        .functions()
+        .values()
+        .filter_map(|name| name.as_str().strip_prefix("py.module.").map(str::to_owned))
+        .collect();
+    for module in modules {
+        r.out.write("import ");
+        r.out.write(&module);
         r.out.write("\n");
     }
     let signatures = r.typed_dicts(document, &regions.authored);
@@ -130,6 +144,7 @@ struct Renderer<'a> {
     /// whose calls take no `await`.
     sync: BTreeSet<Name>,
     asynchronous: BTreeSet<Name>,
+    aliases: BTreeMap<Name, Name>,
     substitutions: BTreeMap<Name, k::Expr>,
     direct: BTreeMap<Name, (Name, lash_kernel_value::FunctionId)>,
     comprehensions: BTreeMap<Name, authored::Comprehension>,
@@ -268,7 +283,10 @@ impl Renderer<'_> {
         }
         let scope = std::mem::replace(&mut self.scope, local);
         let main = std::mem::replace(&mut self.main, false);
-        self.root_block(&body.block, Some(&unit));
+        let aliases = self.aliases.clone();
+        let prefix = self.module_environment(&body.block);
+        self.root_block(&body.block, Some(&unit), prefix);
+        self.aliases = aliases;
         self.main = main;
         self.scope = scope;
         Ok(start..self.out.len())
@@ -312,7 +330,12 @@ impl Renderer<'_> {
         }
         self.out.write(")");
     }
-    fn root_block(&mut self, block: &k::Block, root: Option<&lash_kernel_value::sites::Unit>) {
+    fn root_block(
+        &mut self,
+        block: &k::Block,
+        root: Option<&lash_kernel_value::sites::Unit>,
+        prefix: usize,
+    ) {
         let sync = self.sync.clone();
         let asynchronous = self.asynchronous.clone();
         self.out.begin_node(root);
@@ -328,13 +351,16 @@ impl Renderer<'_> {
                 .iter()
                 .map(|p| p.name.clone())
                 .collect::<Vec<_>>();
-            let nonlocal = self.nonlocals(block, &params);
+            let nonlocal = self.nonlocals(&block[prefix..].to_vec(), &params);
             // A parameter or a `nonlocal` is no declaration of this scope.
             let mut own = declared_locals(self.document, Some(*id));
             own.retain(|name, _| !params.contains(name) && !nonlocal.contains(name));
             declared = Some(std::mem::replace(&mut self.declared, own));
         }
-        self.authored_statements(block);
+        for _ in 0..prefix {
+            self.implicit();
+        }
+        self.authored_statement_range(block, prefix..block.len());
         if let Some(declared) = declared {
             self.declared = declared;
         }
@@ -368,17 +394,35 @@ impl Renderer<'_> {
         let nonlocal: BTreeSet<Name> = writes.difference(&locals).cloned().collect();
         for name in &nonlocal {
             self.padding();
-            self.out.write("nonlocal ");
+            self.out.write(if self.module_binding(name) {
+                "global "
+            } else {
+                "nonlocal "
+            });
             self.name(name);
             self.out.write("\n");
         }
         nonlocal
     }
+    fn module_binding(&self, name: &Name) -> bool {
+        let name = self.aliases.get(name).unwrap_or(name);
+        !self.document.private_bindings.contains(name) && self.document.main.as_deref().is_some_and(|body| body.iter().any(|statement| matches!(statement, k::Stmt::Let { name: declared, .. } if declared == name)))
+    }
     fn name(&mut self, n: &Name) {
+        let n = self.aliases.get(n).unwrap_or(n);
         // Authored source spells the document's names; only the kernel
         // surface reserves some for its own syntax.
         if self.authored && attribute_identifier(n.as_str()) {
-            self.out.write(n.as_str());
+            let source = n
+                .as_str()
+                .rsplit_once("_local")
+                .filter(|(_, suffix)| {
+                    !suffix.is_empty()
+                        && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                        && !self.module_binding(n)
+                })
+                .map_or(n.as_str(), |(source, _)| source);
+            self.out.write(source);
         } else {
             self.out.write(&self.plan.names[n]);
         }

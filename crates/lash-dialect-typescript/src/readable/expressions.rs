@@ -180,6 +180,13 @@ impl Lifter<'_> {
         if let Some(builtin) = self.positional_builtin(&name, args) {
             return builtin;
         }
+        if self.style.exact
+            && crate::constructs::operators::BINARY
+                .iter()
+                .any(|entry| entry.helper == name)
+        {
+            return self.helper(&name, args);
+        }
         if name == "ts.to_property_key"
             && let [value] = args
         {
@@ -635,7 +642,11 @@ impl Lifter<'_> {
         Ok(Some(
             if matches!(args.first(), Some(Expr::TemplateObject(_))) {
                 authored_call(callee, args)
-            } else if direct && !authored {
+            } else if direct
+                && !authored
+                && !args.iter().any(|arg| matches!(arg, Expr::Spread(_)))
+                && !matches!(callee, Expr::Optional(_))
+            {
                 constructor(
                     "callable.invoke_token",
                     std::iter::once(callee).chain(args).collect(),
@@ -695,6 +706,16 @@ impl Lifter<'_> {
                     return refuse("a call of a function the manifest does not list");
                 };
                 self.helper(&name, &act.args)
+            }
+            k::ActKind::Call(k::Callee::Value(name)) if self.positional.contains_key(name) => {
+                let callee = Expr::Ident(self.positional[name].clone());
+                let args = act
+                    .args
+                    .iter()
+                    .skip(1)
+                    .map(|arg| self.expr(arg))
+                    .collect::<Lift<Vec<_>>>()?;
+                Ok(Expr::Call(Box::new(callee), args))
             }
             k::ActKind::Call(k::Callee::Value(name)) => {
                 let callee = self.variable(name)?;
@@ -816,6 +837,11 @@ impl Lifter<'_> {
             ));
         }
         match (name, args) {
+            ("ts.instanceof", [left, right]) => Ok(Expr::Binary(
+                "instanceof",
+                Box::new(self.expr(left)?),
+                Box::new(self.expr(right)?),
+            )),
             ("ts.to_property_key", [value]) => self.expr(value),
             ("ts.construct", [callee, args]) => {
                 let callee = self.operand(callee, "value.operand")?;
@@ -953,7 +979,27 @@ impl Lifter<'_> {
                     .iter()
                     .find(|entry| entry.helper == name)
                     .unwrap_or_else(|| unreachable!("declared helper"));
-                if declaration.swapped {
+                if declaration.token == "in" {
+                    return if declaration.swapped {
+                        self.binary(declaration.token, right, left)
+                    } else {
+                        self.binary(declaration.token, left, right)
+                    };
+                }
+                if self.style.exact {
+                    let left = Expr::As(Box::new(self.expr(left)?), source::Type::Word("any"));
+                    let right = Expr::As(Box::new(self.expr(right)?), source::Type::Word("any"));
+                    let (left, right) = if declaration.swapped {
+                        (right, left)
+                    } else {
+                        (left, right)
+                    };
+                    Ok(Expr::Binary(
+                        declaration.token,
+                        Box::new(left),
+                        Box::new(right),
+                    ))
+                } else if declaration.swapped {
                     self.binary(declaration.token, right, left)
                 } else {
                     self.binary(declaration.token, left, right)
@@ -997,6 +1043,11 @@ impl Lifter<'_> {
                     _ => self.operand(target, "value.operand")?,
                 };
                 let key = self.expr(key)?;
+                let key = if self.style.exact && name == "ts.get_computed" {
+                    Expr::As(Box::new(key), source::Type::Word("any"))
+                } else {
+                    key
+                };
                 Ok(Expr::Index(Box::new(target), Box::new(key)))
             }
             ("ts.read", [target, k::Expr::Literal(k::Literal::Text(field))]) => {
