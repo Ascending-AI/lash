@@ -10,6 +10,19 @@ use crate::Bound;
 use crate::bytecode::program::UnitId;
 use crate::heap::Heap;
 
+impl Exceeded {
+    /// A run-wide bound, passed by no function and at no site: a park's
+    /// requests, the live tasks, a join's members.
+    pub(crate) fn run(bound: Bound, limit: u64) -> Self {
+        Self {
+            bound,
+            limit,
+            function: None,
+            site: None,
+        }
+    }
+}
+
 impl<H: Heap> Vm<H> {
     /// A bound passed by the running op, its frame standing past it.
     pub(super) fn exceeded(&self, bound: Bound, limit: u64) -> Exceeded {

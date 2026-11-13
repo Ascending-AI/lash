@@ -48,6 +48,10 @@ struct View<'a> {
     indices: &'a Members,
 }
 impl Bodies for View<'_> {
+    fn wants_whole(&self, handle: ArenaHandle) {
+        self.arena.objects.wants_whole(handle);
+    }
+
     fn get(&self, handle: ArenaHandle) -> Option<&Body> {
         self.indices
             .get(self.entries, handle.index())

@@ -496,7 +496,7 @@ impl SlotHeap {
             .durable
             .as_ref()
             .ok_or_else(|| malformed("a paged payload in a heap with no directory".into()))?;
-        let whole = lash_kernel_state::arena::take_whole_read(object);
+        let whole = self.arena.objects().take_whole_read(object);
         let access = durable.directory.access();
         let node = edge.node(access).map_err(LoadError::Store)?;
         // A whole read consumes every node: an index's children are

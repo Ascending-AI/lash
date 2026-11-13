@@ -122,19 +122,6 @@ pub(crate) struct Exceeded {
     pub site: Option<Site>,
 }
 
-impl Exceeded {
-    /// A run-wide bound, passed by no function and at no site: a park's
-    /// requests, the live tasks, a join's members.
-    pub(crate) fn run(bound: Bound, limit: u64) -> Self {
-        Self {
-            bound,
-            limit,
-            function: None,
-            site: None,
-        }
-    }
-}
-
 /// How an op leaves the straight line.
 #[derive(Debug)]
 pub(crate) enum Flow {
@@ -264,6 +251,9 @@ pub(crate) struct Vm<H: Heap> {
     exact: bool,
     /// The next op is the first of a run call: its step is not tested.
     fresh: bool,
+    /// Diagnostic mode for this run call; leaf entries read it without TLS.
+    #[cfg(any(test, feature = "perf-witness"))]
+    counting: bool,
     pub call_depth: u32,
     /// The deepest value the run builds or decodes (`K-VAL-034`): the
     /// deployment's data limit at a start, the standard one at an open.
@@ -401,6 +391,8 @@ impl<H: Heap> Vm<H> {
             off,
             exact: true,
             fresh: false,
+            #[cfg(any(test, feature = "perf-witness"))]
+            counting: cfg!(test),
             call_depth,
             value_depth: KernelDataLimits::standard().value_depth(),
             limiter: None,
@@ -1028,6 +1020,10 @@ impl<H: Heap> Vm<H> {
     /// Runs the tasks until the run stops: it parks, the slice of `slice`
     /// units ends, or the run ends.
     pub(crate) fn run(&mut self, host: &mut dyn Host, slice: u64) -> Stop {
+        #[cfg(any(test, feature = "perf-witness"))]
+        {
+            self.counting = cfg!(test) || crate::perf_witness::work_enabled();
+        }
         if let Some(refused) = &self.unadmitted {
             return Stop::bound(refused.clone());
         }
@@ -1073,6 +1069,14 @@ impl<H: Heap> Vm<H> {
     /// with `pc` written back to the frame first and the frame read again
     /// after. The loop is kept small so that its state stays in registers.
     fn dispatch(&mut self, host: &mut dyn Host) -> Run<Stop> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if self.counting {
+            return self.dispatch_counted::<true>(host);
+        }
+        self.dispatch_counted::<false>(host)
+    }
+
+    fn dispatch_counted<const COUNT: bool>(&mut self, host: &mut dyn Host) -> Run<Stop> {
         let program = Arc::clone(&self.program);
         // The run's first op ends no step: the slice was just started.
         let mut fresh = std::mem::take(&mut self.fresh);
@@ -1151,9 +1155,10 @@ impl<H: Heap> Vm<H> {
             }
             loop {
                 let mut op = ops[pc];
-                #[cfg(test)]
-                if !retrying && unit.steps && unit.step[pc] {
+                #[cfg(any(test, feature = "perf-witness"))]
+                if COUNT && !retrying && unit.steps && unit.step[pc] {
                     crate::perf_witness::record(|work| work.vm_steps += 1);
+                    #[cfg(test)]
                     self.chill();
                 }
                 // The laws' forced-cold and collected runs stop at every
@@ -1195,7 +1200,7 @@ impl<H: Heap> Vm<H> {
                         let block = &unit.blocks[block as usize];
                         self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
                     }
-                    Op::Trace(n) => match self.trace(&program, unit, top, n, base)? {
+                    Op::Trace(n) => match self.trace::<COUNT>(&program, unit, top, n, base)? {
                         Some(next) => pc = next,
                         None => continue 'frames,
                     },

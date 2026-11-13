@@ -232,12 +232,16 @@ fn body(
 }
 
 /// The one resident piece of a chunked body, whole.
-fn whole<T>(object: ArenaHandle, chunks: &[Chunk<T>]) -> Result<Option<&T>, NativeError> {
+fn whole<'a, T>(
+    objects: &(impl super::Bodies + ?Sized),
+    object: ArenaHandle,
+    chunks: &'a [Chunk<T>],
+) -> Result<Option<&'a T>, NativeError> {
     match chunks {
         [] => Ok(None),
         [Chunk::Resident(whole)] => Ok(Some(whole)),
         chunks => {
-            super::wants_whole(object);
+            objects.wants_whole(object);
             Err(Retry::Cold {
                 object,
                 chunk: super::first_cold(chunks).unwrap_or(0),
@@ -346,7 +350,9 @@ pub(crate) fn text<'a>(
     match value {
         Value::Text(short) => Ok(short.as_str()),
         Value::LongText(handle) => match body(objects, *handle)? {
-            Body::LongText(long) => Ok(whole(*handle, &long.chunks)?.map_or("", |text| text)),
+            Body::LongText(long) => {
+                Ok(whole(objects, *handle, &long.chunks)?.map_or("", |text| text))
+            }
             _ => Err(NativeError::Malformed("a text handle names another body")),
         },
         _ => Err(NativeError::Malformed("a text was expected")),
@@ -359,7 +365,7 @@ pub(crate) fn bytes(
     handle: ArenaHandle,
 ) -> Result<&[u8], NativeError> {
     match body(objects, handle)? {
-        Body::Bytes(bytes) => Ok(whole(handle, &bytes.chunks)?.map_or(&[], |bytes| bytes)),
+        Body::Bytes(bytes) => Ok(whole(objects, handle, &bytes.chunks)?.map_or(&[], |bytes| bytes)),
         _ => Err(NativeError::Malformed("a bytes handle names another body")),
     }
 }
@@ -414,7 +420,7 @@ pub(crate) fn normal_key(
         return Ok(normal.cloned());
     }
     let normal = if let Value::LongText(handle) | Value::Bytes(handle) = value {
-        Some(long_key(Some(*handle), body(objects, *handle)?)?)
+        Some(long_key(objects, Some(*handle), body(objects, *handle)?)?)
     } else {
         let mut out = TokenWriter::new();
         tokens(objects, facts, value, &mut out)?.then(|| identity::flat(out))
@@ -462,10 +468,14 @@ fn certify(
 
 /// The key of a held text or bytes `body`, of `object` when the arena
 /// holds it, by its content's length ([`identity`]).
-fn long_key(object: Option<ArenaHandle>, body: &Body) -> Result<NormalKey, NativeError> {
+fn long_key(
+    objects: &(impl super::Bodies + ?Sized),
+    object: Option<ArenaHandle>,
+    body: &Body,
+) -> Result<NormalKey, NativeError> {
     let unread = |chunk: u32| match object {
         Some(object) => {
-            super::wants_whole(object);
+            objects.wants_whole(object);
             NativeError::from(Retry::Cold { object, chunk })
         }
         None => NativeError::Malformed("a detached body holds a cold chunk"),
@@ -590,7 +600,7 @@ fn body_tokens(
 ) -> Result<bool, NativeError> {
     let unread = |chunk: u32| match object {
         Some(object) => {
-            super::wants_whole(object);
+            objects.wants_whole(object);
             NativeError::from(Retry::Cold { object, chunk })
         }
         None => NativeError::Malformed("a detached body holds a cold chunk"),
@@ -638,7 +648,7 @@ pub(crate) fn detached_normal(
     body: &Body,
 ) -> Result<Option<NormalKey>, NativeError> {
     if let Body::LongText(_) | Body::Bytes(_) = body {
-        return long_key(None, body).map(Some);
+        return long_key(objects, None, body).map(Some);
     }
     let mut out = TokenWriter::new();
     if !body_tokens(objects, facts, None, body, &mut out)? {

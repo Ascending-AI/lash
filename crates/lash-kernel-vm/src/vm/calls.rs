@@ -167,6 +167,19 @@ impl<H: Heap> Vm<H> {
     /// op goes back to dispatch before its start; a cold read leaves pc
     /// past the op, as dispatch does, so resume suppresses a second start.
     fn leaf_run(&mut self, program: &Program, entry: Entry, checked: bool) -> Run<()> {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if self.counting {
+            return self.leaf_counted::<true>(program, entry, checked);
+        }
+        self.leaf_counted::<false>(program, entry, checked)
+    }
+
+    fn leaf_counted<const COUNT: bool>(
+        &mut self,
+        program: &Program,
+        entry: Entry,
+        checked: bool,
+    ) -> Run<()> {
         if self.watch.is_some() || self.sites {
             return Ok(());
         }
@@ -189,7 +202,7 @@ impl<H: Heap> Vm<H> {
                     self.meter.leave();
                     self.exact = !self.meter.enter(unit.blocks[block as usize].charge);
                 }
-                Op::Trace(n) => match self.trace(program, unit, top, n, base)? {
+                Op::Trace(n) => match self.trace::<COUNT>(program, unit, top, n, base)? {
                     Some(next) => {
                         pc = next;
                         continue;
@@ -198,8 +211,8 @@ impl<H: Heap> Vm<H> {
                 },
                 Op::Inline(n) => {
                     self.cx.frames[top].pc = pc as u32 + 1;
-                    #[cfg(test)]
-                    if unit.steps && unit.step[pc] {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    if COUNT && unit.steps && unit.step[pc] {
                         crate::perf_witness::record(|work| work.vm_steps += 1);
                     }
                     let site = &unit.inlines[n as usize];
@@ -224,8 +237,8 @@ impl<H: Heap> Vm<H> {
                     }
                 }
                 _ => {
-                    #[cfg(test)]
-                    if unit.steps && unit.step[pc] {
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    if COUNT && unit.steps && unit.step[pc] {
                         crate::perf_witness::record(|work| work.vm_steps += 1);
                     }
                     self.cx.frames[top].pc = pc as u32 + 1;
@@ -487,10 +500,12 @@ impl<H: Heap> Vm<H> {
                         self.cx.frames[top].pc = 1;
                         return Ok(());
                     }
-                    #[cfg(test)]
-                    for pc in [1, 2] {
-                        if unit.steps && unit.step[pc] {
-                            crate::perf_witness::record(|work| work.vm_steps += 1);
+                    #[cfg(any(test, feature = "perf-witness"))]
+                    if self.counting {
+                        for pc in [1, 2] {
+                            if unit.steps && unit.step[pc] {
+                                crate::perf_witness::record(|work| work.vm_steps += 1);
+                            }
                         }
                     }
                     let base = self.cx.frames[top].base as usize;

@@ -746,6 +746,8 @@ pub struct Objects {
     free: std::cell::RefCell<Vec<u32>>,
     /// Slots past the end reserved by the call running.
     reserved: std::cell::Cell<u32>,
+    /// The cold object whose next load may batch every payload sibling.
+    whole_read: std::cell::Cell<Option<ArenaHandle>>,
 }
 
 #[derive(Debug)]
@@ -758,6 +760,16 @@ struct Slot {
 }
 
 impl Objects {
+    /// Marks a whole payload read until this arena's next load takes it.
+    pub fn wants_whole(&self, object: ArenaHandle) {
+        self.whole_read.set(Some(object));
+    }
+
+    /// Takes this arena's whole-read hint, clearing it even for another object.
+    pub fn take_whole_read(&self, object: ArenaHandle) -> bool {
+        self.whole_read.take() == Some(object)
+    }
+
     /// The body `handle` names, or `None` for a stale handle.
     #[inline]
     pub fn get(&self, handle: ArenaHandle) -> Option<&Body> {

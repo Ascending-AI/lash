@@ -43,6 +43,12 @@ pub fn enable_work() {
     lash_kernel_state::kernel_internals::perf_witness::enable_work();
 }
 
+/// Whether this thread currently collects diagnostic work.
+#[inline(always)]
+pub(crate) fn work_enabled() -> bool {
+    WORK.get().is_some()
+}
+
 /// The counts since the last call, resetting them, or `None` when counting
 /// is not enabled on this thread.
 pub fn take_work() -> Option<Work> {
