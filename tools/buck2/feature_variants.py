@@ -126,9 +126,12 @@ class _Resolver:
     def dependency_named(self, owner: str, alias: str) -> dict | None:
         package = self.workspace.packages[owner]
         for dependency in package["dependencies"]:
-            if dependency["kind"] is not None:
+            if dependency_alias(dependency) != alias:
                 continue
-            if dependency_alias(dependency) == alias:
+            if dependency["kind"] is None or (
+                dependency["kind"] == "dev"
+                and alias in self.resolution.activated.get(owner, set())
+            ):
                 return dependency
         return None
 

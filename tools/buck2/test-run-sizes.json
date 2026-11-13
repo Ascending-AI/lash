@@ -1609,7 +1609,7 @@
     "peak_bytes": 139206656,
     "samples": 12
   },
-  "//crates/lash-postgres-store:conformance__test__fv_c3f21576": {
+  "//crates/lash-postgres-store:conformance__test__fv_b28f1d21": {
     "cpu_count": 2,
     "mean_cores": 1.84,
     "memory_kb": 262144,
@@ -1663,7 +1663,7 @@
     "peak_bytes": 114360320,
     "samples": 4
   },
-  "//crates/lash-postgres-store:integration__test__fv_c3f21576": {
+  "//crates/lash-postgres-store:integration__test__fv_b28f1d21": {
     "cpu_count": 2,
     "mean_cores": 2.05,
     "memory_kb": 262144,

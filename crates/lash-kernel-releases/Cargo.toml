@@ -33,6 +33,8 @@ dialect-python = ["dep:lash-ext-py-helpers", "dep:lash-ext-py-core"]
 # worker and its parent alike.
 synthetic-next = [
     "lash-kernel-doc/synthetic-next",
+    "lash-kernel-migrate/synthetic-next",
+    "lash-kernel-engine/synthetic-next",
 ]
 
 [[bin]]

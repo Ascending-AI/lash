@@ -157,24 +157,6 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
-    name = "lash-dialect-conventions__fv_6843fd99",
-    build_script = None,
-    crate_features = [],
-    crate_name = "lash_dialect_conventions",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-dialect-conventions", "lash_dialect_conventions"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-dialect-conventions",
-    package_name = "lash-dialect-conventions",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_a650ce47", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_d042336c", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_4d882ce7", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_afbcba6c", "//crates/lash-ext-py-helpers:lash-ext-py-helpers": "//crates/lash-ext-py-helpers:lash-ext-py-helpers__fv_95d956e1", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_4ef8cf60", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_c7b2605f", "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers": "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers__fv_d87dd4c8", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_4485253e", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_79e15556", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_f069c7c4", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_f3a968fd", "//crates/lash-kernel-engine:lash-kernel-engine": "//crates/lash-kernel-engine:lash-kernel-engine__fv_e5936194", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_8288d51d", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_81f4d695", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_cf1fb91f", "//crates/lash-kernel-releases:lash-kernel-releases": "//crates/lash-kernel-releases:lash-kernel-releases__fv_fa504c5b", "//crates/lash-kernel-services:lash-kernel-services": "//crates/lash-kernel-services:lash-kernel-services__fv_ef95b2da", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_570204af", "//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_61815a38", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_3cd7391d"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
     name = "lash-dialect-conventions__fv_82e00390",
     build_script = None,
     crate_features = [],
