@@ -165,7 +165,7 @@ pub(super) async fn open_stores(
         Arc::new(
             lash::sqlite::SqliteStoreSet::open(path, lash::sqlite::SqliteSynchronous::Normal)
                 .await
-                .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?,
+                .map_err(CliError::store)?,
         )
     } else {
         let storage = lash::postgres::PostgresStorage::connect(
@@ -174,7 +174,10 @@ pub(super) async fn open_stores(
             Default::default(),
         )
         .await
-        .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
+        .map_err(|error| match error {
+            lash::postgres::PostgresHostError::Store(error) => CliError::store(error),
+            other => CliError::new(Exit::Unexpected, other.to_string()),
+        })?;
         Arc::new(lash::postgres::PostgresStoreSet::new(
             &storage,
             lash::sqlite::SqliteStoreSet::open(
@@ -182,7 +185,7 @@ pub(super) async fn open_stores(
                 lash::sqlite::SqliteSynchronous::Normal,
             )
             .await
-            .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?
+            .map_err(CliError::store)?
             .attachment_store(),
         ))
     })

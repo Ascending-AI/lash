@@ -2037,6 +2037,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash": "//crates/lash:lash",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "rusqlite": "//third-party/rust:p0289",
             "sqlx": "//third-party/rust:p0338",
             "uuid": "//third-party/rust:p0411"
         },

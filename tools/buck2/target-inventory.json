@@ -105118,6 +105118,7 @@
         "lash-internal-core-store",
         "lash-internal-postgres-store",
         "lash-runtime",
+        "rusqlite",
         "serde",
         "serde_json",
         "sqlx",

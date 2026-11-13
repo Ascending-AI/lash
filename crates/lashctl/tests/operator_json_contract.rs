@@ -35,6 +35,126 @@ fn assert_envelope(body: &Value, command: &str, has_result: bool, has_error: boo
     assert_eq!(!body["error"].is_null(), has_error);
 }
 
+fn recovery_commands() -> [&'static [&'static str]; 5] {
+    [
+        &["kernel-migration", "list"],
+        &["kernel-migration", "run"],
+        &["stranded", "list"],
+        &["stalled", "list", "artifact_cleanup"],
+        &["deployment-status", "--accepting-new-work", "false"],
+    ]
+}
+
+fn assert_too_old(code: i32, body: &Value, component: &str, found: u32, expected: u32) {
+    assert_eq!(code, 4, "{body}");
+    assert_eq!(body["error"]["code"], "incompatible_store", "{body}");
+    assert_eq!(
+        body["error"]["refusal"],
+        json!({
+            "refusal": "too_old", "component": component, "found": found,
+            "reads": {"min": expected, "max": expected},
+            "writing_release": env!("CARGO_PKG_VERSION")
+        })
+    );
+}
+
+/// L57 D1: every recovery entry point must report an old store as the same
+/// typed format refusal that store admission returned, with exit 4.
+#[test]
+fn recovery_preserves_old_sqlite_store_refusals() {
+    let root = std::env::temp_dir().join(format!("lashctl-old-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).expect("scratch directory");
+    let path = root.join("lash.db");
+    let runtime = tokio::runtime::Runtime::new().expect("store runtime");
+    drop(
+        runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &path,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("create current store"),
+    );
+    let connection = rusqlite::Connection::open(&path).expect("stamp predecessor");
+    connection
+        .execute("UPDATE lash_compat SET version = 24, min_reader = 24", [])
+        .expect("main's old schema stamp");
+    let expected = lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION;
+    for args in recovery_commands() {
+        let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
+            .args(args)
+            .args(["--json", "--sqlite-path"])
+            .arg(&path)
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .env_remove("LASH_SQLITE_PATH")
+            .output()
+            .expect("run old-store recovery");
+        let body: Value = serde_json::from_slice(&output.stdout).expect("JSON refusal");
+        assert_too_old(
+            output.status.code().expect("exit code"),
+            &body,
+            "sqlite-core",
+            24,
+            expected,
+        );
+    }
+    let found: u32 = connection
+        .query_row("SELECT version FROM lash_compat", [], |r| r.get(0))
+        .expect("read unchanged stamp");
+    assert_eq!(found, 24);
+    drop(connection);
+    std::fs::remove_dir_all(root).expect("remove scratch store");
+}
+
+/// The PostgreSQL half of L57 D1 uses the same operator entry points.
+#[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
+async fn recovery_preserves_old_postgres_store_refusals() {
+    use sqlx::Connection as _;
+    let url = lash_postgres_store::testing::required_database_url();
+    let schema = format!("lashctl_old_{}", uuid::Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(&url)
+        .await
+        .expect("scratch admin");
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&mut admin)
+        .await
+        .expect("scratch schema");
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let scratch_url = format!("{url}{separator}options=-csearch_path%3D{schema}");
+    let (code, seeded) = run(&["migrate", "--json"], Some(&scratch_url));
+    assert_eq!(code, 0, "{seeded}");
+    let mut scratch = sqlx::PgConnection::connect(&scratch_url)
+        .await
+        .expect("scratch catalog");
+    sqlx::query("UPDATE lash_schema_versions SET version = 37, min_reader = 37 WHERE component = 'lash-postgres-store'")
+        .execute(&mut scratch).await.expect("main's old schema stamp");
+    for args in recovery_commands() {
+        let mut args = args.to_vec();
+        args.push("--json");
+        let (code, body) = run(&args, Some(&scratch_url));
+        assert_too_old(
+            code,
+            &body,
+            "postgres",
+            37,
+            lash_core_store::compat::POSTGRES_SCHEMA_VERSION,
+        );
+    }
+    let found: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&mut scratch)
+    .await
+    .expect("unchanged stamp");
+    assert_eq!(found, 37);
+    scratch.close().await.expect("close scratch");
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&mut admin)
+        .await
+        .expect("drop scratch schema");
+    admin.close().await.expect("close admin");
+}
+
 #[test]
 fn operator_json_contract() {
     let (code, version) = run(&["version", "--json"], None);

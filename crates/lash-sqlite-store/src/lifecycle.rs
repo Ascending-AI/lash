@@ -88,7 +88,7 @@ impl SqliteStore {
     pub async fn open(
         path: &Path,
         synchronous: crate::SqliteSynchronous,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             StoreOptions::standard(synchronous),
@@ -102,7 +102,7 @@ impl SqliteStore {
         path: &Path,
         synchronous: crate::SqliteSynchronous,
         clock: Arc<dyn lash_core_ids::clock::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             StoreOptions::standard(synchronous),
@@ -112,10 +112,7 @@ impl SqliteStore {
         .await
     }
 
-    pub async fn open_with_options(
-        path: &Path,
-        options: StoreOptions,
-    ) -> tokio_rusqlite::Result<Self> {
+    pub async fn open_with_options(path: &Path, options: StoreOptions) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             options,
@@ -129,7 +126,7 @@ impl SqliteStore {
         path: &Path,
         options: StoreOptions,
         clock: Arc<dyn lash_core_ids::clock::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             options,
@@ -144,8 +141,9 @@ impl SqliteStore {
         options: StoreOptions,
         clock: Arc<dyn lash_core_ids::clock::Clock>,
         constructor: &'static str,
-    ) -> tokio_rusqlite::Result<Self> {
-        let location = crate::location::file_location(path, constructor)?;
+    ) -> Result<Self, StoreError> {
+        let location =
+            crate::location::file_location(path, constructor).map_err(sqlite_async_error)?;
         Self::open_at(
             &DatabaseLocation::in_backend(&location, None),
             options,
@@ -155,6 +153,7 @@ impl SqliteStore {
             crate::testing::ConnectionHooks::default(),
         )
         .await
+        .map_err(sqlite_async_error)
     }
 
     /// Open the database file at `path` admitting `writable` as the opening

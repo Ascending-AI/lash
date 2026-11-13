@@ -102,7 +102,6 @@ async fn open(root: &Path, options: SqliteStoreSetOptions) -> Result<SqliteStore
         Arc::new(lash_core_ids::clock::SystemClock),
     )
     .await
-    .map_err(crate::sqlite_async_error)
 }
 
 /// Turn the migrated store at `root` back into the shape the release before

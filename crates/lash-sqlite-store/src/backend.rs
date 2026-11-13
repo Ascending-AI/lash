@@ -144,7 +144,7 @@ impl SqliteStoreSet {
     /// every table of the deployment if it is absent. A directory in the
     /// retired three-file layout refuses with
     /// [`CompatRefusal::RetiredSqliteLayout`](lash_core_store::compat::CompatRefusal::RetiredSqliteLayout)
-    /// in the error's source chain.
+    /// as a typed store error.
     ///
     /// `synchronous` is the host's durability choice
     /// ([`SqliteSynchronous`]): what a commit waits for, and so what a power
@@ -152,7 +152,7 @@ impl SqliteStoreSet {
     pub async fn open(
         path: impl AsRef<Path>,
         synchronous: SqliteSynchronous,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         Self::open_with_clock(path, synchronous, system_clock()).await
     }
 
@@ -161,7 +161,7 @@ impl SqliteStoreSet {
         path: impl AsRef<Path>,
         synchronous: SqliteSynchronous,
         clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         Self::open_with_options_and_clock(path, SqliteStoreSetOptions::standard(synchronous), clock)
             .await
     }
@@ -171,19 +171,22 @@ impl SqliteStoreSet {
         path: impl AsRef<Path>,
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let location = crate::location::file_location(path.as_ref(), "SqliteStoreSet")?;
+    ) -> Result<Self, lash_core_store::store::StoreError> {
+        let location = crate::location::file_location(path.as_ref(), "SqliteStoreSet")
+            .map_err(crate::sqlite_async_error)?;
         let identity: Arc<str> = Arc::from(location.identity());
         Self::assemble(location, identity, None, options, clock).await
     }
 
     /// A fresh named SQLite in-memory store set. SQLite caps each memdb at 1 GiB.
-    pub async fn memory() -> tokio_rusqlite::Result<Self> {
+    pub async fn memory() -> Result<Self, lash_core_store::store::StoreError> {
         Self::memory_with_clock(system_clock()).await
     }
 
     /// A fresh named SQLite in-memory store set on `clock`.
-    pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
+    pub async fn memory_with_clock(
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         Self::memory_with_options_and_clock(SqliteStoreSetOptions::memory(), clock).await
     }
 
@@ -191,9 +194,9 @@ impl SqliteStoreSet {
     pub async fn memory_with_options_and_clock(
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         let location = SqliteLocation::fresh_memory();
-        let anchors = MemoryAnchors::pin(&location).map_err(tokio_rusqlite::Error::Error)?;
+        let anchors = MemoryAnchors::pin(&location).map_err(crate::sqlite_error)?;
         let identity: Arc<str> = Arc::from(location.identity());
         Self::assemble(location, identity, Some(anchors), options, clock).await
     }
@@ -201,12 +204,15 @@ impl SqliteStoreSet {
     /// Fresh handles on this store set's databases: every store opened again
     /// over the same location, identity, options and clock — what a second
     /// runtime over the same store set is.
-    pub async fn reopen(&self) -> tokio_rusqlite::Result<Self> {
+    pub async fn reopen(&self) -> Result<Self, lash_core_store::store::StoreError> {
         self.reopen_with_clock(Arc::clone(&self.inner.clock)).await
     }
 
     /// [`Self::reopen`] on `clock`.
-    pub async fn reopen_with_clock(&self, clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
+    pub async fn reopen_with_clock(
+        &self,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         self.reopen_with_options_and_clock(self.inner.options.clone(), clock)
             .await
     }
@@ -217,7 +223,7 @@ impl SqliteStoreSet {
         &self,
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         Self::assemble(
             self.inner.location.clone(),
             Arc::clone(&self.inner.identity),
@@ -234,7 +240,7 @@ impl SqliteStoreSet {
         anchors: Option<Arc<MemoryAnchors>>,
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, lash_core_store::store::StoreError> {
         // A store older than this build is backed up whole and migrated
         // before any component opens it.
         #[cfg(feature = "testing")]
@@ -248,8 +254,7 @@ impl SqliteStoreSet {
             clock.as_ref(),
             probe,
         )
-        .await
-        .map_err(|error| tokio_rusqlite::Error::Error(crate::sqlite_conversion_error(error)))?;
+        .await?;
         let database = DatabaseLocation::in_backend(&location, anchors.as_ref());
         // The store's installer provisions or admits every table of the
         // database and arms the writer fence every component shares.
@@ -265,7 +270,8 @@ impl SqliteStoreSet {
                     synchronous_replies: options.synchronous_replies,
                 },
             )
-            .await?,
+            .await
+            .map_err(crate::sqlite_async_error)?,
         );
         let process_registry = Arc::new(
             SqliteProcessRegistry::on_connection(
@@ -287,7 +293,9 @@ impl SqliteStoreSet {
                     options.graph_reads,
                 );
                 Some(Arc::new(
-                    crate::durable::SqliteNodeWakes::new(store, path).await?,
+                    crate::durable::SqliteNodeWakes::new(store, path)
+                        .await
+                        .map_err(crate::sqlite_error)?,
                 ))
             }
             SqliteLocation::Memory { .. } => None,
@@ -514,6 +522,41 @@ mod tests {
     use crate::Prepare as _;
     use lash_core_store::store::SessionCatalogStore as _;
 
+    /// L57 D1: the host receives the store refusal itself, rather than a
+    /// driver conversion error that hides its classification.
+    #[tokio::test]
+    async fn an_old_schema_reaches_the_host_as_a_store_refusal() {
+        use lash_core_store::{compat::CompatRefusal, store::StoreError};
+        let root = tempfile::tempdir().expect("scratch store");
+        let path = root.path().join("lash.db");
+        drop(
+            SqliteStoreSet::open(&path, SqliteSynchronous::Normal)
+                .await
+                .expect("current store"),
+        );
+        let connection = rusqlite::Connection::open(&path).expect("stamp old store");
+        connection
+            .execute("UPDATE lash_compat SET version = 24, min_reader = 24", [])
+            .expect("main's old stamp");
+        let error = SqliteStoreSet::open(&path, SqliteSynchronous::Normal)
+            .await
+            .expect_err("old store");
+        let error: &dyn std::error::Error = &error;
+        assert!(
+            matches!(
+                error.downcast_ref::<StoreError>(),
+                Some(StoreError::Incompatible {
+                    refusal: CompatRefusal::TooOld { found: 24, .. }
+                })
+            ),
+            "the public open must preserve StoreError: {error:?}"
+        );
+        let found: u32 = connection
+            .query_row("SELECT version FROM lash_compat", [], |r| r.get(0))
+            .expect("unchanged stamp");
+        assert_eq!(found, 24);
+    }
+
     /// A SQLite deployment is one database file (FIG-5195): a directory in
     /// the retired three-file layout is refused typed, naming the layout's
     /// files it holds, and the open changes nothing in it.
@@ -536,13 +579,9 @@ mod tests {
         let error = SqliteStoreSet::open(root.path(), crate::SqliteSynchronous::Normal)
             .await
             .expect_err("a retired-layout directory must refuse");
-        let tokio_rusqlite::Error::Error(rusqlite::Error::ToSqlConversionFailure(source)) = &error
-        else {
-            panic!("the refusal must preserve its typed source: {error:?}");
-        };
-        let Some(lash_core_store::store::StoreError::Incompatible {
+        let lash_core_store::store::StoreError::Incompatible {
             refusal: lash_core_store::compat::CompatRefusal::RetiredSqliteLayout { location, files },
-        }) = source.downcast_ref::<lash_core_store::store::StoreError>()
+        } = &error
         else {
             panic!("expected a retired-layout refusal: {error:?}");
         };
