@@ -784,9 +784,9 @@ impl<'a> Compiler<'a> {
             ));
         }
         let owner = match outer {
+            _ if !self.document.functions.contains_key(&id) => Some(id),
             Some(outer) => outer.owner,
-            None if self.document.functions.contains_key(&id) => None,
-            None => Some(id),
+            None => None,
         };
         let mut f = Fun::new(SiteUnit::Library(id), false, covered, owner);
         let params: Vec<Name> = definition

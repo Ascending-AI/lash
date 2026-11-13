@@ -203,15 +203,21 @@ fn number(at: usize) -> Result<u32, SealError> {
     u32::try_from(at).map_err(|_| fault("a number past u32"))
 }
 
-/// Each own action and call site's occurrence counter, by its index.
+/// Each document occurrence counter, by its index. An own closure can
+/// carry library sites: their tagged counters stay in the Link's sparse
+/// library map, never in the document counter vector.
 fn occurrence_sites(program: &Program) -> HashMap<u32, (LinkId, Site)> {
     let mut sites = HashMap::new();
     for unit in &program.units {
         for call in &unit.calls {
-            sites.insert(call.mark.occurrence, (unit.link, call.site.clone()));
+            if call.mark.occurrence & LIB == 0 {
+                sites.insert(call.mark.occurrence, (unit.link, call.site.clone()));
+            }
         }
         for (action, mark) in unit.actions.iter().zip(&unit.action_marks) {
-            sites.insert(mark.occurrence, (unit.link, action.site().clone()));
+            if mark.occurrence & LIB == 0 {
+                sites.insert(mark.occurrence, (unit.link, action.site().clone()));
+            }
         }
     }
     sites
