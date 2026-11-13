@@ -886,7 +886,7 @@ impl DialectSession {
 pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
     CodeModeDialectServices {
         documents: None,
-        kernel: crate::executor::KernelCarry::default(),
+        kernel: crate::testing::session_kernel(),
         presentation: crate::RlmPresentationConfig::standard(),
         tool_presentation: crate::dialect::CellDialect::typescript()
             .tool_presenter()

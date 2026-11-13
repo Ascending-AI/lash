@@ -1192,6 +1192,11 @@ mod seed_laws {
         host.kill_and_resume().await;
         let reopened = Arc::new(RlmRuntimeState::new_for_tests().expect("cold session"));
         reopened
+            .execution
+            .lock()
+            .await
+            .note_pages(host.session_pages().as_ref());
+        reopened
             .restore_execution_graph(&graph, lash_core::plugin::ExecutionGraphPurpose::Working)
             .await
             .expect("cold restore");

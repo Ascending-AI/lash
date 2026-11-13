@@ -302,26 +302,27 @@ impl DurableHost {
 }
 
 async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
-    let release = lash_kernel_releases::helper_release().expect("the fixture's helper release");
+    let library =
+        lash_vm_client::packages::WorkerLibrary::built().expect("the fixture's worker library");
     let mut capabilities = lash_vocabulary::claims::NodeCapabilities::default();
     capabilities.machine.kernels.extend(
-        release
-            .functions
+        library
+            .registry()
             .iter()
             .map(|(_, function)| function.kernel()),
     );
     capabilities.machine.natives.extend(
-        release
-            .functions
+        library
+            .registry()
             .iter()
             .filter(|(_, function)| function.states_native())
             .map(|(id, _)| *id),
     );
-    capabilities.machine.helpers = release.helpers.claim_capabilities();
+    capabilities.machine.helpers = library.helpers().claim_capabilities();
     capabilities
         .machine
         .libraries
-        .extend(release.helpers.library_identities().iter().copied());
+        .extend(library.helpers().library_identities().iter().copied());
     let tools = lash_core::testing::test_tools_provider();
     capabilities
         .callbacks
