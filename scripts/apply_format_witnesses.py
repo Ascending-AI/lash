@@ -233,7 +233,7 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
             if previous is None or surface.key not in keys:
                 raise gate.CheckError(finding.detail)
             at, before = gate.version_at(view, surface), gate.version_at(base_view, previous)
-            if at < before:
+            if at < before or (at > before and gate.exact_shape_version_relation(surface, previous)):
                 raise gate.CheckError(finding.detail)
             if at == before:
                 path, text = advance(view, surface, 1)

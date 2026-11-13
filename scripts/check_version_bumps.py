@@ -87,6 +87,9 @@ arguments, and every ``serde`` attribute. Serialized-shape projections also
 ignore only the format-string literal in an exact ``#[error(...)]`` helper;
 its arguments and all other tokens remain guarded.
 
+The named continuation-exchange surface requires shape and version changes
+together in both modes. Other coexist surfaces keep the pre-1.0 freeze policy.
+
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.
 """
@@ -124,6 +127,19 @@ STRICT_VERSION_BUMPS = False
 # overlay bytes have a separate reset witness, which must cover the complete
 # trace projection. Strict mode ignores this pre-cut ownership relation.
 PRE_CUT_RESET_WITNESSES = {"TRACE_SCHEMA_VERSION": "HOST_STORED_SCHEMA_VERSION"}
+# The continuation exchange crosses builds even during the pre-1.0 freeze.
+# Each named surface requires shape/version changes together in both modes.
+EXACT_SHAPE_VERSION_SURFACES: dict[str, str] = {
+    "crates/lash-kernel-conformance/src/compat.rs:VERSION":
+        "continuation exchange written by the base and read by the candidate at the switch gate",
+}
+
+
+def exact_shape_version_relation(surface, previous=None) -> bool:
+    return any(item is not None and item.key in EXACT_SHAPE_VERSION_SURFACES
+               for item in (surface, previous))
+
+
 DOCUMENT_PROJECTION_PREDECESSOR = "d709cfaf7f5bbc3ed9efb5363f10bbca7c7525ff"
 # The one table a record lift is registered in (ADR 0106 §2). Its default-build
 # arm is the upgrade evidence a bumped decoder-law surface owes.
@@ -3246,7 +3262,8 @@ def check_views(
                             in_place.append(Finding(surface, f"pre-1.0 reset witnessed by {reset.constant}; wire schema stays {head_version}"))
                         evaluated.append(surface)
                         continue
-                    witness_required = (strict or surface.upgrade != "coexist"
+                    witness_required = (strict or exact_shape_version_relation(surface, previous)
+                                        or surface.upgrade != "coexist"
                                         or any(name.startswith("token codecs:")
                                                for _, name, _ in head_entries))
                     (failures if witness_required else in_place).append(
@@ -3310,6 +3327,15 @@ def check_views(
                                     f"{version}"
                                     for catalog, version in unstepped
                                 ),
+                            )
+                        )
+                    elif exact_shape_version_relation(surface, previous) and not changed:
+                        failures.append(
+                            Finding(
+                                surface,
+                                f"{surface.constant} moved {base_version} to "
+                                f"{head_version} without a changed guarded shape. "
+                                "A format version advances only with its shape.",
                             )
                         )
                     else:

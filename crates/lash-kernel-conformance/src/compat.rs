@@ -42,6 +42,8 @@ use crate::{Case, CaseBounds, ExpectedEnd, HarnessError, HostAnswer, Observation
 /// version_surface = "coexist"
 /// format_outside_manifest = "conformance runner exchange files read by the compatibility gate; not durable execution state"
 /// version_guard(roots(Manifest, Image, Runs, Refusal))
+/// The checker's named exact-relation table requires a shape change and version
+/// bump together here, even while other coexist surfaces use the pre-1.0 freeze.
 const VERSION: u32 = 2;
 /// The sweep's slice (`r57/l7-runner-interface.md`: slice size 1).
 const SLICE: u64 = 1;
@@ -1137,19 +1139,19 @@ impl PageSource for Pages {
 mod tests {
     use super::*;
 
-    /// Runner interface v2 permits predecessor faults without changing the
-    /// exchange. A version-only bump must not strand that predecessor.
+    /// The predecessor-only fault is not part of the serialized export shape.
+    /// ExchangeVersionRelation in scripts/test_check_version_bumps.py guards
+    /// shape and version changes together, without pinning a literal version.
     #[test]
-    fn v2_predecessor_faults_do_not_strand_exports() -> Result<(), Box<dyn std::error::Error>> {
+    fn predecessor_faults_do_not_change_export_shape() -> Result<(), Box<dyn std::error::Error>> {
         for fault in ["", r#", "predecessor_fault": "base engine fault""#] {
             let manifest: Manifest = serde_json::from_str(&format!(
-                r#"{{"version":2,"cases":[{{"id":"case#0","name":"case","pauses":[]{fault}}}]}}"#
+                r#"{{"version":{VERSION},"cases":[{{"id":"case#0","name":"case","pauses":[]{fault}}}]}}"#
             ))?;
-            assert_eq!(manifest.version, VERSION);
             // The candidate never writes the predecessor-only field.
             assert_eq!(
                 serde_json::to_value(manifest)?,
-                serde_json::json!({"version": 2, "cases": [
+                serde_json::json!({"version": VERSION, "cases": [
                     {"id": "case#0", "name": "case", "pauses": []}
                 ]})
             );

@@ -734,6 +734,63 @@ class BumpAndEvidence(Harness):
         self.assertIn("WIRE_VERSION is 3 on both sides", output)
 
 
+class ExchangeVersionRelation(Harness):
+    EXCHANGE = '''
+    /// version_surface = "coexist"
+    /// version_guard(roots(Manifest))
+    const VERSION: u32 = 2;
+    #[derive(Serialize, Deserialize)]
+    pub struct Manifest {
+        pub version: u32,
+        pub cases: Vec<String>,
+    }
+    '''
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.path = "crates/lash-kernel-conformance/src/compat.rs"
+        self.write("crates/lash-kernel-conformance/Cargo.toml",
+                   '[package]\nname = "lash-kernel-conformance"\n')
+        self.write(self.path, self.EXCHANGE)
+        self.base = self.commit("named exchange version and shape")
+
+    def assert_move(self, source: str, *, strict: bool, expected: int, diagnostic: str) -> None:
+        self.write(self.path, source)
+        result = self.run_command(self.base, self.commit("exchange move"), strict=strict)
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stdout + result.stderr)
+
+    def test_default_exchange_version_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("u32 = 2", "u32 = 3"), strict=False,
+                         expected=1, diagnostic="without a changed guarded shape")
+
+    def test_default_exchange_shape_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("Vec<String>", "Vec<u64>"), strict=False,
+                         expected=1, diagnostic="VERSION is 2 on both sides")
+
+    def test_strict_exchange_version_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("u32 = 2", "u32 = 3"), strict=True,
+                         expected=1, diagnostic="without a changed guarded shape")
+
+    def test_strict_exchange_shape_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("Vec<String>", "Vec<u64>"), strict=True,
+                         expected=1, diagnostic="VERSION is 2 on both sides")
+
+    def test_exchange_shape_and_version_can_move_together(self) -> None:
+        for strict in [False, True]:
+            with self.subTest(strict=strict):
+                self.assert_move(self.EXCHANGE.replace("Vec<String>", "Vec<u64>")
+                                 .replace("u32 = 2", "u32 = 3"), strict=strict,
+                                 expected=0, diagnostic="VERSION 2 to 3")
+
+    def test_allocator_reports_exchange_version_only_move_without_retrying(self) -> None:
+        import apply_format_witnesses as automatic
+
+        self.write(self.path, self.EXCHANGE.replace("u32 = 2", "u32 = 3"))
+        with self.assertRaisesRegex(gate.CheckError, "without a changed guarded shape"):
+            automatic.apply(self.repo, self.base)
+
+
 class DdlCatalogEvidence(Harness):
     """A DDL stamp's bump owes a step of its migration catalog."""
 
