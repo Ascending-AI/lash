@@ -1099,6 +1099,21 @@ def exported_files(package_name: str, package_dir: str) -> str:
     )
 
 
+def build_script_rule(package_dir: str, package: dict, features: list[str], name: str) -> str:
+    return (
+        "lash_rust_build_script(\n"
+        f"    name = {quote(name)},\n"
+        f"    crate_features = {string_list(features)},\n"
+        f"    declared_features = {string_list(sorted(package['features']))},\n"
+        f"    data = [\"{relative(next(target for target in package['targets'] if 'custom-build' in target['kind'])['src_path']).replace(package_dir + '/', '')}\"] + glob([\"src/**/*.rs\"]"
+        + (f" + {string_list(SOURCE_OWNERSHIP[package_dir]['compile_data'])}" if SOURCE_OWNERSHIP.get(package_dir, {}).get('compile_data') else "")
+        + "),\n"
+        f"    manifest_dir = {quote(package_dir)},\n"
+        f"    package_name = {quote(package['name'])},\n"
+        f"    version = {quote(package['version'])},\n"
+        ")\n\n"
+    )
+
 def render_package(package: dict, features: list[str], worker_tests: bool = False) -> tuple[str, dict]:
     manifest = relative(package["manifest_path"])
     package_dir = pathlib.PurePosixPath(manifest).parent.as_posix()
@@ -1130,19 +1145,7 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
 
     has_build_script = any("custom-build" in target["kind"] for target in package["targets"])
     if has_build_script:
-        chunks.append(
-            "lash_rust_build_script(\n"
-            "    name = \"build_script\",\n"
-            f"    crate_features = {string_list(features)},\n"
-            f"    declared_features = {string_list(declared_features)},\n"
-            f"    data = [\"{relative(next(target for target in package['targets'] if 'custom-build' in target['kind'])['src_path']).replace(package_dir + '/', '')}\"] + glob([\"src/**/*.rs\"]"
-            + (f" + {string_list(SOURCE_OWNERSHIP[package_dir]['compile_data'])}" if SOURCE_OWNERSHIP.get(package_dir, {}).get('compile_data') else "")
-            + "),\n"
-            f"    manifest_dir = {quote(package_dir)},\n"
-            f"    package_name = {quote(package['name'])},\n"
-            f"    version = {quote(version)},\n"
-            ")\n\n"
-        )
+        chunks.append(build_script_rule(package_dir, package, features, "build_script"))
         inventory_targets.append({
             # The label that RUNS the script exposes no compile subtargets, so
             # Clippy does not apply to it -- but
@@ -2492,6 +2495,20 @@ class FeatureLaneGraph:
 
     # -- emission -----------------------------------------------------------
 
+    def emit_build_script(self, package_name: str, features: list[str]) -> str | None:
+        package = self.by_name[package_name]
+        if not any("custom-build" in target["kind"] for target in package["targets"]):
+            return None
+        if features == self.default_resolution(package_name):
+            return ":build_script"
+        name = "build_script__fv_" + feature_variants.variant_hash(package_name, features)
+        if (package_name, name) not in self._chunk_names:
+            self.add_chunk(
+                package_name, name,
+                build_script_rule(self.dirs[package_name], package, features, name),
+            )
+        return ":" + name
+
     def emit_library(self, package_name: str, resolution: dict[str, list[str]]) -> str:
         features = resolution[package_name]
         label = self.library_label(package_name, resolution)
@@ -2512,7 +2529,7 @@ class FeatureLaneGraph:
             name,
             "lash_rust_feature_library(\n"
             f"    name = {quote(name)},\n"
-            f"    build_script = {quote(':build_script') if has_build_script else 'None'},\n"
+            f"    build_script = {quote(self.emit_build_script(package_name, features)) if has_build_script else 'None'},\n"
             f"    crate_features = {string_list(features)},\n"
             f"    crate_name = {quote(library['name'])},\n"
             f"    declared_features = {string_list(sorted(package['features']))},\n"
@@ -2640,7 +2657,7 @@ class FeatureLaneGraph:
                 "lash_rust_feature_test(\n"
                 f"    name = {quote(name)},\n"
                 + (f"    args = {string_list(args)},\n" if args else "")
-                + f"    build_script = {quote(':build_script') if any('custom-build' in t['kind'] for t in package['targets']) else 'None'},\n"
+                + f"    build_script = {quote(self.emit_build_script(package_name, features)) if any('custom-build' in t['kind'] for t in package['targets']) else 'None'},\n"
                 f"    crate_features = {string_list(features)},\n"
                 f"    crate_name = {quote(library['name'])},\n"
                 f"    crate_root = {quote(root)},\n"

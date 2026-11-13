@@ -153,9 +153,124 @@ load(
     "lash_rust_feature_test",
 )
 
+lash_rust_build_script(
+    name = "build_script__fv_277e0ab9",
+    crate_features = [
+        "dialect-typescript",
+    ],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
+        "labels/*.json",
+    ]),
+    manifest_dir = "crates/lash-kernel-releases",
+    package_name = "lash-kernel-releases",
+    version = "0.0.0-dev",
+)
+
+lash_rust_build_script(
+    name = "build_script__fv_4ab123b6",
+    crate_features = [
+        "dialect-python",
+    ],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
+        "labels/*.json",
+    ]),
+    manifest_dir = "crates/lash-kernel-releases",
+    package_name = "lash-kernel-releases",
+    version = "0.0.0-dev",
+)
+
+lash_rust_build_script(
+    name = "build_script__fv_63755197",
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
+        "labels/*.json",
+    ]),
+    manifest_dir = "crates/lash-kernel-releases",
+    package_name = "lash-kernel-releases",
+    version = "0.0.0-dev",
+)
+
+lash_rust_build_script(
+    name = "build_script__fv_6672e291",
+    crate_features = [
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
+        "labels/*.json",
+    ]),
+    manifest_dir = "crates/lash-kernel-releases",
+    package_name = "lash-kernel-releases",
+    version = "0.0.0-dev",
+)
+
+lash_rust_build_script(
+    name = "build_script__fv_6b5f7a21",
+    crate_features = [
+        "synthetic-next",
+    ],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
+        "labels/*.json",
+    ]),
+    manifest_dir = "crates/lash-kernel-releases",
+    package_name = "lash-kernel-releases",
+    version = "0.0.0-dev",
+)
+
+lash_rust_build_script(
+    name = "build_script__fv_9f65a119",
+    crate_features = [],
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"] + [
+        "archive/*.json",
+        "labels/*.json",
+    ]),
+    manifest_dir = "crates/lash-kernel-releases",
+    package_name = "lash-kernel-releases",
+    version = "0.0.0-dev",
+)
+
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_17995276",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_277e0ab9",
     crate_features = [
         "dialect-typescript",
     ],
@@ -270,7 +385,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_5db19582",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_63755197",
     crate_features = [
         "dialect-python",
         "dialect-typescript",
@@ -300,7 +415,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_765b0db1",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_9f65a119",
     crate_features = [],
     crate_name = "lash_kernel_releases",
     declared_features = [
@@ -326,7 +441,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_7b92a899",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_277e0ab9",
     crate_features = [
         "dialect-typescript",
     ],
@@ -354,7 +469,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_8f98591c",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_4ab123b6",
     crate_features = [
         "dialect-python",
     ],
@@ -382,7 +497,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_9c5c08d6",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_9f65a119",
     crate_features = [],
     crate_name = "lash_kernel_releases",
     declared_features = [
@@ -408,7 +523,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_b78ee476",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_6672e291",
     crate_features = [
         "dialect-typescript",
         "synthetic-next",
@@ -437,7 +552,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_d3c67ffd",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_6b5f7a21",
     crate_features = [
         "synthetic-next",
     ],
@@ -465,7 +580,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_f989c078",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_9f65a119",
     crate_features = [],
     crate_name = "lash_kernel_releases",
     declared_features = [
@@ -491,7 +606,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_fa504c5b",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_63755197",
     crate_features = [
         "dialect-python",
         "dialect-typescript",
@@ -521,7 +636,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-kernel-releases__fv_fe7d39ff",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_6672e291",
     crate_features = [
         "dialect-typescript",
         "synthetic-next",
@@ -550,7 +665,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_test(
     name = "lash-kernel-releases__unit_test__fv_1df384bc",
-    build_script = ":build_script",
+    build_script = ":build_script__fv_63755197",
     crate_features = [
         "dialect-python",
         "dialect-typescript",
