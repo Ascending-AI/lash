@@ -86,9 +86,40 @@ pub(crate) async fn ensure_schema_with_release(
     writable: lash_core_store::compat::VersionRange,
     build_release: &str,
 ) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
+    admit_schema(pool, check, writable, build_release, true).await
+}
+
+pub(crate) async fn inspect_schema(
+    pool: &PgPool,
+    check: SchemaCheck,
+    writable: lash_core_store::compat::VersionRange,
+) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
+    admit_schema(
+        pool,
+        check,
+        writable,
+        crate::release_stamp::BUILD_RELEASE,
+        false,
+    )
+    .await
+}
+
+async fn admit_schema(
+    pool: &PgPool,
+    check: SchemaCheck,
+    writable: lash_core_store::compat::VersionRange,
+    build_release: &str,
+    record_writing_release: bool,
+) -> Result<(String, lash_core_store::store::FleetFormat), StoreError> {
     let mut tx = crate::host::begin_unfenced(pool)
         .await
         .map_err(store_sqlx_error)?;
+    if !record_writing_release {
+        crate::observed_sql::query("SET TRANSACTION READ ONLY")
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    }
     // Serializes lash's own openers with each other and with a `lash migrate`
     // run holding the same key exclusively, so a verifying open cannot read a
     // half-applied migration batch. The lock needs no privileges, so a runtime
@@ -205,9 +236,11 @@ pub(crate) async fn ensure_schema_with_release(
     // it. Stamping is DML on a lash-owned table, not DDL: a runtime role with
     // only row privileges still records it, and a role that cannot is skipped
     // rather than failed.
-    crate::release_stamp::write(&mut tx)
-        .await
-        .map_err(store_sqlx_error)?;
+    if record_writing_release {
+        crate::release_stamp::write(&mut tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
     // The same admitted open reads the fleet-format row `lash migrate` seeded,
     // so the storage handle carries the value durable writers consult rather
     // than a build constant. An absent row, or a recorded generation this

@@ -157,23 +157,34 @@ fn page<'a>(options: &[&'a str]) -> Result<(Option<&'a str>, NonZeroUsize), CliE
 /// `LASH_SQLITE_PATH` names, else the PostgreSQL database.
 pub(super) async fn open_stores(
     sqlite_path: Option<&Path>,
+    read_only: bool,
 ) -> Result<Arc<dyn lash::StoreSet>, CliError> {
     let sqlite_path = sqlite_path
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os("LASH_SQLITE_PATH").map(PathBuf::from));
     Ok(if let Some(path) = sqlite_path {
         Arc::new(
-            lash::sqlite::SqliteStoreSet::open(path, lash::sqlite::SqliteSynchronous::Normal)
-                .await
-                .map_err(CliError::store)?,
+            if read_only {
+                lash::sqlite::SqliteStoreSet::open_existing_readonly(path).await
+            } else {
+                lash::sqlite::SqliteStoreSet::open(path, lash::sqlite::SqliteSynchronous::Normal)
+                    .await
+            }
+            .map_err(CliError::store)?,
         )
     } else {
-        let storage = lash::postgres::PostgresStorage::connect(
-            &super::endpoints()?,
-            &super::host_config()?,
-            Default::default(),
-        )
-        .await
+        let endpoints = super::endpoints()?;
+        let config = super::host_config()?;
+        let storage = if read_only {
+            lash::postgres::PostgresStorage::connect_for_inspection(
+                &endpoints,
+                &config,
+                Default::default(),
+            )
+            .await
+        } else {
+            lash::postgres::PostgresStorage::connect(&endpoints, &config, Default::default()).await
+        }
         .map_err(|error| match error {
             lash::postgres::PostgresHostError::Store(error) => CliError::store(error),
             other => CliError::new(Exit::Unexpected, other.to_string()),
@@ -202,7 +213,11 @@ impl Invocation {
     pub(super) async fn run(&self) -> Result<Value, CliError> {
         // A backend only assembles store ports. A live core would register
         // a node and run its cleanup relay, even for a status read.
-        let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
+        let read_only = !matches!(
+            self.command,
+            Command::KernelMigrationRun | Command::Rearm { .. }
+        );
+        let backend = durable_backend(open_stores(self.sqlite_path.as_deref(), read_only).await?)?;
         if matches!(
             self.command,
             Command::KernelMigrationList | Command::KernelMigrationRun

@@ -156,6 +156,49 @@ impl SqliteStoreSet {
         Self::open_with_clock(path, synchronous, system_clock()).await
     }
 
+    /// Open an existing file store for operator reads. Never provision,
+    /// migrate, recover journals or create liveness/journal files. A supported
+    /// older schema returns `MigrationPending`. A store requiring recovery or
+    /// a lock that cannot be acquired refuses instead of modifying the store.
+    /// The returned ports cannot write through their read-only connection.
+    pub async fn open_existing_readonly(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, lash_core_store::store::StoreError> {
+        let location = crate::location::file_location(path.as_ref(), "SqliteStoreSet")
+            .map_err(crate::sqlite_async_error)?;
+        let identity: Arc<str> = Arc::from(location.identity());
+        let options = SqliteStoreSetOptions::standard(SqliteSynchronous::Normal);
+        let clock = system_clock();
+        let database = DatabaseLocation::in_backend(&location, None);
+        let process_env_store = Arc::new(
+            SqliteStore::open_passive(&database, options.store, Arc::clone(&clock))
+                .await
+                .map_err(crate::sqlite_async_error)?,
+        );
+        let process_registry = Arc::new(SqliteProcessRegistry::on_connection(
+            process_env_store.conn.clone(),
+            database,
+            Arc::clone(&clock),
+        ));
+        let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
+        Ok(Self {
+            inner: Arc::new(StoreParts {
+                binding: lash_execution_contracts::backend::StoreBindingId::new(Arc::clone(
+                    &identity,
+                )),
+                identity,
+                location,
+                anchors: None,
+                options,
+                clock,
+                process_registry,
+                process_env_store,
+                attachment_store,
+                node_wakes: None,
+            }),
+        })
+    }
+
     /// The file store set at `path` under `synchronous` on `clock`.
     pub async fn open_with_clock(
         path: impl AsRef<Path>,

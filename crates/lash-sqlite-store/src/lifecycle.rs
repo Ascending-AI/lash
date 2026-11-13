@@ -233,6 +233,49 @@ impl SqliteStore {
         })
     }
 
+    pub(crate) async fn open_passive(
+        core: &DatabaseLocation,
+        options: StoreOptions,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
+        let conn =
+            SqliteConnection::open_passive(core.target(), options.connection_policy.operational)
+                .await?;
+        let fleet = conn
+            .call(|c| {
+                // Admit before reporting a supported migration, so retired or
+                // malformed formats retain their more precise typed refusal.
+                let (_, fleet) =
+                    crate::compat::admit(c, lash_core_store::store::FleetFormat::writable())?;
+                crate::compat::refuse_unmigrated(c)?;
+                if crate::compat::read(c)?.is_none() {
+                    return Err(crate::sqlite_conversion_error(StoreError::Incompatible {
+                        refusal: lash_core_store::compat::CompatRefusal::Unstamped {
+                            component: crate::schema::COMPONENT.as_str().to_owned(),
+                            writing_release: crate::compat::writing_release(c),
+                        },
+                    }));
+                }
+                Ok(fleet)
+            })
+            .await?;
+        conn.observe_passive_fleet(fleet);
+        let configs = Arc::clone(conn.configs());
+        Ok(Self {
+            readers: crate::conn::ReadPool::new(vec![conn.clone()]),
+            conn,
+            location: core.clone(),
+            decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
+            decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
+            windows: Arc::default(),
+            encoded_images: Arc::default(),
+            configs,
+            clock,
+            options,
+            commit_count: AtomicU64::new(commit_count_entropy_seed()),
+        })
+    }
+
     #[cfg(test)]
     pub(crate) async fn open_readonly(core: &DatabaseLocation) -> tokio_rusqlite::Result<Self> {
         // Read-only projections cannot reconcile intents or run a reclamation sweep.

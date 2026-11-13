@@ -187,6 +187,170 @@ fn sqlite_operator_reads_never_claim_obligations_or_create_files() {
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// An operator read cannot provision a missing deployment, including its
+/// journal and liveness files.
+#[test]
+fn sqlite_operator_reads_refuse_absent_stores_without_creating_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-absent-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).expect("scratch cwd");
+    let database = root.join("absent.db");
+    for args in read_commands()
+        .into_iter()
+        .filter(|args| args[0] != "version")
+    {
+        let binary = std::fs::canonicalize(env!("CARGO_BIN_EXE_lashctl")).expect("binary");
+        let output = Command::new(binary)
+            .args(args)
+            .arg("--json")
+            .arg("--sqlite-path")
+            .arg(&database)
+            .current_dir(&root)
+            .env_remove("LASH_SQLITE_PATH")
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .output()
+            .expect("operator read");
+        let body: Value = serde_json::from_slice(&output.stdout).expect("JSON");
+        assert!(
+            !output.status.success(),
+            "{args:?} accepted absent store: {body}"
+        );
+        assert!(
+            operator_files(&root).is_empty(),
+            "{args:?} created {:?}",
+            operator_files(&root)
+        );
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// Closing the last writer must not turn a status read into a journal opener.
+/// Byte comparisons also cover the compatibility stamp and every stored row.
+#[test]
+fn sqlite_operator_reads_closed_stores_without_changing_bytes_or_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-closed-{}", uuid::Uuid::new_v4()));
+    let cwd = root.join("work");
+    std::fs::create_dir_all(&cwd).expect("scratch cwd");
+    let database = root.join("lash.db");
+    {
+        let runtime = tokio::runtime::Runtime::new().expect("fixture runtime");
+        let stores = runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &database,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("fixture store");
+        runtime.block_on(pending_cleanups(&stores));
+        drop(stores);
+        drop(runtime);
+    }
+    // A synchronous final connection checkpoints and closes before the
+    // observation. No observing SQLite handle keeps WAL/SHM files alive.
+    let connection = rusqlite::Connection::open(&database).expect("finish fixture");
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .expect("checkpoint fixture");
+    connection.close().expect("close fixture");
+    let files = operator_files(&root);
+    let bytes: Vec<_> = files
+        .iter()
+        .map(|path| std::fs::read(path).expect("fixture bytes"))
+        .collect();
+    for args in read_commands() {
+        read_at(args, &cwd, Some(&database), None);
+        assert_eq!(
+            files,
+            operator_files(&root),
+            "{args:?} changed file inventory"
+        );
+        let after: Vec<_> = files
+            .iter()
+            .map(|path| std::fs::read(path).expect("read bytes"))
+            .collect();
+        assert_eq!(bytes, after, "{args:?} changed stored bytes");
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// The synthetic successor has a supported migration from the production
+/// schema. A read reports it without backing up or advancing the store.
+#[cfg(feature = "synthetic-next")]
+#[test]
+fn sqlite_operator_reads_report_pending_migration_without_changing_bytes_or_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-pending-{}", uuid::Uuid::new_v4()));
+    let cwd = root.join("work");
+    std::fs::create_dir_all(&cwd).expect("scratch cwd");
+    let database = root.join("lash.db");
+    {
+        let runtime = tokio::runtime::Runtime::new().expect("fixture runtime");
+        let stores = runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &database,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("successor fixture");
+        runtime.block_on(pending_cleanups(&stores));
+        drop(stores);
+        drop(runtime);
+    }
+    // Undo precisely the synthetic catalog's additive step to recover the
+    // production schema, which this successor can migrate on a writable open.
+    let connection = rusqlite::Connection::open(&database).expect("fixture stamp");
+    connection
+        .execute_batch("DROP INDEX idx_lash_synthetic_next_note; DROP TABLE lash_synthetic_next;")
+        .expect("production shape");
+    let version = lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION;
+    connection
+        .execute(
+            "UPDATE lash_compat SET version = ?1, min_reader = ?1",
+            [version],
+        )
+        .expect("production stamp");
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .expect("checkpoint fixture");
+    connection.close().expect("close fixture");
+    let files = operator_files(&root);
+    let bytes: Vec<_> = files
+        .iter()
+        .map(|path| std::fs::read(path).expect("fixture bytes"))
+        .collect();
+    for args in read_commands()
+        .into_iter()
+        .filter(|args| args[0] != "version")
+    {
+        let binary = std::fs::canonicalize(env!("CARGO_BIN_EXE_lashctl")).expect("binary");
+        let output = Command::new(binary)
+            .args(args)
+            .arg("--json")
+            .arg("--sqlite-path")
+            .arg(&database)
+            .current_dir(&cwd)
+            .env_remove("LASH_SQLITE_PATH")
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .output()
+            .expect("operator read");
+        let body: Value = serde_json::from_slice(&output.stdout).expect("JSON");
+        assert_eq!(output.status.code(), Some(4), "{args:?}: {body}");
+        assert_eq!(
+            body["error"]["refusal"]["refusal"], "migration_pending",
+            "{body}"
+        );
+        assert_eq!(body["error"]["refusal"]["found"], version, "{body}");
+        assert_eq!(body["error"]["refusal"]["target"], version + 1, "{body}");
+        assert_eq!(
+            files,
+            operator_files(&root),
+            "{args:?} changed file inventory"
+        );
+        let after: Vec<_> = files
+            .iter()
+            .map(|path| std::fs::read(path).expect("read bytes"))
+            .collect();
+        assert_eq!(bytes, after, "{args:?} changed stored bytes");
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
 async fn postgres_rows(
     connection: &mut sqlx::PgConnection,
 ) -> std::collections::BTreeMap<String, Vec<String>> {
@@ -237,6 +401,12 @@ async fn postgres_operator_reads_never_claim_obligations_or_create_files() {
     let mut connection = sqlx::PgConnection::connect(&scratch_url)
         .await
         .expect("observe rows");
+    // An ordinary admitted open stamps an unstamped deployment. A status
+    // read must not claim this release has written it.
+    sqlx::query("DELETE FROM lash_release_stamp")
+        .execute(&mut connection)
+        .await
+        .expect("unstamped release fixture");
     let cwd = std::env::temp_dir().join(format!("lashctl-read-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&cwd).expect("scratch cwd");
     for args in read_commands()

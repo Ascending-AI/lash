@@ -290,6 +290,26 @@ impl PostgresStorage {
         config: &PostgresHostConfig,
         observer: StoreObserver,
     ) -> Result<Self, PostgresHostError> {
+        Self::connect_with_release_stamp(endpoints, config, observer, true).await
+    }
+
+    /// Verify an existing deployment for operator inspection, without
+    /// recording this build as a writer. Admission runs in a read-only
+    /// transaction; no schema is provisioned or migrated.
+    pub async fn connect_for_inspection(
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
+        observer: StoreObserver,
+    ) -> Result<Self, PostgresHostError> {
+        Self::connect_with_release_stamp(endpoints, config, observer, false).await
+    }
+
+    async fn connect_with_release_stamp(
+        endpoints: &PostgresEndpoints,
+        config: &PostgresHostConfig,
+        observer: StoreObserver,
+        record_writing_release: bool,
+    ) -> Result<Self, PostgresHostError> {
         config.validate()?;
         if config.connection.topology == ConnectionTopology::TransactionPool
             && endpoints.session().is_none()
@@ -304,11 +324,12 @@ impl PostgresStorage {
         let has_session_endpoint = endpoints.session().is_some();
         let startup = config.guards.store_startup;
         tokio::time::timeout(startup, async {
-            let storage = Box::pin(Self::open(
+            let storage = Box::pin(Self::open_with_release_stamp(
                 pools,
                 config.clone(),
                 observer,
                 lash_core_store::store::FleetFormat::writable(),
+                record_writing_release,
             ))
             .await?;
             if has_session_endpoint {
@@ -392,6 +413,16 @@ impl PostgresStorage {
         observer: StoreObserver,
         writable: lash_core_store::compat::VersionRange,
     ) -> Result<Self, PostgresHostError> {
+        Self::open_with_release_stamp(pools, config, observer, writable, true).await
+    }
+
+    async fn open_with_release_stamp(
+        pools: PostgresPoolSet,
+        config: PostgresHostConfig,
+        observer: StoreObserver,
+        writable: lash_core_store::compat::VersionRange,
+        record_writing_release: bool,
+    ) -> Result<Self, PostgresHostError> {
         if let Some(deployment) = &config.deployment {
             let capacity = host::connection_capacity(&pools.work).await?;
             let per_process = config.connections_per_process().ok_or_else(|| {
@@ -418,8 +449,11 @@ impl PostgresStorage {
             );
         }
         let pool = pools.work.clone();
-        let (catalog_id, fleet_format) =
-            ensure_schema(&pool, config.schema_check, writable).await?;
+        let (catalog_id, fleet_format) = if record_writing_release {
+            ensure_schema(&pool, config.schema_check, writable).await?
+        } else {
+            crate::schema::inspect_schema(&pool, config.schema_check, writable).await?
+        };
         let pools = Arc::new(host::RolePools::new(pools, &config));
         Ok(Self {
             pool,
