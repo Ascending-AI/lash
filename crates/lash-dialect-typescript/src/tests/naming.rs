@@ -83,6 +83,14 @@ fn enumerated_statements_and_expressions_print_and_relower() {
     let environment = Environment::new(library, &namespaces);
     let forms = [
         ("empty", "; debugger;"),
+        (
+            "authored suffix bindings",
+            "let x=1;let x_1=2;{let x=3;let x_1=4;const result=x+x_1;}",
+        ),
+        (
+            "authored suffix function",
+            "function f_1(x_1:number):number{return x_1+1;}const result=f_1(1);",
+        ),
         ("block", "{let x=1; x+=2;}"),
         ("nested shadow", "let x=1; {let x=2; {const x=3;}}"),
         (
@@ -641,7 +649,7 @@ fn enumerated_statements_and_expressions_print_and_relower() {
         refused.join("\n")
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(admitted, 444, "admitted forms must not disappear");
+    assert_eq!(admitted, 448, "admitted forms must not disappear");
     let mut refused_forms = refused
         .iter()
         .map(|failure| failure.split(':').next().unwrap())

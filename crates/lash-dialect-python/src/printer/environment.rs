@@ -3,6 +3,60 @@ use super::{Renderer, k};
 use lash_kernel_value::Name;
 
 impl Renderer<'_> {
+    /// Invert the scope allocator only for slots proved to be generated.
+    /// Authored identifiers, including ones ending in `_local1`, are untouched.
+    pub(super) fn binding_aliases(&mut self) {
+        let mut captured_writes = std::collections::BTreeSet::new();
+        for function in self.document.functions.values() {
+            let Some(body) = function.body() else {
+                continue;
+            };
+            let mut locals = function
+                .signature
+                .params
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            let mut writes = std::collections::BTreeSet::new();
+            let mut pending = vec![k::Node::Block(&body.block)];
+            while let Some(node) = pending.pop() {
+                match node {
+                    k::Node::Stmt(
+                        k::Stmt::Let { name, .. } | k::Stmt::For { binding: name, .. },
+                    )
+                    | k::Node::Expr(k::Expr::Let { name, .. }) => {
+                        locals.insert(name.clone());
+                    }
+                    k::Node::Stmt(k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        ..
+                    }) => {
+                        writes.insert(name.clone());
+                    }
+                    _ => {}
+                }
+                pending.extend(node.children());
+            }
+            captured_writes.extend(
+                writes
+                    .difference(&locals)
+                    .filter(|name| !self.module_binding(name))
+                    .cloned(),
+            );
+        }
+        for slot in captured_writes {
+            // Only a rebound non-module slot can be assigned across a function
+            // boundary. Its owner allocated it with fresh("{source}_local").
+            if let Some((source, sequence)) = slot.as_str().rsplit_once("_local")
+                && !sequence.is_empty()
+                && sequence.bytes().all(|byte| byte.is_ascii_digit())
+                && super::attribute_identifier(source)
+            {
+                self.aliases.insert(slot.clone(), Name::new(source));
+            }
+        }
+    }
+
     pub(super) fn module_environment(&mut self, body: &[k::Stmt]) -> usize {
         let mut pending = vec![k::Node::Block(body)];
         while let Some(node) = pending.pop() {

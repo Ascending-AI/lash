@@ -60,6 +60,7 @@ pub(crate) fn print_regions(
         max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
         declared: declared_locals(document, None),
     };
+    r.binding_aliases();
     let asyncio = ["py.task.run", "py.gather", "py.sleep"]
         .iter()
         .any(|helper| r.operators.uses(helper));
@@ -413,16 +414,7 @@ impl Renderer<'_> {
         // Authored source spells the document's names; only the kernel
         // surface reserves some for its own syntax.
         if self.authored && attribute_identifier(n.as_str()) {
-            let source = n
-                .as_str()
-                .rsplit_once("_local")
-                .filter(|(_, suffix)| {
-                    !suffix.is_empty()
-                        && suffix.bytes().all(|byte| byte.is_ascii_digit())
-                        && !self.module_binding(n)
-                })
-                .map_or(n.as_str(), |(source, _)| source);
-            self.out.write(source);
+            self.out.write(n.as_str());
         } else {
             self.out.write(&self.plan.names[n]);
         }

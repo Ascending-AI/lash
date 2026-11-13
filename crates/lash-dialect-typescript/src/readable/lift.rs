@@ -225,8 +225,10 @@ impl<'a> Lifter<'a> {
         if matches!(unit, Unit::Main)
             && let Some(body) = body
         {
-            // Main's nested lexical bindings acquire a fresh suffix on lowering.
-            // Recover the input name so readback does not suffix it a second time.
+            // Main's nested lexical declarations, iteration bindings and catch
+            // bindings are allocated by declare_typed. Top-level authored
+            // bindings are public and retain their complete spelling, even
+            // when that spelling ends in a numeric suffix.
             let mut pending = vec![(k::Node::Block(body), 0)];
             while let Some((node, depth)) = pending.pop() {
                 let names: Vec<&Name> = match node {
@@ -283,7 +285,14 @@ impl<'a> Lifter<'a> {
                     && tag == "ts.function"
                     && source::identifier(original)
                     && document.private_bindings.contains(name)
-                    && name.as_str().starts_with(&format!("{original}_"))
+                    && name
+                        .as_str()
+                        .strip_prefix(original)
+                        .and_then(|suffix| suffix.strip_prefix('_'))
+                        .is_some_and(|sequence| {
+                            !sequence.is_empty()
+                                && sequence.bytes().all(|byte| byte.is_ascii_digit())
+                        })
                 {
                     bindings.insert(name.clone(), original.clone());
                 }

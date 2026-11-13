@@ -1468,6 +1468,22 @@ fn enumerated_statements_and_expressions_print_and_relower() {
             "expression await",
             "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=await f(x)",
         ),
+        (
+            "authored local suffix",
+            "def f() -> int:\n    x=1\n    x_local1=2\n    return x+x_local1\nresult=f()",
+        ),
+        (
+            "authored parameter suffix",
+            "def f(x_local1: int) -> int:\n    x=2\n    return x+x_local1\nresult=f(1)",
+        ),
+        (
+            "authored suffix beside rebound local",
+            "def outer() -> int:\n    x=1\n    x_local1=2\n    def inner():\n        nonlocal x\n        x=3\n    inner()\n    return x+x_local1\nresult=outer()",
+        ),
+        (
+            "authored suffix rebound local",
+            "def outer() -> int:\n    x_local1=1\n    def inner():\n        nonlocal x_local1\n        x_local1=2\n    inner()\n    return x_local1\nresult=outer()",
+        ),
         ("binary +", "x=1\ny=2\nresult=x + y"),
         ("binary -", "x=1\ny=2\nresult=x - y"),
         ("binary *", "x=1\ny=2\nresult=x * y"),
@@ -1563,7 +1579,7 @@ fn enumerated_statements_and_expressions_print_and_relower() {
         refused.len(),
         refused.join("\n")
     );
-    assert_eq!(admitted, 284, "admitted forms must not disappear");
+    assert_eq!(admitted, 292, "admitted forms must not disappear");
     let mut refused_forms = refused
         .iter()
         .map(|failure| failure.split(':').next().unwrap())
