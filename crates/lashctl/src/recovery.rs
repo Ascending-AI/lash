@@ -1,4 +1,4 @@
-//! Deployment recovery through the same core API embedders use.
+//! Operator recovery through deployment store ports.
 use super::{CliError, Exit, USAGE, stalled_result};
 use lash::{ObligationId, ObligationKind};
 use serde_json::{Value, json};
@@ -180,13 +180,12 @@ pub(super) async fn open_stores(
         })?;
         Arc::new(lash::postgres::PostgresStoreSet::new(
             &storage,
-            lash::sqlite::SqliteStoreSet::open(
-                std::path::Path::new(".lashctl-attachments.db"),
-                lash::sqlite::SqliteSynchronous::Normal,
-            )
-            .await
-            .map_err(CliError::store)?
-            .attachment_store(),
+            // Recovery reads attachment metadata in PostgreSQL, never the
+            // byte store. No operator command owns a cwd attachment file.
+            lash::sqlite::SqliteStoreSet::memory()
+                .await
+                .map_err(CliError::store)?
+                .attachment_store(),
         ))
     })
 }
@@ -200,57 +199,67 @@ pub(super) fn durable_backend(stores: Arc<dyn lash::StoreSet>) -> Result<lash::B
 }
 
 impl Invocation {
-    async fn core(&self) -> Result<lash::LashCore, CliError> {
-        let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
-        // This core sends control intents through the store. It serves no model,
-        // starts no host turn, and does not install an HTTP handler endpoint.
-        lash::LashCore::standard_builder(backend)
-            .data_retention(lash::DataRetention::standard())
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-            .execution_budgets(lash::ExecutionBudgets::recommended())
-            .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .build(lash_core_store::store::LeaseOwnerIdentity::opaque(
-                lash_core_store::store::LeaseOwnerId::new("lashctl"),
-                lash_core_store::store::LeaseIncarnationId::new(std::process::id().to_string()),
-            ))
-            .map_err(core_error)
-    }
-
     pub(super) async fn run(&self) -> Result<Value, CliError> {
+        // A backend only assembles store ports. A live core would register
+        // a node and run its cleanup relay, even for a status read.
+        let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
         if matches!(
             self.command,
             Command::KernelMigrationList | Command::KernelMigrationRun
         ) {
-            let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
             return kernel_migration(&backend, &self.command).await;
         }
         if let Command::Stranded { after, limit } = &self.command {
-            let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
             return stranded(&backend, after.as_deref(), *limit).await;
         }
-        let core = self.core().await?;
-        execute(&core, &self.command).await
+        execute(&backend, &self.command).await
     }
 }
 
-async fn execute(core: &lash::LashCore, command: &Command) -> Result<Value, CliError> {
+async fn execute(backend: &lash::Backend, command: &Command) -> Result<Value, CliError> {
     Ok(match command {
         Command::Stalled { kind, after, limit } => {
-            let records = core
-                .stalled_obligations(*kind, after.as_ref(), limit.saturating_add(1))
+            let records = backend
+                .obligation_ledger(*kind)
+                .list_stalled(after.as_ref(), limit.saturating_add(1))
                 .await
-                .map_err(core_error)?;
+                .map_err(store_error)?;
             let next = (records.len() > limit.get()).then(|| records[limit.get() - 1].id.clone());
             json!({"records":records.iter().take(limit.get()).map(stalled_result).collect::<Vec<_>>(), "next":next})
         }
         Command::Rearm { kind, id } => {
-            json!({"rearmed":core.rearm_obligation(*kind, id).await.map_err(core_error)?})
+            json!({"rearmed": backend.obligation_ledger(*kind)
+                .rearm(id, backend.clock().timestamp_ms()).await.map_err(store_error)?})
         }
-        Command::DeploymentStatus { accepting_new_work } => json!(
-            core.drain_status(*accepting_new_work)
+        Command::DeploymentStatus { accepting_new_work } => {
+            let remaining_invocations = backend
+                .process_registry()
+                .count_non_terminal_processes()
                 .await
-                .map_err(core_error)?
-        ),
+                .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
+            let turns = backend
+                .session_store_factory()
+                .count_unsettled_turns()
+                .await
+                .map_err(store_error)?;
+            let mut stalled_obligations = std::collections::BTreeMap::new();
+            for kind in ObligationKind::ALL {
+                let count = backend
+                    .obligation_ledger(kind)
+                    .count_stalled()
+                    .await
+                    .map_err(store_error)?;
+                stalled_obligations.insert(kind, count);
+            }
+            // The facade report owns the drain predicate and its JSON form.
+            json!(lash::DeploymentDrainStatus {
+                accepting_new_work: *accepting_new_work,
+                remaining_invocations,
+                in_flight_turns: turns.in_flight_turns,
+                stalled_obligations,
+                checked_at: backend.clock().timestamp_ms(),
+            })
+        }
         // Answered from the backend, before a core is built.
         Command::KernelMigrationList | Command::KernelMigrationRun | Command::Stranded { .. } => {
             return Err(usage());
@@ -299,16 +308,6 @@ async fn stranded(
         .await
         .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
     serde_json::to_value(&page).map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))
-}
-
-pub(super) fn core_error(error: lash::EmbedError) -> CliError {
-    match error {
-        lash::EmbedError::Store(error) => store_error(error),
-        lash::EmbedError::Runtime(error) => {
-            CliError::refused(Exit::Unexpected, error.to_string(), &error)
-        }
-        other => CliError::new(Exit::Unexpected, other.to_string()),
-    }
 }
 
 fn store_error(error: lash_core_store::store::StoreError) -> CliError {
