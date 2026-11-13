@@ -36,6 +36,11 @@ const _: () = assert!(LASH_KERNEL_VERSION == KernelVersion::NEWEST.number());
 /// version_guard(
 ///     roots(path = "crates/lash-kernel-doc/src/document.rs", Document),
 ///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
+///     items(
+///         path = "crates/lash-kernel-doc/src/identified.rs",
+///         new, from_shared, decode, decode_standard, id, body, shared_body,
+///     ),
+///     items(path = "crates/lash-kernel-doc/src/document.rs", identity, canonical_bytes),
 /// )
 /// format_manifest = "KernelDocument"
 /// version_surface = "migrate"

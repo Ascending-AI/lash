@@ -1130,6 +1130,82 @@ class DocumentProjection(Harness):
         self.assertIn("Selection", output)
 
 
+class DocumentConstruction(Harness):
+    """Document construction mutations must move both document witnesses."""
+
+    identified_path = "crates/lash-kernel-doc/src/identified.rs"
+    document_path = DocumentProjection.document_path
+    bytes_path = DocumentProjection.bytes_path
+
+    def declare(self, marker: str) -> None:
+        self.write(DocumentProjection.bytes_path, marker + textwrap.dedent("""
+            /// version_surface = "coexist"
+            pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
+            pub fn decode(body: &[u8]) -> usize { body.len() }
+        """).lstrip("\n"))
+        self.write(DocumentProjection.runtime_path, marker + textwrap.dedent("""
+            /// version_surface = "migrate"
+            /// version_unguarded = "pre-1.0 reset"
+            pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 7;
+        """).lstrip("\n"))
+
+    def assert_mutation_requires_both_bumps(self, old: str, new: str) -> None:
+        source_root = SCRIPT.parent.parent
+        markers = []
+        for path in (DocumentProjection.bytes_path, DocumentProjection.runtime_path):
+            source = (source_root / path).read_text()
+            marker = next(
+                source[start:end] for start, end, _ in gate.marker_blocks(source)
+                if 'roots(path = "crates/lash-kernel-doc/src/document.rs", Document)'
+                in source[start:end]
+            )
+            markers.append(marker)
+        self.assertEqual(markers[0], markers[1], "both document guards must cover construction")
+        identified = (source_root / self.identified_path).read_text()
+        self.assertEqual(identified.count(old), 1, "mutate exactly the reviewed construction path")
+        for kind in ("shapes", "roots"):
+            with self.subTest(predecessor=kind):
+                self.write("crates/lash-kernel-doc/Cargo.toml",
+                           '[package]\nname = "lash-kernel-doc"\n')
+                self.write(DocumentProjection.document_path, DocumentProjection.document + """
+                    impl Document {
+                        pub fn identity(&self) -> DocumentId {
+                            DocumentId::from_bytes(logical_digest(&self.canonical_bytes()))
+                        }
+                        pub fn canonical_bytes(&self) -> Vec<u8> { encode_body(self) }
+                    }
+                """)
+                self.write("crates/lash-kernel-doc/src/codec.rs", DocumentProjection.codec)
+                self.write(self.identified_path, identified)
+                self.declare(DocumentProjection.marker(self, kind))
+                self.base = self.commit("predecessor before construction guards")
+                self.declare(markers[0])
+                with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.base):
+                    code, output = self.verdict(self.commit("guard unchanged document construction"))
+                    self.assertEqual(code, 0, output)
+                    self.write(self.identified_path, identified.replace(old, new, 1))
+                    code, output = self.verdict(self.commit("mutate document construction"))
+                self.assertEqual(code, 1, output)
+                for constant in ("DOCUMENT_GRAMMAR_VERSION", "KERNEL_DOCUMENT_SCHEMA_VERSION"):
+                    self.assertIn(f"{constant} is 7 on both sides", output)
+
+    def test_prepending_a_token_to_the_canonical_body_requires_both_bumps(self) -> None:
+        self.assert_mutation_requires_both_bumps(
+            "document.encode(&mut out);",
+            "out.unsigned(42);\n        document.encode(&mut out);",
+        )
+
+    def test_hashing_a_different_body_slice_requires_both_bumps(self) -> None:
+        self.assert_mutation_requires_both_bumps(
+            "logical_digest(&body)", "logical_digest(&body[1..])",
+        )
+
+    def test_dropping_the_trailing_token_refusal_requires_both_bumps(self) -> None:
+        self.assert_mutation_requires_both_bumps(
+            "input.finish()?;", "let _ = input.finish();",
+        )
+
+
 class Reachable(Harness):
     """A `roots(..)` guard covers everything its roots serialize."""
 

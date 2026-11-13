@@ -16,6 +16,11 @@ use lash_kernel_value::tokens::TokenError;
 /// version_guard(
 ///     roots(path = "crates/lash-kernel-doc/src/document.rs", Document),
 ///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
+///     items(
+///         path = "crates/lash-kernel-doc/src/identified.rs",
+///         new, from_shared, decode, decode_standard, id, body, shared_body,
+///     ),
+///     items(path = "crates/lash-kernel-doc/src/document.rs", identity, canonical_bytes),
 /// )
 pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
 
