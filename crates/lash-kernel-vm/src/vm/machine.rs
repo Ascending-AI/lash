@@ -295,11 +295,11 @@ fn build(
         &program.library.core(available),
     )
     .map_err(linked)?;
-    crate::bytecode::inline::inline(&mut code);
+    crate::bytecode::inline::inline(&mut code).map_err(linked)?;
     let heights = crate::bytecode::validate::validate(&code).map_err(linked)?;
-    crate::bytecode::fold::fold(&mut code);
+    crate::bytecode::fold::fold(&mut code).map_err(linked)?;
     crate::bytecode::fuse::fuse(&mut code);
-    crate::bytecode::trace::trace(&mut code);
+    crate::bytecode::trace::trace(&mut code).map_err(linked)?;
     let off = matches!(bounds.charge, Charge::Off);
     let operations = operations(program, &code, modes)?;
     let mut vm = Vm::new(

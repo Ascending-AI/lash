@@ -82,6 +82,7 @@ impl Linear {
                     if *how == Measure::DeepSize {
                         linear.deep |= 1 << linear.len;
                     }
+                    // get_mut above admits one of the three position slots.
                     linear.len += 1;
                 }
                 Term::Sum(terms) => {
@@ -124,6 +125,7 @@ impl Term {
             Operand::Param(name) => params
                 .iter()
                 .position(|param| param == name)
+                // Charge::new admits only known positions below RESULT (255).
                 .map_or(RESULT - 1, |at| at as u8),
         };
         let all = |terms: &[Formula]| terms.iter().map(|term| Self::new(term, params)).collect();
@@ -197,7 +199,33 @@ impl Term {
 }
 
 impl Charge {
-    pub(crate) fn new(formula: &Formula, params: Vec<Name>) -> Self {
+    pub(crate) fn new(formula: &Formula, params: Vec<Name>) -> super::compile::Result<Self> {
+        // RESULT reserves 255; an argument position must be strictly below it.
+        let mut pending = vec![formula];
+        while let Some(term) = pending.pop() {
+            match term {
+                Formula::Size(Operand::Param(name))
+                | Formula::DeepSize(Operand::Param(name))
+                | Formula::NestedSize(Operand::Param(name))
+                | Formula::Magnitude(Operand::Param(name)) => {
+                    let Some(position) = params.iter().position(|param| param == name) else {
+                        return super::compile::unsupported("a formula names an absent parameter");
+                    };
+                    if position >= usize::from(RESULT) {
+                        return super::compile::unsupported(format!(
+                            "formula operand position {position}, more than the bytecode core's limit of {}",
+                            RESULT - 1
+                        ));
+                    }
+                }
+                Formula::Sum(terms)
+                | Formula::Product(terms)
+                | Formula::Max(terms)
+                | Formula::Min(terms) => pending.extend(terms),
+                Formula::CeilLog2(term) => pending.push(term),
+                _ => {}
+            }
+        }
         let term = Term::new(formula, &params);
         // A leaf measures its size, shallow or deep, and nests nothing
         // (`K-CHG-004`, `K-CHG-005`).
@@ -217,14 +245,14 @@ impl Charge {
             })
         });
         let constant = constant(formula);
-        Self {
+        Ok(Self {
             reads_args: constant.is_none() && term.reads_args(),
             constant,
             linear: Linear::of(&term),
             term,
             pairs,
             function: None,
-        }
+        })
     }
 
     /// The formula over two arguments and a result that hold nothing,
@@ -347,7 +375,8 @@ mod tests {
                     .iter()
                     .map(|param| param.name.clone())
                     .collect(),
-            );
+            )
+            .unwrap();
             let form = charge.linear().unwrap();
             for a in values {
                 for b in values {
@@ -413,7 +442,8 @@ mod tests {
             let charge = Charge::new(
                 definition.charge().unwrap(),
                 params.map(|param| param.name.clone()).collect(),
-            );
+            )
+            .unwrap();
             let Some(form) = charge.linear() else {
                 continue;
             };

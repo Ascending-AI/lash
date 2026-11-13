@@ -82,11 +82,15 @@ pub fn compile_document(
     .map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;
-    crate::bytecode::inline::inline(&mut code);
+    crate::bytecode::inline::inline(&mut code).map_err(|problem| StartError::Linked {
+        problem: problem.to_string(),
+    })?;
     crate::bytecode::validate::validate(&code).map_err(|problem| StartError::Linked {
         problem: problem.to_string(),
     })?;
-    crate::bytecode::fold::fold(&mut code);
+    crate::bytecode::fold::fold(&mut code).map_err(|problem| StartError::Linked {
+        problem: problem.to_string(),
+    })?;
     Ok(BytecodeProgram { code })
 }
 

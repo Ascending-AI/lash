@@ -9,12 +9,14 @@ use super::charge_tables::{Charge, RESULT};
 use super::op::Op;
 use super::program::{Block, Callee, Constant, LookupWords, Program, Slot, Step, Unit, WordUpdate};
 
+// Compiler::sealed/inline::expand admitted every pc and inline-site index.
 pub(super) fn derive(program: &mut Program) {
     for at in 0..program.units.len() {
         let found: Vec<_> = (0..program.units[at].inlines.len())
             .filter_map(|n| recipe(program, &program.units[at], n).map(|recipe| (n, recipe)))
             .collect();
         let unit = &mut program.units[at];
+        // At most one recipe per inline site, admitted by inline::expand.
         for (n, recipe) in found {
             unit.inlines[n].lookup_words = Some(unit.lookup_words.len() as u32);
             unit.lookup_words.push(recipe);
@@ -99,6 +101,7 @@ fn recipe(program: &Program, unit: &Unit, n: usize) -> Option<LookupWords> {
         word_fees: next.fees,
         operation: next.operation,
         between: between.charge?,
+        // recipe finds this pc in code admitted by sealed/inline::expand.
         resume: next.resume as u32,
         destination: next.destination,
     })

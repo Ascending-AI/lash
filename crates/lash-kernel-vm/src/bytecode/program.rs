@@ -850,6 +850,7 @@ impl Program {
         } else {
             0
         };
+        // Compiler::reserve admitted base + units.len() below library::LIB.
         self.tag | (base + at) as UnitId
     }
 
@@ -963,6 +964,7 @@ impl Program {
             } else {
                 0
             };
+            // Compiler::formula admitted this combined pool below library::LIB.
             return Some(self.tag | (base + at) as u32);
         }
         self.lib.charge_ids.get(function).copied()
@@ -974,6 +976,7 @@ impl Program {
         self.links
             .iter()
             .position(|held| held == link)
+            // Compiler::finish admitted the Link table length as a coordinate.
             .map(|at| at as u32)
     }
 

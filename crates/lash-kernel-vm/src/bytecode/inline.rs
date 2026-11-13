@@ -43,6 +43,7 @@ use std::collections::HashMap;
 
 use lash_kernel_value::names::CallableId;
 
+use super::compile::{Result, coordinate, pool};
 use super::op::Op;
 use super::program::{
     Block, CallSite, Callee, Constant, InlineSite, LIB, Program, Unit, UnitId, UnitKind,
@@ -81,10 +82,10 @@ pub(crate) fn disabled<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Expands every admissible body call of `program`.
-pub(crate) fn inline(program: &mut Program) {
+pub(crate) fn inline(program: &mut Program) -> Result<()> {
     #[cfg(test)]
     if DISABLED.with(std::cell::Cell::get) {
-        return;
+        return Ok(());
     }
     let mut taken = HashMap::new();
     for at in 0..program.units.len() {
@@ -106,10 +107,11 @@ pub(crate) fn inline(program: &mut Program) {
             .collect();
         for (pc, site, callee) in sites {
             if let Some(region) = Region::of(program, callee) {
-                expand(program, at, pc, site, callee, &region, &mut taken);
+                expand(program, at, pc, site, callee, &region, &mut taken)?;
             }
         }
     }
+    Ok(())
 }
 
 /// Whether `callee` is a body the pass may expand into `caller`: a covered
@@ -178,11 +180,13 @@ impl Region {
                 work.push(k + 1);
             }
         }
-        let size: u32 = reached
+        // Disjoint blocks cover at most u32::MAX ops; each cold stub adds
+        // at most one extra op per block, so the sum fits u64.
+        let size: u64 = reached
             .iter()
             .zip(&body.blocks)
             .map(|(on, block)| match on {
-                Some(true) => block.end - block.start,
+                Some(true) => u64::from(block.end - block.start),
                 Some(false) => 2,
                 None => 0,
             })
@@ -191,7 +195,7 @@ impl Region {
             *on == Some(true)
                 && (block.start..block.end).any(|pc| op_at(body, pc as usize) == Op::Return)
         });
-        if reached[0] != Some(true) || !returns || size > BUDGET {
+        if reached[0] != Some(true) || !returns || size > u64::from(BUDGET) {
             return None;
         }
         let blocks = reached
@@ -245,13 +249,13 @@ fn expand(
     callee: UnitId,
     region: &Region,
     taken: &mut HashMap<(u32, u32), u32>,
-) -> Option<()> {
+) -> Result<Option<()>> {
     let body = program.unit(callee);
     let caller = &program.units[at];
-    let index = caller.inlines.len() as u32;
-    let entry = caller.ops.len() as u32;
-    let first_block = caller.blocks.len() as u32;
-    let first_call = caller.calls.len() as u32;
+    let index = coordinate(caller.inlines.len(), "inline sites of one function")?;
+    let entry = coordinate(caller.ops.len(), "ops of one function")?;
+    let first_block = coordinate(caller.blocks.len(), "blocks of one function")?;
+    let first_call = coordinate(caller.calls.len(), "call sites of one function")?;
     // The region's ops stand for the call's expression, where the
     // unit's origin table covers its ops.
     let origin = (caller.origin.len() == caller.ops.len())
@@ -263,9 +267,38 @@ fn expand(
     for &(k, on) in &region.blocks {
         starts[k] = Some(next);
         let block = body.blocks[k];
-        next += if on { block.end - block.start } else { 2 };
+        next = coordinate(
+            next as usize
+                + if on {
+                    (block.end - block.start) as usize
+                } else {
+                    2
+                },
+            "ops of one function",
+        )?;
     }
     let target = |to: u32| starts[body.blocks.iter().position(|block| block.start == to)?];
+    // Region::of admits at most BUDGET (128) ops. Admit the other tables
+    // before adding any of its offsets to their u32 coordinates.
+    coordinate(
+        caller.blocks.len() + region.blocks.len(),
+        "blocks of one function",
+    )?;
+    let extra_calls: usize = region
+        .blocks
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(k, _)| {
+            let block = body.blocks[*k];
+            (block.start..block.end)
+                .filter(|pc| matches!(op_at(body, *pc as usize), Op::Call(_)))
+                .count()
+        })
+        .sum();
+    coordinate(
+        caller.calls.len() + extra_calls,
+        "call sites of one function",
+    )?;
     let mut ops = Vec::new();
     let mut event = Vec::new();
     let mut calls = Vec::new();
@@ -279,8 +312,18 @@ fn expand(
         if on {
             for from in block.start as usize + 1..block.end as usize {
                 let op = match op_at(body, from) {
-                    Op::Jump(to) => Op::Jump(target(to)?),
-                    Op::JumpIfFalse(to) => Op::JumpIfFalse(target(to)?),
+                    Op::Jump(to) => {
+                        let Some(to) = target(to) else {
+                            return Ok(None);
+                        };
+                        Op::Jump(to)
+                    }
+                    Op::JumpIfFalse(to) => {
+                        let Some(to) = target(to) else {
+                            return Ok(None);
+                        };
+                        Op::JumpIfFalse(to)
+                    }
                     Op::Return => Op::Leave(index),
                     Op::Call(call) => {
                         calls.push(body.calls[call as usize].clone());
@@ -306,7 +349,7 @@ fn expand(
             if let Op::Const(n) | Op::Field(n) = op
                 && *n & LIB != 0
             {
-                *n = take(program, taken, index, *n);
+                *n = take(program, taken, index, *n)?;
             }
         }
     }
@@ -352,14 +395,19 @@ fn expand(
         folds: (0, 0),
         lookup_words: None,
     });
-    Some(())
+    Ok(Some(()))
 }
 
 /// Library constant `n` as the document's own constant, a function value
 /// naming the Link of index `link`.
-fn take(program: &mut Program, taken: &mut HashMap<(u32, u32), u32>, link: u32, n: u32) -> u32 {
+fn take(
+    program: &mut Program,
+    taken: &mut HashMap<(u32, u32), u32>,
+    link: u32,
+    n: u32,
+) -> Result<u32> {
     if let Some(own) = taken.get(&(link, n)) {
-        return *own;
+        return Ok(*own);
     }
     let constant = match program.constant(n) {
         Constant::Function(callable) => Constant::Function(CallableId {
@@ -368,8 +416,8 @@ fn take(program: &mut Program, taken: &mut HashMap<(u32, u32), u32>, link: u32, 
         }),
         other => other.clone(),
     };
-    let own = program.constants.len() as u32;
+    let own = pool(0, program.constants.len(), "constants")?;
     program.constants.push(constant);
     taken.insert((link, n), own);
-    own
+    Ok(own)
 }

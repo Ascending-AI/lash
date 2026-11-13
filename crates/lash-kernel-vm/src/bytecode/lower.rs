@@ -18,7 +18,9 @@ use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot, Name};
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::types::Type;
 
-use super::compile::{Compiler, Fun, LoopCtx, Packing, Result, Scope, Var, unsupported, within};
+use super::compile::{
+    Compiler, Fun, LoopCtx, Packing, Result, Scope, Var, coordinate, unsupported, within,
+};
 use super::op::Op;
 use super::program::{ActionSite, Callee, LoopMark, LoopSite, Point};
 
@@ -27,7 +29,7 @@ impl Compiler<'_> {
     pub(crate) fn block(&mut self, f: &mut Fun, block: &[Stmt]) -> Result<()> {
         Self::scoped(f, |f| {
             for (index, stmt) in block.iter().enumerate() {
-                f.path.push(index as u32);
+                f.path.push(coordinate(index, "children of one node")?);
                 let lowered = self.stmt(f, stmt);
                 f.path.pop();
                 lowered?;
@@ -62,43 +64,46 @@ impl Compiler<'_> {
 
     // --- Variables.
 
-    fn resolve(&mut self, f: &Fun, name: &Name) -> Var {
-        match (f.slots.get(name), f.captures.get(name)) {
+    fn resolve(&mut self, f: &Fun, name: &Name) -> Result<Var> {
+        Ok(match (f.slots.get(name), f.captures.get(name)) {
             (Some(slot), _) if f.boxed.contains(name) => Var::Cell(*slot),
             (Some(slot), _) => Var::Local(*slot),
             (None, Some(capture)) => Var::Capture(*capture),
-            (None, None) => Var::Global(self.global(name)),
-        }
+            (None, None) => Var::Global(self.global(name)?),
+        })
     }
 
-    fn read(&mut self, f: &mut Fun, name: &Name) {
-        let op = match self.resolve(f, name) {
+    fn read(&mut self, f: &mut Fun, name: &Name) -> Result<()> {
+        let op = match self.resolve(f, name)? {
             Var::Local(slot) => Op::Local(slot),
             Var::Cell(slot) => Op::CellGet(slot),
             Var::Capture(capture) => Op::CaptureGet(capture),
             Var::Global(global) => Op::Global(global),
         };
         f.emit(op);
+        Ok(())
     }
 
-    fn write(&mut self, f: &mut Fun, name: &Name) {
-        let op = match self.resolve(f, name) {
+    fn write(&mut self, f: &mut Fun, name: &Name) -> Result<()> {
+        let op = match self.resolve(f, name)? {
             Var::Local(slot) => Op::SetLocal(slot),
             Var::Cell(slot) => Op::CellSet(slot),
             Var::Capture(capture) => Op::CaptureSet(capture),
             Var::Global(global) => Op::SetGlobal(global),
         };
         f.emit(op);
+        Ok(())
     }
 
     /// A declaration: each execution makes a new variable, so a shared one
     /// gets a fresh cell (closures made by earlier executions keep theirs).
-    fn bind(f: &mut Fun, name: &Name) {
-        let slot = f.declare(name);
+    fn bind(f: &mut Fun, name: &Name) -> Result<()> {
+        let slot = f.declare(name)?;
         f.emit(Op::SetLocal(slot));
         if f.boxed.contains(name) {
             f.emit(Op::Box(slot));
         }
+        Ok(())
     }
 
     /// An op that leaves its block for good: what follows starts a block.
@@ -127,7 +132,7 @@ impl Compiler<'_> {
         match stmt {
             Stmt::Let { name, value } => {
                 self.rhs(f, 0, value)?;
-                Self::bind(f, name);
+                Self::bind(f, name)?;
             }
             Stmt::Assign {
                 place: Place::Variable(name),
@@ -135,7 +140,7 @@ impl Compiler<'_> {
                 ..
             } => {
                 self.rhs(f, 0, value)?;
-                self.write(f, name);
+                self.write(f, name)?;
             }
             Stmt::Assign {
                 place: Place::Member(member),
@@ -150,7 +155,7 @@ impl Compiler<'_> {
                 }
                 Member::Field { target, field } => {
                     self.child(f, 0, target)?;
-                    let field = self.text(field);
+                    let field = self.text(field)?;
                     f.emit(Op::RemoveField(field));
                 }
             },
@@ -171,18 +176,18 @@ impl Compiler<'_> {
                     then: empty(1, then_block),
                     otherwise: empty(2, else_block),
                 };
-                f.point(test as u32, point);
+                f.point(coordinate(test, "ops of one function")?, point);
                 f.leader();
                 self.child_block(f, 1, then_block)?;
                 if else_block.is_empty() {
-                    let end = f.label();
+                    let end = f.label()?;
                     f.patch(test, end);
                 } else {
                     let skip = Self::exit(f, Op::Jump(0));
-                    let otherwise = f.label();
+                    let otherwise = f.label()?;
                     f.patch(test, otherwise);
                     self.child_block(f, 2, else_block)?;
-                    let end = f.label();
+                    let end = f.label()?;
                     f.patch(skip, end);
                 }
             }
@@ -192,8 +197,8 @@ impl Compiler<'_> {
                 body,
                 else_block,
             } => {
-                let started = Self::enter_loop(f);
-                let head = f.label();
+                let started = Self::enter_loop(f)?;
+                let head = f.label()?;
                 f.point(head, Point::Test(f.statement.clone()));
                 self.loop_test(f, *metered);
                 if *metered != 0 {
@@ -213,12 +218,12 @@ impl Compiler<'_> {
                 lowered?;
                 Self::exit(f, Op::Jump(head));
                 f.enclosing.pop();
-                let exhausted = f.label();
+                let exhausted = f.label()?;
                 f.patch(test, exhausted);
                 if !else_block.is_empty() {
                     self.child_block(f, 2, else_block)?;
                 }
-                let end = f.label();
+                let end = f.label()?;
                 for at in ctx.into_iter().flat_map(|ctx| ctx.breaks) {
                     f.patch(at, end);
                 }
@@ -240,7 +245,7 @@ impl Compiler<'_> {
                 if !else_block.is_empty() {
                     self.child_block(f, 2, else_block)?;
                 }
-                let end = f.label();
+                let end = f.label()?;
                 if let Some(ctx) = f.loops.pop() {
                     for at in ctx.breaks {
                         f.patch(at, end);
@@ -268,7 +273,7 @@ impl Compiler<'_> {
                 self.child(f, 0, value)?;
                 if Self::has_finally(f, None) {
                     // The value is held while the finally blocks run.
-                    let held = f.temp();
+                    let held = f.temp()?;
                     f.emit(Op::SetLocal(held));
                     self.depart(f, None)?;
                     f.emit(Op::Local(held));
@@ -281,14 +286,14 @@ impl Compiler<'_> {
                 self.child(f, 0, value)?;
                 // Cleanup unwinds first; the policy runs outside the
                 // function's handlers and its result returns directly.
-                let held = f.temp();
+                let held = f.temp()?;
                 f.emit(Op::SetLocal(held));
                 self.depart(f, None)?;
                 f.emit(Op::Local(held));
                 let policy = Self::local_target(policy, "a return policy")?;
                 let site = f.site();
                 let callee = self.callee(f, policy)?;
-                self.call(f, callee, 1, site);
+                self.call(f, callee, 1, site)?;
                 Self::exit(f, Op::Return);
             }
             Stmt::Try(scope) => self.try_stmt(f, scope)?,
@@ -314,14 +319,14 @@ impl Compiler<'_> {
 
     /// Enters a loop at the statement being lowered: its pass counter is
     /// zeroed, and it encloses what is lowered until its else block.
-    fn enter_loop(f: &mut Fun) -> u16 {
-        let started = f.temp();
+    fn enter_loop(f: &mut Fun) -> Result<u16> {
+        let started = f.temp()?;
         f.quiet(Op::LoopStart(started));
         f.enclosing.push(LoopMark {
             site: f.statement.clone(),
             started,
         });
-        started
+        Ok(started)
     }
 
     /// A loop's continuation test: its unit, then its `metered` event,
@@ -353,7 +358,7 @@ impl Compiler<'_> {
         match member {
             Member::Field { target, field } => {
                 self.child(f, 0, target)?;
-                let field = self.text(field);
+                let field = self.text(field)?;
                 if place_first {
                     self.rhs(f, value_index, value)?;
                     f.emit(Op::SetFieldPlaceFirst(field));
@@ -382,10 +387,9 @@ impl Compiler<'_> {
         binding: &Name,
         body: &[Stmt],
     ) -> Result<()> {
-        let slot = f.temp();
-        f.temp(); // the cursor
-        let index = f.loop_sites.len() as u32;
-        let binding_slot = f.declare(binding);
+        let slot = f.temps(2)?; // walked and cursor
+        let index = coordinate(f.loop_sites.len(), "loop sites of one function")?;
+        let binding_slot = f.declare(binding)?;
         f.loop_sites.push(LoopSite {
             slot,
             binding: binding_slot,
@@ -394,9 +398,9 @@ impl Compiler<'_> {
             join: None,
             site: f.site(),
         });
-        let started = Self::enter_loop(f);
+        let started = Self::enter_loop(f)?;
         f.emit(Op::ForOpen(index));
-        let head = f.label();
+        let head = f.label()?;
         self.loop_test(f, metered);
         f.emit(Op::ForNext(index));
         f.leader();
@@ -411,7 +415,7 @@ impl Compiler<'_> {
         self.child_block(f, 1, body)?;
         Self::exit(f, Op::Jump(head));
         f.enclosing.pop();
-        let exit = f.label();
+        let exit = f.label()?;
         f.loop_sites[index as usize].exit = exit;
         Ok(())
     }
@@ -441,16 +445,13 @@ impl Compiler<'_> {
             hook(&protocol.check)?,
         );
         let site = f.site();
-        let started = Self::enter_loop(f);
+        let started = Self::enter_loop(f)?;
         let callee = self.callee(f, open)?;
-        self.call(f, callee, 1, site.clone());
+        self.call(f, callee, 1, site.clone())?;
         // walked, cursor, size, remaining, raw item, more.
-        let slot = f.temp();
-        for _ in 0..5 {
-            f.temp();
-        }
-        let binding_slot = f.declare(binding);
-        let index = f.loop_sites.len() as u32;
+        let slot = f.temps(6)?;
+        let binding_slot = f.declare(binding)?;
+        let index = coordinate(f.loop_sites.len(), "loop sites of one function")?;
         f.loop_sites.push(LoopSite {
             slot,
             binding: binding_slot,
@@ -460,7 +461,7 @@ impl Compiler<'_> {
             site: site.clone(),
         });
         f.emit(Op::ProtoOpen(index));
-        let head = f.label();
+        let head = f.label()?;
         self.loop_test(f, metered);
         f.emit(Op::ProtoStep(index));
         f.leader();
@@ -468,18 +469,19 @@ impl Compiler<'_> {
             f.emit(Op::ProtoGuard(index));
             f.leader();
             let callee = self.callee(f, check)?;
-            self.call(f, callee, 4, site.clone());
+            self.call(f, callee, 4, site.clone())?;
             f.emit(Op::ProtoChecked(index));
         }
-        let join = f.label();
+        let join = f.label()?;
         f.emit(Op::ProtoMore(index));
         f.leader();
+        // temps(6) admitted slot..slot + 6 before either item arm.
         match item {
             Some(item) => {
                 f.emit(Op::Local(slot));
                 f.emit(Op::Local(slot + 4));
                 let callee = self.callee(f, item)?;
-                self.call(f, callee, 2, site.clone());
+                self.call(f, callee, 2, site.clone())?;
             }
             None => {
                 f.emit(Op::Local(slot + 4));
@@ -501,10 +503,10 @@ impl Compiler<'_> {
         // `next`, what `open` gives must be walkable (`K-ITER-005`).
         let driver = match next {
             Some(next) => {
-                let driver = f.label();
+                let driver = f.label()?;
                 f.emit(Op::Local(slot));
                 let callee = self.callee(f, next)?;
-                self.call(f, callee, 1, site);
+                self.call(f, callee, 1, site)?;
                 f.emit(Op::ProtoPull(index));
                 Self::exit(f, Op::Jump(join));
                 Some(driver)
@@ -512,7 +514,7 @@ impl Compiler<'_> {
             None => None,
         };
         f.enclosing.pop();
-        let exit = f.label();
+        let exit = f.label()?;
         let loop_site = &mut f.loop_sites[index as usize];
         loop_site.exit = exit;
         loop_site.driver = driver;
@@ -549,18 +551,21 @@ impl Compiler<'_> {
                 f.emit(Op::TryExit);
                 let skip = Self::exit(f, Op::Jump(0));
                 // The handler starts a block, the raised value on the stack.
-                let handler = f.label();
+                let handler = f.label()?;
                 f.patch(enter, handler);
                 let taking = f.emit(Op::CatchEnter(0));
-                f.scopes.push((depth, Scope::Catch(taking as u32)));
+                f.scopes.push((
+                    depth,
+                    Scope::Catch(coordinate(taking, "ops of one function")?),
+                ));
                 Self::scoped(f, |f| {
-                    Self::bind(f, &catch.binding);
+                    Self::bind(f, &catch.binding)?;
                     self.child_block(f, 1, &catch.body)
                 })?;
                 f.scopes.pop();
-                f.emit(Op::CatchExit(taking as u32));
-                f.patch(taking, f.here());
-                let end = f.label();
+                f.emit(Op::CatchExit(coordinate(taking, "ops of one function")?));
+                f.patch(taking, f.here()?);
+                let end = f.label()?;
                 f.patch(skip, end);
             }
             None => self.child_block(f, 0, &scope.body)?,
@@ -573,14 +578,14 @@ impl Compiler<'_> {
             self.finally_block(f, &block, &finally_path)?;
             let skip = Self::exit(f, Op::Jump(0));
             // A raise: hold the value, run the block, raise it again.
-            let handler = f.label();
+            let handler = f.label()?;
             f.patch(enter, handler);
-            let held = f.temp();
+            let held = f.temp()?;
             f.emit(Op::SetLocal(held));
             self.finally_block(f, &block, &finally_path)?;
             f.emit(Op::Local(held));
             Self::exit(f, Op::Raise);
-            let end = f.label();
+            let end = f.label()?;
             f.patch(skip, end);
         }
         Ok(())
@@ -658,7 +663,7 @@ impl Compiler<'_> {
         let site = f.site();
         match action {
             Action::Call { callee, args } => {
-                self.callee_value(f, callee);
+                self.callee_value(f, callee)?;
                 self.atoms(f, args, false)?;
                 self.call_callee(f, callee, args.len(), site)?;
             }
@@ -673,23 +678,23 @@ impl Compiler<'_> {
             }
             Action::Join { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
-                self.task_action(f, ActionSite::Join { site });
+                self.task_action(f, ActionSite::Join { site })?;
             }
             Action::JoinMany { mode, tasks } => {
                 self.atoms(f, std::slice::from_ref(tasks), false)?;
-                self.task_action(f, ActionSite::JoinMany { mode: *mode, site });
+                self.task_action(f, ActionSite::JoinMany { mode: *mode, site })?;
             }
-            Action::Yield => self.task_action(f, ActionSite::Yield { site }),
+            Action::Yield => self.task_action(f, ActionSite::Yield { site })?,
             Action::Cancel { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
-                self.task_action(f, ActionSite::Cancel { site });
+                self.task_action(f, ActionSite::Cancel { site })?;
             }
             Action::CancelEffect { task } => {
                 self.atoms(f, std::slice::from_ref(task), false)?;
-                self.task_action(f, ActionSite::CancelEffect { site });
+                self.task_action(f, ActionSite::CancelEffect { site })?;
             }
             Action::Spawn { callee, args } => {
-                self.callee_value(f, callee);
+                self.callee_value(f, callee)?;
                 self.atoms(f, args, true)?;
                 self.spawn(f, callee, args.len(), site)?;
             }
@@ -697,7 +702,7 @@ impl Compiler<'_> {
                 self.atoms(f, std::slice::from_ref(value), false)?;
                 let policy = Self::local_target(policy, "an await policy")?;
                 let callee = self.callee(f, policy)?;
-                self.entered_call(f, callee, 1, site);
+                self.entered_call(f, callee, 1, site)?;
             }
         }
         Ok(())
@@ -713,7 +718,7 @@ impl Compiler<'_> {
                 f.units(1);
             }
             match arg {
-                Atom::Variable(name) => self.read(f, name),
+                Atom::Variable(name) => self.read(f, name)?,
                 Atom::Literal(literal) => self.literal(f, literal)?,
             }
         }
@@ -724,7 +729,7 @@ impl Compiler<'_> {
         if let Literal::Function(id) = literal {
             self.trampoline(*id)?;
         }
-        let at = self.constant(literal);
+        let at = self.constant(literal)?;
         f.emit(Op::Const(at));
         Ok(())
     }
@@ -740,10 +745,11 @@ impl Compiler<'_> {
     }
 
     /// A value callee is read before the arguments (`K-EVAL-004`).
-    fn callee_value(&mut self, f: &mut Fun, callee: &DocCallee) {
+    fn callee_value(&mut self, f: &mut Fun, callee: &DocCallee) -> Result<()> {
         if let DocCallee::Value(name) = callee {
-            self.read(f, name);
+            self.read(f, name)?;
         }
+        Ok(())
     }
 
     fn call_callee(
@@ -763,9 +769,9 @@ impl Compiler<'_> {
             DocCallee::Import(slot) => self.import_call(f, *slot)?,
         };
         let packing = self.packing(callee)?;
-        let names = self.keywords(packing.as_ref(), argc);
-        f.point(f.here(), Point::Action(site.clone()));
-        self.entered_call(f, target, passed(argc)?, site);
+        let names = self.keywords(packing.as_ref(), argc)?;
+        f.point(f.here()?, Point::Action(site.clone()));
+        self.entered_call(f, target, passed(argc)?, site)?;
         if let Some(call) = f.calls.last_mut() {
             call.checked = checked;
             call.names = names;
@@ -793,7 +799,7 @@ impl Compiler<'_> {
                 then_yield,
                 site,
             },
-        );
+        )?;
         Ok(())
     }
 
@@ -813,6 +819,8 @@ impl Compiler<'_> {
             }
         };
         let packing = self.packing(callee)?;
+        let argc = usize::from(passed(argc)?);
+        // passed admits argc <= 65,535 before adding the optional callee.
         let values = passed(argc + usize::from(target.is_none()))?;
         let unit = self.stub(f, target, resolved, packing.as_ref(), passed(argc)?)?;
         self.task_action(
@@ -822,23 +830,24 @@ impl Compiler<'_> {
                 argc: values,
                 site,
             },
-        );
+        )?;
         Ok(())
     }
 
     /// An action other than a call: it ends its block, so a task resumes
     /// at a block head (`K-EVAL-008`).
-    fn task_action(&mut self, f: &mut Fun, action: ActionSite) {
-        let at = f.actions.len() as u32;
-        let mark = self.mark(f, action.site());
+    fn task_action(&mut self, f: &mut Fun, action: ActionSite) -> Result<()> {
+        let at = coordinate(f.actions.len(), "action sites of one function")?;
+        let mark = self.mark(f, action.site())?;
         f.actions.push(action);
         f.action_marks.push(mark);
         let pc = f.emit(Op::Action(at));
         f.point(
-            pc as u32,
+            coordinate(pc, "ops of one function")?,
             Point::Action(f.actions[at as usize].site().clone()),
         );
         f.leader();
+        Ok(())
     }
 
     // --- Expressions.
@@ -847,12 +856,12 @@ impl Compiler<'_> {
         f.units(1);
         match value {
             Expr::Literal(literal) => self.literal(f, literal)?,
-            Expr::Variable(name) => self.read(f, name),
+            Expr::Variable(name) => self.read(f, name)?,
             Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
                 for (index, item) in items.iter().enumerate() {
-                    self.child(f, index as u32, item)?;
+                    self.child(f, coordinate(index, "children of one node")?, item)?;
                 }
-                let n = items.len() as u32;
+                let n = coordinate(items.len(), "members of one sequence")?;
                 f.members(u64::from(n));
                 f.emit(match value {
                     Expr::Tuple(_) => Op::MakeTuple(n),
@@ -861,22 +870,36 @@ impl Compiler<'_> {
                 });
             }
             Expr::Map(entries) => {
+                coordinate(
+                    entries.len().checked_mul(2).ok_or_else(|| {
+                        super::compile::Unsupported("too many map children".into())
+                    })?,
+                    "children of one map",
+                )?;
                 for (index, entry) in entries.iter().enumerate() {
-                    self.child(f, 2 * index as u32, &entry.key)?;
-                    self.child(f, 2 * index as u32 + 1, &entry.value)?;
+                    self.child(f, coordinate(2 * index, "children of one map")?, &entry.key)?;
+                    self.child(
+                        f,
+                        coordinate(2 * index + 1, "children of one map")?,
+                        &entry.value,
+                    )?;
                 }
                 f.members(entries.len() as u64);
-                f.emit(Op::MakeMap(entries.len() as u32));
+                f.emit(Op::MakeMap(coordinate(
+                    entries.len(),
+                    "members of one map",
+                )?));
             }
             Expr::Record(entries) => {
+                coordinate(entries.len(), "members of one record")?;
                 for (index, entry) in entries.iter().enumerate() {
-                    self.child(f, index as u32, &entry.value)?;
+                    self.child(f, coordinate(index, "children of one node")?, &entry.value)?;
                 }
                 let shape: Arc<[u32]> = entries
                     .iter()
                     .map(|entry| self.text(&entry.field))
-                    .collect();
-                let at = f.records.len() as u32;
+                    .collect::<Result<_>>()?;
+                let at = coordinate(f.records.len(), "record sites of one function")?;
                 f.records.push(shape);
                 f.members(entries.len() as u64);
                 f.emit(Op::MakeRecord(at));
@@ -884,7 +907,7 @@ impl Compiler<'_> {
             Expr::Member(member) => match &**member {
                 Member::Field { target, field } => {
                     self.child(f, 0, target)?;
-                    let field = self.text(field);
+                    let field = self.text(field)?;
                     f.emit(Op::Field(field));
                 }
                 Member::Index { target, index } => {
@@ -904,11 +927,11 @@ impl Compiler<'_> {
                     return Ok(());
                 }
                 for (index, arg) in args.iter().enumerate() {
-                    self.child(f, index as u32, arg)?;
+                    self.child(f, coordinate(index, "children of one node")?, arg)?;
                 }
                 let site = f.site();
                 let callee = self.callee(f, *function)?;
-                self.call(f, callee, passed(args.len())?, site);
+                self.call(f, callee, passed(args.len())?, site)?;
             }
             Expr::If { cond, then, r#else } => {
                 self.child(f, 0, cond)?;
@@ -916,26 +939,26 @@ impl Compiler<'_> {
                 f.leader();
                 self.child(f, 1, then)?;
                 let skip = Self::exit(f, Op::Jump(0));
-                let otherwise = f.label();
+                let otherwise = f.label()?;
                 f.patch(test, otherwise);
                 self.child(f, 2, r#else)?;
-                let end = f.label();
+                let end = f.label()?;
                 f.patch(skip, end);
             }
             Expr::Let { name, value, body } => {
                 self.child(f, 0, value)?;
                 Self::scoped(f, |f| {
-                    Self::bind(f, name);
+                    Self::bind(f, name)?;
                     self.child(f, 1, body)
                 })?;
             }
             Expr::Act(act) => {
                 let site = f.site();
                 if let ActKind::Call(callee) | ActKind::Spawn(callee) = &act.kind {
-                    self.callee_value(f, callee);
+                    self.callee_value(f, callee)?;
                 }
                 for (index, arg) in act.args.iter().enumerate() {
-                    self.child(f, index as u32, arg)?;
+                    self.child(f, coordinate(index, "children of one node")?, arg)?;
                 }
                 let argc = act.args.len();
                 match &act.kind {
@@ -946,18 +969,20 @@ impl Compiler<'_> {
                         then_yield,
                     } => self.perform(f, slot, argc, result, *then_yield, site)?,
                     ActKind::Spawn(callee) => self.spawn(f, callee, argc, site)?,
-                    ActKind::Join => self.task_action(f, ActionSite::Join { site }),
+                    ActKind::Join => self.task_action(f, ActionSite::Join { site })?,
                     ActKind::JoinMany(mode) => {
-                        self.task_action(f, ActionSite::JoinMany { mode: *mode, site })
+                        self.task_action(f, ActionSite::JoinMany { mode: *mode, site })?
                     }
-                    ActKind::Yield => self.task_action(f, ActionSite::Yield { site }),
-                    ActKind::Cancel => self.task_action(f, ActionSite::Cancel { site }),
-                    ActKind::CancelEffect => self.task_action(f, ActionSite::CancelEffect { site }),
+                    ActKind::Yield => self.task_action(f, ActionSite::Yield { site })?,
+                    ActKind::Cancel => self.task_action(f, ActionSite::Cancel { site })?,
+                    ActKind::CancelEffect => {
+                        self.task_action(f, ActionSite::CancelEffect { site })?
+                    }
                     ActKind::Await(policy) => {
                         let policy = Self::local_target(policy, "an await policy")?;
                         let callee = self.callee(f, policy)?;
-                        f.point(f.here(), Point::Action(site.clone()));
-                        self.entered_call(f, callee, 1, site);
+                        f.point(f.here()?, Point::Action(site.clone()));
+                        self.entered_call(f, callee, 1, site)?;
                     }
                 }
             }

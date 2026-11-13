@@ -35,6 +35,7 @@ use std::sync::Arc;
 use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::Site;
 
+use super::compile::{Result, coordinate, unsupported};
 use super::op::Op;
 use super::program::{ActionSite, Callee, Unit};
 
@@ -151,7 +152,7 @@ pub struct Entry {
     /// How many values at the top of the stack are the action's own
     /// roles: its operands at [`Phase::Ready`], what the role table keeps
     /// at [`Phase::Issued`].
-    pub held: u8,
+    pub held: u16,
     pub resume: Resume,
 }
 
@@ -278,11 +279,12 @@ impl Entry {
 
 /// The resume table of `unit`. Empty where its operand stack is
 /// malformed: the validator refuses such a unit.
-pub(crate) fn build(unit: &Unit) -> SiteTable {
+pub(crate) fn build(unit: &Unit) -> Result<SiteTable> {
+    coordinate(unit.ops.len(), "ops of one function")?;
     let root: Path = Arc::from(unit.site.path.as_slice());
     let origin = |pc: usize| unit.origin.get(pc).unwrap_or(&root).clone();
     let Some(stacks) = stacks(unit, &origin) else {
-        return SiteTable::default();
+        return Ok(SiteTable::default());
     };
     let site = |pc: usize| Site::new(unit.site.unit.clone(), origin(pc).to_vec());
     let mut entries = Vec::new();
@@ -352,7 +354,8 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
                     phase,
                     copy: 0,
                     action: Some(kind),
-                    held: held as u8,
+                    // Perform/spawn counts passed lower::within; other actions take at most one.
+                    held: held as u16,
                     resume: Resume {
                         pc,
                         stack: stack.into(),
@@ -373,6 +376,8 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
             _ => {}
         }
     }
+    coordinate(entries.len(), "resume entries of one function")?;
+    // Every entry index and duplicate ordinal is below this admitted length.
     entries.sort_by(|a, b| (&a.site, a.phase, a.resume.pc).cmp(&(&b.site, b.phase, b.resume.pc)));
     for at in 1..entries.len() {
         let (before, rest) = entries.split_at_mut(at);
@@ -386,19 +391,20 @@ pub(crate) fn build(unit: &Unit) -> SiteTable {
         let entry = &entries[at as usize];
         (entry.resume.pc, entry.phase)
     });
-    let (locals, by_site, loops) = slots(unit, &root);
-    SiteTable {
+    let (locals, by_site, loops) = slots(unit, &root)?;
+    Ok(SiteTable {
         entries,
         by_pc,
         locals,
         by_site,
         loops,
-    }
+    })
 }
 
 /// What each slot of `unit` holds, the slots by declaring site, and each
 /// `for` loop's state.
-fn slots(unit: &Unit, root: &Path) -> (Vec<Local>, Vec<u16>, Vec<LoopState>) {
+fn slots(unit: &Unit, root: &Path) -> Result<(Vec<Local>, Vec<u16>, Vec<LoopState>)> {
+    coordinate(unit.loops.len(), "loop sites of one function")?;
     let mut roles: Vec<(Path, SlotRole)> = (0..unit.locals)
         .map(|slot| match unit.declared.get(usize::from(slot)) {
             Some((site, Some(name))) => (site.clone(), SlotRole::Variable(name.clone())),
@@ -445,9 +451,17 @@ fn slots(unit: &Unit, root: &Path) -> (Vec<Local>, Vec<u16>, Vec<LoopState>) {
         } else {
             2
         };
-        let slots: Arc<[u16]> = (site.slot..site.slot.saturating_add(width)).collect();
+        let Some(end) = site
+            .slot
+            .checked_add(width)
+            .filter(|end| *end <= unit.locals)
+        else {
+            return unsupported("loop state exceeds the admitted local slots");
+        };
+        let slots: Arc<[u16]> = (site.slot..end).collect();
         for (at, &slot) in slots.iter().enumerate() {
             if let Some((_, role)) = roles.get_mut(usize::from(slot)) {
+                // width is 2 or 6, so the role offset is at most 5.
                 *role = SlotRole::Loop(at as u8);
             }
         }
@@ -465,6 +479,7 @@ fn slots(unit: &Unit, root: &Path) -> (Vec<Local>, Vec<u16>, Vec<LoopState>) {
             passes: counter,
         });
     }
+    // roles is built from 0..unit.locals (u16); indices and length fit u16.
     let mut locals: Vec<Local> = roles
         .into_iter()
         .enumerate()
@@ -493,7 +508,7 @@ fn slots(unit: &Unit, root: &Path) -> (Vec<Local>, Vec<u16>, Vec<LoopState>) {
         state.copy = copies as u32;
         seen.push((state.site.clone(), state.copy));
     }
-    (locals, by_site, loops)
+    Ok((locals, by_site, loops))
 }
 
 /// The operand stack before each op of `unit`, each value by the
@@ -520,7 +535,7 @@ fn stacks(unit: &Unit, origin: &impl Fn(usize) -> Path) -> Option<Vec<Option<Sta
         };
         seen[pc] = Some(stack.clone());
         let op = unit.ops[pc];
-        let (pops, pushes) = unit.effect(op);
+        let (pops, pushes) = unit.effect(op)?;
         let mut after = stack.pop(pops as usize)?;
         for _ in 0..pushes {
             after = after.push(origin(pc));

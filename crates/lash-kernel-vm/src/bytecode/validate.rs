@@ -140,6 +140,10 @@ impl Unit {
             problem,
         };
         let len = self.ops.len();
+        if u32::try_from(len).is_err() {
+            return Err(whole("too many ops for bytecode coordinates".into()));
+        }
+        // All pc/block/call indices below are bounded by admitted table lengths.
         let parallel = [
             ("event", self.event.len()),
             ("step", self.step.len()),
@@ -243,7 +247,7 @@ impl Unit {
         let within = |from: usize, to: u32| head(to) && region(from as u32) == region(to);
         for site in &self.loops {
             let ends = [Some(site.exit), site.driver, site.join];
-            if !local(site.binding) || !local(site.slot.saturating_add(1)) {
+            if !local(site.binding) || !site.slot.checked_add(1).is_some_and(local) {
                 return Err(whole(format!(
                     "loop at {} keeps state past the locals",
                     site.site
@@ -302,7 +306,7 @@ impl Unit {
                     // A protocol loop keeps four more hidden locals.
                     self.loops
                         .get(n as usize)
-                        .is_some_and(|site| local(site.slot.saturating_add(5)))
+                        .is_some_and(|site| site.slot.checked_add(5).is_some_and(local))
                 }
                 Op::Action(n) => (n as usize) < self.actions.len(),
                 // Fusion writes fused runs, and the trace pass traces,
@@ -444,11 +448,15 @@ impl Unit {
                 None => depth[pc - entry] = Some(d),
             }
             let op = self.ops[pc];
-            let (pops, pushes) = self.effect(op);
+            let (pops, pushes) = self
+                .effect(op)
+                .ok_or_else(|| at("operand count exceeds the bytecode core limit".into()))?;
             let Some(after) = d.checked_sub(pops) else {
                 return Err(at(format!("{op:?} pops {pops} of {d} operands")));
             };
-            let after = after + pushes;
+            let after = after
+                .checked_add(pushes)
+                .ok_or_else(|| at("operand depth exceeds the bytecode core limit".into()))?;
             if d.max(after) > admitted {
                 return Err(at(format!(
                     "region {n} holds {} operands where its body admits {admitted}",
@@ -572,12 +580,21 @@ impl Unit {
                 None => *seen = Some(d),
             }
             let op = self.ops[pc];
-            let (pops, pushes) = self.effect(op);
+            let (pops, pushes) = self
+                .effect(op)
+                .ok_or_else(|| at("operand count exceeds the bytecode core limit".into()))?;
             let Some(after) = d.checked_sub(pops) else {
                 return Err(at(format!("{op:?} pops {pops} of {d} operands")));
             };
-            let after = after + pushes;
-            height = height.max(d).max(after).max(self.adapting(op, d - pops));
+            let after = after
+                .checked_add(pushes)
+                .ok_or_else(|| at("operand depth exceeds the bytecode core limit".into()))?;
+            height = height
+                .max(d)
+                .max(after)
+                .max(self.adapting(op, d - pops).ok_or_else(|| {
+                    at("adapted operand depth exceeds the bytecode core limit".into())
+                })?);
             let mut go = |to: usize, d: u32| work.push((to, d));
             match op {
                 Op::Return | Op::Fall | Op::Raise | Op::Finish | Op::Fail | Op::Unavailable(_) => {}
@@ -590,7 +607,12 @@ impl Unit {
                 // A raise truncates to the depth at entry and pushes the
                 // raised value.
                 Op::TryEnter(to) => {
-                    go(to as usize, after + 1);
+                    go(
+                        to as usize,
+                        after.checked_add(1).ok_or_else(|| {
+                            at("handler operand depth exceeds the bytecode core limit".into())
+                        })?,
+                    );
                     go(pc + 1, after);
                 }
                 Op::ForNext(n) | Op::ProtoMore(n) => {
@@ -641,7 +663,10 @@ impl Unit {
                 };
                 wanted.push((phase, pc, d));
             }
-            let (pops, pushes) = self.effect(*op);
+            let Some((pops, pushes)) = self.effect(*op) else {
+                return refuse(pc, "operand count exceeds the bytecode core limit".into());
+            };
+            // depth() already checked these per-op stack transitions.
             match op {
                 Op::Call(_) | Op::Inline(_) => wanted.push((Phase::Call, pc + 1, d - pops)),
                 Op::Action(n) => {
@@ -700,21 +725,21 @@ impl Unit {
     /// The operand depth a call through an import reaches while it
     /// adapts its arguments, its callee and arguments popped to `under`:
     /// the frame holds them as it holds an authored call's operands.
-    fn adapting(&self, op: Op, under: u32) -> u32 {
+    fn adapting(&self, op: Op, under: u32) -> Option<u32> {
         let call = match op {
             Op::Call(n) => n,
             Op::Inline(n) => self.inlines[n as usize].call,
-            _ => return 0,
+            _ => return Some(0),
         };
         let site = &self.calls[call as usize];
         match site.callee {
-            Callee::Entry { adapt, .. } => under + adapt.peak(site.argc),
-            _ => 0,
+            Callee::Entry { adapt, .. } => under.checked_add(adapt.peak(site.argc)),
+            _ => Some(0),
         }
     }
 
-    pub(super) fn effect(&self, op: Op) -> (u32, u32) {
-        match op {
+    pub(super) fn effect(&self, op: Op) -> Option<(u32, u32)> {
+        Some(match op {
             Op::Block(_)
             | Op::Nop
             | Op::Box(_)
@@ -759,8 +784,8 @@ impl Unit {
             | Op::RemoveField(_)
             | Op::Leave(_) => (1, 0),
             Op::MakeTuple(n) | Op::MakeList(n) | Op::MakeSet(n) => (n, 1),
-            Op::MakeMap(n) => (n.saturating_mul(2), 1),
-            Op::MakeRecord(n) => (self.records[n as usize].len() as u32, 1),
+            Op::MakeMap(n) => (n.checked_mul(2)?, 1),
+            Op::MakeRecord(n) => (u32::try_from(self.records[n as usize].len()).ok()?, 1),
             Op::Index => (2, 1),
             Op::Field(_) => (1, 1),
             Op::SetIndex | Op::SetIndexPlaceFirst => (3, 0),
@@ -770,7 +795,7 @@ impl Unit {
                 let callee = u32::from(matches!(site.callee, Callee::Value));
                 (u32::from(site.argc) + callee, 1)
             }
-            Op::Inline(n) => self.effect(Op::Call(self.inlines[n as usize].call)),
+            Op::Inline(n) => self.effect(Op::Call(self.inlines[n as usize].call))?,
             Op::ProtoGuard(_) => (0, 4),
             Op::Action(n) => {
                 let pops = match &self.actions[n as usize] {
@@ -785,7 +810,7 @@ impl Unit {
                 };
                 (pops, 1)
             }
-        }
+        })
     }
 }
 
@@ -874,7 +899,7 @@ mod tests {
             sites: Default::default(),
             cleanup: None,
         };
-        unit.sites = super::super::site_tables::build(&unit);
+        unit.sites = super::super::site_tables::build(&unit).unwrap();
         Program {
             units: vec![unit],
             constants: vec![Constant::Immediate(Value::Bool(true))],

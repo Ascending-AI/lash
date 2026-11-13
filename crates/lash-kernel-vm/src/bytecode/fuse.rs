@@ -22,6 +22,7 @@ use super::op::Op;
 use super::program::{Callee, Fused, NegatedBranch, Operand, Program, Then, Unit, Words};
 
 /// Fuses the runs of every unit of `program`.
+/// Compiler::sealed and inline::expand admitted every pc and table coordinate.
 pub(crate) fn fuse(program: &mut Program) {
     // A call held to a contract, an import's signature, checks its
     // arguments first, as only the call op does.
@@ -82,6 +83,8 @@ pub(crate) fn fuse(program: &mut Program) {
             }
         }
     }
+    // Each disjoint run consumes an op of the admitted u32-length code.
+    // Fused/negated tables contain at most one entry per such run.
     for (at, pc, mut fused, branch) in runs {
         let unit = &mut program.units[at];
         if let Some(branch) = branch {
@@ -141,6 +144,7 @@ fn run(
     let fused = Fused {
         first: unit.ops[pc],
         operands,
+        // The operand buffer and run loop admit at most two pushes.
         pushes: pushes as u8,
         site,
         call: call as u32,

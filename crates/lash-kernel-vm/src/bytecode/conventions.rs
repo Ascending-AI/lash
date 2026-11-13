@@ -11,7 +11,7 @@ use lash_kernel_value::Type;
 use lash_kernel_value::names::{CallableId, FunctionId, ImportSlot};
 use lash_kernel_value::sites::Unit as SiteUnit;
 
-use super::compile::{Compiler, Entry, Fun, Packing, Result, unsupported, within};
+use super::compile::{Compiler, Entry, Fun, Packing, Result, coordinate, unsupported, within};
 use super::op::Op;
 use super::program::{
     Adapt, Block, CallSite, Callee, Checked, Event, RootCleanup, Unit, UnitId, UnitKind,
@@ -43,16 +43,16 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
     let at = root(compiler, entry)?;
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, await_fn)?;
-    let mark = compiler.mark(&site, &site.statement);
-    let null = compiler.constant(&Literal::Null);
+    let mark = compiler.mark(&site, &site.statement)?;
+    let null = compiler.constant(&Literal::Null)?;
     let Some(mut unit) = compiler.take(at) else {
         return unsupported("a TypeScript entry has no compiled body");
     };
     let returns = unit.ops.len();
-    let fall = unit.ops.len() as u32;
-    append(&mut unit, &[Op::Block(0), Op::Const(null)]);
-    let settle = unit.ops.len() as u32;
-    let call = unit.calls.len() as u32;
+    let fall = coordinate(unit.ops.len(), "ops of one function")?;
+    append(&mut unit, &[Op::Block(0), Op::Const(null)])?;
+    let settle = coordinate(unit.ops.len(), "ops of one function")?;
+    let call = coordinate(unit.calls.len(), "call sites of one function")?;
     unit.calls.push(CallSite {
         callee,
         argc: 1,
@@ -64,8 +64,8 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
     });
     // Settlement runs after the body's handlers have left, like its return:
     // those its frame still holds, never a caller's.
-    append(&mut unit, &[Op::Block(0), Op::TryLeave, Op::Call(call)]);
-    append(&mut unit, &[Op::Block(0), Op::Return]);
+    append(&mut unit, &[Op::Block(0), Op::TryLeave, Op::Call(call)])?;
+    append(&mut unit, &[Op::Block(0), Op::Return])?;
     for op in &mut unit.ops[..returns] {
         match op {
             Op::Return => *op = Op::Jump(settle),
@@ -101,7 +101,7 @@ fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
         };
         return compiler.stub(&site, Some(callable), None, None, argc);
     }
-    let at = compiler.reserve();
+    let at = compiler.reserve()?;
     let kind = match entry.captures {
         Some(_) => UnitKind::Closure(id),
         None => UnitKind::Declared(id),
@@ -117,7 +117,7 @@ fn root(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<UnitId> {
 /// reference engine.
 fn billed(compiler: &mut Compiler<'_>, id: FunctionId, mut g: Fun, argc: u16) -> Result<UnitId> {
     let definition = compiler.def(&id)?;
-    let at = compiler.reserve();
+    let at = compiler.reserve()?;
     g.locals = argc;
     g.leader();
     for value in 0..argc {
@@ -125,10 +125,10 @@ fn billed(compiler: &mut Compiler<'_>, id: FunctionId, mut g: Fun, argc: u16) ->
     }
     let callee = Callee::Unit {
         unit: compiler.body(id, true)?,
-        charge: compiler.charge(id, definition),
+        charge: compiler.charge(id, definition)?,
     };
     let site = g.site();
-    compiler.call(&mut g, callee, argc, site);
+    compiler.call(&mut g, callee, argc, site)?;
     g.emit(Op::Return);
     compiler.seal(g, at, UnitKind::Spawn, argc, Arc::from("spawn"))?;
     Ok(at)
@@ -166,12 +166,12 @@ fn clean_up(
     let at = root(compiler, entry)?;
     let site = Fun::new(SiteUnit::Library(id), false, false, None);
     let callee = compiler.callee(&site, cleanup)?;
-    let mark = compiler.mark(&site, &site.statement);
+    let mark = compiler.mark(&site, &site.statement)?;
     let Some(mut unit) = compiler.take(at) else {
         return unsupported("an entry with a run-root cleanup has no compiled body");
     };
     let body = unit.ops.len();
-    let call = unit.calls.len() as u32;
+    let call = coordinate(unit.calls.len(), "call sites of one function")?;
     unit.calls.push(CallSite {
         callee,
         argc: 0,
@@ -183,15 +183,15 @@ fn clean_up(
     });
     let mut paths = [0u32; 3];
     for (path, departure) in paths.iter_mut().zip([Op::Return, Op::Fall, Op::Raise]) {
-        *path = unit.ops.len() as u32;
+        *path = coordinate(unit.ops.len(), "ops of one function")?;
         // A return or a fall leaves the handlers its frame still holds,
         // never a caller's; a raise reaches the cleanup only once none of
         // its own is left.
         match departure {
-            Op::Raise => append(&mut unit, &[Op::Block(0), Op::Call(call)]),
-            _ => append(&mut unit, &[Op::Block(0), Op::TryLeave, Op::Call(call)]),
+            Op::Raise => append(&mut unit, &[Op::Block(0), Op::Call(call)])?,
+            _ => append(&mut unit, &[Op::Block(0), Op::TryLeave, Op::Call(call)])?,
         }
-        append(&mut unit, &[Op::Block(0), Op::Pop, departure]);
+        append(&mut unit, &[Op::Block(0), Op::Pop, departure])?;
     }
     let [returned, fell, raised] = paths;
     for op in &mut unit.ops[..body] {
@@ -202,7 +202,7 @@ fn clean_up(
         }
     }
     unit.cleanup = Some(RootCleanup {
-        body: body as u32,
+        body: coordinate(body, "ops of one function")?,
         raised,
     });
     compiler.put(at, unit);
@@ -210,19 +210,21 @@ fn clean_up(
 }
 
 /// Appends one zero-event block without changing any existing coordinate.
-fn append(unit: &mut Unit, ops: &[Op]) {
-    let start = unit.ops.len() as u32;
+fn append(unit: &mut Unit, ops: &[Op]) -> Result<()> {
+    let end = coordinate(unit.ops.len() + ops.len(), "ops of one function")?;
+    let start = coordinate(unit.ops.len(), "ops of one function")?;
     unit.ops.extend_from_slice(ops);
-    unit.ops[start as usize] = Op::Block(unit.blocks.len() as u32);
+    unit.ops[start as usize] = Op::Block(coordinate(unit.blocks.len(), "blocks of one function")?);
     unit.event
         .extend(std::iter::repeat_n(Event::default(), ops.len()));
     unit.step.extend(std::iter::repeat_n(false, ops.len()));
     unit.through.extend(std::iter::repeat_n(0, ops.len()));
     unit.blocks.push(Block {
         start,
-        end: unit.ops.len() as u32,
+        end,
         charge: Some(0),
     });
+    Ok(())
 }
 
 /// Decodes TS and packed Python source parameters before packing the
@@ -450,7 +452,9 @@ impl Compiler<'_> {
             }
             StartConvention::TsArgsList { .. } => Some(Adapt::Listed),
             StartConvention::PyArgsList { positional } => Some(Adapt::Python {
-                positional: u16::try_from(positional).unwrap_or(u16::MAX),
+                // Adaptation only reads min(positional, operands). Every call's
+                // operands passed lower::passed, so this exact clamp preserves it.
+                positional: positional.min(u32::from(u16::MAX)) as u16,
             }),
         };
         let unit = match self.scope.entries.get(export) {
@@ -493,7 +497,7 @@ impl Compiler<'_> {
                 return None;
             };
             Some(Packing {
-                positional: usize::try_from(positional).unwrap_or(usize::MAX),
+                positional: positional as usize,
                 names: (descriptor.signature.params.iter())
                     .map(|param| param.name.clone())
                     .collect(),

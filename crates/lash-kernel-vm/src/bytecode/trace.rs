@@ -565,11 +565,13 @@ impl Step {
     }
 
     #[inline(always)]
+    // Step::new packs small in bits 16..32; the cast extracts that field.
     pub fn small(self) -> u16 {
         (self.head >> 16) as u16
     }
 
     #[inline(always)]
+    // Step::new packs a in the low 32 bits and b in the high 32 bits.
     pub fn a(self) -> u32 {
         self.tail as u32
     }
@@ -582,6 +584,7 @@ impl Step {
     /// The same step with kind `kind` and `small`.
     pub fn with(self, kind: Kind, small: u16) -> Self {
         Self::new(kind as usize, self.pc(), small, self.a(), self.b())
+            // fee_base masks two bits, so its value is at most 3.
             .with_fee_base(self.fee_base() as u8)
     }
 }
@@ -675,6 +678,7 @@ fn step(unit: &Unit, micro: Micro) -> Step {
             };
             let inputs = &unit.trace_operands[n as usize];
             let kind = match operation.and_then(|op| OPERATIONS.iter().position(|&at| at == op)) {
+                // ScalarOp has twelve variants (0..=11); shape is 0..=6 and then 0..=3.
                 Some(op) if inputs.direct => word_kind(op as u8, inputs.shape, then),
                 _ if inputs.direct && fused.words.is_none() => OTHER + usize::from(inputs.shape),
                 _ => Kind::Fused as usize,
@@ -701,7 +705,9 @@ fn step(unit: &Unit, micro: Micro) -> Step {
 /// document's, when it is linked, or the library's, when it is
 /// published. A library body's validated ops stay what inlining and
 /// validation read (`Unit::original`).
-pub(crate) fn trace(program: &mut Program) {
+// Compiler::constant/inline::take admit the combined constant pool below LIB.
+// Compiler::sealed and inline::expand admit each op coordinate before tracing.
+pub(crate) fn trace(program: &mut Program) -> super::compile::Result<()> {
     let own = if program.tag == LIB {
         program.constants.len()
     } else {
@@ -731,8 +737,9 @@ pub(crate) fn trace(program: &mut Program) {
         }
     };
     for unit in &mut program.units {
-        trace_unit(unit, &readable, &immediate);
+        trace_unit(unit, &readable, &immediate)?;
     }
+    Ok(())
 }
 
 /// Builds `unit`'s traces and puts each in place of its head's op. A
@@ -742,7 +749,7 @@ pub(crate) fn trace_unit(
     unit: &mut Unit,
     readable: &impl Fn(u32) -> bool,
     immediate: &impl Fn(u32) -> Option<Value>,
-) {
+) -> super::compile::Result<()> {
     unit.trace_operands = unit
         .fused
         .iter()
@@ -763,7 +770,7 @@ pub(crate) fn trace_unit(
         // through its native's call, so a line is counted up to it. Any
         // other line leaves the head as it was.
         let line = &micros[start..];
-        let mut saved = 0;
+        let mut saved = 0usize;
         for micro in line {
             match micro {
                 Micro::Exit { .. } => break,
@@ -790,6 +797,9 @@ pub(crate) fn trace_unit(
             micros.truncate(start);
             continue;
         }
+        super::compile::coordinate(micros.len(), "trace steps of one function")?;
+        // One trace per head, and each trace contains an exit: these
+        // indices are below the admitted micro length (NONE is reserved).
         at[head] = traces.len() as u32;
         traces.push(Trace {
             block,
@@ -825,6 +835,7 @@ pub(crate) fn trace_unit(
     unit.traces = traces;
     let steps: Vec<_> = micros.into_iter().map(|micro| step(unit, micro)).collect();
     bundle(unit, steps);
+    Ok(())
 }
 
 /// Prefix kinds are encoded at build time. Common sequences select a
@@ -905,6 +916,7 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
                 step.a(),
                 redirect(step.b()),
             )
+            // fee_base masks two bits, so its value is at most 3.
             .with_fee_base(step.fee_base() as u8);
         }
     }
@@ -917,6 +929,7 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
                 Step::new(
                     bundle_kind(steps[main].kind(), &steps[first..main]),
                     steps[first].pc(),
+                    // end starts at main + 1 and may include one trailing jump.
                     (end - main - 1) as u16,
                     first as u32,
                     main as u32,

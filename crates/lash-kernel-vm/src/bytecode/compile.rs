@@ -33,10 +33,9 @@ use super::library::{LIB, LibCode, SharedLibrary};
 use super::names::Names;
 use super::op::Op;
 use super::program::{
-    ActionSite, Block, CallSite, Callee, Capture, Checked, ClosureSite, Constant, Event,
-    FunctionEntry, LoopMark, LoopSite, Mark, NativeEntry, Point, Program, Unit, UnitId, UnitKind,
+    Block, CallSite, Callee, Capture, Checked, ClosureSite, Constant, FunctionEntry, Mark,
+    NativeEntry, Program, Unit, UnitId, UnitKind,
 };
-use super::site_tables::Path;
 use crate::functions::{MachineFunction, machine_function};
 
 /// A document the core does not compile. Admission has checked the
@@ -63,6 +62,30 @@ pub(crate) fn within(count: usize, what: &str) -> Result<u16> {
             u16::MAX
         )),
     }
+}
+
+/// A bytecode coordinate or count. Tables may end at u32::MAX, but no
+/// index may name that sentinel (trace::NONE).
+pub(crate) fn coordinate(count: usize, what: &str) -> Result<u32> {
+    u32::try_from(count).map_err(|_| {
+        Unsupported(format!(
+            "{count} {what}, more than the bytecode core's limit of {}",
+            u32::MAX
+        ))
+    })
+}
+
+/// A shared-pool index, leaving bit 31 for library::LIB.
+pub(crate) fn pool(base: usize, offset: usize, what: &str) -> Result<u32> {
+    let count = base
+        .checked_add(offset)
+        .ok_or_else(|| Unsupported(format!("too many {what}")))?;
+    if count >= LIB as usize {
+        return unsupported(format!(
+            "{count} {what}, at the bytecode core's limit of {LIB}"
+        ));
+    }
+    coordinate(count, what)
 }
 
 /// Compiles `document`, whose library functions `registry` holds, as
@@ -101,12 +124,12 @@ pub(crate) fn compile(
     // function value of the root Link may enter as an argument, a host
     // binding or a delivery, or be held across a cold reopen, without its
     // code naming it.
-    compiler.declare_all(true);
+    compiler.declare_all(true)?;
     for (other, document) in &linked.others {
         if *other != link {
             compiler.links.insert(*other, document);
             compiler.enter_link(*other)?;
-            compiler.declare_all(true);
+            compiler.declare_all(true)?;
         }
     }
     for identity in &linked.closures {
@@ -116,7 +139,7 @@ pub(crate) fn compile(
         compiler.enter_link(callable.link)?;
         let from = compiler.units.len();
         if let Err(error) = compiler.trampoline(callable.function) {
-            compiler.refuse_from(from, &error);
+            compiler.refuse_from(from, &error)?;
         }
     }
     compiler.finish(main)
@@ -162,252 +185,8 @@ pub struct Linked<'a> {
     pub helpers: Option<&'a BuildHelpers>,
 }
 
-/// Where a read or write of a name goes.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Var {
-    Local(u16),
-    Cell(u16),
-    Capture(u16),
-    Global(u16),
-}
-
-/// A loop being lowered: where `continue` goes and the jumps `break`
-/// leaves to patch.
-pub(crate) struct LoopCtx {
-    pub head: u32,
-    pub breaks: Vec<usize>,
-}
-
-/// A scope a departure (`break`, `continue`, `return`) leaves.
-#[derive(Clone)]
-pub(crate) enum Scope {
-    Handler,
-    Catch(u32),
-    /// A finally block and its site path.
-    Finally(Arc<[Stmt]>, Vec<u32>),
-}
-
-/// One unit while it is lowered.
-pub(crate) struct Fun {
-    pub ops: Vec<Op>,
-    pub event: Vec<Event>,
-    pub step: Vec<bool>,
-    pending: Event,
-    /// The next op starts a step (a statement's start).
-    pub mark: bool,
-    /// What an observer sees before the next op: a statement start.
-    pub start: Option<Point>,
-    pub points: Vec<(u32, Point)>,
-    pub slots: HashMap<Name, u16>,
-    pub locals: u16,
-    pub boxed: BTreeSet<Name>,
-    pub captures: HashMap<Name, u16>,
-    pub capture_names: Vec<Name>,
-    pub loops: Vec<LoopCtx>,
-    /// Open handlers and finally blocks, innermost last, each with the
-    /// loop depth it opened at.
-    pub scopes: Vec<(usize, Scope)>,
-    pub main: bool,
-    /// The unit runs inside a covered library extent (`K-CHG-007`).
-    pub covered: bool,
-    /// The library function whose body (or a closure in it) this is;
-    /// `None` in the document's own code (`K-LIB-010`).
-    pub owner: Option<FunctionId>,
-    pub records: Vec<Arc<[u32]>>,
-    pub closures: Vec<ClosureSite>,
-    pub calls: Vec<CallSite>,
-    pub loop_sites: Vec<LoopSite>,
-    pub actions: Vec<ActionSite>,
-    pub action_marks: Vec<Arc<Mark>>,
-    /// The statement being lowered.
-    pub statement: Site,
-    /// The loops that enclose the code being lowered, outermost first.
-    pub enclosing: Vec<LoopMark>,
-    pub site: SiteUnit,
-    pub path: Vec<u32>,
-    /// The expression each op lowers, by path (`site_tables`).
-    pub origin: Vec<Path>,
-    /// How much of each op's origin is the statement it runs in.
-    pub stated: Vec<u16>,
-    /// Where each slot was declared, and the variable it holds if any
-    /// (`site_tables`).
-    pub declared: Vec<(Path, Option<Name>)>,
-}
-
-impl Fun {
-    pub(crate) fn new(
-        site: SiteUnit,
-        main: bool,
-        covered: bool,
-        owner: Option<FunctionId>,
-    ) -> Self {
-        Self {
-            ops: Vec::new(),
-            event: Vec::new(),
-            step: Vec::new(),
-            pending: Event::default(),
-            mark: false,
-            start: None,
-            points: Vec::new(),
-            slots: HashMap::new(),
-            locals: 0,
-            boxed: BTreeSet::new(),
-            captures: HashMap::new(),
-            capture_names: Vec::new(),
-            loops: Vec::new(),
-            scopes: Vec::new(),
-            main,
-            covered,
-            owner,
-            records: Vec::new(),
-            closures: Vec::new(),
-            calls: Vec::new(),
-            loop_sites: Vec::new(),
-            actions: Vec::new(),
-            action_marks: Vec::new(),
-            statement: Site::new(site.clone(), Vec::new()),
-            enclosing: Vec::new(),
-            site,
-            path: Vec::new(),
-            origin: Vec::new(),
-            stated: Vec::new(),
-            declared: Vec::new(),
-        }
-    }
-
-    /// The site of the node being lowered.
-    pub(crate) fn site(&self) -> Site {
-        Site::new(self.site.clone(), self.path.clone())
-    }
-
-    /// Whether the unit is the document's own code, which an observer
-    /// sees (`observe/`): library code (`K-LIB-010`) never is.
-    pub(crate) fn observed(&self) -> bool {
-        !self.covered && self.owner.is_none()
-    }
-
-    /// Records what an observer sees before the op at `at`.
-    pub(crate) fn point(&mut self, at: u32, point: Point) {
-        if self.observed() {
-            self.points.push((at, point));
-        }
-    }
-
-    /// `n` one-unit events of uncovered code (statement, expression node,
-    /// atom, loop test), billed by the next op.
-    pub(crate) fn units(&mut self, n: u64) {
-        if !self.covered {
-            self.pending.units = self.pending.units.saturating_add(n);
-        }
-    }
-
-    /// One-unit events that charge in covered code too: the atoms of a
-    /// `perform` or `spawn` (`K-CHG-007`).
-    pub(crate) fn always(&mut self, n: u64) {
-        self.pending.units = self.pending.units.saturating_add(n);
-    }
-
-    /// A `metered N` loop test's units: one declared event of `n`, billed
-    /// whole and in covered code too (`K-CHG-007`).
-    pub(crate) fn metered(&mut self, n: u64) {
-        self.pending.atomic = self.pending.atomic.saturating_add(n);
-    }
-
-    /// A construction's members, one atomic event on the next op.
-    pub(crate) fn members(&mut self, n: u64) {
-        if !self.covered {
-            self.pending.atomic = self.pending.atomic.saturating_add(n);
-        }
-    }
-
-    /// Emits `op`, which bills nothing, leaving pending events and the
-    /// step mark to the op after it.
-    pub(crate) fn quiet(&mut self, op: Op) {
-        self.originate();
-        self.ops.push(op);
-        self.event.push(Event::default());
-        self.step.push(false);
-    }
-
-    pub(crate) fn emit(&mut self, op: Op) -> usize {
-        if let Some(point) = self.start.take() {
-            self.points.push((self.here(), point));
-        }
-        self.originate();
-        self.ops.push(op);
-        self.event.push(std::mem::take(&mut self.pending));
-        self.step.push(std::mem::take(&mut self.mark));
-        self.ops.len() - 1
-    }
-
-    /// Records the path of the op about to be emitted, sharing the last
-    /// op's where it is the same.
-    fn originate(&mut self) {
-        let path = match self.origin.last() {
-            Some(last) if **last == *self.path => Arc::clone(last),
-            _ => Path::from(self.path.as_slice()),
-        };
-        self.origin.push(path);
-        let stated = if self.path.starts_with(&self.statement.path) {
-            self.statement.path.len()
-        } else {
-            0
-        };
-        self.stated.push(stated as u16);
-    }
-
-    /// A block starts here; events still pending are billed before it.
-    pub(crate) fn leader(&mut self) {
-        if !self.pending.is_none() || self.mark {
-            self.emit(Op::Nop);
-        }
-        if !matches!(self.ops.last(), Some(Op::Block(_))) {
-            self.emit(Op::Block(0));
-        }
-    }
-
-    /// Starts a block and gives its head, a jump target.
-    pub(crate) fn label(&mut self) -> u32 {
-        self.leader();
-        self.here() - 1
-    }
-
-    pub(crate) fn here(&self) -> u32 {
-        self.ops.len() as u32
-    }
-
-    /// Declares `name` in the innermost scope (`K-FORM-003`): a new
-    /// variable in a slot of its own, shadowing any outer one until the
-    /// scope ends.
-    pub(crate) fn declare(&mut self, name: &Name) -> u16 {
-        let slot = self.temp();
-        self.slots.insert(name.clone(), slot);
-        self.declared[usize::from(slot)].1 = Some(name.clone());
-        slot
-    }
-
-    /// A hidden local.
-    /// Past the core's limit the slot saturates, and the unit is refused
-    /// when it is sealed ([`Compiler::seal`]), never wrapped.
-    pub(crate) fn temp(&mut self) -> u16 {
-        let slot = self.locals;
-        self.locals = self.locals.saturating_add(1);
-        self.declared.push((Path::from(self.path.as_slice()), None));
-        slot
-    }
-
-    /// Patches the target of the jump at `at`.
-    pub(crate) fn patch(&mut self, at: usize, to: u32) {
-        self.ops[at] = match self.ops[at] {
-            Op::Jump(_) => Op::Jump(to),
-            Op::JumpIfFalse(_) => Op::JumpIfFalse(to),
-            Op::WhileFalse(_) => Op::WhileFalse(to),
-            Op::TryEnter(_) => Op::TryEnter(to),
-            Op::CatchEnter(_) => Op::CatchEnter(to),
-            other => other,
-        };
-    }
-}
+mod fun;
+pub(crate) use fun::{Fun, LoopCtx, Scope, Var};
 
 /// What the compiler has made for one Link: a function id, a function
 /// literal or a helper's perform means that Link's own, so each Link's
@@ -646,12 +425,12 @@ impl<'a> Compiler<'a> {
 
     /// What the library's compiler keeps for its next request. A unit a
     /// failed compile reserved and left refuses when it runs.
-    pub(crate) fn into_tables(mut self) -> Tables {
+    pub(crate) fn into_tables(mut self) -> Result<Tables> {
         self.refuse_from(
             0,
             &Unsupported("the library left this unit uncompiled".into()),
-        );
-        Tables {
+        )?;
+        Ok(Tables {
             scope: self.scope,
             functions: self.functions,
             occurrences: self.occurrences,
@@ -663,7 +442,7 @@ impl<'a> Compiler<'a> {
             failed_functions: self.failed_functions,
             fresh_sites: self.fresh_sites,
             fresh_trampolines: self.fresh_trampolines,
-        }
+        })
     }
 
     /// Whether the compiler is compiling the library.
@@ -764,7 +543,7 @@ impl<'a> Compiler<'a> {
     /// `compile`, gives each its trampoline. One the core cannot compile
     /// is a unit that refuses when it runs (contract §7), as is every
     /// unit its attempt reserved.
-    fn declare_all(&mut self, compile: bool) {
+    fn declare_all(&mut self, compile: bool) -> Result<()> {
         let document = self.document;
         for id in document.functions.keys() {
             self.declares.insert(CallableId {
@@ -781,23 +560,25 @@ impl<'a> Compiler<'a> {
             }
             let from = self.units.len();
             if let Err(error) = self.trampoline(*id) {
-                self.refuse_from(from, &error);
+                self.refuse_from(from, &error)?;
             }
         }
+        Ok(())
     }
 
     /// Every unit reserved from `from` and left uncompiled refuses with
     /// `error` when it runs.
-    fn refuse_from(&mut self, from: usize, error: &Unsupported) {
+    fn refuse_from(&mut self, from: usize, error: &Unsupported) -> Result<()> {
         for at in from..self.units.len() {
             if self.units[at].is_none() {
-                self.units[at] = Some(self.unavailable(&error.0));
+                self.units[at] = Some(self.unavailable(&error.0)?);
             }
         }
+        Ok(())
     }
 
     fn main(&mut self) -> Result<UnitId> {
-        let at = self.reserve();
+        let at = self.reserve()?;
         let empty = Vec::new();
         let block = self.document.main.as_ref().unwrap_or(&empty);
         let mut f = Fun::new(SiteUnit::Main, true, false, None);
@@ -819,7 +600,7 @@ impl<'a> Compiler<'a> {
                 // A unit's tables are built from its final code: a
                 // convention may add to a unit after it was sealed.
                 Some(mut unit) => {
-                    unit.sites = super::site_tables::build(&unit);
+                    unit.sites = super::site_tables::build(&unit)?;
                     units.push(unit);
                 }
                 None => return unsupported(format!("unit {at} was reserved and never compiled")),
@@ -834,6 +615,7 @@ impl<'a> Compiler<'a> {
         others.sort_unstable_by_key(|link| *link.as_bytes());
         let mut links = vec![self.root];
         links.extend(others);
+        coordinate(links.len(), "linked documents")?;
         Ok(Program {
             units,
             constants: self.constants,
@@ -855,9 +637,10 @@ impl<'a> Compiler<'a> {
         })
     }
 
-    pub(crate) fn reserve(&mut self) -> UnitId {
+    pub(crate) fn reserve(&mut self) -> Result<UnitId> {
+        let at = self.tag | pool(self.base.units, self.units.len(), "units")?;
         self.units.push(None);
-        self.tag | (self.base.units + self.units.len() - 1) as UnitId
+        Ok(at)
     }
 
     /// A function's definition: the document's own, else the library's.
@@ -875,9 +658,9 @@ impl<'a> Compiler<'a> {
 
     // --- Constants.
 
-    pub(crate) fn constant(&mut self, literal: &Literal) -> u32 {
+    pub(crate) fn constant(&mut self, literal: &Literal) -> Result<u32> {
         if let Some(at) = self.scope.immediates.get(literal) {
-            return *at;
+            return Ok(*at);
         }
         let constant = match literal {
             Literal::Null => Constant::Immediate(Value::Null),
@@ -898,27 +681,25 @@ impl<'a> Compiler<'a> {
                 function: *function,
             }),
         };
-        let at = self.tag | (self.base.constants + self.constants.len()) as u32;
+        let at = self.tag | pool(self.base.constants, self.constants.len(), "constants")?;
         self.constants.push(constant);
         self.scope.immediates.insert(literal.clone(), at);
-        at
+        Ok(at)
     }
 
     /// A text constant: a field name.
-    pub(crate) fn text(&mut self, text: &str) -> u32 {
+    pub(crate) fn text(&mut self, text: &str) -> Result<u32> {
         self.constant(&Literal::Text(text.to_owned()))
     }
 
-    pub(crate) fn global(&mut self, name: &Name) -> u16 {
+    pub(crate) fn global(&mut self, name: &Name) -> Result<u16> {
         if let Some(at) = self.global_ids.get(name) {
-            return *at;
+            return Ok(*at);
         }
-        // Past the core's limit the id saturates, and the unit naming it
-        // is refused when it is sealed ([`Compiler::seal`]).
-        let at = u16::try_from(self.globals.len()).unwrap_or(u16::MAX);
+        let at = within(self.globals.len() + 1, "global names of one program")? - 1;
         self.globals.push(name.clone());
         self.global_ids.insert(name.clone(), at);
-        at
+        Ok(at)
     }
 
     // --- Units.
@@ -927,7 +708,7 @@ impl<'a> Compiler<'a> {
     /// a closure it makes shares: their variables live in cells.
     fn declare(&mut self, f: &mut Fun, params: &[Name], block: &[Stmt]) -> Result<()> {
         for param in params {
-            f.declare(param);
+            f.declare(param)?;
         }
         let (declared, closures) = {
             let mut closure_free = |closure| self.free_names(closure);
@@ -1090,7 +871,7 @@ impl<'a> Compiler<'a> {
                 return Err(error);
             }
         }
-        let at = self.reserve();
+        let at = self.reserve()?;
         self.scope.bodies.insert((id, covered), at);
         let kind = if self.document.functions.contains_key(&id) {
             UnitKind::Declared(id)
@@ -1102,7 +883,7 @@ impl<'a> Compiler<'a> {
             Err(error) => {
                 self.scope.bodies.remove(&(id, covered));
                 // The reserved index keeps a unit that says why it cannot run.
-                let unit = self.unavailable(&error.0);
+                let unit = self.unavailable(&error.0)?;
                 self.put(at, unit);
                 if self.in_library() {
                     self.failed.insert((id, covered), error.clone());
@@ -1115,19 +896,19 @@ impl<'a> Compiler<'a> {
     /// The unit build helper `id` compiles to when the opening build image
     /// lacks it: an `Unavailable` op owned by `id` (contract §7). `None`
     /// for a function the document declares or the image holds.
-    fn missing(&mut self, id: FunctionId) -> Option<UnitId> {
+    fn missing(&mut self, id: FunctionId) -> Result<Option<UnitId>> {
         if !self.lacks(&id) {
-            return None;
+            return Ok(None);
         }
         if let Some(unit) = self.scope.missing.get(&id) {
-            return Some(*unit);
+            return Ok(Some(*unit));
         }
-        let at = self.reserve();
-        let mut unit = self.unavailable(&format!("build helper {id} is unavailable"));
+        let at = self.reserve()?;
+        let mut unit = self.unavailable(&format!("build helper {id} is unavailable"))?;
         unit.owner = Some(id);
         self.put(at, unit);
         self.scope.missing.insert(id, at);
-        Some(at)
+        Ok(Some(at))
     }
 
     /// Whether `id` is a build helper the opening build image lacks.
@@ -1139,8 +920,8 @@ impl<'a> Compiler<'a> {
 
     /// A unit that refuses when it runs: a body the core cannot compile,
     /// reached only from a path that does not run it (contract §7).
-    fn unavailable(&mut self, why: &str) -> Unit {
-        let reason = self.text(why);
+    fn unavailable(&mut self, why: &str) -> Result<Unit> {
+        let reason = self.text(why)?;
         let mut f = Fun::new(SiteUnit::Main, false, true, None);
         f.leader();
         f.emit(Op::Unavailable(reason));
@@ -1152,32 +933,35 @@ impl<'a> Compiler<'a> {
         &mut self,
         id: FunctionId,
         definition: &FunctionDefinition,
-    ) -> Option<u32> {
+    ) -> Result<Option<u32>> {
         if let Some(at) = self.scope.charge_ids.get(&id) {
-            return Some(*at);
+            return Ok(Some(*at));
         }
-        let formula = charge_tables::completion(definition, false)?;
-        let at = self.formula(formula, definition);
+        let Some(formula) = charge_tables::completion(definition, false) else {
+            return Ok(None);
+        };
+        let at = self.formula(formula, definition)?;
         if let Some(charge) = self.charges.last_mut() {
             charge.function = Some(id);
         }
         self.scope.charge_ids.insert(id, at);
-        Some(at)
+        Ok(Some(at))
     }
 
     fn formula(
         &mut self,
         formula: &lash_kernel_doc::Formula,
         definition: &FunctionDefinition,
-    ) -> u32 {
+    ) -> Result<u32> {
         let params = definition
             .signature
             .params
             .iter()
             .map(|param| param.name.clone())
             .collect();
-        self.charges.push(Charge::new(formula, params));
-        self.tag | (self.base.charges + self.charges.len() - 1) as u32
+        let at = self.tag | pool(self.base.charges, self.charges.len(), "completion formulas")?;
+        self.charges.push(Charge::new(formula, params)?);
+        Ok(at)
     }
 
     /// What a call of library or declared function `id` from `f` calls.
@@ -1193,7 +977,7 @@ impl<'a> Compiler<'a> {
 
     /// What a call of `id` from code `covered` or not calls.
     fn called(&mut self, id: FunctionId, covered: bool) -> Result<Callee> {
-        if let Some(unit) = self.missing(id) {
+        if let Some(unit) = self.missing(id)? {
             return Ok(Callee::Unit { unit, charge: None });
         }
         let definition = self.def(&id)?;
@@ -1201,7 +985,7 @@ impl<'a> Compiler<'a> {
             let charge = if covered {
                 None
             } else {
-                self.charge(id, definition)
+                self.charge(id, definition)?
             };
             return Ok(Callee::Machine {
                 function,
@@ -1230,14 +1014,14 @@ impl<'a> Compiler<'a> {
                 })
             }
             None if definition.body().is_none() => Ok(Callee::Unit {
-                unit: self.unlinked(id),
+                unit: self.unlinked(id)?,
                 charge: None,
             }),
             None => {
                 let charge = if covered {
                     None
                 } else {
-                    self.charge(id, definition)
+                    self.charge(id, definition)?
                 };
                 Ok(Callee::Unit {
                     unit: self.body(id, true)?,
@@ -1249,16 +1033,16 @@ impl<'a> Compiler<'a> {
 
     /// A native the build declares and does not link: a unit that refuses
     /// when it runs, so code that never calls it still compiles.
-    fn unlinked(&mut self, id: FunctionId) -> UnitId {
+    fn unlinked(&mut self, id: FunctionId) -> Result<UnitId> {
         if let Some(unit) = self.scope.missing.get(&id) {
-            return *unit;
+            return Ok(*unit);
         }
-        let at = self.reserve();
-        let mut unit = self.unavailable(&format!("native {id} is not linked in this build"));
+        let at = self.reserve()?;
+        let mut unit = self.unavailable(&format!("native {id} is not linked in this build"))?;
         unit.owner = Some(id);
         self.put(at, unit);
         self.scope.missing.insert(id, at);
-        at
+        Ok(at)
     }
 
     fn native(
@@ -1270,13 +1054,14 @@ impl<'a> Compiler<'a> {
         if let Some(at) = self.scope.native_ids.get(&id) {
             return Ok(*at);
         }
-        let Some(charge) = self.charge(id, definition) else {
+        let Some(charge) = self.charge(id, definition)? else {
             return unsupported(format!("native {id} has no completion formula"));
         };
         let guard = definition
             .guard
             .as_ref()
-            .map(|guard| self.formula(&guard.limit, definition));
+            .map(|guard| self.formula(&guard.limit, definition))
+            .transpose()?;
         let scalar = match native
             .specialization()
             .inline
@@ -1305,7 +1090,7 @@ impl<'a> Compiler<'a> {
             .and_then(|registered| registered.plan())
             .and_then(|plan| plan.template.as_ref())
             .map_or(0, |template| template.depth);
-        let at = self.tag | (self.base.natives + self.natives.len()) as u32;
+        let at = self.tag | pool(self.base.natives, self.natives.len(), "natives")?;
         self.natives.push(NativeEntry {
             function: id,
             name: Arc::from(definition.name.as_str()),
@@ -1354,13 +1139,13 @@ impl<'a> Compiler<'a> {
         if let Some(error) = self.failed_functions.get(&id) {
             return Err(error.clone());
         }
-        if let Some(unit) = self.missing(id) {
+        if let Some(unit) = self.missing(id)? {
             self.functions.insert(callable, unit);
             self.fresh(id, unit);
             return Ok(());
         }
         let definition = self.def(&id)?;
-        let at = self.reserve();
+        let at = self.reserve()?;
         self.functions.insert(callable, at);
         self.fresh(id, at);
         if let Err(error) = self.trampoline_body(id, definition, at) {
@@ -1411,11 +1196,11 @@ impl<'a> Compiler<'a> {
         }
         let site = f.site();
         let callee = self.callee(&f, id)?;
-        self.call(&mut f, callee, argc, site);
+        self.call(&mut f, callee, argc, site)?;
         f.emit(Op::Return);
         let name = Arc::from(format!("&{}", definition.name.as_str()));
         // The value's call is the one its trampoline makes.
-        let mut unit = self.sealed(f, UnitKind::Body(id), argc, name);
+        let mut unit = self.sealed(f, UnitKind::Body(id), argc, name)?;
         unit.call = false;
         self.put(at, unit);
         Ok(())
@@ -1464,9 +1249,15 @@ impl<'a> Compiler<'a> {
 
     /// Emits a call through `callee` with `argc` arguments on the stack. A
     /// call that pushes a frame ends its block.
-    pub(crate) fn call(&mut self, f: &mut Fun, callee: Callee, argc: u16, site: Site) {
-        let at = f.calls.len() as u32;
-        let mark = self.mark(f, &site);
+    pub(crate) fn call(
+        &mut self,
+        f: &mut Fun,
+        callee: Callee,
+        argc: u16,
+        site: Site,
+    ) -> Result<()> {
+        let at = coordinate(f.calls.len(), "call sites of one function")?;
+        let mark = self.mark(f, &site)?;
         f.calls.push(CallSite {
             callee,
             argc,
@@ -1480,39 +1271,48 @@ impl<'a> Compiler<'a> {
         if !matches!(callee, Callee::Native { .. } | Callee::Machine { .. }) {
             f.leader();
         }
+        Ok(())
     }
 
     /// A call action at `site`: [`Self::call`], its entries counted
     /// (`K-EFF-008`).
-    pub(crate) fn entered_call(&mut self, f: &mut Fun, callee: Callee, argc: u16, site: Site) {
-        self.call(f, callee, argc, site);
+    pub(crate) fn entered_call(
+        &mut self,
+        f: &mut Fun,
+        callee: Callee,
+        argc: u16,
+        site: Site,
+    ) -> Result<()> {
+        self.call(f, callee, argc, site)?;
         if let Some(call) = f.calls.last_mut() {
             call.entry = Some(call.mark.occurrence);
         }
+        Ok(())
     }
 
     /// Where `f` stands at the call or action at `site`.
-    pub(crate) fn mark(&mut self, f: &Fun, site: &Site) -> Arc<Mark> {
-        Arc::new(Mark {
+    pub(crate) fn mark(&mut self, f: &Fun, site: &Site) -> Result<Arc<Mark>> {
+        Ok(Arc::new(Mark {
             statement: f.statement.clone(),
             loops: f.enclosing.iter().cloned().collect(),
-            occurrence: self.occurrence(site),
-        })
+            occurrence: self.occurrence(site)?,
+        }))
     }
 
     /// The occurrence counter of the call or action at `site`: the
     /// library's for a site in library code, whichever Link counts it.
-    fn occurrence(&mut self, site: &Site) -> u32 {
+    fn occurrence(&mut self, site: &Site) -> Result<u32> {
         if let SiteUnit::Library(id) = &site.unit
             && let Some(library) = self.library_of(id)
         {
-            return library
-                .request(self.registry, self.available, |library| {
-                    Ok(library.occurrence(site))
-                })
-                .unwrap_or(self.occurrences.len() as u32);
+            return library.request(self.registry, self.available, |library| {
+                library.occurrence(site)
+            });
         }
-        let next = self.tag | self.occurrences.len() as u32;
+        if let Some(at) = self.occurrences.get(&(self.link, site.clone())) {
+            return Ok(*at);
+        }
+        let next = self.tag | pool(0, self.occurrences.len(), "occurrence sites")?;
         let at = *self
             .occurrences
             .entry((self.link, site.clone()))
@@ -1520,7 +1320,7 @@ impl<'a> Compiler<'a> {
         if at == next && self.in_library() {
             self.fresh_sites.push((site.clone(), at));
         }
-        at
+        Ok(at)
     }
 
     /// The names a call through an import of a `PyArgsList` export
@@ -1534,9 +1334,13 @@ impl<'a> Compiler<'a> {
     /// collection is built, is named absent.
     ///
     /// [`Adapt::Python`]: super::program::Adapt::Python
-    pub(crate) fn keywords(&mut self, packing: Option<&Packing>, argc: usize) -> Box<[u32]> {
+    pub(crate) fn keywords(
+        &mut self,
+        packing: Option<&Packing>,
+        argc: usize,
+    ) -> Result<Box<[u32]>> {
         let Some(Packing { positional, names }) = packing else {
-            return Box::default();
+            return Ok(Box::default());
         };
         ((*positional).min(argc)..argc)
             .map(|at| match names.get(at) {
@@ -1563,9 +1367,12 @@ impl<'a> Compiler<'a> {
         if let Some(unit) = self.scope.stubs.get(&key) {
             return Ok(*unit);
         }
-        let at = self.reserve();
+        let at = self.reserve()?;
         self.scope.stubs.insert(key, at);
-        let values = argc + u16::from(callee.is_none());
+        let values = within(
+            usize::from(argc) + usize::from(callee.is_none()),
+            "arguments and callee of one spawn",
+        )?;
         let mut g = Fun::new(site.unit.clone(), false, false, f.owner);
         g.path.clone_from(&site.path);
         g.locals = values;
@@ -1574,6 +1381,8 @@ impl<'a> Compiler<'a> {
         if first > 0 {
             g.emit(Op::Local(0));
         }
+        // within(values) admitted argc plus the optional callee; every
+        // first + at is below values and therefore below u16::MAX.
         for at in 0..argc {
             g.emit(Op::Local(first + at));
         }
@@ -1582,8 +1391,8 @@ impl<'a> Compiler<'a> {
             (None, None) => (Callee::Value, None),
             (Some(callable), None) => (self.callee_at(&g, callable)?, None),
         };
-        let names = self.keywords(packing, usize::from(argc));
-        self.call(&mut g, target, argc, site);
+        let names = self.keywords(packing, usize::from(argc))?;
+        self.call(&mut g, target, argc, site)?;
         if let Some(call) = g.calls.last_mut() {
             call.checked = checked;
             call.names = names;
@@ -1596,12 +1405,12 @@ impl<'a> Compiler<'a> {
     /// A closure made where `f` stands, by its index in `f`'s closure
     /// table: its body is a unit of its own, charged wherever it runs.
     pub(crate) fn closure(&mut self, f: &mut Fun, id: FunctionId) -> Result<u32> {
-        let at = self.reserve();
+        let at = self.reserve()?;
         let (captures, capture_names) =
             match self.function(id, Some(f), None, at, false, UnitKind::Closure(id)) {
                 Ok(found) => found,
                 Err(error) => {
-                    let unit = self.unavailable(&error.0);
+                    let unit = self.unavailable(&error.0)?;
                     self.put(at, unit);
                     return Err(error);
                 }
@@ -1617,7 +1426,7 @@ impl<'a> Compiler<'a> {
                 site: f.site(),
             },
         });
-        let index = f.closures.len() as u32;
+        let index = coordinate(f.closures.len(), "closure sites of one function")?;
         f.closures.push(ClosureSite {
             unit: at,
             identity,
@@ -1635,11 +1444,11 @@ impl<'a> Compiler<'a> {
             return Ok(());
         }
         self.enter_link(callable.link)?;
-        let at = self.reserve();
+        let at = self.reserve()?;
         let kind = UnitKind::Closure(callable.function);
         let saved = Some(identity.capture_names.as_slice());
         if let Err(error) = self.function(callable.function, None, saved, at, false, kind) {
-            let unit = self.unavailable(&error.0);
+            let unit = self.unavailable(&error.0)?;
             self.put(at, unit);
         }
         Ok(())
@@ -1647,9 +1456,8 @@ impl<'a> Compiler<'a> {
 
     // --- Sealing.
 
-    /// Cuts `f` into blocks and stores it at `at`, refusing a unit past
-    /// the core's limit ([`within`]) in locals and temporaries, which
-    /// [`Fun::temp`] saturates, or global names ([`Compiler::global`]).
+    /// Cuts `f` into blocks and stores it at `at`. Slots and globals were
+    /// admitted at allocation, before any op could use their indices.
     pub(crate) fn seal(
         &mut self,
         f: Fun,
@@ -1658,14 +1466,15 @@ impl<'a> Compiler<'a> {
         params: u16,
         name: Arc<str>,
     ) -> Result<()> {
-        within(f.declared.len(), "parameters and locals of one function")?;
-        within(self.globals.len(), "global names of one program")?;
-        let unit = self.sealed(f, kind, params, name);
+        let unit = self.sealed(f, kind, params, name)?;
         self.put(at, unit);
         Ok(())
     }
 
-    fn sealed(&mut self, f: Fun, kind: UnitKind, params: u16, name: Arc<str>) -> Unit {
+    fn sealed(&mut self, f: Fun, kind: UnitKind, params: u16, name: Arc<str>) -> Result<Unit> {
+        coordinate(f.ops.len(), "ops of one function")?;
+        // Every block and op position below is bounded by this admitted length.
+        let captures = within(f.capture_names.len(), "captures of one function")?;
         let Fun {
             mut ops,
             event,
@@ -1687,7 +1496,6 @@ impl<'a> Compiler<'a> {
             stated,
             declared,
             owner,
-            capture_names,
             ..
         } = f;
         // Points are recorded in lowering order; an `if`'s test and a
@@ -1761,7 +1569,7 @@ impl<'a> Compiler<'a> {
             .filter_map(|name| slots.get(name).copied())
             .collect();
         boxed.sort_unstable();
-        Unit {
+        Ok(Unit {
             call: !matches!(kind, UnitKind::Main | UnitKind::Spawn),
             kind,
             link: self.link,
@@ -1769,7 +1577,7 @@ impl<'a> Compiler<'a> {
             steps,
             params,
             locals: locals.max(params),
-            captures: capture_names.len() as u16,
+            captures,
             boxed,
             ops,
             event,
@@ -1786,7 +1594,10 @@ impl<'a> Compiler<'a> {
             name,
             owner,
             site: Site::new(site, path),
-            points,
+            points: points
+                .into_iter()
+                .map(|(at, point)| (at as u32, point))
+                .collect(),
             fused: Vec::new(),
             negated_branches: Vec::new(),
             traces: Vec::new(),
@@ -1801,7 +1612,7 @@ impl<'a> Compiler<'a> {
             declared,
             sites: Default::default(),
             cleanup: None,
-        }
+        })
     }
 
     /// A function call's machine identity, for `brand.built` answered
@@ -1818,6 +1629,81 @@ impl<'a> Compiler<'a> {
             Some(owner) => Literal::Bytes(lash_kernel_doc::Bytes::new(owner.as_bytes().to_vec())),
             None => Literal::Absent,
         };
-        Ok(Some(self.constant(&literal)))
+        Ok(Some(self.constant(&literal)?))
+    }
+}
+
+#[cfg(test)]
+mod limit_laws {
+    use super::super::program::ActionSite;
+    use super::*;
+
+    /// Constants and unit IDs reserve the high bit for library IDs. Exercise
+    /// the actual allocators with a nearly full published pool, without
+    /// allocating billions of unrelated constants or units.
+    #[test]
+    fn pool_growth_refuses_before_aliasing_the_library_tag() {
+        let registry = FunctionRegistry::new();
+        let mut compiler = Compiler::new(
+            &NO_DOCUMENT,
+            &registry,
+            LinkId::from_bytes(NO_LINK),
+            &NO_IMPORTS,
+        );
+        compiler.base.constants = LIB as usize - 1;
+        compiler.base.units = LIB as usize - 1;
+        assert_eq!(compiler.constant(&Literal::Null).unwrap(), LIB - 1);
+        assert!(
+            compiler
+                .constant(&Literal::Bool(true))
+                .unwrap_err()
+                .0
+                .contains("constants")
+        );
+        assert_eq!(compiler.constant(&Literal::Null).unwrap(), LIB - 1);
+        assert_eq!(compiler.reserve().unwrap(), LIB - 1);
+        assert!(compiler.reserve().unwrap_err().0.contains("units"));
+        assert!(pool(usize::MAX, 1, "constants").is_err());
+        assert_eq!(coordinate(u32::MAX as usize, "ops").unwrap(), u32::MAX);
+        assert!(coordinate(u32::MAX as usize + 1, "ops").is_err());
+    }
+    /// Ready continuations retain every operand of an admitted effect, even
+    /// beyond the old eight-bit held-count truncation.
+    #[test]
+    fn effect_role_counts_retain_the_admitted_argument_boundary() {
+        let registry = FunctionRegistry::new();
+        let mut compiler = Compiler::new(
+            &NO_DOCUMENT,
+            &registry,
+            LinkId::from_bytes(NO_LINK),
+            &NO_IMPORTS,
+        );
+        let mut f = Fun::new(SiteUnit::Main, true, false, None);
+        f.leader();
+        for _ in 0..u16::MAX {
+            f.emit(Op::Const(0));
+        }
+        let site = f.site();
+        f.actions.push(ActionSite::Perform {
+            owner: None,
+            slot: ImportSlot(0),
+            argc: u16::MAX,
+            result: lash_kernel_value::Type::Any,
+            then_yield: false,
+            site,
+        });
+        f.emit(Op::Action(0));
+        f.emit(Op::Return);
+        let unit = compiler
+            .sealed(f, UnitKind::Main, 0, Arc::from("effect boundary"))
+            .unwrap();
+        let sites = super::super::site_tables::build(&unit).unwrap();
+        let ready = sites
+            .entries()
+            .iter()
+            .find(|entry| entry.phase == super::super::site_tables::Phase::Ready)
+            .unwrap();
+        assert_eq!(ready.held(), &ready.resume.stack[..]);
+        assert_eq!(ready.held().len(), 65535);
     }
 }

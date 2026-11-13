@@ -1568,3 +1568,434 @@ fn a_long_keyword_name_allocates_nothing_at_the_call() {
     }
     panic!("no bound up to 8192 completes");
 }
+
+#[test]
+fn protocol_locals_refuse_before_slot_arithmetic() {
+    let count = 65535;
+    let public = Signature {
+        params: (0..count)
+            .map(|i| parameter(&format!("k{i}"), Type::Bool, false))
+            .collect(),
+        result: Type::Any,
+    };
+    let open_signature = Signature {
+        params: vec![parameter("value", Type::Any, false)],
+        result: Type::Any,
+    };
+    let open = function(
+        "review.open",
+        open_signature,
+        BTreeMap::new(),
+        vec![Stmt::Return {
+            value: Expr::Variable(Name::new("value")),
+        }],
+    );
+    let mut body = function(
+        "review.locals",
+        public.clone(),
+        BTreeMap::new(),
+        vec![
+            Stmt::For {
+                metered: 1,
+                binding: Name::new("item"),
+                iterable: null(),
+                via: Some(lash_kernel_doc::Protocol {
+                    open: lash_kernel_doc::FunctionTarget::Local(open.identity()),
+                    next: None,
+                    item: None,
+                    check: None,
+                }),
+                body: vec![],
+                else_block: vec![],
+            },
+            returns(true),
+        ],
+    );
+    if let Implementation::Guest { body, .. } = &mut body.implementation {
+        body.functions.insert(open.identity(), open.name.clone());
+    }
+    let export = FunctionExport {
+        function: body.identity(),
+        signature: public.clone(),
+        convention: StartConvention::Direct,
+        asynchronous: false,
+        rest: false,
+    };
+    let program = entry_world(
+        vec![open, body],
+        vec![("entry", export)],
+        vec![("entry", public)],
+        vec![],
+        vec![
+            Stmt::Let {
+                name: Name::new("result"),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Import(ImportSlot(0)),
+                    args: vec![Atom::Literal(Literal::Bool(true)); count],
+                }),
+            },
+            returns(true),
+        ],
+    );
+    let start = CellStart {
+        owner: PageId([8; 32]),
+        target: Target::Main,
+        args: vec![],
+        session: None,
+        modes: BTreeMap::new(),
+        host: vec![],
+    };
+    match KernelMachine::start(program, bounds(), start, Box::new(Pages::default())) {
+        Err(lash_kernel_vm::StartError::Linked { problem }) => {
+            eprintln!("PROTOCOL LOCALS {problem}");
+            assert!(
+                problem.contains("parameters and locals") && problem.contains("limit of 65535")
+            );
+        }
+        Err(other) => panic!("unexpected refusal {other:?}"),
+        Ok(_) => panic!("overlimit locals admitted"),
+    }
+}
+
+/// A Direct body with enough parameters to put its lowered locals at a boundary.
+fn local_limit_program(
+    count: usize,
+    block: Vec<Stmt>,
+    helpers: Vec<FunctionDefinition>,
+) -> Program {
+    let public = Signature {
+        params: (0..count)
+            .map(|i| parameter(&format!("k{i}"), Type::Bool, false))
+            .collect(),
+        result: Type::Any,
+    };
+    let mut body = function("limit.locals", public.clone(), BTreeMap::new(), block);
+    if let Implementation::Guest { body, .. } = &mut body.implementation {
+        body.functions = helpers
+            .iter()
+            .map(|f| (f.identity(), f.name.clone()))
+            .collect();
+    }
+    let export = FunctionExport {
+        function: body.identity(),
+        signature: public.clone(),
+        convention: StartConvention::Direct,
+        asynchronous: false,
+        rest: false,
+    };
+    let mut functions = helpers;
+    functions.push(body);
+    entry_world(
+        functions,
+        vec![("entry", export)],
+        vec![("entry", public)],
+        vec![],
+        vec![Stmt::Return {
+            value: calling(
+                Callee::Import(ImportSlot(0)),
+                vec![Expr::Literal(Literal::Bool(true)); count],
+            ),
+        }],
+    )
+}
+
+fn start_limit_program(program: Program) -> Result<KernelMachine, lash_kernel_vm::StartError> {
+    let start = CellStart {
+        owner: PageId([8; 32]),
+        target: Target::Main,
+        args: vec![],
+        session: None,
+        modes: BTreeMap::new(),
+        host: vec![],
+    };
+    let mut limits = bounds();
+    limits.memory = 1 << 30;
+    limits.charge_limit = 1_000_000;
+    KernelMachine::start(program, limits, start, Box::new(Pages::default()))
+}
+
+fn assert_limit_result(
+    result: Result<KernelMachine, lash_kernel_vm::StartError>,
+    accepted: bool,
+    what: &str,
+) {
+    if !accepted {
+        match result {
+            Err(lash_kernel_vm::StartError::Linked { problem }) => {
+                assert!(
+                    problem.contains(what) && problem.contains("limit of"),
+                    "{problem}"
+                );
+            }
+            Err(other) => panic!("unexpected refusal: {other:?}"),
+            Ok(_) => panic!("overlimit document compiled: {what}"),
+        }
+        return;
+    }
+    let mut machine =
+        result.unwrap_or_else(|error| panic!("the exact slot boundary compiles: {error:?}"));
+    loop {
+        match machine
+            .run(&mut Passive, 1_000_000)
+            .unwrap_or_else(|error| panic!("local boundary execution: {error:?}"))
+        {
+            Step::Slice => {}
+            Step::Ended(End::Finished(done)) => {
+                assert_eq!(done.result, Datum::Bool(true));
+                break;
+            }
+            other => panic!("boundary body did not finish with its result: {other:?}"),
+        }
+    }
+}
+
+/// The six protocol scratch slots, pass counter and binding are admitted
+/// together with the parameters. Both item arms must compile at 65,535 slots.
+#[test]
+fn protocol_scratch_and_plain_loop_slots_obey_the_local_limit() {
+    for protocol in [false, true] {
+        for item_hook in [false, true] {
+            if !protocol && item_hook {
+                continue;
+            }
+            let open = function(
+                "limit.open",
+                limit_signature(vec![parameter("value", Type::Any, false)]),
+                BTreeMap::new(),
+                vec![Stmt::Return {
+                    value: Expr::List(vec![]),
+                }],
+            );
+            let item = function(
+                "limit.item",
+                limit_signature(vec![
+                    parameter("walked", Type::Any, false),
+                    parameter("raw", Type::Any, false),
+                ]),
+                BTreeMap::new(),
+                vec![returns(true)],
+            );
+            let via = protocol.then(|| lash_kernel_doc::Protocol {
+                open: lash_kernel_doc::FunctionTarget::Local(open.identity()),
+                next: None,
+                item: item_hook.then(|| lash_kernel_doc::FunctionTarget::Local(item.identity())),
+                check: None,
+            });
+            // A plain loop owns walked/cursor/binding/pass; a protocol owns
+            // six scratch slots plus binding/pass.
+            let used = if protocol { 8 } else { 4 };
+            for extra in [0, 1] {
+                let block = vec![
+                    Stmt::For {
+                        metered: 1,
+                        binding: Name::new("item"),
+                        iterable: Expr::List(vec![]),
+                        via: via.clone(),
+                        body: vec![],
+                        else_block: vec![],
+                    },
+                    returns(true),
+                ];
+                let helpers = if protocol {
+                    if item_hook {
+                        vec![open.clone(), item.clone()]
+                    } else {
+                        vec![open.clone()]
+                    }
+                } else {
+                    vec![]
+                };
+                let program = local_limit_program(65535 - used + extra, block, helpers);
+                assert_limit_result(
+                    start_limit_program(program),
+                    extra == 0,
+                    "parameters and locals",
+                );
+            }
+        }
+    }
+}
+
+/// Nested scopes retain their declarations, and a return policy holds its
+/// departing value in a temporary. That temporary must be admitted immediately.
+#[test]
+fn nested_blocks_and_return_temporaries_obey_the_local_limit() {
+    let policy = function(
+        "limit.policy",
+        limit_signature(vec![parameter("value", Type::Any, false)]),
+        BTreeMap::new(),
+        vec![Stmt::Return {
+            value: Expr::Variable(Name::new("value")),
+        }],
+    );
+    for extra in [0, 1] {
+        let block = vec![
+            Stmt::If {
+                condition: Expr::Literal(Literal::Bool(true)),
+                then_block: vec![
+                    bound("outer"),
+                    Stmt::If {
+                        condition: Expr::Literal(Literal::Bool(true)),
+                        then_block: vec![
+                            bound("inner"),
+                            Stmt::ReturnVia {
+                                value: Expr::Literal(Literal::Bool(true)),
+                                policy: lash_kernel_doc::FunctionTarget::Local(policy.identity()),
+                            },
+                        ],
+                        else_block: vec![],
+                    },
+                ],
+                else_block: vec![],
+            },
+            returns(false),
+        ];
+        let program = local_limit_program(65535 - 3 + extra, block, vec![policy.clone()]);
+        assert_limit_result(
+            start_limit_program(program),
+            extra == 0,
+            "parameters and locals",
+        );
+    }
+}
+
+/// Operand 255 is reserved for a formula's result, and must never alias
+/// parameter 255. Parameter 254 remains usable at execution.
+#[test]
+fn formula_operand_positions_refuse_before_the_result_sentinel() {
+    for position in [254, 255] {
+        let public = limit_signature(
+            (0..=position)
+                .map(|i| parameter(&format!("k{i}"), Type::Bool, false))
+                .collect(),
+        );
+        let mut body = function(
+            "limit.formula",
+            public.clone(),
+            BTreeMap::new(),
+            vec![returns(true)],
+        );
+        if let Implementation::Guest { metering, .. } = &mut body.implementation {
+            *metering = Metering::Formula(lash_kernel_doc::Formula::Size(
+                lash_kernel_doc::Operand::Param(Name::new(format!("k{position}"))),
+            ));
+        }
+        let export = FunctionExport {
+            function: body.identity(),
+            signature: public.clone(),
+            convention: StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        };
+        let program = entry_world(
+            vec![body],
+            vec![("entry", export)],
+            vec![("entry", public)],
+            vec![],
+            vec![Stmt::Return {
+                value: calling(
+                    Callee::Import(ImportSlot(0)),
+                    vec![Expr::Literal(Literal::Bool(true)); position + 1],
+                ),
+            }],
+        );
+        assert_limit_result(
+            start_limit_program(program),
+            position == 254,
+            "formula operand position 255",
+        );
+    }
+}
+
+fn limit_signature(params: Vec<Param>) -> Signature {
+    Signature {
+        params,
+        result: Type::Any,
+    }
+}
+
+/// Main may name host/session bindings in untaken code. Its global table still
+/// needs exact indices even when the host supplies no values for that branch.
+#[test]
+fn global_name_allocation_obeys_the_core_limit() {
+    for count in [65535, 65536] {
+        let reads = (0..count)
+            .map(|i| Stmt::Do {
+                value: Expr::Variable(Name::new(format!("global_{i}"))),
+            })
+            .collect();
+        let program = entry_world(
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![
+                Stmt::If {
+                    condition: Expr::Literal(Literal::Bool(false)),
+                    then_block: reads,
+                    else_block: vec![],
+                },
+                returns(true),
+            ],
+        );
+        assert_limit_result(start_limit_program(program), count == 65535, "global names");
+    }
+}
+
+/// An inner closure can inherit 65,535 captures without exceeding either
+/// enclosing function's local limit. The next capture must refuse allocation.
+#[test]
+fn inherited_capture_allocation_obeys_the_core_limit() {
+    for extra in [0, 1] {
+        let count = 65534 + extra;
+        let mut reads: Vec<_> = (0..count)
+            .map(|i| Stmt::Do {
+                value: Expr::Variable(Name::new(format!("captured_{i}"))),
+            })
+            .collect();
+        reads.push(Stmt::Do {
+            value: Expr::Variable(Name::new("last")),
+        });
+        reads.push(returns(true));
+        let inner = function(
+            "limit.inner",
+            limit_signature(vec![]),
+            BTreeMap::new(),
+            reads,
+        );
+        let mut outer = function(
+            "limit.outer",
+            limit_signature(vec![]),
+            BTreeMap::new(),
+            vec![
+                bound("last"),
+                Stmt::Do {
+                    value: Expr::Closure(Box::new(Closure {
+                        function: inner.identity(),
+                        presentation: None,
+                    })),
+                },
+                returns(true),
+            ],
+        );
+        if let Implementation::Guest { body, .. } = &mut outer.implementation {
+            body.functions.insert(inner.identity(), inner.name.clone());
+        }
+        let mut main: Vec<_> = (0..count)
+            .map(|i| bound(&format!("captured_{i}")))
+            .collect();
+        main.push(Stmt::Do {
+            value: Expr::Closure(Box::new(Closure {
+                function: outer.identity(),
+                presentation: None,
+            })),
+        });
+        main.push(returns(true));
+        let program = entry_world(vec![], vec![], vec![], vec![inner, outer], main);
+        assert_limit_result(
+            start_limit_program(program),
+            extra == 0,
+            "captures of one function",
+        );
+    }
+}

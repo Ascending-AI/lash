@@ -39,6 +39,7 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::{InlineOperation, IntegerTextDomain, ScalarDomain};
 use lash_kernel_doc::plan::Table;
 
+use super::compile::{Result, coordinate};
 use super::op::Op;
 
 use super::program::{
@@ -46,20 +47,24 @@ use super::program::{
 };
 
 /// Folds the guard path of every inline region of `program`.
-pub(crate) fn fold(program: &mut Program) {
+/// Compiler::sealed and inline::expand already admitted every op coordinate.
+pub(crate) fn fold(program: &mut Program) -> Result<()> {
     for at in 0..program.units.len() {
+        // inline::expand admitted the inline-site count before insertion.
         for n in 0..program.units[at].inlines.len() {
             let folds = derive(program, &program.units[at], n as u32);
             let element = matches!(folds.as_slice(), [fold]
                 if fold.len == 1 && matches!(fold.steps[0], Step::Element { .. }));
             let unit = &mut program.units[at];
-            let start = unit.folds.len() as u32;
+            let start = coordinate(unit.folds.len(), "folds of one function")?;
+            coordinate(unit.folds.len() + folds.len(), "folds of one function")?;
             unit.folds.extend(folds);
             unit.inlines[n].element = element;
             unit.inlines[n].folds = (start, unit.folds.len() as u32);
         }
     }
     super::lookup::derive(program);
+    Ok(())
 }
 
 /// What a path holds at an op: where each operand above the body's
@@ -81,6 +86,7 @@ impl Path<'_> {
             return None;
         }
         self.steps.push(step);
+        // derive sets limit to FOLD_STEPS (8) or 32; make checks it first.
         self.made += 1;
         Some(Slot::Made(self.made - 1))
     }
@@ -262,6 +268,7 @@ fn walk(
                 steps[..path.steps.len()].copy_from_slice(&path.steps);
                 return Some(Fold {
                     steps,
+                    // The FOLD_STEPS check above admits at most 8 steps.
                     len: path.steps.len() as u8,
                     result,
                     leave: pc as u32,
@@ -527,6 +534,7 @@ fn kind_masks(steps: &mut Vec<Step>, result: &mut Slot) {
             at += 1;
             continue;
         };
+        // derive sets Path::limit to 8 or 32 before any step is made.
         let made = steps[..at]
             .iter()
             .filter(|step| !matches!(step, Step::Guard { .. } | Step::Kinds { .. }))

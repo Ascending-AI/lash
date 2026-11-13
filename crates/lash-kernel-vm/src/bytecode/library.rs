@@ -135,7 +135,13 @@ impl SharedLibrary {
         let tables = std::mem::take(&mut builder.tables);
         let mut compiler = Compiler::library(registry, available, &builder.code, tables);
         let answer = request(&mut compiler);
-        builder.tables = compiler.into_tables();
+        match compiler.into_tables() {
+            Ok(tables) => builder.tables = tables,
+            Err(error) => {
+                builder.broken = Some(error.0.clone());
+                return Err(error);
+            }
+        }
         answer
     }
 
@@ -182,20 +188,21 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
         entered: Default::default(),
     };
     for unit in &mut program.units {
-        unit.sites = super::site_tables::build(unit);
+        unit.sites = super::site_tables::build(unit)?;
     }
-    super::inline::inline(&mut program);
+    super::inline::inline(&mut program)?;
     let checked = super::validate::checked(&program)
         .map_err(|error| Unsupported(format!("the library does not validate: {error}")))?;
-    super::fold::fold(&mut program);
+    super::fold::fold(&mut program)?;
     super::fuse::fuse(&mut program);
     // Traces are a load-time product beside the validated body: a held
     // body's validation reads it through `Unit::original`.
-    super::trace::trace(&mut program);
+    super::trace::trace(&mut program)?;
     let mut code = LibCode::clone(held);
     let mut performs: std::collections::HashSet<_> = code.performs.iter().copied().collect();
     let units = program.units.into_iter().zip(checked);
     for (at, (unit, (height, depth))) in units.enumerate() {
+        // Compiler::reserve admitted the combined pool below LIB.
         let id = LIB | (held.units.len() + at) as UnitId;
         code.frames.push(crate::heap::meter::frame(&unit, height));
         if super::inline::expandable(&unit) {
@@ -220,12 +227,15 @@ fn publish(held: &Arc<LibCode>, tables: &mut Tables) -> Result<LibCode> {
     code.natives.extend(program.natives);
     for charge in program.charges {
         if let Some(function) = charge.function {
-            code.charge_ids
-                .insert(function, LIB | code.charges.len() as u32);
+            code.charge_ids.insert(
+                function, // Compiler::formula admitted this combined pool below LIB.
+                LIB | code.charges.len() as u32,
+            );
         }
         code.charges.push(charge);
     }
     for (site, at) in fresh.occurrences {
+        // Compiler::occurrence admitted every counter below LIB.
         debug_assert_eq!(code.occurrences.len() as u32, at & !LIB);
         code.sites.insert(site.clone(), at);
         code.occurrences.push(site);
@@ -267,7 +277,7 @@ pub(crate) fn held(key: [u8; 32]) -> Arc<SharedLibrary> {
 /// function's identity, whether it has a native and the inline answer
 /// that native declares for the function's version.
 pub(crate) fn digest(registry: &FunctionRegistry) -> [u8; 32] {
-    let mut bytes = Vec::with_capacity(registry.len() * 41);
+    let mut bytes = Vec::new();
     for (function, registered) in registry.iter() {
         bytes.extend_from_slice(function.as_bytes());
         match registered.native() {
@@ -281,6 +291,8 @@ pub(crate) fn digest(registry: &FunctionRegistry) -> [u8; 32] {
                     .and_then(|inline| inline.for_version(version));
                 if let Some(inline) = inline {
                     let declared = format!("{inline:?}");
+                    // InlineOperation holds only finite enums, with no strings or
+                    // collections: its Debug spelling is below 256 bytes.
                     bytes.extend_from_slice(&(declared.len() as u32).to_le_bytes());
                     bytes.extend_from_slice(declared.as_bytes());
                 }
