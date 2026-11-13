@@ -42,7 +42,7 @@ use crate::{Case, CaseBounds, ExpectedEnd, HarnessError, HostAnswer, Observation
 /// version_surface = "coexist"
 /// format_outside_manifest = "conformance runner exchange files read by the compatibility gate; not durable execution state"
 /// version_guard(roots(Manifest, Image, Runs, Refusal))
-const VERSION: u32 = 3;
+const VERSION: u32 = 2;
 /// The sweep's slice (`r57/l7-runner-interface.md`: slice size 1).
 const SLICE: u64 = 1;
 /// Steps after which a run is an error rather than an observation.
@@ -595,6 +595,9 @@ struct ManifestCase {
     id: String,
     name: String,
     pauses: Vec<Pause>,
+    /// Interface v2's predecessor-only diagnostic; candidate exports omit it.
+    #[serde(default, skip_serializing, rename = "predecessor_fault")]
+    _predecessor_fault: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -791,6 +794,7 @@ fn export(
             id: id.clone(),
             name: case.name.clone(),
             pauses,
+            _predecessor_fault: None,
         });
     }
     if images == 0 {
@@ -1126,5 +1130,30 @@ impl PageSource for Pages {
             },
         );
         Ok(page)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runner interface v2 permits predecessor faults without changing the
+    /// exchange. A version-only bump must not strand that predecessor.
+    #[test]
+    fn v2_predecessor_faults_do_not_strand_exports() -> Result<(), Box<dyn std::error::Error>> {
+        for fault in ["", r#", "predecessor_fault": "base engine fault""#] {
+            let manifest: Manifest = serde_json::from_str(&format!(
+                r#"{{"version":2,"cases":[{{"id":"case#0","name":"case","pauses":[]{fault}}}]}}"#
+            ))?;
+            assert_eq!(manifest.version, VERSION);
+            // The candidate never writes the predecessor-only field.
+            assert_eq!(
+                serde_json::to_value(manifest)?,
+                serde_json::json!({"version": 2, "cases": [
+                    {"id": "case#0", "name": "case", "pauses": []}
+                ]})
+            );
+        }
+        Ok(())
     }
 }

@@ -4,12 +4,25 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import continuation_compat as compat
 
 
 class ContinuationLaws(unittest.TestCase):
+    def test_export_and_observation_readers_follow_the_runner_version(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(compat, 'EXCHANGE_VERSION', 7):
+            root = Path(directory)
+            (root / 'image.json').write_text('{}')
+            (root / 'manifest.json').write_text(json.dumps(dict(version=7, cases=[
+                dict(id='case', name='case', pauses=[dict(id='0', kind='start', image='image.json')])
+            ])))
+            pauses = compat.inventory(root, {'case': 'case'})
+            path = root / 'runs.json'
+            path.write_text(json.dumps(dict(version=7, runs=[dict(case='case', pause='0')])))
+            self.assertEqual(set(compat.runs(path, pauses, True)), pauses)
+
     def test_missing_exported_pause_observation_cannot_pass(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'runs.json'

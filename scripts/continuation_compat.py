@@ -19,6 +19,12 @@ import time
 from perf_land_gate import ROOT, build, digest, git, load_artifact, read, require, write
 
 LABEL = "//crates/lash-kernel-conformance:continuation_compat__bin"
+# The runner owns the exchange version. Deployment receipts have their own
+# version and are not part of this protocol.
+EXCHANGE_VERSION = int(re.search(
+    r"(?m)^const VERSION: u32 = (\d+);$",
+    (ROOT / "crates/lash-kernel-conformance/src/compat.rs").read_text(),
+).group(1))
 FORMAT_NAMES = {"PAGE_FORMAT", "KERNEL_PARKED_STATE_VERSION", "KERNEL_SAVED_FUNCTION_VERSION",
                 "KERNEL_DOCUMENT_SCHEMA_VERSION", "LASH_KERNEL_VERSION", "WORKER_PROTOCOL_VERSION",
                 "PAGE_DIGEST_DOMAIN"}
@@ -139,7 +145,7 @@ def files(directory):
 
 def inventory(directory, cases):
     manifest = read(directory / "manifest.json")
-    require(manifest["version"] == 2, "unknown export protocol")
+    require(manifest["version"] == EXCHANGE_VERSION, "unknown export protocol")
     seen, pauses, images = set(), set(), set()
     for case in manifest["cases"]:
         key = case["id"]
@@ -162,7 +168,7 @@ def inventory(directory, cases):
 
 def runs(path, expected, resumed):
     receipt = read(path)
-    require(receipt["version"] == 2, "unknown observation protocol")
+    require(receipt["version"] == EXCHANGE_VERSION, "unknown observation protocol")
     result = {}
     for run in receipt["runs"]:
         key = (run["case"], run["pause"]) if resumed else run["case"]
