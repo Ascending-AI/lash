@@ -35,6 +35,13 @@ features = [
   "lash-regress/default",
   "lash-runtime/default",
   "lash-internal-facade-tests/default",
+  "lash-internal-durable/default",
+  "lash-internal-execution-contracts/default",
+  "lash-internal-provider-fixtures/default",
+  "lash-internal-transport-failure/default",
+  "lash-internal-vocabulary/default",
+  "lash-kernel-value/default",
+  "provider-signatures/default",
 ]
 
 [[lane]]
@@ -44,12 +51,33 @@ features = [
   "lash-internal-protocol-types/schema-validation:on",
   "lash-internal-sansio/schema-validation:off",
   "lash-internal-protocol-types/schema-validation:off",
+  "lash-internal-vocabulary/testing:on",
+  "lash-internal-vocabulary/testing:off",
+  "lash-internal-vocabulary/schema-validation:on",
+  "lash-internal-vocabulary/schema-validation:off",
+  "lash-internal-protocol-types/testing:on",
+  "lash-internal-protocol-types/testing:off",
+  "lash-internal-sansio/testing:on",
+  "lash-internal-sansio/testing:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-protocol-types", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--features", "schema-validation", "--locked"],
   ["cargo", "check", "-p", "lash-internal-protocol-types", "--lib", "--no-default-features", "--features", "schema-validation", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-vocabulary", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vocabulary", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vocabulary", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vocabulary", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vocabulary", "--lib", "--no-default-features", "--features", "schema-validation", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vocabulary", "--tests", "--no-default-features", "--features", "schema-validation", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-types", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sansio", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sansio", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sansio", "--tests", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
@@ -75,8 +103,10 @@ features = [
   "lash-internal-core-llm/otel-trace:off",
   "lash-internal-core-llm/testing:on",
   "lash-internal-core-llm/testing:off",
-  "lash-runtime/otel-trace:on",
-  "lash-runtime/otel-trace:off",
+  "lash-internal-trace/testing:on",
+  "lash-internal-trace/testing:off",
+  "lash-internal-execution-contracts/otel-trace:on",
+  "lash-internal-execution-contracts/otel-trace:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--locked"],
@@ -118,6 +148,14 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-execution", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-execution", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-trace", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-trace", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
@@ -147,6 +185,30 @@ features = [
   "lash-internal-core-store/perf-witness:off",
   "lash-internal-core-store/testing:on",
   "lash-internal-core-store/testing:off",
+  "lash-kernel-value/testing:on",
+  "lash-kernel-value/testing:off",
+  "lash-internal-checkpoint-encoder/perf-witness:on",
+  "lash-internal-checkpoint-encoder/perf-witness:off",
+  "lash-internal-checkpoint-encoder/testing:on",
+  "lash-internal-checkpoint-encoder/testing:off",
+  "lash-internal-durable/testing:on",
+  "lash-internal-durable/testing:off",
+  "lash-internal-execution-contracts/perf-witness:on",
+  "lash-internal-execution-contracts/perf-witness:off",
+  "lash-internal-execution-contracts/testing:on",
+  "lash-internal-execution-contracts/testing:off",
+  "lash-kernel-doc/perf-witness:on",
+  "lash-kernel-doc/perf-witness:off",
+  "lash-kernel-package/testing:on",
+  "lash-kernel-package/testing:off",
+  "lash-kernel-state/testing:on",
+  "lash-kernel-state/testing:off",
+  "lash-kernel-state/perf-witness:on",
+  "lash-kernel-state/perf-witness:off",
+  "lash-kernel-vm/testing:on",
+  "lash-kernel-vm/testing:off",
+  "lash-kernel-vm/perf-witness:on",
+  "lash-kernel-vm/perf-witness:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-core-effect", "--lib", "--no-default-features", "--locked"],
@@ -171,6 +233,49 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-core", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-execution", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-execution", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-ids", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-core-store", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-value", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-value", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-value", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-value", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-checkpoint-encoder", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-checkpoint-encoder", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-checkpoint-encoder", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-checkpoint-encoder", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-checkpoint-encoder", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-checkpoint-encoder", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-durable", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-durable", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-durable", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-durable", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-doc", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-doc", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-package", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-package", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
 ]
 
 [[lane]]
@@ -180,8 +285,12 @@ features = [
   "lash-internal-vm-runtime/testing:off",
   "lash-internal-vm-client/testing:on",
   "lash-internal-vm-client/testing:off",
-  "lash-internal-vm-worker/testing:on",
-  "lash-internal-vm-worker/testing:off",
+  "lash-internal-vm-broker/perf-witness:on",
+  "lash-internal-vm-broker/perf-witness:off",
+  "lash-internal-vm-broker/testing:on",
+  "lash-internal-vm-broker/testing:off",
+  "lash-internal-vm-client/perf-witness:on",
+  "lash-internal-vm-client/perf-witness:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
@@ -193,6 +302,18 @@ commands = [
   # whose self dev-dependency would turn testing on.
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-broker", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
 ]
 
 [[lane]]
@@ -210,6 +331,8 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-llm-transport", "--lib", "--no-default-features", "--features", "proptest-support", "--locked"],
   ["cargo", "check", "-p", "lash-internal-llm-transport", "--tests", "--features", "testing", "--locked"],
   ["cargo", "test", "-p", "lash-internal-llm-transport", "--lib", "--features", "testing", "--locked", "conformance"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-llm-transport", "--tests", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
@@ -227,6 +350,8 @@ features = [
   "lash-internal-s3-store/testing:off",
   "lash-internal-conformance/lash-vm:on",
   "lash-internal-conformance/lash-vm:off",
+  "lash-internal-store-sql/testing:on",
+  "lash-internal-store-sql/testing:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--locked"],
@@ -241,6 +366,17 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-postgres-store", "--tests", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-s3-store", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-sqlite-store", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-postgres-store", "--tests", "--no-default-features", "--features", "perf-witness", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-s3-store", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-s3-store", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-conformance", "--tests", "--no-default-features", "--features", "lash-vm", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-conformance", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-store-sql", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-store-sql", "--tests", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-store-sql", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-store-sql", "--tests", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
@@ -282,8 +418,14 @@ features = [
   "lash-runtime/workflow-view:off",
   "lash-runtime/workflow-authoring:on",
   "lash-runtime/workflow-authoring:off",
+  "lash-runtime/otel-trace:on",
+  "lash-runtime/otel-trace:off",
+  "lash-runtime/synthetic-next:on",
+  "lash-runtime/synthetic-next:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "synthetic-next,rlm,sqlite,testing,worker,typescript,python", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "typescript,python,rlm,testing,workflow-view,workflow-authoring,otel-trace,sqlite,worker,mcp,openai,anthropic,google,postgres,s3,http-transport,dialect-typescript,dialect-python", "--locked"],
   # Production host witnesses (FIG-5097): --lib excludes dev-dependencies,
   # so neither the facade nor its dependency closure can acquire testing.
   # Keep the default-features witness beside the existing default-off one;
@@ -342,6 +484,15 @@ commands = [
   # beside the worker's own `lash-vm-client/testing` forward -- a testing
   # worker with a testing client, the pairing FIG-4409's invariant checks.
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "rlm,testing", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "workflow-view", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "workflow-authoring", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
 # The exact facade combination Figments builds lash-runtime with. A compile
@@ -354,7 +505,8 @@ commands = [
 # carry the six-feature set anyway.
 [[lane]]
 name = "figments-facade"
-features = []
+features = [
+]
 commands = [
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,postgres,openai,typescript,testing,otel-trace", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "rlm,postgres,openai,typescript,testing,otel-trace", "--locked"],
@@ -362,6 +514,8 @@ commands = [
 
 [[lane]]
 name = "protocol-rlm-testing"
+# Cargo tests name this worker through the existing test runfile seam.
+worker_features = ["testing", "dialect-typescript", "dialect-python"]
 features = [
   "lash-internal-protocol-rlm/testing:on",
   "lash-internal-protocol-rlm/testing:off",
@@ -370,13 +524,19 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "test", "-p", "lash-internal-protocol-rlm", "--features", "testing", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--tests", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
 name = "tool-lash-vm-proxies"
+# Cargo tests name this worker through the existing test runfile seam.
+worker_features = ["testing", "dialect-typescript", "dialect-python"]
 features = [
   "lash-internal-plugin-mcp/lash-vm:on",
   "lash-internal-plugin-mcp/lash-vm:off",
+  "lash-internal-plugin-mcp/testing:on",
+  "lash-internal-plugin-mcp/testing:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--locked"],
@@ -386,6 +546,9 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-tool-support", "--lib", "--no-default-features", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--tests", "--no-default-features", "--features", "testing", "--locked"],
 ]
 
 [[lane]]
@@ -451,8 +614,22 @@ features = [
   "lash-internal-vm-worker/dialect-typescript:off",
   "lash-internal-vm-worker/dialect-python:on",
   "lash-internal-vm-worker/dialect-python:off",
+  "lash-kernel-engine/dialect-typescript:on",
+  "lash-kernel-engine/dialect-typescript:off",
+  "lash-kernel-engine/dialect-python:on",
+  "lash-kernel-engine/dialect-python:off",
+  "lash-kernel-conformance/shipped-library:on",
+  "lash-kernel-conformance/shipped-library:off",
+  "lash-kernel-conformance/dialect-typescript:on",
+  "lash-kernel-conformance/dialect-typescript:off",
+  "lash-kernel-conformance/dialect-python:on",
+  "lash-kernel-conformance/dialect-python:off",
+  "lash-internal-vm-worker/testing:on",
+  "lash-internal-vm-worker/testing:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "testing,dialect-typescript,dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--all-targets", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
@@ -465,6 +642,27 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--features", "dialect-typescript", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--features", "dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--tests", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--tests", "--no-default-features", "--features", "dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--tests", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--tests", "--no-default-features", "--features", "dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--tests", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--tests", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--tests", "--no-default-features", "--features", "dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "shipped-library", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--tests", "--no-default-features", "--features", "shipped-library", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
 ]
 
 [[lane]]
@@ -474,12 +672,26 @@ features = [
   "lash-internal-vm-worker/dhat-heap:off",
   "lash-perf/dhat-heap:on",
   "lash-perf/dhat-heap:off",
+  "lash-internal-vm-client/dhat-heap:on",
+  "lash-internal-vm-client/dhat-heap:off",
+  "lash-internal-vm-worker/cell-memory:on",
+  "lash-internal-vm-worker/cell-memory:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-perf", "--tests", "--no-default-features", "--features", "default", "--locked"],
+  ["cargo", "check", "-p", "lash-perf", "--tests", "--no-default-features", "--features", "default,dhat-heap", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "cell-memory,dhat-heap,dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
   ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "cell-memory,dialect-typescript,dialect-python", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "dhat-heap", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--features", "dhat-heap", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "cell-memory", "--locked"],
 ]
 
 # Phase A's synthetic N+1 (ADR 0115 §6): `lash-upgrade-harness` forwards
@@ -491,6 +703,8 @@ commands = [
 # default build's (FIG-4262).
 [[lane]]
 name = "upgrade-harness-synthetic-next"
+# Cargo tests name this worker through the existing test runfile seam.
+worker_features = ["testing", "dialect-typescript", "dialect-python", "synthetic-next"]
 features = [
   "lash-internal-vm-protocol/synthetic-next:on",
   "lash-internal-vm-protocol/synthetic-next:off",
@@ -498,8 +712,6 @@ features = [
   "lash-internal-vm-broker/synthetic-next:off",
   "lash-internal-vm-client/synthetic-next:on",
   "lash-internal-vm-client/synthetic-next:off",
-  "lash-runtime/synthetic-next:on",
-  "lash-runtime/synthetic-next:off",
   "lash-internal-core/synthetic-next:on",
   "lash-internal-core/synthetic-next:off",
   "lash-internal-sansio/synthetic-next:on",
@@ -516,6 +728,10 @@ features = [
   "lash-internal-sqlite-store/synthetic-next:off",
   "lash-internal-protocol-rlm/synthetic-next:on",
   "lash-internal-protocol-rlm/synthetic-next:off",
+  "lash-internal-execution-contracts/synthetic-next:on",
+  "lash-internal-execution-contracts/synthetic-next:off",
+  "lash-internal-vm-client/lash-kernel-migrate:on",
+  "lash-internal-vm-client/lash-kernel-migrate:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--locked"],
@@ -552,6 +768,16 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-sqlite-store", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-vm-protocol", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--tests", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-execution-contracts", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-client", "--lib", "--no-default-features", "--features", "lash-kernel-migrate", "--locked"],
 ]
 
 # The kernel's synthetic successor version (FIG-5716): the kernel crates carry
@@ -572,6 +798,10 @@ features = [
   "lash-internal-vm-runtime/synthetic-next:off",
   "lash-kernel-releases/synthetic-next:on",
   "lash-kernel-releases/synthetic-next:off",
+  "lash-kernel-engine/synthetic-next:on",
+  "lash-kernel-engine/synthetic-next:off",
+  "lash-kernel-package/synthetic-next:on",
+  "lash-kernel-package/synthetic-next:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--locked"],
@@ -589,6 +819,20 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript,synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-runtime", "--test", "kernel_two_build_claim", "--no-default-features", "--features", "rlm,sqlite,testing,typescript,synthetic-next", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-kernel-doc", "--tests", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-doc", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-migrate", "--tests", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-migrate", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--tests", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-releases", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-engine", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-package", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-package", "--lib", "--no-default-features", "--locked"],
 ]
 
 # The FIG-4169 rolling deploy replaces the load-test workers with the same
@@ -640,6 +884,8 @@ commands = [
   ["cargo", "check", "-p", "lash-regress", "--lib", "--no-default-features", "--features", "utf16", "--locked"],
   ["cargo", "test", "-p", "lash-regress", "--no-default-features", "--features", "backend-pikevm,std,index-positions,utf16", "--locked"],
   ["cargo", "test", "-p", "lash-regress", "--no-default-features", "--features", "backend-pikevm,std,prohibit-unsafe,utf16", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-regress", "--tests", "--no-default-features", "--locked"],
 ]
 
 [[lane]]
@@ -660,15 +906,29 @@ commands = [
 # another facade feature or any development dependency in the resolution.
 [[lane]]
 name = "provider-signatures"
-features = []
+features = [
+  "provider-signatures/openai:on",
+  "provider-signatures/openai:off",
+  "provider-signatures/anthropic:on",
+  "provider-signatures/anthropic:off",
+  "provider-signatures/google:on",
+  "provider-signatures/google:off",
+]
 commands = [
   ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "openai", "--locked"],
   ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "anthropic", "--locked"],
   ["cargo", "check", "-p", "provider-signatures", "--lib", "--no-default-features", "--features", "google", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "provider-signatures", "--tests", "--no-default-features", "--features", "openai", "--locked"],
+  ["cargo", "check", "-p", "provider-signatures", "--tests", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "provider-signatures", "--tests", "--no-default-features", "--features", "anthropic", "--locked"],
+  ["cargo", "check", "-p", "provider-signatures", "--tests", "--no-default-features", "--features", "google", "--locked"],
 ]
 
 [[lane]]
 name = "facade-law-features"
+# Cargo tests name this worker through the existing test runfile seam.
+worker_features = ["testing", "dialect-typescript", "dialect-python"]
 features = [
   "lash-internal-facade-tests/codemode:on",
   "lash-internal-facade-tests/codemode:off",
@@ -692,26 +952,52 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_streaming", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_tracing", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-facade-tests", "--test", "facade_turns", "--no-default-features", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--features", "codemode", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--tests", "--no-default-features", "--features", "codemode", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--features", "rlm", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--features", "otel-trace", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--features", "openai", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-facade-tests", "--lib", "--no-default-features", "--features", "http-transport", "--locked"],
 ]
 
 # FIG-7153: the format carry law retains the previous kernel's exact Link code.
 [[lane]]
 name = "linked-format-carry"
-features = ["lash-internal-durable-test/synthetic-next:on"]
+features = [
+  "lash-internal-durable-test/synthetic-next:on",
+  "lash-internal-durable-test/lash-vm-runtime:on",
+  "lash-internal-durable-test/lash-vm-runtime:off",
+  "lash-internal-durable-test/lash-vm-worker:on",
+  "lash-internal-durable-test/lash-vm-worker:off",
+]
 commands = [
   ["cargo", "test", "-p", "lash-internal-durable-test", "--test", "kernel_step_crash_laws", "--features", "synthetic-next", "--locked", "--", "--exact", "linked_carry::a_linked_carry_keeps_exact_pinned_code_over_another_retained_release_on_sqlite", "--ignored"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-internal-durable-test", "--lib", "--no-default-features", "--features", "lash-vm-runtime", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-durable-test", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-durable-test", "--lib", "--no-default-features", "--features", "lash-vm-worker", "--locked"],
 ]
 
 [[lane]]
 name = "perf-cell-memory"
-features = ["lash-internal-vm-worker/cell-memory:on", "lash-internal-vm-worker/cell-memory:off"]
+features = [
+]
 commands = [
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "cell-memory,dialect-typescript,dialect-python", "--locked"],
 ]
 
 [[lane]]
 name = "perf-console"
-features = ["lash-perf/console:on", "lash-perf/console:off"]
+features = [
+  "lash-perf/console:on",
+  "lash-perf/console:off",
+]
 commands = [
   ["cargo", "check", "-p", "lash-perf", "--bins", "--no-default-features", "--features", "console", "--locked"],
+  # Exact states and contexts required by the current feature predicates.
+  ["cargo", "check", "-p", "lash-perf", "--lib", "--no-default-features", "--features", "console", "--locked"],
+  ["cargo", "check", "-p", "lash-perf", "--tests", "--no-default-features", "--features", "console", "--locked"],
+  ["cargo", "check", "-p", "lash-perf", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-perf", "--tests", "--no-default-features", "--locked"],
 ]

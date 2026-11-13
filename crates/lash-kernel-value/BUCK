@@ -94,6 +94,27 @@ export_file(
 load(
     "//tools/buck2:lash_rust.bzl",
     "lash_rust_feature_library",
+    "lash_rust_feature_test",
+)
+
+lash_rust_feature_library(
+    name = "lash-kernel-value__fv_4f39b3f2",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_kernel_value",
+    declared_features = [
+        "default",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-value", "lash_kernel_value"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-kernel-value",
+    package_name = "lash-kernel-value",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
 )
 
 lash_rust_feature_library(
@@ -116,5 +137,73 @@ lash_rust_feature_library(
         "manual",
     ],
     variant_deps = {"//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_82400803", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_647d830b", "//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_eb1d5497"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-kernel-value__fv_a7ed9c3e",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_kernel_value",
+    declared_features = [
+        "default",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-value", "lash_kernel_value"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-kernel-value",
+    package_name = "lash-kernel-value",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-kernel-value__unit_test__fv_4f39b3f2",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_kernel_value",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-value", "lash_kernel_value", "//crates/lash-kernel-value:lash-kernel-value__unit_test__fv_4f39b3f2"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-kernel-value",
+    package_name = "lash-kernel-value",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_4f39b3f2"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "lash-kernel-value__unit_test__fv_a7ed9c3e",
+    build_script = None,
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "lash_kernel_value",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "default",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-value", "lash_kernel_value", "//crates/lash-kernel-value:lash-kernel-value__unit_test__fv_a7ed9c3e"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-kernel-value",
+    package_name = "lash-kernel-value",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_a7ed9c3e"},
     version = "0.0.0-dev",
 )

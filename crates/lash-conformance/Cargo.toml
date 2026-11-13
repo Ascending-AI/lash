@@ -51,4 +51,4 @@ rmp-serde.workspace = true
 lash-transport-failure = { workspace = true }
 # The store-contract self-tests replay their cases against a real store: a
 # SQLite memory store set.
-lash-sqlite-store.workspace = true
+lash-sqlite-store = { workspace = true, features = ["testing"] }

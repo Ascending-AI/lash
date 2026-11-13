@@ -71,6 +71,7 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+lash-protocol-rlm = { workspace = true, features = ["testing"] }
 chrono = { workspace = true }
 lash-llm-transport = { package = "lash-internal-llm-transport", path = "../lash-llm-transport" }
 # The `dataframe` fixture the Package laws publish (FIG-6926).

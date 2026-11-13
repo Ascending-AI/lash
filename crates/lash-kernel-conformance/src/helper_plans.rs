@@ -9,6 +9,7 @@
 
 mod conversions;
 mod numeric;
+#[cfg(feature = "shipped-library")]
 mod numeric_slices;
 
 use crate::projection::{Projector, Recorded};

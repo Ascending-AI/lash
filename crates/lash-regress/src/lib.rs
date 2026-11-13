@@ -130,6 +130,8 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 #[cfg(not(feature = "std"))]
 #[macro_use]
 extern crate alloc;
+#[cfg(all(test, not(feature = "std")))]
+extern crate std;
 
 pub use crate::api::*;
 

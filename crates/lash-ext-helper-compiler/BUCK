@@ -156,6 +156,27 @@ load(
 )
 
 lash_rust_feature_library(
+    name = "lash-ext-helper-compiler__fv_070863d7",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_ext_helper_compiler",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-ext-helper-compiler", "lash_ext_helper_compiler"),
+    compile_data_patterns = [
+        "tests/control.kernel",
+    ],
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-ext-helper-compiler",
+    package_name = "lash-ext-helper-compiler",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-dialect-conventions:lash-dialect-conventions": "//crates/lash-dialect-conventions:lash-dialect-conventions__fv_a863586f", "//crates/lash-dialect-python:lash-dialect-python": "//crates/lash-dialect-python:lash-dialect-python__fv_788086b0", "//crates/lash-dialect-typescript:lash-dialect-typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript__fv_b81e3bee", "//crates/lash-ext-date-ecma:lash-ext-date-ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma__fv_6603f771", "//crates/lash-ext-py-core:lash-ext-py-core": "//crates/lash-ext-py-core:lash-ext-py-core__fv_f27558f0", "//crates/lash-ext-py-helpers:lash-ext-py-helpers": "//crates/lash-ext-py-helpers:lash-ext-py-helpers__fv_aa6c6cb8", "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__fv_6b2403e7", "//crates/lash-ext-ts-core:lash-ext-ts-core": "//crates/lash-ext-ts-core:lash-ext-ts-core__fv_50f44683", "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers": "//crates/lash-ext-ts-helpers:lash-ext-ts-helpers__fv_1ef787e5", "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__fv_a10fec8c", "//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_6c7097f7", "//crates/lash-kernel-conformance:lash-kernel-conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_a4d85777", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_0488b44d", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_4999496a", "//crates/lash-kernel-edit:lash-kernel-edit": "//crates/lash-kernel-edit:lash-kernel-edit__fv_ee4228d6", "//crates/lash-kernel-engine:lash-kernel-engine": "//crates/lash-kernel-engine:lash-kernel-engine__fv_7a44a21a", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_6341b90e", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_b17b55cb", "//crates/lash-kernel-releases:lash-kernel-releases": "//crates/lash-kernel-releases:lash-kernel-releases__fv_5484b64c", "//crates/lash-kernel-services:lash-kernel-services": "//crates/lash-kernel-services:lash-kernel-services__fv_a2ae8a97", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_2e755a50", "//crates/lash-kernel-value:lash-kernel-value": "//crates/lash-kernel-value:lash-kernel-value__fv_61815a38", "//crates/lash-kernel-view:lash-kernel-view": "//crates/lash-kernel-view:lash-kernel-view__fv_d789022c", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_80840447", "//examples/kernel-embedder:kernel-embedder": "//examples/kernel-embedder:kernel-embedder__fv_30962f8f"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-ext-helper-compiler__fv_61a50ed4",
     build_script = None,
     crate_features = [],

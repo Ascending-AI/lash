@@ -12,7 +12,9 @@ mod contract_cases;
 mod accumulators;
 mod captions;
 mod charge;
+#[cfg(feature = "shipped-library")]
 mod cold_probes;
+#[cfg(feature = "shipped-library")]
 mod probes;
 mod protocol;
 

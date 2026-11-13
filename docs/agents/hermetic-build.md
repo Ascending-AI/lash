@@ -144,6 +144,20 @@ Third-party dependencies use the workspace feature union. First-party lane
 checks cannot detect accidental reliance on an external feature enabled
 elsewhere. The Cargo feature matrix remains the isolated feature proof.
 
+Run a named Cargo lane after sourcing `env.sh`, with routing disabled so the
+Cargo artifact and resolver witnesses execute as declared:
+
+```sh
+kiln gate lash <fork> -- env KILN_CARGO_ROUTE= python3 scripts/check_feature_coverage.py run <lane>
+```
+
+Keep the package and target selection in `scripts/feature-coverage.toml`.
+Workspace feature unification cannot substitute for these OFF witnesses.
+Lanes with `worker_features` first build their declared worker and select
+Cargo's exact executable artifact through the existing `LASH_VM_WORKER` test
+hook. Each lane restores that selection when it finishes.
+
+
 Clippy includes first-party build scripts and uses the nearest declared
 `clippy.toml`, Cargo package/workspace lints and `-D warnings`. Unsupported
 labels, empty selections and missing lint outputs fail. Workspace libraries

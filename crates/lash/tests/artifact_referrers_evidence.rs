@@ -1244,7 +1244,7 @@ fn postgres_variants_never_pass_without_a_database_url() {
 fn python_process_embedding(
     _tuning: &lash::vm::WorkerTuning,
 ) -> Result<lash::vm::WorkerEmbedder, lash::vm::WorkerEmbedError> {
-    lash::vm::WorkerEmbedder::new().dialect(lash::vm::python_worker_dialect())
+    lash::vm::WorkerEmbedder::new().dialect(lash_vm_worker::python())
 }
 
 // This support entry becomes a worker only when the pool reexecs it.

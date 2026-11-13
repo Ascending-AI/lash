@@ -2813,6 +2813,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-execution-contracts",
  "lash-internal-llm-transport",
+ "lash-internal-protocol-rlm",
  "lash-internal-protocol-types",
  "lash-internal-render",
  "lash-internal-rlm-types",

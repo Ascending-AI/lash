@@ -658,7 +658,14 @@ PACKAGE_DEPS = {
     },
     "lash-internal-execution-contracts": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_core_effect": "//crates/lash-core-effect:lash-core-effect",
+            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
+            "lash_trace": "//crates/lash-trace:lash-trace"
+        },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "lash_core_effect": "//crates/lash-core-effect:lash-core-effect",
@@ -933,6 +940,7 @@ PACKAGE_DEPS = {
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
+            "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
