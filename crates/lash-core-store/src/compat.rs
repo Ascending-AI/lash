@@ -239,9 +239,10 @@ pub enum CompatRefusal {
         writing_release: Option<String>,
     },
     #[error(
-        "{component} is at version {found}, older than this build reads ({reads}): an older or \
-         skipped release wrote it. Run `lashctl migrate` from the intermediate release first, \
-         then from this build{}",
+        "{component} is at version {found}, older than this build reads ({reads}). This format \
+         is retired by this build and cannot be migrated here. Follow the host upgrade reset \
+         procedure: stop admission, settle outstanding calls on the old build, drain and stop \
+         all old writers, then reset the store before starting this build{}",
         release_suffix(.writing_release)
     )]
     TooOld {
@@ -555,6 +556,81 @@ mod tests {
             version,
             min_reader,
         })
+    }
+
+    /// L57 D2: a retired format requires reset; a supported SQLite migration
+    /// must still direct the host to the whole-store migration entry point.
+    #[test]
+    fn retired_formats_request_reset_instead_of_an_invented_intermediate_release() {
+        let retired = CompatRefusal::TooOld {
+            component: "sqlite-core".into(),
+            found: 24,
+            reads: VersionRange::new(28, 28).expect("range"),
+            writing_release: None,
+        }
+        .to_string();
+        assert!(retired.contains("reset"), "{retired}");
+        assert!(!retired.contains("intermediate release"), "{retired}");
+        let supported = CompatRefusal::MigrationPending {
+            component: "sqlite-core".into(),
+            found: 28,
+            target: 29,
+            writing_release: None,
+        }
+        .to_string();
+        assert!(supported.contains("SqliteStoreSet::open"), "{supported}");
+        assert!(!supported.contains("reset"), "{supported}");
+    }
+
+    /// A replay reconstructs the stored refusal, including the old writer's
+    /// wording, even when this build renders the same typed cause differently.
+    #[test]
+    fn recorded_refusal_replays_old_display_wording_verbatim() {
+        use crate::runtime_error::RecordedRefusal;
+        use crate::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
+
+        const OLD_MESSAGE: &str = "sqlite-core is at version 24, older than this build reads \
+            ([28,28]): an older or skipped release wrote it. Run `lashctl migrate` from the \
+            intermediate release first, then from this build";
+        let stored = serde_json::json!({
+            "code": "engine_object_state_format_unsupported",
+            "message": OLD_MESSAGE,
+            "cause": {
+                "kind": "compat",
+                "refusal": {
+                    "refusal": "too_old",
+                    "component": "sqlite-core",
+                    "found": 24,
+                    "reads": {"min": 28, "max": 28}
+                }
+            }
+        });
+        let decoded: RecordedRefusal = serde_json::from_value(stored.clone())
+            .expect("decode a refusal written with the old remedy");
+        // Session-command replay uses this same conversion from its record.
+        let replayed = RuntimeError::from(decoded);
+        let cause = CompatRefusal::TooOld {
+            component: "sqlite-core".into(),
+            found: 24,
+            reads: VersionRange::exactly(28),
+            writing_release: None,
+        };
+        assert_ne!(OLD_MESSAGE, cause.to_string());
+        assert_eq!(replayed.message, OLD_MESSAGE);
+        assert_eq!(
+            replayed.code,
+            RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+        assert_eq!(
+            replayed.cause,
+            Some(RuntimeErrorCause::Compat {
+                refusal: Box::new(cause)
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(RecordedRefusal::from(replayed)).expect("record replay"),
+            stored
+        );
     }
 
     #[test]
