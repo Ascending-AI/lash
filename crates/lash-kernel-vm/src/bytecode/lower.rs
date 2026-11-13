@@ -200,7 +200,7 @@ impl Compiler<'_> {
                 let started = Self::enter_loop(f)?;
                 let head = f.label()?;
                 f.point(head, Point::Test(f.statement.clone()));
-                self.loop_test(f, *metered);
+                self.loop_test(f, *metered)?;
                 if *metered != 0 {
                     // The metered event comes before the condition's.
                     f.emit(Op::Nop);
@@ -329,12 +329,30 @@ impl Compiler<'_> {
         Ok(started)
     }
 
-    /// A loop's continuation test: its unit, then its `metered` event,
-    /// which charges under a cover too (`K-CHG-002`, `K-CHG-007`). The
-    /// next op bills both.
-    fn loop_test(&mut self, f: &mut Fun, metered: u64) {
-        f.units(1);
+    /// A loop's continuation test at its kernel version's price, then its
+    /// `metered` event, which charges under a cover too (`K-CHG-002`,
+    /// `K-CHG-007`).
+    fn loop_test(&mut self, f: &mut Fun, metered: u64) -> Result<()> {
+        let kernel = match &f.site {
+            lash_kernel_value::sites::Unit::Library(id) => self.def(id)?.kernel,
+            _ => self.document.kernel(),
+        };
+        let version = lash_kernel_doc::KernelVersion::of(kernel).ok_or_else(|| {
+            super::compile::Unsupported(format!("unknown kernel version {kernel}"))
+        })?;
+        match version {
+            lash_kernel_doc::KernelVersion::One => f.units(1),
+            #[cfg(feature = "synthetic-next")]
+            lash_kernel_doc::KernelVersion::SyntheticNext => {
+                // A continuation test is one atomic event, even when its
+                // price is more than one unit. Keep it before `metered`.
+                f.leader();
+                f.members(2);
+                f.leader();
+            }
+        }
         f.metered(metered);
+        Ok(())
     }
 
     fn assign(
@@ -401,7 +419,7 @@ impl Compiler<'_> {
         let started = Self::enter_loop(f)?;
         f.emit(Op::ForOpen(index));
         let head = f.label()?;
-        self.loop_test(f, metered);
+        self.loop_test(f, metered)?;
         f.emit(Op::ForNext(index));
         f.leader();
         if f.boxed.contains(binding) {
@@ -462,7 +480,7 @@ impl Compiler<'_> {
         });
         f.emit(Op::ProtoOpen(index));
         let head = f.label()?;
-        self.loop_test(f, metered);
+        self.loop_test(f, metered)?;
         f.emit(Op::ProtoStep(index));
         f.leader();
         if let Some(check) = check {

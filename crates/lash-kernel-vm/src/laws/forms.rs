@@ -616,7 +616,10 @@ fn charges_follow_the_cost_table() {
             #[cfg(feature = "synthetic-next")]
             lash_kernel_doc::KernelVersion::SyntheticNext => 12,
         };
-        for limit in [expected - 1, expected, expected + 1] {
+        let test_price = (expected - 6) / 3;
+        // All limits after constructing the iterable distinguish a test
+        // billed atomically from two separately billed one-unit events.
+        for limit in 6..=expected + 1 {
             let mut embedder = Embedder::with(
                 "main { for x in (1, 2) { } }",
                 Setup {
@@ -629,7 +632,12 @@ fn charges_follow_the_cost_table() {
                 },
             );
             let end = embedder.run_to_end(&[]);
-            assert_eq!(embedder.machine.meters().charged, Some(expected));
+            let billed = if limit < expected {
+                6 + ((limit - 6) / test_price + 1) * test_price
+            } else {
+                expected
+            };
+            assert_eq!(embedder.machine.meters().charged, Some(billed));
             if limit < expected {
                 assert!(
                     matches!(
