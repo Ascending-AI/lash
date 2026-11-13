@@ -210,9 +210,15 @@ fn sqlite_operator_reads_refuse_absent_stores_without_creating_files() {
             .output()
             .expect("operator read");
         let body: Value = serde_json::from_slice(&output.stdout).expect("JSON");
-        assert!(
-            !output.status.success(),
-            "{args:?} accepted absent store: {body}"
+        assert_eq!(output.status.code(), Some(4), "{args:?}: {body}");
+        assert_eq!(
+            body["error"]["code"], "incompatible_store",
+            "{args:?}: {body}"
+        );
+        assert_eq!(
+            body["error"]["refusal"],
+            json!({"refusal": "unstamped", "component": "sqlite-core"}),
+            "{args:?}: {body}"
         );
         assert!(
             operator_files(&root).is_empty(),
@@ -220,6 +226,25 @@ fn sqlite_operator_reads_refuse_absent_stores_without_creating_files() {
             operator_files(&root)
         );
     }
+    // Hosts can use the same public passive entry point directly, without
+    // lashctl. The condition must already be typed before CLI rendering.
+    let runtime = tokio::runtime::Runtime::new().expect("passive runtime");
+    let Err(error) = runtime.block_on(lash::sqlite::SqliteStoreSet::open_existing_readonly(
+        &database,
+    )) else {
+        panic!("absent store accepted");
+    };
+    assert!(
+        matches!(error, lash_core_store::store::StoreError::Incompatible {
+        refusal: lash_core_store::compat::CompatRefusal::Unstamped { ref component, writing_release: None }
+    } if component == "sqlite-core"),
+        "{error:?}"
+    );
+    assert!(
+        operator_files(&root).is_empty(),
+        "passive API created files"
+    );
+    drop(runtime);
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 

@@ -13,10 +13,16 @@ use rusqlite::{Connection, OpenFlags, ffi};
 pub(super) fn open(target: &DatabaseTarget) -> rusqlite::Result<(Connection, Connection)> {
     let path = target.file_path().ok_or(rusqlite::Error::InvalidQuery)?;
     if !path.try_exists().map_err(io_error)? {
-        return Err(io_error(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("existing SQLite store does not exist: {}", path.display()),
-        )));
+        // The same typed absence as an unprovisioned PostgreSQL store.
+        // Preserve it across the driver boundary for both hosts and lashctl.
+        return Err(crate::sqlite_conversion_error(
+            lash_core_store::store::StoreError::Incompatible {
+                refusal: lash_core_store::compat::CompatRefusal::Unstamped {
+                    component: crate::schema::COMPONENT.as_str().to_owned(),
+                    writing_release: None,
+                },
+            },
+        ));
     }
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | OpenFlags::SQLITE_OPEN_URI
