@@ -3,6 +3,7 @@ schema = 1
 non_normal_forwards = [
   "lash-kernel-releases/synthetic-next->lash-kernel-engine/synthetic-next",
   "lash-kernel-releases/synthetic-next->lash-kernel-migrate/synthetic-next",
+  "lash-kernel-releases/synthetic-next->lash-kernel-vm/synthetic-next",
 ]
 
 # Explicit `default` declarations are exercised by the ordinary workspace
@@ -786,6 +787,7 @@ commands = [
 # and the conformance harness runs that migration's laws.
 [[lane]]
 name = "kernel-synthetic-next"
+worker_features = ["testing", "dialect-typescript", "dialect-python", "synthetic-next"]
 features = [
   "lash-kernel-doc/synthetic-next:on",
   "lash-kernel-doc/synthetic-next:off",
