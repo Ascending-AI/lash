@@ -1,8 +1,9 @@
 schema = 1
-# The store backends lash-runtime wires are optional `[dependencies]` entries
-# now (ADR 0079 extension features), so no feature forward leaves the normal
-# dependency graph.
-non_normal_forwards = []
+# The release synthetic-test witness forwards its version to dev dependencies.
+non_normal_forwards = [
+  "lash-kernel-releases/synthetic-next->lash-kernel-engine/synthetic-next",
+  "lash-kernel-releases/synthetic-next->lash-kernel-migrate/synthetic-next",
+]
 
 # Explicit `default` declarations are exercised by the ordinary workspace
 # all-targets graph. Packages with no `[features].default` entry do not acquire

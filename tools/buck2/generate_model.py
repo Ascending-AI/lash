@@ -2740,7 +2740,8 @@ class FeatureLaneGraph:
         # kind == "test": an integration test target.
         base = label_name(target, False)
         name = f"{base}__fv_{suffix}"
-        shards = test_shard_count(package_name, kind, target["name"])
+        test_policy = target_policy(package_name, kind, target["name"])
+        shards = test_policy.shards
         self.add_chunk(
             package_name,
             name,
@@ -2779,6 +2780,7 @@ class FeatureLaneGraph:
                 else ""
             )
             + f"    tags = {string_list(tags)},\n"
+            + (f"    timeout = {quote(test_policy.timeout)},\n" if test_policy.timeout else "")
             + self.extra_deps_argument(package_name, features, resolution)
             + self.pruned_deps_argument(package_name, features, with_dev=True)
             + self.variant_deps_argument(package_name, resolution)
