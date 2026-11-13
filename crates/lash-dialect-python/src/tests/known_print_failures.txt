@@ -1,0 +1,698 @@
+# Known print failures, also failing on main unless marked.
+# Main comparison: d709cfaf7f; branch baseline: 0cad7ea19d.
+# Design review: /workspace/notes/lash/tasks/lanes/r59/astra-print-total.md
+# FIG-7711, r59. Remove an identity as soon as it round-trips exactly.
+# A listed success or a new unlisted failure fails the composition law.
+control async-with/async-with/plain/cell
+control async-with/async-with/plain/module
+control async-with/async-with/return/cell
+control async-with/async-with/return/module
+control async-with/closure/plain/cell
+control async-with/closure/plain/module
+control async-with/closure/return/cell
+control async-with/closure/return/module
+control async-with/for-else/break/cell
+control async-with/for-else/break/module
+control async-with/for-else/continue/cell
+control async-with/for-else/continue/module
+control async-with/for-else/plain/cell
+control async-with/for-else/plain/module
+control async-with/for-else/return/cell
+control async-with/for-else/return/module
+control async-with/for-pattern/break/cell
+control async-with/for-pattern/break/module
+control async-with/for-pattern/continue/cell
+control async-with/for-pattern/continue/module
+control async-with/for-pattern/plain/cell
+control async-with/for-pattern/plain/module
+control async-with/for-pattern/return/cell
+control async-with/for-pattern/return/module
+control async-with/for/break/cell
+control async-with/for/break/module
+control async-with/for/continue/cell
+control async-with/for/continue/module
+control async-with/for/plain/cell
+control async-with/for/plain/module
+control async-with/for/return/cell
+control async-with/for/return/module
+control async-with/if-else/plain/cell
+control async-with/if-else/plain/module
+control async-with/if-else/return/cell
+control async-with/if-else/return/module
+control async-with/if/plain/cell
+control async-with/if/plain/module
+control async-with/if/return/cell
+control async-with/if/return/module
+control async-with/match/plain/cell
+control async-with/match/plain/module
+control async-with/match/return/cell
+control async-with/match/return/module
+control async-with/try-except-else-finally/plain/cell
+control async-with/try-except-else-finally/plain/module
+control async-with/try-except-else-finally/return/cell
+control async-with/try-except-else-finally/return/module
+control async-with/try-except-none/plain/cell
+control async-with/try-except-none/plain/module
+control async-with/try-except-none/return/cell
+control async-with/try-except-none/return/module
+control async-with/try-except/plain/cell
+control async-with/try-except/plain/module
+control async-with/try-except/return/cell
+control async-with/try-except/return/module
+control async-with/try-finally/plain/cell
+control async-with/try-finally/plain/module
+control async-with/try-finally/return/cell
+control async-with/try-finally/return/module
+control async-with/while-else/break/cell
+control async-with/while-else/break/module
+control async-with/while-else/continue/cell
+control async-with/while-else/continue/module
+control async-with/while-else/plain/cell
+control async-with/while-else/plain/module
+control async-with/while-else/return/cell
+control async-with/while-else/return/module
+control async-with/while/break/cell
+control async-with/while/break/module
+control async-with/while/continue/cell
+control async-with/while/continue/module
+control async-with/while/plain/cell
+control async-with/while/plain/module
+control async-with/while/return/cell
+control async-with/while/return/module
+control async-with/with-pattern/plain/cell
+control async-with/with-pattern/plain/module
+control async-with/with-pattern/return/cell
+control async-with/with-pattern/return/module
+control async-with/with/plain/cell
+control async-with/with/plain/module
+control async-with/with/return/cell
+control async-with/with/return/module
+control closure/async-with/plain/cell
+control closure/async-with/plain/module
+control closure/async-with/return/cell
+control closure/async-with/return/module
+control closure/closure/plain/cell
+control closure/for-else/break/cell
+control closure/for-else/break/module
+control closure/for-else/continue/cell
+control closure/for-else/continue/module
+control closure/for-else/plain/cell
+control closure/for-else/plain/module
+control closure/for-else/return/cell
+control closure/for-else/return/module
+control closure/for-pattern/plain/cell
+control closure/for-pattern/plain/module
+control closure/for/plain/cell
+control closure/for/plain/module
+control closure/if-else/plain/cell
+control closure/if-else/plain/module
+control closure/if-else/return/cell
+control closure/if-else/return/module
+control closure/if/plain/cell
+control closure/if/plain/module
+control closure/match/plain/cell
+control closure/match/plain/module
+control closure/try-except-else-finally/plain/cell
+control closure/try-except-else-finally/plain/module
+control closure/try-except-else-finally/return/cell
+control closure/try-except-else-finally/return/module
+control closure/try-except-none/plain/cell
+control closure/try-except-none/plain/module
+control closure/try-except-none/return/cell
+control closure/try-except-none/return/module
+control closure/try-except/plain/cell
+control closure/try-except/plain/module
+control closure/try-except/return/cell
+control closure/try-except/return/module
+control closure/try-finally/plain/cell
+control closure/try-finally/plain/module
+control closure/try-finally/return/cell
+control closure/try-finally/return/module
+control closure/while-else/break/cell
+control closure/while-else/break/module
+control closure/while-else/continue/cell
+control closure/while-else/continue/module
+control closure/while-else/plain/cell
+control closure/while-else/plain/module
+control closure/while-else/return/cell
+control closure/while-else/return/module
+control closure/while/plain/cell
+control closure/while/plain/module
+control closure/with-pattern/plain/cell
+control closure/with-pattern/plain/module
+control closure/with-pattern/return/cell
+control closure/with-pattern/return/module
+control closure/with/plain/cell
+control closure/with/plain/module
+control closure/with/return/cell
+control closure/with/return/module
+control for-else/async-with/break/cell
+control for-else/async-with/break/module
+control for-else/async-with/continue/cell
+control for-else/async-with/continue/module
+control for-else/async-with/plain/cell
+control for-else/async-with/plain/module
+control for-else/async-with/return/cell
+control for-else/async-with/return/module
+control for-else/closure/plain/cell
+control for-else/closure/plain/module
+control for-else/with-pattern/break/cell
+control for-else/with-pattern/break/module
+control for-else/with-pattern/continue/cell
+control for-else/with-pattern/continue/module
+control for-else/with-pattern/plain/cell
+control for-else/with-pattern/plain/module
+control for-else/with-pattern/return/cell
+control for-else/with-pattern/return/module
+control for-else/with/break/cell
+control for-else/with/break/module
+control for-else/with/continue/cell
+control for-else/with/continue/module
+control for-else/with/plain/cell
+control for-else/with/plain/module
+control for-else/with/return/cell
+control for-else/with/return/module
+control for-pattern/async-with/break/cell
+control for-pattern/async-with/break/module
+control for-pattern/async-with/continue/cell
+control for-pattern/async-with/continue/module
+control for-pattern/async-with/plain/cell
+control for-pattern/async-with/plain/module
+control for-pattern/async-with/return/cell
+control for-pattern/async-with/return/module
+control for-pattern/closure/plain/cell
+control for-pattern/closure/plain/module
+control for-pattern/with-pattern/break/cell
+control for-pattern/with-pattern/break/module
+control for-pattern/with-pattern/continue/cell
+control for-pattern/with-pattern/continue/module
+control for-pattern/with-pattern/plain/cell
+control for-pattern/with-pattern/plain/module
+control for-pattern/with-pattern/return/cell
+control for-pattern/with-pattern/return/module
+control for-pattern/with/break/cell
+control for-pattern/with/break/module
+control for-pattern/with/continue/cell
+control for-pattern/with/continue/module
+control for-pattern/with/plain/cell
+control for-pattern/with/plain/module
+control for-pattern/with/return/cell
+control for-pattern/with/return/module
+control for/async-with/break/cell
+control for/async-with/break/module
+control for/async-with/continue/cell
+control for/async-with/continue/module
+control for/async-with/plain/cell
+control for/async-with/plain/module
+control for/async-with/return/cell
+control for/async-with/return/module
+control for/closure/plain/cell
+control for/closure/plain/module
+control for/with-pattern/break/cell
+control for/with-pattern/break/module
+control for/with-pattern/continue/cell
+control for/with-pattern/continue/module
+control for/with-pattern/plain/cell
+control for/with-pattern/plain/module
+control for/with-pattern/return/cell
+control for/with-pattern/return/module
+control for/with/break/cell
+control for/with/break/module
+control for/with/continue/cell
+control for/with/continue/module
+control for/with/plain/cell
+control for/with/plain/module
+control for/with/return/cell
+control for/with/return/module
+control if-else/async-with/plain/cell
+control if-else/async-with/plain/module
+control if-else/async-with/return/cell
+control if-else/async-with/return/module
+control if-else/closure/plain/cell
+control if-else/closure/plain/module
+control if-else/with-pattern/plain/cell
+control if-else/with-pattern/plain/module
+control if-else/with-pattern/return/cell
+control if-else/with-pattern/return/module
+control if-else/with/plain/cell
+control if-else/with/plain/module
+control if-else/with/return/cell
+control if-else/with/return/module
+control if/async-with/plain/cell
+control if/async-with/plain/module
+control if/async-with/return/cell
+control if/async-with/return/module
+control if/closure/plain/cell
+control if/closure/plain/module
+control if/with-pattern/plain/cell
+control if/with-pattern/plain/module
+control if/with-pattern/return/cell
+control if/with-pattern/return/module
+control if/with/plain/cell
+control if/with/plain/module
+control if/with/return/cell
+control if/with/return/module
+control match/async-with/plain/cell
+control match/async-with/plain/module
+control match/async-with/return/cell
+control match/async-with/return/module
+control match/closure/plain/cell
+control match/closure/plain/module
+control match/with-pattern/plain/cell
+control match/with-pattern/plain/module
+control match/with-pattern/return/cell
+control match/with-pattern/return/module
+control match/with/plain/cell
+control match/with/plain/module
+control match/with/return/cell
+control match/with/return/module
+control try-except-else-finally/async-with/plain/cell
+control try-except-else-finally/async-with/plain/module
+control try-except-else-finally/async-with/return/cell
+control try-except-else-finally/async-with/return/module
+control try-except-else-finally/closure/plain/cell
+control try-except-else-finally/closure/plain/module
+control try-except-else-finally/with-pattern/plain/cell
+control try-except-else-finally/with-pattern/plain/module
+control try-except-else-finally/with-pattern/return/cell
+control try-except-else-finally/with-pattern/return/module
+control try-except-else-finally/with/plain/cell
+control try-except-else-finally/with/plain/module
+control try-except-else-finally/with/return/cell
+control try-except-else-finally/with/return/module
+control try-except-none/async-with/plain/cell
+control try-except-none/async-with/plain/module
+control try-except-none/async-with/return/cell
+control try-except-none/async-with/return/module
+control try-except-none/closure/plain/cell
+control try-except-none/closure/plain/module
+control try-except-none/with-pattern/plain/cell
+control try-except-none/with-pattern/plain/module
+control try-except-none/with-pattern/return/cell
+control try-except-none/with-pattern/return/module
+control try-except-none/with/plain/cell
+control try-except-none/with/plain/module
+control try-except-none/with/return/cell
+control try-except-none/with/return/module
+control try-except/async-with/plain/cell
+control try-except/async-with/plain/module
+control try-except/async-with/return/cell
+control try-except/async-with/return/module
+control try-except/closure/plain/cell
+control try-except/closure/plain/module
+control try-except/with-pattern/plain/cell
+control try-except/with-pattern/plain/module
+control try-except/with-pattern/return/cell
+control try-except/with-pattern/return/module
+control try-except/with/plain/cell
+control try-except/with/plain/module
+control try-except/with/return/cell
+control try-except/with/return/module
+control try-finally/async-with/plain/cell
+control try-finally/async-with/plain/module
+control try-finally/async-with/return/cell
+control try-finally/async-with/return/module
+control try-finally/closure/plain/cell
+control try-finally/closure/plain/module
+control try-finally/with-pattern/plain/cell
+control try-finally/with-pattern/plain/module
+control try-finally/with-pattern/return/cell
+control try-finally/with-pattern/return/module
+control try-finally/with/plain/cell
+control try-finally/with/plain/module
+control try-finally/with/return/cell
+control try-finally/with/return/module
+control while-else/async-with/break/cell
+control while-else/async-with/break/module
+control while-else/async-with/continue/cell
+control while-else/async-with/continue/module
+control while-else/async-with/plain/cell
+control while-else/async-with/plain/module
+control while-else/async-with/return/cell
+control while-else/async-with/return/module
+control while-else/closure/plain/cell
+control while-else/closure/plain/module
+control while-else/with-pattern/break/cell
+control while-else/with-pattern/break/module
+control while-else/with-pattern/continue/cell
+control while-else/with-pattern/continue/module
+control while-else/with-pattern/plain/cell
+control while-else/with-pattern/plain/module
+control while-else/with-pattern/return/cell
+control while-else/with-pattern/return/module
+control while-else/with/break/cell
+control while-else/with/break/module
+control while-else/with/continue/cell
+control while-else/with/continue/module
+control while-else/with/plain/cell
+control while-else/with/plain/module
+control while-else/with/return/cell
+control while-else/with/return/module
+control while/async-with/break/cell
+control while/async-with/break/module
+control while/async-with/continue/cell
+control while/async-with/continue/module
+control while/async-with/plain/cell
+control while/async-with/plain/module
+control while/async-with/return/cell
+control while/async-with/return/module
+control while/closure/plain/cell
+control while/closure/plain/module
+control while/with-pattern/break/cell
+control while/with-pattern/break/module
+control while/with-pattern/continue/cell
+control while/with-pattern/continue/module
+control while/with-pattern/plain/cell
+control while/with-pattern/plain/module
+control while/with-pattern/return/cell
+control while/with-pattern/return/module
+control while/with/break/cell
+control while/with/break/module
+control while/with/continue/cell
+control while/with/continue/module
+control while/with/plain/cell
+control while/with/plain/module
+control while/with/return/cell
+control while/with/return/module
+control with-pattern/async-with/plain/cell
+control with-pattern/async-with/plain/module
+control with-pattern/async-with/return/cell
+control with-pattern/async-with/return/module
+control with-pattern/closure/plain/cell
+control with-pattern/closure/plain/module
+control with-pattern/closure/return/cell
+control with-pattern/closure/return/module
+control with-pattern/for-else/break/cell
+control with-pattern/for-else/break/module
+control with-pattern/for-else/continue/cell
+control with-pattern/for-else/continue/module
+control with-pattern/for-else/plain/cell
+control with-pattern/for-else/plain/module
+control with-pattern/for-else/return/cell
+control with-pattern/for-else/return/module
+control with-pattern/for-pattern/break/cell
+control with-pattern/for-pattern/break/module
+control with-pattern/for-pattern/continue/cell
+control with-pattern/for-pattern/continue/module
+control with-pattern/for-pattern/plain/cell
+control with-pattern/for-pattern/plain/module
+control with-pattern/for-pattern/return/cell
+control with-pattern/for-pattern/return/module
+control with-pattern/for/break/cell
+control with-pattern/for/break/module
+control with-pattern/for/continue/cell
+control with-pattern/for/continue/module
+control with-pattern/for/plain/cell
+control with-pattern/for/plain/module
+control with-pattern/for/return/cell
+control with-pattern/for/return/module
+control with-pattern/if-else/plain/cell
+control with-pattern/if-else/plain/module
+control with-pattern/if-else/return/cell
+control with-pattern/if-else/return/module
+control with-pattern/if/plain/cell
+control with-pattern/if/plain/module
+control with-pattern/if/return/cell
+control with-pattern/if/return/module
+control with-pattern/match/plain/cell
+control with-pattern/match/plain/module
+control with-pattern/match/return/cell
+control with-pattern/match/return/module
+control with-pattern/try-except-else-finally/plain/cell
+control with-pattern/try-except-else-finally/plain/module
+control with-pattern/try-except-else-finally/return/cell
+control with-pattern/try-except-else-finally/return/module
+control with-pattern/try-except-none/plain/cell
+control with-pattern/try-except-none/plain/module
+control with-pattern/try-except-none/return/cell
+control with-pattern/try-except-none/return/module
+control with-pattern/try-except/plain/cell
+control with-pattern/try-except/plain/module
+control with-pattern/try-except/return/cell
+control with-pattern/try-except/return/module
+control with-pattern/try-finally/plain/cell
+control with-pattern/try-finally/plain/module
+control with-pattern/try-finally/return/cell
+control with-pattern/try-finally/return/module
+control with-pattern/while-else/break/cell
+control with-pattern/while-else/break/module
+control with-pattern/while-else/continue/cell
+control with-pattern/while-else/continue/module
+control with-pattern/while-else/plain/cell
+control with-pattern/while-else/plain/module
+control with-pattern/while-else/return/cell
+control with-pattern/while-else/return/module
+control with-pattern/while/break/cell
+control with-pattern/while/break/module
+control with-pattern/while/continue/cell
+control with-pattern/while/continue/module
+control with-pattern/while/plain/cell
+control with-pattern/while/plain/module
+control with-pattern/while/return/cell
+control with-pattern/while/return/module
+control with-pattern/with-pattern/plain/cell
+control with-pattern/with-pattern/plain/module
+control with-pattern/with-pattern/return/cell
+control with-pattern/with-pattern/return/module
+control with-pattern/with/plain/cell
+control with-pattern/with/plain/module
+control with-pattern/with/return/cell
+control with-pattern/with/return/module
+control with/async-with/plain/cell
+control with/async-with/plain/module
+control with/async-with/return/cell
+control with/async-with/return/module
+control with/closure/plain/cell
+control with/closure/plain/module
+control with/closure/return/cell
+control with/closure/return/module
+control with/for-else/break/cell
+control with/for-else/break/module
+control with/for-else/continue/cell
+control with/for-else/continue/module
+control with/for-else/plain/cell
+control with/for-else/plain/module
+control with/for-else/return/cell
+control with/for-else/return/module
+control with/for-pattern/break/cell
+control with/for-pattern/break/module
+control with/for-pattern/continue/cell
+control with/for-pattern/continue/module
+control with/for-pattern/plain/cell
+control with/for-pattern/plain/module
+control with/for-pattern/return/cell
+control with/for-pattern/return/module
+control with/for/break/cell
+control with/for/break/module
+control with/for/continue/cell
+control with/for/continue/module
+control with/for/plain/cell
+control with/for/plain/module
+control with/for/return/cell
+control with/for/return/module
+control with/if-else/plain/cell
+control with/if-else/plain/module
+control with/if-else/return/cell
+control with/if-else/return/module
+control with/if/plain/cell
+control with/if/plain/module
+control with/if/return/cell
+control with/if/return/module
+control with/match/plain/cell
+control with/match/plain/module
+control with/match/return/cell
+control with/match/return/module
+control with/try-except-else-finally/plain/cell
+control with/try-except-else-finally/plain/module
+control with/try-except-else-finally/return/cell
+control with/try-except-else-finally/return/module
+control with/try-except-none/plain/cell
+control with/try-except-none/plain/module
+control with/try-except-none/return/cell
+control with/try-except-none/return/module
+control with/try-except/plain/cell
+control with/try-except/plain/module
+control with/try-except/return/cell
+control with/try-except/return/module
+control with/try-finally/plain/cell
+control with/try-finally/plain/module
+control with/try-finally/return/cell
+control with/try-finally/return/module
+control with/while-else/break/cell
+control with/while-else/break/module
+control with/while-else/continue/cell
+control with/while-else/continue/module
+control with/while-else/plain/cell
+control with/while-else/plain/module
+control with/while-else/return/cell
+control with/while-else/return/module
+control with/while/break/cell
+control with/while/break/module
+control with/while/continue/cell
+control with/while/continue/module
+control with/while/plain/cell
+control with/while/plain/module
+control with/while/return/cell
+control with/while/return/module
+control with/with-pattern/plain/cell
+control with/with-pattern/plain/module
+control with/with-pattern/return/cell
+control with/with-pattern/return/module
+control with/with/plain/cell
+control with/with/plain/module
+control with/with/return/cell
+control with/with/return/module
+position binary !=/call-callee/cell
+position binary !=/call-callee/module
+position binary !=/call-receiver/cell
+position binary !=/call-receiver/module
+position binary */call-callee/cell
+position binary */call-callee/module
+position binary */call-receiver/cell
+position binary */call-receiver/module
+position binary +/call-callee/cell
+position binary +/call-callee/module
+position binary +/call-receiver/cell
+position binary +/call-receiver/module
+position binary -/call-callee/cell
+position binary -/call-callee/module
+position binary -/call-receiver/cell
+position binary -/call-receiver/module
+position binary </call-callee/cell
+position binary </call-callee/module
+position binary </call-receiver/cell
+position binary </call-receiver/module
+position binary <=/call-callee/cell
+position binary <=/call-callee/module
+position binary <=/call-receiver/cell
+position binary <=/call-receiver/module
+position binary >/call-callee/cell
+position binary >/call-callee/module
+position binary >/call-receiver/cell
+position binary >/call-receiver/module
+position binary >=/call-callee/cell
+position binary >=/call-callee/module
+position binary >=/call-receiver/cell
+position binary >=/call-receiver/module
+position binary is not/call-callee/cell
+position binary is not/call-callee/module
+position binary is not/call-receiver/cell
+position binary is not/call-receiver/module
+position expression bytes/call-callee/cell
+position expression bytes/call-callee/module
+position expression bytes/call-keyword/cell
+position expression bytes/call-keyword/module
+position expression bytes/compound-key/cell
+position expression bytes/compound-key/module
+position expression dict comprehension/call-keyword-spread/cell
+position expression dict comprehension/call-keyword-spread/module
+position expression dict comprehension/call-spread/cell
+position expression dict comprehension/call-spread/module
+position expression dict comprehension/compound-key/cell
+position expression dict comprehension/compound-key/module
+position expression dict comprehension/compound-rhs/cell
+position expression dict comprehension/compound-rhs/module
+position expression dict/call-keyword-spread/cell
+position expression dict/call-keyword-spread/module
+position expression dict/call-spread/cell
+position expression dict/call-spread/module
+position expression dict/compound-rhs/cell
+position expression dict/compound-rhs/module
+position expression double starred call/call-keyword-spread/cell
+position expression double starred call/call-keyword-spread/module
+position expression double starred call/call-spread/cell
+position expression double starred call/call-spread/module
+position expression double starred call/compound-rhs/cell
+position expression double starred call/compound-rhs/module
+position expression generator/call-keyword-spread/cell
+position expression generator/call-keyword-spread/module
+position expression generator/call-spread/cell
+position expression generator/call-spread/module
+position expression generator/compound-key/cell
+position expression generator/compound-key/module
+position expression generator/compound-rhs/cell
+position expression generator/compound-rhs/module
+position expression lambda/call-keyword-spread/cell
+position expression lambda/call-keyword-spread/module
+position expression lambda/call-spread/cell
+position expression lambda/call-spread/module
+position expression lambda/compound-rhs/cell
+position expression lambda/compound-rhs/module
+position expression list comprehension/call-keyword-spread/cell
+position expression list comprehension/call-keyword-spread/module
+position expression list comprehension/call-spread/cell
+position expression list comprehension/call-spread/module
+position expression list comprehension/compound-key/cell
+position expression list comprehension/compound-key/module
+position expression list comprehension/compound-rhs/cell
+position expression list comprehension/compound-rhs/module
+position expression list/call-keyword-spread/cell
+position expression list/call-keyword-spread/module
+position expression list/call-spread/cell
+position expression list/call-spread/module
+position expression list/compound-rhs/cell
+position expression list/compound-rhs/module
+position expression set comprehension/call-keyword-spread/cell
+position expression set comprehension/call-keyword-spread/module
+position expression set comprehension/call-spread/cell
+position expression set comprehension/call-spread/module
+position expression set comprehension/compound-key/cell
+position expression set comprehension/compound-key/module
+position expression set comprehension/compound-rhs/cell
+position expression set comprehension/compound-rhs/module
+position expression set/call-keyword-spread/cell
+position expression set/call-keyword-spread/module
+position expression set/call-spread/cell
+position expression set/call-spread/module
+position expression set/compound-rhs/cell
+position expression set/compound-rhs/module
+position expression starred call/call-keyword-spread/cell
+position expression starred call/call-keyword-spread/module
+position expression starred call/call-spread/cell
+position expression starred call/call-spread/module
+position expression starred call/compound-rhs/cell
+position expression starred call/compound-rhs/module
+position expression walrus/assignment-key/cell
+position expression walrus/assignment-key/module
+position expression walrus/call-argument/cell
+position expression walrus/call-argument/module
+position expression walrus/call-callee/cell
+position expression walrus/call-callee/module
+position expression walrus/call-keyword-spread/cell
+position expression walrus/call-keyword-spread/module
+position expression walrus/call-keyword/cell
+position expression walrus/call-keyword/module
+position expression walrus/call-receiver/cell
+position expression walrus/call-receiver/module
+position expression walrus/call-spread/cell
+position expression walrus/call-spread/module
+position expression walrus/compound-key/cell
+position expression walrus/compound-key/module
+position expression walrus/compound-rhs/cell
+position expression walrus/compound-rhs/module
+position expression walrus/index-rhs/cell
+position expression walrus/index-rhs/module
+position expression walrus/pattern-rhs/cell
+position expression walrus/pattern-rhs/module
+position expression walrus/slice-rhs/cell
+position expression walrus/slice-rhs/module
+position unary -/call-callee/cell
+position unary -/call-callee/module
+position unary -/call-receiver/cell
+position unary -/call-receiver/module
+position unary not/call-callee/cell
+position unary not/call-callee/module
+position unary not/call-receiver/cell
+position unary not/call-receiver/module
+review py-148 with nested/cell
+review py-148 with nested/module
+review py-149 with await/cell
+review py-149 with await/module
+review py-151 comp multiple filters/cell
+review py-151 comp multiple filters/module
+review py-152 comp tuple/cell
+review py-152 comp tuple/module
+review py-153 comp nested/cell
+review py-153 comp nested/module
+review py-162 await comp/module
+review py-163 await while/module

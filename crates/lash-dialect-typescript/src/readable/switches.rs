@@ -67,10 +67,28 @@ impl Lifter<'_> {
         block: &[k::Stmt],
         site: &Site,
     ) -> Lift<Option<(StmtKind, usize)>> {
+        // A default-only switch still evaluates and pins its discriminant,
+        // although no clause test reads that snapshot.
+        let (snapshot, chosen_at) = match block {
+            [
+                k::Stmt::Let { name, value },
+                k::Stmt::Let {
+                    value: k::Rhs::Expr(chosen),
+                    ..
+                },
+                ..,
+            ] if super::lift::temporary(name)
+                && number(chosen) == Some(-1.0)
+                && !super::lift::reads_name(k::Node::Block(&block[1..]), name) =>
+            {
+                (Some(value), 1)
+            }
+            _ => (None, 0),
+        };
         let Some(k::Stmt::Let {
             name: chosen,
             value: k::Rhs::Expr(value),
-        }) = block.first()
+        }) = block.get(chosen_at)
         else {
             return Ok(None);
         };
@@ -79,7 +97,7 @@ impl Lifter<'_> {
         }
         let mut tests = std::collections::BTreeMap::new();
         let mut discriminant = None;
-        let mut index = 1;
+        let mut index = chosen_at + 1;
         while let Some(k::Stmt::If {
             condition: k::Expr::Call { function, args },
             then_block,
@@ -194,7 +212,10 @@ impl Lifter<'_> {
         }
         let discriminant = match discriminant {
             Some(value) => self.expr(&value)?,
-            None => Expr::Undefined,
+            None => match snapshot {
+                Some(value) => self.rhs(value)?,
+                None => Expr::Undefined,
+            },
         };
         let mut taken = index + 1;
         if let Some(flag) = &continuation {
@@ -211,6 +232,15 @@ impl Lifter<'_> {
                 return Ok(None);
             };
             let test = test.map(|test| self.expr(&test)).transpose()?;
+            // A for-head binding lowered inside the clause is not one of
+            // the switch-wide declarations. Keep its scope when the loop
+            // prints as an initializer followed by a while.
+            let scoped_loop = matches!(body.as_slice(),
+                [k::Stmt::Let { name, .. }, k::Stmt::While { body, .. }]
+                    if !super::lift::temporary(name)
+                        && matches!(body.last(), Some(k::Stmt::Assign {
+                            place: k::Place::Variable(updated), ..
+                        }) if updated == name));
             let body = self.block(
                 body,
                 &site
@@ -219,6 +249,14 @@ impl Lifter<'_> {
                     .child((2 * position + 1) as u32)
                     .child(0),
             )?;
+            let body = if scoped_loop {
+                vec![super::source::Stmt {
+                    caption: None,
+                    kind: StmtKind::Block(body),
+                }]
+            } else {
+                body
+            };
             cases.push((test, body));
         }
         if let Some(flag) = continuation {

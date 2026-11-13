@@ -1,0 +1,103 @@
+# Explicitly refused source identities in the composition enumeration.
+control closure/block/plain/module
+control closure/classic-for/break/module
+control closure/classic-for/continue/module
+control closure/classic-for/plain/module
+control closure/classic-pattern/break/module
+control closure/classic-pattern/continue/module
+control closure/classic-pattern/plain/module
+control closure/closure/plain/module
+control closure/do/break/module
+control closure/do/continue/module
+control closure/do/plain/module
+control closure/for-empty/break/module
+control closure/for-empty/continue/module
+control closure/for-empty/plain/module
+control closure/for-in-pattern/break/module
+control closure/for-in-pattern/continue/module
+control closure/for-in-pattern/plain/module
+control closure/for-in/break/module
+control closure/for-in/continue/module
+control closure/for-in/plain/module
+control closure/for-of-pattern/break/module
+control closure/for-of-pattern/continue/module
+control closure/for-of-pattern/plain/module
+control closure/for-of/break/module
+control closure/for-of/continue/module
+control closure/for-of/plain/module
+control closure/if-else/plain/module
+control closure/if/plain/module
+control closure/switch-default/break/module
+control closure/switch-default/plain/module
+control closure/switch-fallthrough/break/module
+control closure/switch-fallthrough/plain/module
+control closure/switch/break/module
+control closure/switch/plain/module
+control closure/try-catch-finally/plain/module
+control closure/try-catch-none/plain/module
+control closure/try-catch/plain/module
+control closure/try-finally/plain/module
+control closure/while/break/module
+control closure/while/continue/module
+control closure/while/plain/module
+flat break/cell
+flat break/module
+flat class/cell
+flat class/module
+flat continue/cell
+flat continue/module
+flat for await/cell
+flat for await/module
+flat for in assignment array/cell
+flat for in assignment array/module
+flat for in assignment object/cell
+flat for in assignment object/module
+flat return bare/cell
+flat return bare/module
+flat return/cell
+flat return/module
+position binary !=/call-receiver/cell
+position binary !=/call-receiver/module
+position binary !==/call-receiver/cell
+position binary !==/call-receiver/module
+position binary </call-receiver/cell
+position binary </call-receiver/module
+position binary <=/call-receiver/cell
+position binary <=/call-receiver/module
+position binary ==/call-receiver/cell
+position binary ==/call-receiver/module
+position binary ===/call-receiver/cell
+position binary ===/call-receiver/module
+position binary >/call-receiver/cell
+position binary >/call-receiver/module
+position binary >=/call-receiver/cell
+position binary >=/call-receiver/module
+position binary in/call-receiver/cell
+position binary in/call-receiver/module
+position binary instanceof/call-receiver/cell
+position binary instanceof/call-receiver/module
+position expression array/call-receiver/cell
+position expression array/call-receiver/module
+position expression as/call-receiver/cell
+position expression as/call-receiver/module
+position expression bool/call-receiver/cell
+position expression bool/call-receiver/module
+position expression delete index/call-receiver/cell
+position expression delete index/call-receiver/module
+position expression delete/call-receiver/cell
+position expression delete/call-receiver/module
+position expression new/call-receiver/cell
+position expression new/call-receiver/module
+position expression number/call-receiver/cell
+position expression number/call-receiver/module
+position expression string/call-receiver/cell
+position expression string/call-receiver/module
+position expression template/call-receiver/cell
+position expression template/call-receiver/module
+position unary !/call-receiver/cell
+position unary !/call-receiver/module
+position unary +/call-receiver/cell
+position unary +/call-receiver/module
+position unary typeof/call-receiver/cell
+position unary typeof/call-receiver/module
+review ts-251 named recursive/module

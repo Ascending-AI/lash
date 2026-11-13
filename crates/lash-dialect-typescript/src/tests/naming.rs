@@ -81,7 +81,102 @@ fn enumerated_statements_and_expressions_print_and_relower() {
     let library = super::library();
     let namespaces = Default::default();
     let environment = Environment::new(library, &namespaces);
-    let forms = [
+    let forms = flat_source_forms();
+    let mut refused = Vec::new();
+    let mut failures = Vec::new();
+    let mut admitted = 0;
+    for (name, body) in forms {
+        for module in [false, true] {
+            let context = if module { "module" } else { "cell" };
+            let source = if module {
+                format!("export const entry=async(): Promise<number>=>1; {body}")
+            } else {
+                body.into()
+            };
+            let mode = if module {
+                Mode::Module
+            } else {
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            };
+            let lowered = match crate::lower(&source, &environment, mode) {
+                Ok(lowered) => lowered,
+                Err(error) => {
+                    refused.push(format!("{context} {name}: {error}"));
+                    continue;
+                }
+            };
+            admitted += 1;
+            let printed = match crate::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                lash_kernel_dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(printed) => printed,
+                Err(error) => {
+                    failures.push(format!("{context} {name}: print: {error}"));
+                    continue;
+                }
+            };
+            match crate::lower(&printed.source, &environment, mode) {
+                Ok(read)
+                    if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
+                {
+                    printed
+                        .source_map
+                        .unwrap()
+                        .validate(&lowered.document, &printed.source)
+                        .unwrap();
+                }
+                Ok(read) => failures.push(format!(
+                    "{context} {name}: different document; private {:?} -> {:?}; source {}",
+                    lowered.document.private_bindings,
+                    read.document.private_bindings,
+                    printed.source
+                )),
+                Err(error) => failures.push(format!("{context} {name}: lower print: {error}")),
+            }
+        }
+    }
+    eprintln!(
+        "TypeScript enumerated: admitted={admitted}, passed={}, failed={}, refused={}\nREFUSED:\n{}",
+        admitted - failures.len(),
+        failures.len(),
+        refused.len(),
+        refused.join("\n")
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(admitted, 448, "admitted forms must not disappear");
+    let mut refused_forms = refused
+        .iter()
+        .map(|failure| failure.split(':').next().unwrap())
+        .collect::<Vec<_>>();
+    refused_forms.sort_unstable();
+    let mut expected = [
+        "return",
+        "return bare",
+        "break",
+        "continue",
+        "class",
+        "for in assignment array",
+        "for in assignment object",
+        "for await",
+    ]
+    .into_iter()
+    .flat_map(|name| [format!("cell {name}"), format!("module {name}")])
+    .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert_eq!(
+        refused_forms, expected,
+        "lower-refused forms must be explicit"
+    );
+}
+
+fn flat_source_forms() -> Vec<(&'static str, &'static str)> {
+    vec![
         ("empty", "; debugger;"),
         (
             "authored suffix bindings",
@@ -581,31 +676,107 @@ fn enumerated_statements_and_expressions_print_and_relower() {
             "const f=function named():unknown{return this;};",
         ),
         ("for await", "for await(const x of [1,2]){}"),
-    ];
+    ]
+}
+
+fn review_source_forms() -> Vec<(String, String)> {
+    vec![
+        ("review ts-230 nested switch try loop".into(), "let result=0;try{switch(1){case 1: for(const [x,y] of [[1,2]]){result+=x+y;} break;default:result=4;}}catch{result=9;}finally{result+=1;}".into()),
+        ("review ts-231 label continue switch".into(), "let result=0;outer:for(let i=0;i<3;i++){switch(i){case 1:continue outer;default:result+=i;}}".into()),
+        ("review ts-232 switch continue step two".into(), "let result=0;for(let i=0;i<4;i+=2){switch(i){case 0:continue;default:result+=i;}}".into()),
+        ("review ts-233 switch continue custom step".into(), "let result=0;for(let i=0;i<4;i=i+2){switch(i){case 0:continue;default:result+=i;}}".into()),
+        ("review ts-234 nested switch continue".into(), "let result=0;for(let i=0;i<3;i++){switch(i){case 0:switch(i){case 0:continue;}break;default:result+=i;}}".into()),
+        ("review ts-235 catch shadow".into(), "let e=1;let result=0;try{throw 2;}catch(e){let f=()=>e;result=f();}result+=e;".into()),
+        ("review ts-236 catch nested shadow".into(), "let result=0;try{throw {a:1};}catch({a}){try{throw 2;}catch(a){result=a;}}".into()),
+        ("review ts-237 capture classic let".into(), "const fs=[];for(let i=0;i<3;i++){fs.push(()=>i);}const result=fs.map(f=>f());".into()),
+        ("review ts-238 capture for of".into(), "const fs=[];for(const [x] of [[1],[2]]){fs.push(()=>x);}const result=fs.map(f=>f());".into()),
+        ("review ts-239 capture var".into(), "const fs=[];for(var i=0;i<3;i++){fs.push(()=>i);}const result=fs.map(f=>f());".into()),
+        ("review ts-240 await switch".into(), "let result=0;switch(await Promise.resolve(1)){case await Promise.resolve(1):result=await Promise.resolve(2);break;}".into()),
+        ("review ts-241 await loop".into(), "let result=0;for(let i=await Promise.resolve(0);await Promise.resolve(i<2);i+=await Promise.resolve(1)){result+=await Promise.resolve(i);}".into()),
+        ("review ts-242 await patterns".into(), "let result=0;for(const {x=await Promise.resolve(3)} of await Promise.resolve([{}])){result=x;}".into()),
+        ("review ts-243 await try".into(), "let result=0;try{throw await Promise.resolve(1);}catch(e){result=await Promise.resolve(e);}finally{result+=await Promise.resolve(2);}".into()),
+        ("review ts-244 destructure while label".into(), "let result=0;outer:while(result<2){const [x]=[1];result+=x;continue outer;}".into()),
+        ("review ts-245 destructure do label".into(), "let result=0;outer:do{const {x}={x:1};result+=x;if(result<2)continue outer;}while(result<3);".into()),
+        ("review ts-246 classic destructure".into(), "let result=0;for(let [i,j]=[0,1];i<2;i++){result+=i+j;}".into()),
+        ("review ts-247 for in destructure".into(), "let result=0;outer:for(const [x] in {abc:1}){result+=x.length;break outer;}".into()),
+        ("review ts-248 default middle".into(), "let result=0;switch(3){case 1:result++;default:result+=2;case 3:result+=3;}".into()),
+        ("review ts-249 empty switch side effect".into(), "let result=0;switch(result++){}".into()),
+        ("review ts-250 default only side effect".into(), "let result=0;switch(result++){default:result+=2;}".into()),
+        ("review ts-251 named recursive".into(), "const f=function named(x:number):number {return x?named(x-1):0;};const result=f(2);".into()),
+        ("review ts-252 logical index side effects".into(), "let i=0;const xs=[0,1];xs[i++] ||= i++;const result=[i,xs];".into()),
+        ("review ts-253 compound index side effects".into(), "let i=0;const xs=[1,2];xs[i++] += i++;const result=[i,xs];".into()),
+        ("review ts-254 optional grouping".into(), "const obj={x:{y:1}};const result=(obj?.x).y;".into()),
+        ("review ts-255 optional bound call".into(), "const obj={x:1,f:function():number{return this.x;}};const result=(obj?.f)();".into()),
+        ("review ts-256 enum expression".into(), "enum E{A=1+2,B=A+1}const result=E.B;".into()),
+        ("review ts-257 authored temp".into(), "let t1=1;try{throw 2;}catch(t2){t1+=t2;}".into()),
+        ("review ts-258 private sibling scopes".into(), "let result=0;{let x=1;result+=x;}{let x=2;result+=x;}".into()),
+        ("audit block-local function simple".into(), "{function f_1(x_1:number):number{return x_1+1;}const result=f_1(1);}".into()),
+        ("audit block-local function with local".into(), "{function f_1(x_1:number):number{let x=2;return x+x_1;}const result=f_1(1);}".into()),
+    ]
+}
+
+/// PRINT-ROUNDTRIP over admitted control and expression compositions.
+/// Known failures stay explicit; a fixed case must leave the list.
+#[test]
+fn enumerated_compositions_print_and_relower() {
+    use lash_kernel_dialect::{Environment, Mode};
+    let started = std::time::Instant::now();
+    let identities = |text: &'static str| {
+        let identities = text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect::<Vec<_>>();
+        assert!(
+            identities.windows(2).all(|pair| pair[0] < pair[1]),
+            "identity lists must be sorted and unique"
+        );
+        identities
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let mut known_failures = identities(include_str!("known_print_failures.txt"));
+    let expected_refusals = identities(include_str!("composition_lowering_refusals.txt"));
+    let mut seen = std::collections::BTreeSet::new();
+    let library = super::library();
+    let namespaces = Default::default();
+    let environment = Environment::new(library, &namespaces);
+    let mut forms = flat_source_forms()
+        .into_iter()
+        .map(|(name, body)| (format!("flat {name}"), body.to_owned()))
+        .collect::<Vec<_>>();
+    forms.extend(review_source_forms());
+    forms.extend(composed_control_forms());
+    forms.extend(composed_expression_forms());
     let mut refused = Vec::new();
     let mut failures = Vec::new();
-    let mut admitted = 0;
+    let mut counts = std::collections::BTreeMap::<String, [usize; 4]>::new();
     for (name, body) in forms {
         for module in [false, true] {
             let context = if module { "module" } else { "cell" };
-            let source = if module {
-                format!("export const entry=async(): Promise<number>=>1; {body}")
-            } else {
-                body.into()
-            };
+            let identity = format!("{name}/{context}");
+            assert!(seen.insert(identity.clone()), "duplicate case: {identity}");
             let mode = if module {
                 Mode::Module
             } else {
                 Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
             };
+            let source = if module {
+                format!("export const entry=async(): Promise<number>=>1; {body}")
+            } else {
+                body.clone()
+            };
+            let count = counts
+                .entry(name.split_whitespace().next().unwrap().to_owned())
+                .or_default();
             let lowered = match crate::lower(&source, &environment, mode) {
                 Ok(lowered) => lowered,
-                Err(error) => {
-                    refused.push(format!("{context} {name}: {error}"));
+                Err(_) => {
+                    count[3] += 1;
+                    refused.push(identity.clone());
                     continue;
                 }
             };
-            admitted += 1;
+            count[0] += 1;
             let printed = match crate::print(
                 &lowered.document,
                 Some(&lowered.captions),
@@ -617,7 +788,10 @@ fn enumerated_statements_and_expressions_print_and_relower() {
             ) {
                 Ok(printed) => printed,
                 Err(error) => {
-                    failures.push(format!("{context} {name}: print: {error}"));
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!("{identity}: print: {error}\nORIGINAL:\n{source}"));
+                    }
                     continue;
                 }
             };
@@ -625,52 +799,193 @@ fn enumerated_statements_and_expressions_print_and_relower() {
                 Ok(read)
                     if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
                 {
+                    count[1] += 1;
                     printed
                         .source_map
+                        .as_ref()
                         .unwrap()
                         .validate(&lowered.document, &printed.source)
                         .unwrap();
                 }
-                Ok(read) => failures.push(format!(
-                    "{context} {name}: different document; private {:?} -> {:?}; source {}",
-                    lowered.document.private_bindings,
-                    read.document.private_bindings,
-                    printed.source
-                )),
-                Err(error) => failures.push(format!("{context} {name}: lower print: {error}")),
+                Ok(_) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!(
+                            "{identity}: document mismatch\nORIGINAL:\n{source}\nPRINT:\n{}",
+                            printed.source
+                        ));
+                    }
+                }
+                Err(error) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!(
+                            "{identity}: lower print: {error}\nORIGINAL:\n{source}\nPRINT:\n{}",
+                            printed.source
+                        ));
+                    }
+                }
             }
         }
     }
-    eprintln!(
-        "TypeScript enumerated: admitted={admitted}, passed={}, failed={}, refused={}\nREFUSED:\n{}",
-        admitted - failures.len(),
-        failures.len(),
-        refused.len(),
-        refused.join("\n")
-    );
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(admitted, 448, "admitted forms must not disappear");
-    let mut refused_forms = refused
-        .iter()
-        .map(|failure| failure.split(':').next().unwrap())
-        .collect::<Vec<_>>();
-    refused_forms.sort_unstable();
-    let mut expected = [
-        "return",
-        "return bare",
-        "break",
-        "continue",
-        "class",
-        "for in assignment array",
-        "for in assignment object",
-        "for await",
-    ]
-    .into_iter()
-    .flat_map(|name| [format!("cell {name}"), format!("module {name}")])
-    .collect::<Vec<_>>();
-    expected.sort_unstable();
+    eprintln!("COMPOSITION COUNTS [admitted, equal, known-failed, lower-refused]: {counts:?}");
+    eprintln!("COMPOSITION ELAPSED: {:?}", started.elapsed());
     assert_eq!(
-        refused_forms, expected,
-        "lower-refused forms must be explicit"
+        counts
+            .iter()
+            .map(|(group, count)| (group.clone(), [count[0], count[3]]))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        std::collections::BTreeMap::from([
+            ("audit".to_owned(), [4, 0]),
+            ("control".to_owned(), [3545, 41]),
+            ("flat".to_owned(), [448, 16]),
+            ("position".to_owned(), [1860, 44]),
+            ("review".to_owned(), [57, 1])
+        ]),
+        "admission counts must not silently shrink"
     );
+    assert_eq!(
+        refused
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected_refusals,
+        "lowering refusals must remain explicit"
+    );
+    assert!(
+        failures.is_empty() && known_failures.is_empty(),
+        "UNLISTED PRINT FAILURES: {}\n{}\nKNOWN PRINT FAILURES THAT NOW PASS OR ARE NO LONGER ADMITTED: {}\n{}",
+        failures.len(),
+        failures.join("\n"),
+        known_failures.len(),
+        known_failures.into_iter().collect::<Vec<_>>().join("\n")
+    );
+}
+
+fn composed_control_forms() -> Vec<(String, String)> {
+    let controls = [
+        ("block", "{$BODY}", 0u8),
+        ("if", "if(result<2){$BODY}", 0u8),
+        ("if-else", "if(result<2){$BODY}else{result++;}", 0u8),
+        ("while", "while(result<2){$BODY}", 3u8),
+        ("do", "do{$BODY}while(result<2);", 3u8),
+        ("classic-for", "for(let i$N=0;i$N<2;i$N++){$BODY}", 3u8),
+        (
+            "classic-pattern",
+            "for(let [i$N]=[0];i$N<2;i$N+=2){$BODY}",
+            3u8,
+        ),
+        ("for-empty", "for(;;){$BODY}", 3u8),
+        ("for-of", "for(const x$N of [1,2]){$BODY}", 3u8),
+        (
+            "for-of-pattern",
+            "for(const [x$N] of [[1],[2]]){$BODY}",
+            3u8,
+        ),
+        ("for-in", "for(const x$N in {a:1,b:2}){$BODY}", 3u8),
+        ("for-in-pattern", "for(const [x$N] in {ab:1}){$BODY}", 3u8),
+        (
+            "switch",
+            "switch(result){case 0:$BODY break;default:result++;}",
+            2u8,
+        ),
+        (
+            "switch-fallthrough",
+            "switch(result){case 0:$BODY case 1:result++;default:result++;}",
+            2u8,
+        ),
+        ("switch-default", "switch(result){default:$BODY}", 2u8),
+        ("try-catch", "try{$BODY}catch(error$N){result++;}", 0u8),
+        ("try-catch-none", "try{$BODY}catch{result++;}", 0u8),
+        ("try-finally", "try{$BODY}finally{result++;}", 0u8),
+        (
+            "try-catch-finally",
+            "try{$BODY}catch(error$N){result++;}finally{result++;}",
+            0u8,
+        ),
+        (
+            "closure",
+            "const nested$N=():number=>{$BODY return result;};result=nested$N();",
+            4u8,
+        ),
+    ];
+    let mut forms = Vec::new();
+    for (outer_name, outer, outer_role) in controls {
+        for (inner_name, inner, inner_role) in controls {
+            let mut exits = vec![
+                ("plain", "result++;", false),
+                ("return", "return result;", false),
+            ];
+            if inner_role & 4 == 0 && (inner_role & 2 != 0 || outer_role & 6 == 2) {
+                exits.push(("break", "break;", false));
+            }
+            if inner_role & 4 == 0 && (inner_role & 1 != 0 || outer_role & 5 == 1) {
+                exits.push(("continue", "continue;", false));
+            }
+            if inner_role & 4 == 0 && outer_role & 2 != 0 {
+                exits.push(("label-break", "break outer_label;", true));
+            }
+            if inner_role & 4 == 0 && outer_role & 1 != 0 {
+                exits.push(("label-continue", "continue outer_label;", true));
+            }
+            for (exit, payload, label) in exits {
+                let inner = inner.replace("$N", "1").replace("$BODY", payload);
+                let outer = outer.replace("$N", "0").replace("$BODY", &inner);
+                let outer = if label {
+                    format!("outer_label:{outer}")
+                } else {
+                    outer
+                };
+                let body = if exit == "return" {
+                    format!(
+                        "const run=():number=>{{let result=0;{outer}return result;}};const result=run();"
+                    )
+                } else {
+                    format!("let result=0;{outer}")
+                };
+                forms.push((format!("control {outer_name}/{inner_name}/{exit}"), body));
+            }
+        }
+    }
+    forms
+}
+
+fn composed_expression_forms() -> Vec<(String, String)> {
+    let positions = [
+        ("variable-rhs", "target=$EXPR;"),
+        ("field-rhs", "box.x=$EXPR;"),
+        ("index-rhs", "arr[0]=$EXPR;"),
+        ("pattern-rhs", "[target]=[$EXPR];"),
+        ("compound-rhs", "target+=$EXPR;"),
+        ("logical-rhs", "target||=$EXPR;"),
+        ("assignment-key", "box[$EXPR]=1;"),
+        ("compound-key", "box[$EXPR]+=1;"),
+        ("logical-key", "box[$EXPR]||=1;"),
+        ("call-callee", "($EXPR)(1);"),
+        ("call-argument", "sink($EXPR);"),
+        ("call-receiver", "($EXPR).f(1);"),
+        ("call-key", "box[$EXPR](1);"),
+        ("call-spread", "sink(...($EXPR));"),
+    ];
+    let mut forms = Vec::new();
+    for (name, body) in flat_source_forms() {
+        if !(name.starts_with("expression ")
+            || name.starts_with("binary ")
+            || name.starts_with("unary "))
+        {
+            continue;
+        }
+        let Some((prefix, expression)) = body.rsplit_once("const result=") else {
+            panic!("expression form without result: {name}");
+        };
+        let expression = expression.trim_end_matches(';');
+        for (position, template) in positions {
+            let body = format!(
+                "{prefix}let target:any=0;const box:any={{x:0}};const arr:any=[0];const sink=(value:any):any=>value;{}",
+                template.replace("$EXPR", &format!("({expression})"))
+            );
+            forms.push((format!("position {name}/{position}"), body));
+        }
+    }
+    forms
 }

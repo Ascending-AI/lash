@@ -1164,7 +1164,100 @@ fn enumerated_statements_and_expressions_print_and_relower() {
     let library = machine::library();
     let namespaces = Default::default();
     let environment = Environment::new(library, &namespaces);
-    let forms = [
+    let forms = flat_source_forms();
+    let mut refused = Vec::new();
+    let mut failures = Vec::new();
+    let mut admitted = 0;
+    for (name, body) in forms {
+        for module in [false, true] {
+            let context = if module { "module" } else { "cell" };
+            let source = if module {
+                format!("async def entry() -> int:\n    return 1\n{body}\n")
+            } else {
+                body.into()
+            };
+            let mode = if module {
+                Mode::Module
+            } else {
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            };
+            let lowered = match crate::lower(&source, &environment, mode) {
+                Ok(lowered) => lowered,
+                Err(error) => {
+                    refused.push(format!("{context} {name}: {error}"));
+                    continue;
+                }
+            };
+            admitted += 1;
+            let printed = match crate::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                lash_kernel_dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(printed) => printed,
+                Err(error) => {
+                    failures.push(format!("{context} {name}: print: {error}"));
+                    continue;
+                }
+            };
+            match crate::lower(&printed.source, &environment, mode) {
+                Ok(read)
+                    if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
+                {
+                    printed
+                        .source_map
+                        .unwrap()
+                        .validate(&lowered.document, &printed.source)
+                        .unwrap();
+                }
+                Ok(read) => failures.push(format!(
+                    "{context} {name}: different document; private {:?} -> {:?}; source {}",
+                    lowered.document.private_bindings,
+                    read.document.private_bindings,
+                    printed.source
+                )),
+                Err(error) => failures.push(format!("{context} {name}: lower print: {error}")),
+            }
+        }
+    }
+    eprintln!(
+        "Python enumerated: admitted={admitted}, passed={}, failed={}, refused={}\nREFUSED:\n{}",
+        admitted - failures.len(),
+        failures.len(),
+        refused.len(),
+        refused.join("\n")
+    );
+    assert_eq!(admitted, 292, "admitted forms must not disappear");
+    let mut refused_forms = refused
+        .iter()
+        .map(|failure| failure.split(':').next().unwrap())
+        .collect::<Vec<_>>();
+    refused_forms.sort_unstable();
+    let mut expected = [
+        "attribute assignment",
+        "return",
+        "break",
+        "continue",
+        "class",
+        "async for",
+    ]
+    .into_iter()
+    .flat_map(|name| [format!("cell {name}"), format!("module {name}")])
+    .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert_eq!(
+        refused_forms, expected,
+        "lower-refused forms must be explicit"
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn flat_source_forms() -> Vec<(&'static str, &'static str)> {
+    vec![
         ("pass", "pass"),
         ("block", "if True:\n    x=1"),
         ("assign", "x=1\ny=x"),
@@ -1512,31 +1605,92 @@ fn enumerated_statements_and_expressions_print_and_relower() {
         ("unary -", "x=1\nresult=-x"),
         ("unary ~", "x=1\nresult=~x"),
         ("unary not", "x=1\nresult=not x"),
-    ];
+    ]
+}
+
+fn review_source_forms() -> Vec<(String, String)> {
+    vec![
+        ("review py-148 with nested".into(), "resource=None\nwith resource as (x,y):\n    with resource as z:\n        result=x+y+z".into()),
+        ("review py-149 with await".into(), "async def f() -> int:\n    async with None as x:\n        return await x\n".into()),
+        ("review py-150 match nested".into(), "match [1,2]:\n    case [x,y] if x:\n        match y:\n            case 2:\n                result=x\n    case _:\n        result=0".into()),
+        ("review py-151 comp multiple filters".into(), "result=[x+y for x in [1,2] if x>0 for y in [3,4] if y>3 if x+y>4]".into()),
+        ("review py-152 comp tuple".into(), "result=[x+y for x,y in [(1,2)] if x>0]".into()),
+        ("review py-153 comp nested".into(), "result=[[y for y in [1,2] if y>x] for x in [0,1] if x<2]".into()),
+        ("review py-154 try else finally".into(), "result=0\ntry:\n    result=1\nexcept ValueError as e:\n    result=2\nelse:\n    result+=3\nfinally:\n    result+=4".into()),
+        ("review py-155 catch shadow".into(), "e=1\ntry:\n    raise ValueError(\"x\")\nexcept ValueError as e:\n    result=str(e)\n".into()),
+        ("review py-156 global read write".into(), "x=1\ndef f() -> int:\n    global x\n    x+=1\n    return x\nresult=f()".into()),
+        ("review py-157 nonlocal nested".into(), "def f() -> int:\n    x=1\n    def g() -> int:\n        nonlocal x\n        x+=1\n        return x\n    return g()\nresult=f()".into()),
+        ("review py-158 authored local suffix".into(), "def f() -> int:\n    x=1\n    x_local1=2\n    return x+x_local1\nresult=f()".into()),
+        ("review py-159 parameter local suffix".into(), "def f(x_local1: int) -> int:\n    x=2\n    return x_local1+x\nresult=f(1)".into()),
+        ("review py-160 nested unpack star".into(), "x,(y,*z)=(1,(2,3,4))\nresult=x+y+len(z)".into()),
+        ("review py-161 match mapping".into(), "match {\"a\":1,\"b\":2}:\n    case {\"a\":x,**rest}:\n        result=x+len(rest)".into()),
+        ("review py-162 await comp".into(), "async def g(x: int) -> int:\n    return x\nasync def h(x: int) -> bool:\n    return x>0\nasync def f() -> object:\n    return [await g(x) for x in [1,2] if await h(x)]".into()),
+        ("review py-163 await while".into(), "async def g(x: int) -> bool:\n    return x<2\nasync def h(x: int) -> int:\n    return 1\nasync def f() -> int:\n    x=0\n    while await g(x):\n        x+=await h(x)\n    return x".into()),
+    ]
+}
+
+/// PRINT-ROUNDTRIP over admitted control and expression compositions.
+/// Known failures stay explicit; a fixed case must leave the list.
+#[test]
+fn enumerated_compositions_print_and_relower() {
+    use lash_kernel_dialect::{Environment, Mode};
+    let started = std::time::Instant::now();
+    let identities = |text: &'static str| {
+        let identities = text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect::<Vec<_>>();
+        assert!(
+            identities.windows(2).all(|pair| pair[0] < pair[1]),
+            "identity lists must be sorted and unique"
+        );
+        identities
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let mut known_failures = identities(include_str!("known_print_failures.txt"));
+    let expected_refusals = identities(include_str!("composition_lowering_refusals.txt"));
+    let mut seen = std::collections::BTreeSet::new();
+    let library = machine::library();
+    let namespaces = Default::default();
+    let environment = Environment::new(library, &namespaces);
+    let mut forms = flat_source_forms()
+        .into_iter()
+        .map(|(name, body)| (format!("flat {name}"), body.to_owned()))
+        .collect::<Vec<_>>();
+    forms.extend(review_source_forms());
+    forms.extend(composed_control_forms());
+    forms.extend(composed_expression_forms());
     let mut refused = Vec::new();
     let mut failures = Vec::new();
-    let mut admitted = 0;
+    let mut counts = std::collections::BTreeMap::<String, [usize; 4]>::new();
     for (name, body) in forms {
         for module in [false, true] {
             let context = if module { "module" } else { "cell" };
-            let source = if module {
-                format!("async def entry() -> int:\n    return 1\n{body}\n")
-            } else {
-                body.into()
-            };
+            let identity = format!("{name}/{context}");
+            assert!(seen.insert(identity.clone()), "duplicate case: {identity}");
             let mode = if module {
                 Mode::Module
             } else {
                 Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
             };
+            let source = if module {
+                format!("async def entry() -> int:\n    return 1\n{body}\n")
+            } else {
+                body.clone()
+            };
+            let count = counts
+                .entry(name.split_whitespace().next().unwrap().to_owned())
+                .or_default();
             let lowered = match crate::lower(&source, &environment, mode) {
                 Ok(lowered) => lowered,
-                Err(error) => {
-                    refused.push(format!("{context} {name}: {error}"));
+                Err(_) => {
+                    count[3] += 1;
+                    refused.push(identity.clone());
                     continue;
                 }
             };
-            admitted += 1;
+            count[0] += 1;
             let printed = match crate::print(
                 &lowered.document,
                 Some(&lowered.captions),
@@ -1548,7 +1702,10 @@ fn enumerated_statements_and_expressions_print_and_relower() {
             ) {
                 Ok(printed) => printed,
                 Err(error) => {
-                    failures.push(format!("{context} {name}: print: {error}"));
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!("{identity}: print: {error}\nORIGINAL:\n{source}"));
+                    }
                     continue;
                 }
             };
@@ -1556,50 +1713,223 @@ fn enumerated_statements_and_expressions_print_and_relower() {
                 Ok(read)
                     if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
                 {
+                    count[1] += 1;
                     printed
                         .source_map
+                        .as_ref()
                         .unwrap()
                         .validate(&lowered.document, &printed.source)
                         .unwrap();
                 }
-                Ok(read) => failures.push(format!(
-                    "{context} {name}: different document; private {:?} -> {:?}; source {}",
-                    lowered.document.private_bindings,
-                    read.document.private_bindings,
-                    printed.source
-                )),
-                Err(error) => failures.push(format!("{context} {name}: lower print: {error}")),
+                Ok(_) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!(
+                            "{identity}: document mismatch\nORIGINAL:\n{source}\nPRINT:\n{}",
+                            printed.source
+                        ));
+                    }
+                }
+                Err(error) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!(
+                            "{identity}: lower print: {error}\nORIGINAL:\n{source}\nPRINT:\n{}",
+                            printed.source
+                        ));
+                    }
+                }
             }
         }
     }
-    eprintln!(
-        "Python enumerated: admitted={admitted}, passed={}, failed={}, refused={}\nREFUSED:\n{}",
-        admitted - failures.len(),
-        failures.len(),
-        refused.len(),
-        refused.join("\n")
-    );
-    assert_eq!(admitted, 292, "admitted forms must not disappear");
-    let mut refused_forms = refused
-        .iter()
-        .map(|failure| failure.split(':').next().unwrap())
-        .collect::<Vec<_>>();
-    refused_forms.sort_unstable();
-    let mut expected = [
-        "attribute assignment",
-        "return",
-        "break",
-        "continue",
-        "class",
-        "async for",
-    ]
-    .into_iter()
-    .flat_map(|name| [format!("cell {name}"), format!("module {name}")])
-    .collect::<Vec<_>>();
-    expected.sort_unstable();
+    eprintln!("COMPOSITION COUNTS [admitted, equal, known-failed, lower-refused]: {counts:?}");
+    eprintln!("COMPOSITION ELAPSED: {:?}", started.elapsed());
     assert_eq!(
-        refused_forms, expected,
-        "lower-refused forms must be explicit"
+        counts
+            .iter()
+            .map(|(group, count)| (group.clone(), [count[0], count[3]]))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        std::collections::BTreeMap::from([
+            ("control".to_owned(), [1537, 7]),
+            ("flat".to_owned(), [292, 12]),
+            ("position".to_owned(), [1430, 0]),
+            ("review".to_owned(), [31, 1])
+        ]),
+        "admission counts must not silently shrink"
     );
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(
+        refused
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected_refusals,
+        "lowering refusals must remain explicit"
+    );
+    assert!(
+        failures.is_empty() && known_failures.is_empty(),
+        "UNLISTED PRINT FAILURES: {}\n{}\nKNOWN PRINT FAILURES THAT NOW PASS OR ARE NO LONGER ADMITTED: {}\n{}",
+        failures.len(),
+        failures.join("\n"),
+        known_failures.len(),
+        known_failures.into_iter().collect::<Vec<_>>().join("\n")
+    );
+}
+
+fn composed_control_forms() -> Vec<(String, String)> {
+    let controls = [
+        ("if", "if result<2:\n    $BODY", 0u8, 4usize),
+        (
+            "if-else",
+            "if result<2:\n    $BODY\nelse:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        ("while", "while result<2:\n    $BODY", 3u8, 4usize),
+        (
+            "while-else",
+            "while result<2:\n    $BODY\nelse:\n    result+=1",
+            3u8,
+            4usize,
+        ),
+        ("for", "for x$N in [1,2]:\n    $BODY", 3u8, 4usize),
+        (
+            "for-pattern",
+            "for x$N,y$N in [(1,2)]:\n    $BODY",
+            3u8,
+            4usize,
+        ),
+        (
+            "for-else",
+            "for x$N in [1,2]:\n    $BODY\nelse:\n    result+=1",
+            3u8,
+            4usize,
+        ),
+        (
+            "try-except",
+            "try:\n    $BODY\nexcept ValueError as error$N:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        (
+            "try-except-none",
+            "try:\n    $BODY\nexcept:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        (
+            "try-finally",
+            "try:\n    $BODY\nfinally:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        (
+            "try-except-else-finally",
+            "try:\n    $BODY\nexcept ValueError:\n    result+=1\nelse:\n    result+=1\nfinally:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        ("with", "with None as x$N:\n    $BODY", 0u8, 4usize),
+        (
+            "with-pattern",
+            "with None as (x$N,y$N):\n    $BODY",
+            0u8,
+            4usize,
+        ),
+        (
+            "async-with",
+            "async with None as x$N:\n    $BODY",
+            8u8,
+            4usize,
+        ),
+        (
+            "match",
+            "match result:\n    case 0:\n        $BODY\n    case _:\n        pass",
+            0u8,
+            8usize,
+        ),
+        (
+            "closure",
+            "def nested$N() -> int:\n    $BODY\n    return result\nnested$N()",
+            4u8,
+            4usize,
+        ),
+    ];
+    fn nest(template: &str, body: &str, depth: &str, indent: usize) -> String {
+        template.replace("$N", depth).replace(
+            "$BODY",
+            &body.replace('\n', &format!("\n{}", " ".repeat(indent))),
+        )
+    }
+    let mut forms = Vec::new();
+    for (outer_name, outer, outer_role, outer_indent) in controls {
+        for (inner_name, inner, inner_role, inner_indent) in controls {
+            let mut exits = vec![("plain", "result+=1"), ("return", "return result")];
+            if inner_role & 4 == 0 && (inner_role & 2 != 0 || outer_role & 6 == 2) {
+                exits.push(("break", "break"));
+            }
+            if inner_role & 4 == 0 && (inner_role & 1 != 0 || outer_role & 5 == 1) {
+                exits.push(("continue", "continue"));
+            }
+            for (exit, payload) in exits {
+                let inner = nest(inner, payload, "1", inner_indent);
+                let outer_template = if outer_name == "closure" && inner_role & 8 != 0 {
+                    "async def nested$N() -> int:\n    $BODY\n    return result\nawait nested$N()"
+                } else {
+                    outer
+                };
+                let outer = nest(outer_template, &inner, "0", outer_indent);
+                let asynchronous = outer_role & 8 != 0 || inner_role & 8 != 0;
+                let body = if exit == "return" || asynchronous {
+                    format!(
+                        "{}def run() -> int:\n    result=0\n    {}\n    return result\nresult={}run()",
+                        if asynchronous { "async " } else { "" },
+                        outer.replace('\n', "\n    "),
+                        if asynchronous { "await " } else { "" }
+                    )
+                } else {
+                    format!("result=0\n{outer}")
+                };
+                forms.push((format!("control {outer_name}/{inner_name}/{exit}"), body));
+            }
+        }
+    }
+    forms
+}
+
+fn composed_expression_forms() -> Vec<(String, String)> {
+    let positions = [
+        ("variable-rhs", "target=$EXPR"),
+        ("index-rhs", "box[0]=$EXPR"),
+        ("slice-rhs", "arr[:]=[$EXPR]"),
+        ("pattern-rhs", "target,=[$EXPR]"),
+        ("compound-rhs", "target+=$EXPR"),
+        ("assignment-key", "box[$EXPR]=1"),
+        ("compound-key", "box[$EXPR]+=1"),
+        ("call-callee", "($EXPR)(1)"),
+        ("call-argument", "sink($EXPR)"),
+        ("call-receiver", "($EXPR).get(1)"),
+        ("call-keyword", "sink(value=$EXPR)"),
+        ("call-spread", "sink(*($EXPR))"),
+        ("call-keyword-spread", "sink(**($EXPR))"),
+    ];
+    let mut forms = Vec::new();
+    for (name, body) in flat_source_forms() {
+        if !(name.starts_with("expression ")
+            || name.starts_with("binary ")
+            || name.starts_with("unary "))
+        {
+            continue;
+        }
+        let Some((prefix, expression)) = body.rsplit_once("result=") else {
+            panic!("expression form without result: {name}");
+        };
+        for (position, template) in positions {
+            let body = format!(
+                "{prefix}target=0\nbox={{0:1}}\narr=[0]\nsink=lambda value:value\n{}",
+                template.replace("$EXPR", &format!("({expression})"))
+            );
+            forms.push((format!("position {name}/{position}"), body));
+        }
+    }
+    forms
 }

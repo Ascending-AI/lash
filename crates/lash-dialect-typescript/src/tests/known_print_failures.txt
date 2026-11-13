@@ -1,0 +1,1080 @@
+# Known print failures, also failing on main unless marked.
+# Main comparison: d709cfaf7f; branch baseline: 0cad7ea19d.
+# Design review: /workspace/notes/lash/tasks/lanes/r59/astra-print-total.md
+# FIG-7711, r59. Remove an identity as soon as it round-trips exactly.
+# A listed success or a new unlisted failure fails the composition law.
+audit block-local function simple/cell
+audit block-local function simple/module
+audit block-local function with local/cell
+audit block-local function with local/module
+control classic-for/block/label-break/cell
+control classic-for/block/label-break/module
+control classic-for/block/label-continue/cell
+control classic-for/block/label-continue/module
+control classic-for/classic-for/label-break/cell
+control classic-for/classic-for/label-break/module
+control classic-for/classic-for/label-continue/cell
+control classic-for/classic-for/label-continue/module
+control classic-for/classic-pattern/label-break/cell
+control classic-for/classic-pattern/label-break/module
+control classic-for/classic-pattern/label-continue/cell
+control classic-for/classic-pattern/label-continue/module
+control classic-for/closure/plain/cell
+control classic-for/closure/plain/module
+control classic-for/do/label-break/cell
+control classic-for/do/label-break/module
+control classic-for/do/label-continue/cell
+control classic-for/do/label-continue/module
+control classic-for/for-empty/label-break/cell
+control classic-for/for-empty/label-break/module
+control classic-for/for-empty/label-continue/cell
+control classic-for/for-empty/label-continue/module
+control classic-for/for-in-pattern/label-break/cell
+control classic-for/for-in-pattern/label-break/module
+control classic-for/for-in-pattern/label-continue/cell
+control classic-for/for-in-pattern/label-continue/module
+control classic-for/for-in/label-break/cell
+control classic-for/for-in/label-break/module
+control classic-for/for-in/label-continue/cell
+control classic-for/for-in/label-continue/module
+control classic-for/for-of-pattern/label-break/cell
+control classic-for/for-of-pattern/label-break/module
+control classic-for/for-of-pattern/label-continue/cell
+control classic-for/for-of-pattern/label-continue/module
+control classic-for/for-of/label-break/cell
+control classic-for/for-of/label-break/module
+control classic-for/for-of/label-continue/cell
+control classic-for/for-of/label-continue/module
+control classic-for/if-else/label-break/cell
+control classic-for/if-else/label-break/module
+control classic-for/if-else/label-continue/cell
+control classic-for/if-else/label-continue/module
+control classic-for/if/continue/cell
+control classic-for/if/continue/module
+control classic-for/if/label-break/cell
+control classic-for/if/label-break/module
+control classic-for/if/label-continue/cell
+control classic-for/if/label-continue/module
+control classic-for/switch-default/continue/cell
+control classic-for/switch-default/continue/module
+control classic-for/switch-default/label-break/cell
+control classic-for/switch-default/label-break/module
+control classic-for/switch-default/label-continue/cell
+control classic-for/switch-default/label-continue/module
+control classic-for/switch-fallthrough/label-break/cell
+control classic-for/switch-fallthrough/label-break/module
+control classic-for/switch-fallthrough/label-continue/cell
+control classic-for/switch-fallthrough/label-continue/module
+control classic-for/switch/label-break/cell
+control classic-for/switch/label-break/module
+control classic-for/switch/label-continue/cell
+control classic-for/switch/label-continue/module
+control classic-for/try-catch-finally/break/cell
+control classic-for/try-catch-finally/break/module
+control classic-for/try-catch-finally/continue/cell
+control classic-for/try-catch-finally/continue/module
+control classic-for/try-catch-finally/label-break/cell
+control classic-for/try-catch-finally/label-break/module
+control classic-for/try-catch-finally/label-continue/cell
+control classic-for/try-catch-finally/label-continue/module
+control classic-for/try-catch-finally/plain/cell
+control classic-for/try-catch-finally/plain/module
+control classic-for/try-catch-none/break/cell
+control classic-for/try-catch-none/break/module
+control classic-for/try-catch-none/continue/cell
+control classic-for/try-catch-none/continue/module
+control classic-for/try-catch-none/label-break/cell
+control classic-for/try-catch-none/label-break/module
+control classic-for/try-catch-none/label-continue/cell
+control classic-for/try-catch-none/label-continue/module
+control classic-for/try-catch-none/plain/cell
+control classic-for/try-catch-none/plain/module
+control classic-for/try-catch/break/cell
+control classic-for/try-catch/break/module
+control classic-for/try-catch/continue/cell
+control classic-for/try-catch/continue/module
+control classic-for/try-catch/label-break/cell
+control classic-for/try-catch/label-break/module
+control classic-for/try-catch/label-continue/cell
+control classic-for/try-catch/label-continue/module
+control classic-for/try-catch/plain/cell
+control classic-for/try-catch/plain/module
+control classic-for/try-finally/break/cell
+control classic-for/try-finally/break/module
+control classic-for/try-finally/continue/cell
+control classic-for/try-finally/continue/module
+control classic-for/try-finally/label-break/cell
+control classic-for/try-finally/label-break/module
+control classic-for/try-finally/label-continue/cell
+control classic-for/try-finally/label-continue/module
+control classic-for/try-finally/plain/cell
+control classic-for/try-finally/plain/module
+control classic-for/while/label-break/cell
+control classic-for/while/label-break/module
+control classic-for/while/label-continue/cell
+control classic-for/while/label-continue/module
+control classic-pattern/block/label-break/cell
+control classic-pattern/block/label-break/module
+control classic-pattern/block/label-continue/cell
+control classic-pattern/block/label-continue/module
+control classic-pattern/classic-for/label-break/cell
+control classic-pattern/classic-for/label-break/module
+control classic-pattern/classic-for/label-continue/cell
+control classic-pattern/classic-for/label-continue/module
+control classic-pattern/classic-pattern/label-break/cell
+control classic-pattern/classic-pattern/label-break/module
+control classic-pattern/classic-pattern/label-continue/cell
+control classic-pattern/classic-pattern/label-continue/module
+control classic-pattern/closure/plain/cell
+control classic-pattern/closure/plain/module
+control classic-pattern/do/label-break/cell
+control classic-pattern/do/label-break/module
+control classic-pattern/do/label-continue/cell
+control classic-pattern/do/label-continue/module
+control classic-pattern/for-empty/label-break/cell
+control classic-pattern/for-empty/label-break/module
+control classic-pattern/for-empty/label-continue/cell
+control classic-pattern/for-empty/label-continue/module
+control classic-pattern/for-in-pattern/label-break/cell
+control classic-pattern/for-in-pattern/label-break/module
+control classic-pattern/for-in-pattern/label-continue/cell
+control classic-pattern/for-in-pattern/label-continue/module
+control classic-pattern/for-in/label-break/cell
+control classic-pattern/for-in/label-break/module
+control classic-pattern/for-in/label-continue/cell
+control classic-pattern/for-in/label-continue/module
+control classic-pattern/for-of-pattern/label-break/cell
+control classic-pattern/for-of-pattern/label-break/module
+control classic-pattern/for-of-pattern/label-continue/cell
+control classic-pattern/for-of-pattern/label-continue/module
+control classic-pattern/for-of/label-break/cell
+control classic-pattern/for-of/label-break/module
+control classic-pattern/for-of/label-continue/cell
+control classic-pattern/for-of/label-continue/module
+control classic-pattern/if-else/label-break/cell
+control classic-pattern/if-else/label-break/module
+control classic-pattern/if-else/label-continue/cell
+control classic-pattern/if-else/label-continue/module
+control classic-pattern/if/label-break/cell
+control classic-pattern/if/label-break/module
+control classic-pattern/if/label-continue/cell
+control classic-pattern/if/label-continue/module
+control classic-pattern/switch-default/continue/cell
+control classic-pattern/switch-default/continue/module
+control classic-pattern/switch-default/label-break/cell
+control classic-pattern/switch-default/label-break/module
+control classic-pattern/switch-default/label-continue/cell
+control classic-pattern/switch-default/label-continue/module
+control classic-pattern/switch-fallthrough/continue/cell
+control classic-pattern/switch-fallthrough/continue/module
+control classic-pattern/switch-fallthrough/label-break/cell
+control classic-pattern/switch-fallthrough/label-break/module
+control classic-pattern/switch-fallthrough/label-continue/cell
+control classic-pattern/switch-fallthrough/label-continue/module
+control classic-pattern/switch/continue/cell
+control classic-pattern/switch/continue/module
+control classic-pattern/switch/label-break/cell
+control classic-pattern/switch/label-break/module
+control classic-pattern/switch/label-continue/cell
+control classic-pattern/switch/label-continue/module
+control classic-pattern/try-catch-finally/break/cell
+control classic-pattern/try-catch-finally/break/module
+control classic-pattern/try-catch-finally/continue/cell
+control classic-pattern/try-catch-finally/continue/module
+control classic-pattern/try-catch-finally/label-break/cell
+control classic-pattern/try-catch-finally/label-break/module
+control classic-pattern/try-catch-finally/label-continue/cell
+control classic-pattern/try-catch-finally/label-continue/module
+control classic-pattern/try-catch-finally/plain/cell
+control classic-pattern/try-catch-finally/plain/module
+control classic-pattern/try-catch-none/break/cell
+control classic-pattern/try-catch-none/break/module
+control classic-pattern/try-catch-none/continue/cell
+control classic-pattern/try-catch-none/continue/module
+control classic-pattern/try-catch-none/label-break/cell
+control classic-pattern/try-catch-none/label-break/module
+control classic-pattern/try-catch-none/label-continue/cell
+control classic-pattern/try-catch-none/label-continue/module
+control classic-pattern/try-catch-none/plain/cell
+control classic-pattern/try-catch-none/plain/module
+control classic-pattern/try-catch/break/cell
+control classic-pattern/try-catch/break/module
+control classic-pattern/try-catch/continue/cell
+control classic-pattern/try-catch/continue/module
+control classic-pattern/try-catch/label-break/cell
+control classic-pattern/try-catch/label-break/module
+control classic-pattern/try-catch/label-continue/cell
+control classic-pattern/try-catch/label-continue/module
+control classic-pattern/try-catch/plain/cell
+control classic-pattern/try-catch/plain/module
+control classic-pattern/try-finally/break/cell
+control classic-pattern/try-finally/break/module
+control classic-pattern/try-finally/continue/cell
+control classic-pattern/try-finally/continue/module
+control classic-pattern/try-finally/label-break/cell
+control classic-pattern/try-finally/label-break/module
+control classic-pattern/try-finally/label-continue/cell
+control classic-pattern/try-finally/label-continue/module
+control classic-pattern/try-finally/plain/cell
+control classic-pattern/try-finally/plain/module
+control classic-pattern/while/label-break/cell
+control classic-pattern/while/label-break/module
+control classic-pattern/while/label-continue/cell
+control classic-pattern/while/label-continue/module
+control switch-default/classic-pattern/break/cell
+control switch-default/classic-pattern/break/module
+control switch-default/classic-pattern/continue/cell
+control switch-default/classic-pattern/continue/module
+control switch-default/classic-pattern/label-break/cell
+control switch-default/classic-pattern/label-break/module
+control switch-default/classic-pattern/plain/cell
+control switch-default/classic-pattern/plain/module
+control switch-default/classic-pattern/return/cell
+control switch-default/classic-pattern/return/module
+control switch-default/closure/plain/cell
+control switch-default/closure/plain/module
+control switch-default/closure/return/cell
+control switch-default/closure/return/module
+control switch-fallthrough/classic-pattern/break/cell
+control switch-fallthrough/classic-pattern/break/module
+control switch-fallthrough/classic-pattern/continue/cell
+control switch-fallthrough/classic-pattern/continue/module
+control switch-fallthrough/classic-pattern/label-break/cell
+control switch-fallthrough/classic-pattern/label-break/module
+control switch-fallthrough/classic-pattern/plain/cell
+control switch-fallthrough/classic-pattern/plain/module
+control switch-fallthrough/classic-pattern/return/cell
+control switch-fallthrough/classic-pattern/return/module
+control switch-fallthrough/closure/plain/cell
+control switch-fallthrough/closure/plain/module
+control switch-fallthrough/closure/return/cell
+control switch-fallthrough/closure/return/module
+control switch/classic-for/break/cell
+control switch/classic-for/break/module
+control switch/classic-for/continue/cell
+control switch/classic-for/continue/module
+control switch/classic-for/label-break/cell
+control switch/classic-for/label-break/module
+control switch/classic-for/plain/cell
+control switch/classic-for/plain/module
+control switch/classic-for/return/cell
+control switch/classic-for/return/module
+control switch/classic-pattern/break/cell
+control switch/classic-pattern/break/module
+control switch/classic-pattern/continue/cell
+control switch/classic-pattern/continue/module
+control switch/classic-pattern/label-break/cell
+control switch/classic-pattern/label-break/module
+control switch/classic-pattern/plain/cell
+control switch/classic-pattern/plain/module
+control switch/classic-pattern/return/cell
+control switch/classic-pattern/return/module
+control switch/closure/plain/cell
+control switch/closure/plain/module
+control switch/closure/return/cell
+control switch/closure/return/module
+position binary !=/call-key/cell
+position binary !=/call-key/module
+position binary !=/compound-key/cell
+position binary !=/compound-key/module
+position binary !=/field-rhs/cell
+position binary !=/field-rhs/module
+position binary !=/logical-key/cell
+position binary !=/logical-key/module
+position binary !=/pattern-rhs/cell
+position binary !=/pattern-rhs/module
+position binary !==/call-key/cell
+position binary !==/call-key/module
+position binary !==/compound-key/cell
+position binary !==/compound-key/module
+position binary !==/field-rhs/cell
+position binary !==/field-rhs/module
+position binary !==/logical-key/cell
+position binary !==/logical-key/module
+position binary !==/pattern-rhs/cell
+position binary !==/pattern-rhs/module
+position binary %/call-key/cell
+position binary %/call-key/module
+position binary %/call-receiver/cell
+position binary %/call-receiver/module
+position binary %/compound-key/cell
+position binary %/compound-key/module
+position binary %/field-rhs/cell
+position binary %/field-rhs/module
+position binary %/logical-key/cell
+position binary %/logical-key/module
+position binary %/pattern-rhs/cell
+position binary %/pattern-rhs/module
+position binary &/call-key/cell
+position binary &/call-key/module
+position binary &/call-receiver/cell
+position binary &/call-receiver/module
+position binary &/compound-key/cell
+position binary &/compound-key/module
+position binary &/field-rhs/cell
+position binary &/field-rhs/module
+position binary &/logical-key/cell
+position binary &/logical-key/module
+position binary &/pattern-rhs/cell
+position binary &/pattern-rhs/module
+position binary **/call-key/cell
+position binary **/call-key/module
+position binary **/compound-key/cell
+position binary **/compound-key/module
+position binary **/field-rhs/cell
+position binary **/field-rhs/module
+position binary **/logical-key/cell
+position binary **/logical-key/module
+position binary **/pattern-rhs/cell
+position binary **/pattern-rhs/module
+position binary */call-key/cell
+position binary */call-key/module
+position binary */call-receiver/cell
+position binary */call-receiver/module
+position binary */compound-key/cell
+position binary */compound-key/module
+position binary */field-rhs/cell
+position binary */field-rhs/module
+position binary */logical-key/cell
+position binary */logical-key/module
+position binary */pattern-rhs/cell
+position binary */pattern-rhs/module
+position binary +/call-key/cell
+position binary +/call-key/module
+position binary +/call-receiver/cell
+position binary +/call-receiver/module
+position binary +/compound-key/cell
+position binary +/compound-key/module
+position binary +/field-rhs/cell
+position binary +/field-rhs/module
+position binary +/logical-key/cell
+position binary +/logical-key/module
+position binary +/pattern-rhs/cell
+position binary +/pattern-rhs/module
+position binary -/call-key/cell
+position binary -/call-key/module
+position binary -/call-receiver/cell
+position binary -/call-receiver/module
+position binary -/compound-key/cell
+position binary -/compound-key/module
+position binary -/field-rhs/cell
+position binary -/field-rhs/module
+position binary -/logical-key/cell
+position binary -/logical-key/module
+position binary -/pattern-rhs/cell
+position binary -/pattern-rhs/module
+position binary //call-key/cell
+position binary //call-key/module
+position binary //call-receiver/cell
+position binary //call-receiver/module
+position binary //compound-key/cell
+position binary //compound-key/module
+position binary //field-rhs/cell
+position binary //field-rhs/module
+position binary //logical-key/cell
+position binary //logical-key/module
+position binary //pattern-rhs/cell
+position binary //pattern-rhs/module
+position binary </call-key/cell
+position binary </call-key/module
+position binary </compound-key/cell
+position binary </compound-key/module
+position binary </field-rhs/cell
+position binary </field-rhs/module
+position binary </logical-key/cell
+position binary </logical-key/module
+position binary </pattern-rhs/cell
+position binary </pattern-rhs/module
+position binary <</call-key/cell
+position binary <</call-key/module
+position binary <</call-receiver/cell
+position binary <</call-receiver/module
+position binary <</compound-key/cell
+position binary <</compound-key/module
+position binary <</field-rhs/cell
+position binary <</field-rhs/module
+position binary <</logical-key/cell
+position binary <</logical-key/module
+position binary <</pattern-rhs/cell
+position binary <</pattern-rhs/module
+position binary <=/call-key/cell
+position binary <=/call-key/module
+position binary <=/compound-key/cell
+position binary <=/compound-key/module
+position binary <=/field-rhs/cell
+position binary <=/field-rhs/module
+position binary <=/logical-key/cell
+position binary <=/logical-key/module
+position binary <=/pattern-rhs/cell
+position binary <=/pattern-rhs/module
+position binary ==/call-key/cell
+position binary ==/call-key/module
+position binary ==/compound-key/cell
+position binary ==/compound-key/module
+position binary ==/field-rhs/cell
+position binary ==/field-rhs/module
+position binary ==/logical-key/cell
+position binary ==/logical-key/module
+position binary ==/pattern-rhs/cell
+position binary ==/pattern-rhs/module
+position binary ===/call-key/cell
+position binary ===/call-key/module
+position binary ===/compound-key/cell
+position binary ===/compound-key/module
+position binary ===/field-rhs/cell
+position binary ===/field-rhs/module
+position binary ===/logical-key/cell
+position binary ===/logical-key/module
+position binary ===/pattern-rhs/cell
+position binary ===/pattern-rhs/module
+position binary >/call-key/cell
+position binary >/call-key/module
+position binary >/compound-key/cell
+position binary >/compound-key/module
+position binary >/field-rhs/cell
+position binary >/field-rhs/module
+position binary >/logical-key/cell
+position binary >/logical-key/module
+position binary >/pattern-rhs/cell
+position binary >/pattern-rhs/module
+position binary >=/call-key/cell
+position binary >=/call-key/module
+position binary >=/compound-key/cell
+position binary >=/compound-key/module
+position binary >=/field-rhs/cell
+position binary >=/field-rhs/module
+position binary >=/logical-key/cell
+position binary >=/logical-key/module
+position binary >=/pattern-rhs/cell
+position binary >=/pattern-rhs/module
+position binary >>/call-key/cell
+position binary >>/call-key/module
+position binary >>/call-receiver/cell
+position binary >>/call-receiver/module
+position binary >>/compound-key/cell
+position binary >>/compound-key/module
+position binary >>/field-rhs/cell
+position binary >>/field-rhs/module
+position binary >>/logical-key/cell
+position binary >>/logical-key/module
+position binary >>/pattern-rhs/cell
+position binary >>/pattern-rhs/module
+position binary >>>/call-key/cell
+position binary >>>/call-key/module
+position binary >>>/call-receiver/cell
+position binary >>>/call-receiver/module
+position binary >>>/compound-key/cell
+position binary >>>/compound-key/module
+position binary >>>/field-rhs/cell
+position binary >>>/field-rhs/module
+position binary >>>/logical-key/cell
+position binary >>>/logical-key/module
+position binary >>>/pattern-rhs/cell
+position binary >>>/pattern-rhs/module
+position binary ^/call-key/cell
+position binary ^/call-key/module
+position binary ^/call-receiver/cell
+position binary ^/call-receiver/module
+position binary ^/compound-key/cell
+position binary ^/compound-key/module
+position binary ^/field-rhs/cell
+position binary ^/field-rhs/module
+position binary ^/logical-key/cell
+position binary ^/logical-key/module
+position binary ^/pattern-rhs/cell
+position binary ^/pattern-rhs/module
+position binary in/call-key/cell
+position binary in/call-key/module
+position binary in/compound-key/cell
+position binary in/compound-key/module
+position binary in/field-rhs/cell
+position binary in/field-rhs/module
+position binary in/logical-key/cell
+position binary in/logical-key/module
+position binary in/logical-rhs/cell
+position binary in/logical-rhs/module
+position binary in/pattern-rhs/cell
+position binary in/pattern-rhs/module
+position binary instanceof/call-key/cell
+position binary instanceof/call-key/module
+position binary instanceof/compound-key/cell
+position binary instanceof/compound-key/module
+position binary instanceof/field-rhs/cell
+position binary instanceof/field-rhs/module
+position binary instanceof/logical-key/cell
+position binary instanceof/logical-key/module
+position binary instanceof/logical-rhs/cell
+position binary instanceof/logical-rhs/module
+position binary instanceof/pattern-rhs/cell
+position binary instanceof/pattern-rhs/module
+position binary |/call-key/cell
+position binary |/call-key/module
+position binary |/call-receiver/cell
+position binary |/call-receiver/module
+position binary |/compound-key/cell
+position binary |/compound-key/module
+position binary |/field-rhs/cell
+position binary |/field-rhs/module
+position binary |/logical-key/cell
+position binary |/logical-key/module
+position binary |/pattern-rhs/cell
+position binary |/pattern-rhs/module
+position expression array/call-key/cell
+position expression array/call-key/module
+position expression array/compound-key/cell
+position expression array/compound-key/module
+position expression array/field-rhs/cell
+position expression array/field-rhs/module
+position expression array/logical-key/cell
+position expression array/logical-key/module
+position expression array/pattern-rhs/cell
+position expression array/pattern-rhs/module
+position expression arrow/call-key/cell
+position expression arrow/call-key/module
+position expression arrow/compound-key/cell
+position expression arrow/compound-key/module
+position expression arrow/field-rhs/cell
+position expression arrow/field-rhs/module
+position expression arrow/logical-key/cell
+position expression arrow/logical-key/module
+position expression arrow/pattern-rhs/cell
+position expression arrow/pattern-rhs/module
+position expression as/call-key/cell
+position expression as/call-key/module
+position expression as/compound-key/cell
+position expression as/compound-key/module
+position expression as/field-rhs/cell
+position expression as/field-rhs/module
+position expression as/logical-key/cell
+position expression as/logical-key/module
+position expression as/pattern-rhs/cell
+position expression as/pattern-rhs/module
+position expression await/call-key/cell
+position expression await/call-key/module
+position expression await/compound-key/cell
+position expression await/compound-key/module
+position expression await/logical-key/cell
+position expression await/logical-key/module
+position expression await/pattern-rhs/cell
+position expression await/pattern-rhs/module
+position expression bigint/call-key/cell
+position expression bigint/call-key/module
+position expression bigint/compound-key/cell
+position expression bigint/compound-key/module
+position expression bigint/field-rhs/cell
+position expression bigint/field-rhs/module
+position expression bigint/logical-key/cell
+position expression bigint/logical-key/module
+position expression bigint/pattern-rhs/cell
+position expression bigint/pattern-rhs/module
+position expression bool/call-key/cell
+position expression bool/call-key/module
+position expression bool/compound-key/cell
+position expression bool/compound-key/module
+position expression bool/field-rhs/cell
+position expression bool/field-rhs/module
+position expression bool/logical-key/cell
+position expression bool/logical-key/module
+position expression bool/pattern-rhs/cell
+position expression bool/pattern-rhs/module
+position expression call/call-key/cell
+position expression call/call-key/module
+position expression call/compound-key/cell
+position expression call/compound-key/module
+position expression call/field-rhs/cell
+position expression call/field-rhs/module
+position expression call/logical-key/cell
+position expression call/logical-key/module
+position expression call/pattern-rhs/cell
+position expression call/pattern-rhs/module
+position expression conditional/call-key/cell
+position expression conditional/call-key/module
+position expression conditional/compound-key/cell
+position expression conditional/compound-key/module
+position expression conditional/field-rhs/cell
+position expression conditional/field-rhs/module
+position expression conditional/logical-key/cell
+position expression conditional/logical-key/module
+position expression conditional/pattern-rhs/cell
+position expression conditional/pattern-rhs/module
+position expression delete index/call-key/cell
+position expression delete index/call-key/module
+position expression delete index/compound-key/cell
+position expression delete index/compound-key/module
+position expression delete index/logical-key/cell
+position expression delete index/logical-key/module
+position expression delete index/pattern-rhs/cell
+position expression delete index/pattern-rhs/module
+position expression delete/call-key/cell
+position expression delete/call-key/module
+position expression delete/compound-key/cell
+position expression delete/compound-key/module
+position expression delete/field-rhs/cell
+position expression delete/field-rhs/module
+position expression delete/logical-key/cell
+position expression delete/logical-key/module
+position expression delete/pattern-rhs/cell
+position expression delete/pattern-rhs/module
+position expression dynamic new/call-key/cell
+position expression dynamic new/call-key/module
+position expression dynamic new/compound-key/cell
+position expression dynamic new/compound-key/module
+position expression dynamic new/field-rhs/cell
+position expression dynamic new/field-rhs/module
+position expression dynamic new/logical-key/cell
+position expression dynamic new/logical-key/module
+position expression dynamic new/pattern-rhs/cell
+position expression dynamic new/pattern-rhs/module
+position expression function/call-key/cell
+position expression function/call-key/module
+position expression function/compound-key/cell
+position expression function/compound-key/module
+position expression function/field-rhs/cell
+position expression function/field-rhs/module
+position expression function/logical-key/cell
+position expression function/logical-key/module
+position expression function/pattern-rhs/cell
+position expression function/pattern-rhs/module
+position expression ident/call-key/cell
+position expression ident/call-key/module
+position expression ident/call-receiver/cell
+position expression ident/call-receiver/module
+position expression ident/compound-key/cell
+position expression ident/compound-key/module
+position expression ident/field-rhs/cell
+position expression ident/field-rhs/module
+position expression ident/logical-key/cell
+position expression ident/logical-key/module
+position expression ident/pattern-rhs/cell
+position expression ident/pattern-rhs/module
+position expression index/call-callee/cell
+position expression index/call-callee/module
+position expression index/call-key/cell
+position expression index/call-key/module
+position expression index/call-receiver/cell
+position expression index/call-receiver/module
+position expression index/compound-key/cell
+position expression index/compound-key/module
+position expression index/field-rhs/cell
+position expression index/field-rhs/module
+position expression index/logical-key/cell
+position expression index/logical-key/module
+position expression index/pattern-rhs/cell
+position expression index/pattern-rhs/module
+position expression logical and/call-key/cell
+position expression logical and/call-key/module
+position expression logical and/call-receiver/cell
+position expression logical and/call-receiver/module
+position expression logical and/compound-key/cell
+position expression logical and/compound-key/module
+position expression logical and/field-rhs/cell
+position expression logical and/field-rhs/module
+position expression logical and/logical-key/cell
+position expression logical and/logical-key/module
+position expression logical and/pattern-rhs/cell
+position expression logical and/pattern-rhs/module
+position expression logical or/call-key/cell
+position expression logical or/call-key/module
+position expression logical or/call-receiver/cell
+position expression logical or/call-receiver/module
+position expression logical or/compound-key/cell
+position expression logical or/compound-key/module
+position expression logical or/field-rhs/cell
+position expression logical or/field-rhs/module
+position expression logical or/logical-key/cell
+position expression logical or/logical-key/module
+position expression logical or/pattern-rhs/cell
+position expression logical or/pattern-rhs/module
+position expression member/call-key/cell
+position expression member/call-key/module
+position expression member/compound-key/cell
+position expression member/compound-key/module
+position expression member/field-rhs/cell
+position expression member/field-rhs/module
+position expression member/logical-key/cell
+position expression member/logical-key/module
+position expression member/pattern-rhs/cell
+position expression member/pattern-rhs/module
+position expression method/call-key/cell
+position expression method/call-key/module
+position expression method/compound-key/cell
+position expression method/compound-key/module
+position expression method/field-rhs/cell
+position expression method/field-rhs/module
+position expression method/logical-key/cell
+position expression method/logical-key/module
+position expression method/logical-rhs/cell
+position expression method/logical-rhs/module
+position expression method/pattern-rhs/cell
+position expression method/pattern-rhs/module
+position expression new/call-key/cell
+position expression new/call-key/module
+position expression new/compound-key/cell
+position expression new/compound-key/module
+position expression new/field-rhs/cell
+position expression new/field-rhs/module
+position expression new/logical-key/cell
+position expression new/logical-key/module
+position expression new/pattern-rhs/cell
+position expression new/pattern-rhs/module
+position expression null/call-key/cell
+position expression null/call-key/module
+position expression null/compound-key/cell
+position expression null/compound-key/module
+position expression null/field-rhs/cell
+position expression null/field-rhs/module
+position expression null/logical-key/cell
+position expression null/logical-key/module
+position expression null/pattern-rhs/cell
+position expression null/pattern-rhs/module
+position expression nullish/call-key/cell
+position expression nullish/call-key/module
+position expression nullish/call-receiver/cell
+position expression nullish/call-receiver/module
+position expression nullish/compound-key/cell
+position expression nullish/compound-key/module
+position expression nullish/field-rhs/cell
+position expression nullish/field-rhs/module
+position expression nullish/logical-key/cell
+position expression nullish/logical-key/module
+position expression nullish/pattern-rhs/cell
+position expression nullish/pattern-rhs/module
+position expression number/compound-key/cell
+position expression number/compound-key/module
+position expression number/field-rhs/cell
+position expression number/field-rhs/module
+position expression number/logical-key/cell
+position expression number/logical-key/module
+position expression number/pattern-rhs/cell
+position expression number/pattern-rhs/module
+position expression object/call-key/cell
+position expression object/call-key/module
+position expression object/compound-key/cell
+position expression object/compound-key/module
+position expression object/field-rhs/cell
+position expression object/field-rhs/module
+position expression object/logical-key/cell
+position expression object/logical-key/module
+position expression object/logical-rhs/cell
+position expression object/logical-rhs/module
+position expression object/pattern-rhs/cell
+position expression object/pattern-rhs/module
+position expression optional call/call-argument/cell
+position expression optional call/call-argument/module
+position expression optional call/call-callee/cell
+position expression optional call/call-callee/module
+position expression optional call/call-key/cell
+position expression optional call/call-key/module
+position expression optional call/call-receiver/cell
+position expression optional call/call-receiver/module
+position expression optional call/call-spread/cell
+position expression optional call/call-spread/module
+position expression optional call/compound-key/cell
+position expression optional call/compound-key/module
+position expression optional call/field-rhs/cell
+position expression optional call/field-rhs/module
+position expression optional call/logical-key/cell
+position expression optional call/logical-key/module
+position expression optional call/logical-rhs/cell
+position expression optional call/logical-rhs/module
+position expression optional call/pattern-rhs/cell
+position expression optional call/pattern-rhs/module
+position expression optional delete/call-argument/cell
+position expression optional delete/call-argument/module
+position expression optional delete/call-callee/cell
+position expression optional delete/call-callee/module
+position expression optional delete/call-key/cell
+position expression optional delete/call-key/module
+position expression optional delete/call-spread/cell
+position expression optional delete/call-spread/module
+position expression optional delete/compound-key/cell
+position expression optional delete/compound-key/module
+position expression optional delete/field-rhs/cell
+position expression optional delete/field-rhs/module
+position expression optional delete/logical-key/cell
+position expression optional delete/logical-key/module
+position expression optional delete/logical-rhs/cell
+position expression optional delete/logical-rhs/module
+position expression optional delete/pattern-rhs/cell
+position expression optional delete/pattern-rhs/module
+position expression optional field/call-callee/cell
+position expression optional field/call-callee/module
+position expression optional field/call-key/cell
+position expression optional field/call-key/module
+position expression optional field/call-receiver/cell
+position expression optional field/call-receiver/module
+position expression optional field/compound-key/cell
+position expression optional field/compound-key/module
+position expression optional field/field-rhs/cell
+position expression optional field/field-rhs/module
+position expression optional field/logical-key/cell
+position expression optional field/logical-key/module
+position expression optional field/logical-rhs/cell
+position expression optional field/logical-rhs/module
+position expression optional field/pattern-rhs/cell
+position expression optional field/pattern-rhs/module
+position expression optional index/call-callee/cell
+position expression optional index/call-callee/module
+position expression optional index/call-key/cell
+position expression optional index/call-key/module
+position expression optional index/call-receiver/cell
+position expression optional index/call-receiver/module
+position expression optional index/compound-key/cell
+position expression optional index/compound-key/module
+position expression optional index/field-rhs/cell
+position expression optional index/field-rhs/module
+position expression optional index/logical-key/cell
+position expression optional index/logical-key/module
+position expression optional index/logical-rhs/cell
+position expression optional index/logical-rhs/module
+position expression optional index/pattern-rhs/cell
+position expression optional index/pattern-rhs/module
+position expression optional method/call-callee/cell
+position expression optional method/call-callee/module
+position expression optional method/call-key/cell
+position expression optional method/call-key/module
+position expression optional method/call-receiver/cell
+position expression optional method/call-receiver/module
+position expression optional method/compound-key/cell
+position expression optional method/compound-key/module
+position expression optional method/field-rhs/cell
+position expression optional method/field-rhs/module
+position expression optional method/logical-key/cell
+position expression optional method/logical-key/module
+position expression optional method/logical-rhs/cell
+position expression optional method/logical-rhs/module
+position expression optional method/pattern-rhs/cell
+position expression optional method/pattern-rhs/module
+position expression post decrement/call-key/cell
+position expression post decrement/call-key/module
+position expression post decrement/call-receiver/cell
+position expression post decrement/call-receiver/module
+position expression post decrement/compound-key/cell
+position expression post decrement/compound-key/module
+position expression post decrement/field-rhs/cell
+position expression post decrement/field-rhs/module
+position expression post decrement/logical-key/cell
+position expression post decrement/logical-key/module
+position expression post decrement/logical-rhs/cell
+position expression post decrement/logical-rhs/module
+position expression post decrement/pattern-rhs/cell
+position expression post decrement/pattern-rhs/module
+position expression post increment/call-key/cell
+position expression post increment/call-key/module
+position expression post increment/call-receiver/cell
+position expression post increment/call-receiver/module
+position expression post increment/compound-key/cell
+position expression post increment/compound-key/module
+position expression post increment/field-rhs/cell
+position expression post increment/field-rhs/module
+position expression post increment/logical-key/cell
+position expression post increment/logical-key/module
+position expression post increment/logical-rhs/cell
+position expression post increment/logical-rhs/module
+position expression post increment/pattern-rhs/cell
+position expression post increment/pattern-rhs/module
+position expression pre decrement/call-key/cell
+position expression pre decrement/call-key/module
+position expression pre decrement/call-receiver/cell
+position expression pre decrement/call-receiver/module
+position expression pre decrement/compound-key/cell
+position expression pre decrement/compound-key/module
+position expression pre decrement/compound-rhs/cell
+position expression pre decrement/compound-rhs/module
+position expression pre decrement/field-rhs/cell
+position expression pre decrement/field-rhs/module
+position expression pre decrement/logical-key/cell
+position expression pre decrement/logical-key/module
+position expression pre decrement/logical-rhs/cell
+position expression pre decrement/logical-rhs/module
+position expression pre decrement/pattern-rhs/cell
+position expression pre decrement/pattern-rhs/module
+position expression pre increment/call-key/cell
+position expression pre increment/call-key/module
+position expression pre increment/call-receiver/cell
+position expression pre increment/call-receiver/module
+position expression pre increment/compound-key/cell
+position expression pre increment/compound-key/module
+position expression pre increment/compound-rhs/cell
+position expression pre increment/compound-rhs/module
+position expression pre increment/field-rhs/cell
+position expression pre increment/field-rhs/module
+position expression pre increment/logical-key/cell
+position expression pre increment/logical-key/module
+position expression pre increment/logical-rhs/cell
+position expression pre increment/logical-rhs/module
+position expression pre increment/pattern-rhs/cell
+position expression pre increment/pattern-rhs/module
+position expression regexp/call-key/cell
+position expression regexp/call-key/module
+position expression regexp/compound-key/cell
+position expression regexp/compound-key/module
+position expression regexp/field-rhs/cell
+position expression regexp/field-rhs/module
+position expression regexp/logical-key/cell
+position expression regexp/logical-key/module
+position expression regexp/logical-rhs/cell
+position expression regexp/logical-rhs/module
+position expression regexp/pattern-rhs/cell
+position expression regexp/pattern-rhs/module
+position expression sequence/call-key/cell
+position expression sequence/call-key/module
+position expression sequence/call-receiver/cell
+position expression sequence/call-receiver/module
+position expression sequence/compound-key/cell
+position expression sequence/compound-key/module
+position expression sequence/field-rhs/cell
+position expression sequence/field-rhs/module
+position expression sequence/logical-key/cell
+position expression sequence/logical-key/module
+position expression sequence/pattern-rhs/cell
+position expression sequence/pattern-rhs/module
+position expression spread call/call-key/cell
+position expression spread call/call-key/module
+position expression spread call/compound-key/cell
+position expression spread call/compound-key/module
+position expression spread call/field-rhs/cell
+position expression spread call/field-rhs/module
+position expression spread call/logical-key/cell
+position expression spread call/logical-key/module
+position expression spread call/pattern-rhs/cell
+position expression spread call/pattern-rhs/module
+position expression spread method/call-key/cell
+position expression spread method/call-key/module
+position expression spread method/compound-key/cell
+position expression spread method/compound-key/module
+position expression spread method/field-rhs/cell
+position expression spread method/field-rhs/module
+position expression spread method/logical-key/cell
+position expression spread method/logical-key/module
+position expression spread method/logical-rhs/cell
+position expression spread method/logical-rhs/module
+position expression spread method/pattern-rhs/cell
+position expression spread method/pattern-rhs/module
+position expression string/assignment-key/cell
+position expression string/assignment-key/module
+position expression string/call-key/cell
+position expression string/call-key/module
+position expression string/compound-key/cell
+position expression string/compound-key/module
+position expression string/field-rhs/cell
+position expression string/field-rhs/module
+position expression string/logical-key/cell
+position expression string/logical-key/module
+position expression string/pattern-rhs/cell
+position expression string/pattern-rhs/module
+position expression tagged template/call-key/cell
+position expression tagged template/call-key/module
+position expression tagged template/compound-key/cell
+position expression tagged template/compound-key/module
+position expression tagged template/field-rhs/cell
+position expression tagged template/field-rhs/module
+position expression tagged template/logical-key/cell
+position expression tagged template/logical-key/module
+position expression tagged template/pattern-rhs/cell
+position expression tagged template/pattern-rhs/module
+position expression template/assignment-key/cell
+position expression template/assignment-key/module
+position expression template/compound-key/cell
+position expression template/compound-key/module
+position expression template/field-rhs/cell
+position expression template/field-rhs/module
+position expression template/logical-key/cell
+position expression template/logical-key/module
+position expression template/pattern-rhs/cell
+position expression template/pattern-rhs/module
+position expression this/call-key/cell
+position expression this/call-key/module
+position expression this/compound-key/cell
+position expression this/compound-key/module
+position expression this/field-rhs/cell
+position expression this/field-rhs/module
+position expression this/logical-key/cell
+position expression this/logical-key/module
+position expression this/pattern-rhs/cell
+position expression this/pattern-rhs/module
+position unary !/call-key/cell
+position unary !/call-key/module
+position unary !/compound-key/cell
+position unary !/compound-key/module
+position unary !/field-rhs/cell
+position unary !/field-rhs/module
+position unary !/logical-key/cell
+position unary !/logical-key/module
+position unary !/pattern-rhs/cell
+position unary !/pattern-rhs/module
+position unary +/call-key/cell
+position unary +/call-key/module
+position unary +/compound-key/cell
+position unary +/compound-key/module
+position unary +/field-rhs/cell
+position unary +/field-rhs/module
+position unary +/logical-key/cell
+position unary +/logical-key/module
+position unary +/pattern-rhs/cell
+position unary +/pattern-rhs/module
+position unary -/call-key/cell
+position unary -/call-key/module
+position unary -/call-receiver/cell
+position unary -/call-receiver/module
+position unary -/compound-key/cell
+position unary -/compound-key/module
+position unary -/field-rhs/cell
+position unary -/field-rhs/module
+position unary -/logical-key/cell
+position unary -/logical-key/module
+position unary -/pattern-rhs/cell
+position unary -/pattern-rhs/module
+position unary typeof/compound-key/cell
+position unary typeof/compound-key/module
+position unary typeof/field-rhs/cell
+position unary typeof/field-rhs/module
+position unary typeof/pattern-rhs/cell
+position unary typeof/pattern-rhs/module
+position unary void/call-key/cell
+position unary void/call-key/module
+position unary void/compound-key/cell
+position unary void/compound-key/module
+position unary void/field-rhs/cell
+position unary void/field-rhs/module
+position unary void/logical-key/cell
+position unary void/logical-key/module
+position unary void/pattern-rhs/cell
+position unary void/pattern-rhs/module
+position unary ~/call-key/cell
+position unary ~/call-key/module
+position unary ~/call-receiver/cell
+position unary ~/call-receiver/module
+position unary ~/compound-key/cell
+position unary ~/compound-key/module
+position unary ~/field-rhs/cell
+position unary ~/field-rhs/module
+position unary ~/logical-key/cell
+position unary ~/logical-key/module
+position unary ~/pattern-rhs/cell
+position unary ~/pattern-rhs/module
+review ts-231 label continue switch/cell
+review ts-231 label continue switch/module
+review ts-232 switch continue step two/cell
+review ts-232 switch continue step two/module
+review ts-233 switch continue custom step/cell
+review ts-233 switch continue custom step/module
+review ts-234 nested switch continue/cell
+review ts-234 nested switch continue/module
+review ts-237 capture classic let/cell
+review ts-237 capture classic let/module
+review ts-249 empty switch side effect/cell
+review ts-249 empty switch side effect/module
+review ts-250 default only side effect/cell
+review ts-250 default only side effect/module
+review ts-251 named recursive/cell
+review ts-252 logical index side effects/cell
+review ts-252 logical index side effects/module
+review ts-253 compound index side effects/cell
+review ts-253 compound index side effects/module
+review ts-254 optional grouping/cell
+review ts-254 optional grouping/module
+review ts-255 optional bound call/cell
+review ts-255 optional bound call/module
+review ts-256 enum expression/cell
+review ts-256 enum expression/module
