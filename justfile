@@ -215,9 +215,9 @@ push-gate:
 confidence-local *args:
   bash "{{repo}}/scripts/confidence-local.sh" "$@"
 
-# Cargo-owned trybuild facade fixtures. Trusted Buck2 uses //crates/lash:ui_fixtures.
+# Facade compile-pass modules, compile-fail UI laws and export completeness.
 seal:
-  cargo test --workspace --locked --test ui
+  kiln test //crates/lash:ui_fixtures //crates/lash:facade_completeness
 
 # An opt-in broad tooling checkpoint over the Kiln fork: the dev and feature-lane test and
 # clippy partitions on the shared pool plus the quick script gates. Frontend

@@ -361,8 +361,9 @@ for required service flags and durable PostgreSQL settings.
 
 Cargo owns nested builds, trybuild's cache, fuzzing, Miri, named live recipes,
 release artifacts, packaging and publication. The trusted facade checks are
-`//crates/lash:ui_fixtures` and `//crates/lash:facade_completeness`; `just seal`
-retains the Cargo trybuild recipe. Launcher self-tests require Bubblewrap.
+`//crates/lash:ui_fixtures` and `//crates/lash:facade_completeness`. `just seal`
+runs both. The UI fixture harness also builds the compile-pass modules in
+`//crates/lash:ui__test`; that binary intentionally has no runtime cases. Launcher self-tests require Bubblewrap.
 Browser/service E2E remains separate from the developer partition.
 
 The package-layering law runs with
