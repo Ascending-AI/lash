@@ -51,8 +51,8 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "provider-retry-exhaustion",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-runtime",
-            target: CargoTestTarget::Library("lash"),
+            package: "lash-internal-facade-tests",
+            target: CargoTestTarget::Integration("facade_turns"),
             filter: Some("tests::turn_checkpoints::retryable_llm_failures_exhaust_and_fail_turn"),
         }),
     },
@@ -81,7 +81,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             target: CargoTestTarget::Library("lash_sqlite_store"),
-            filter: Some("durable::tests::no_write_through_a_stale_epoch::memory"),
+            filter: Some("durable::tests::a_zombie_owner_past_reap_cannot_commit::file"),
         }),
     },
     DurableFaultMatrixRow {

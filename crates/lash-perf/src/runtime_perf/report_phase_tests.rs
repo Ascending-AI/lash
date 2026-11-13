@@ -118,7 +118,9 @@ fn high_traffic_config() -> HighTrafficConfig {
 }
 
 fn checkpoint_curve_config() -> CheckpointCurveConfig {
-    CheckpointCurveConfig::new(8 * 1024, 2, 4, 8).expect("valid checkpoint curve test config")
+    // Even the quarter-size point has paged seeds. Crossing from packed
+    // inline rows to payload references can decrease physical spool bytes.
+    CheckpointCurveConfig::new(32 * 1024, 2, 4, 8).expect("valid checkpoint curve test config")
 }
 
 fn postgres_database_url() -> String {

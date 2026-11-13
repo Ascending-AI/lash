@@ -22,6 +22,12 @@ spec.loader.exec_module(static)
 # The worker hosts runs and lowering; the kernel set is the machine and the
 # dialects themselves.
 WORKER = "lash-vm-worker"
+# This explicit standalone perf command embeds the kernel over an in-memory
+# PageSource to measure cold collection work without worker transport. It is
+# never linked into a host's execution path; other lash-perf files stay checked.
+EMBEDDING_BENCHMARKS = {
+    "crates/lash-perf/src/boundary/kernel_cold.rs",
+}
 KERNEL_SET = re.compile(r"^lash-(kernel|dialect|ext)-")
 DIALECT_ENTRY = r"(?:lower(?:_[a-z_]+)?|parse|Parser)"
 ENTRY = re.compile(
@@ -37,6 +43,8 @@ def check(root: Path) -> list[str]:
     problems = []
     for path in sorted((root / "crates").glob("*/src/**/*.rs")):
         relative = path.relative_to(root).as_posix()
+        if relative in EMBEDDING_BENCHMARKS:
+            continue
         crate = path.relative_to(root / "crates").parts[0]
         if crate == WORKER or KERNEL_SET.match(crate):
             continue

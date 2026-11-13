@@ -1090,7 +1090,7 @@ run_state_machine_and_fault_matrix() {
     run_cargo_tests -p lash-internal-core --locked durable_fault_matrix
     step "Durable process fault-matrix evidence"
     run_cargo_tests -p lash-internal-sqlite-store --lib --locked \
-      durable::tests::no_write_through_a_stale_epoch::memory
+      durable::tests::a_zombie_owner_past_reap_cannot_commit::file
     run_cargo_tests -p lash-internal-durable-test --locked --test steering_crash_laws \
       a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
@@ -1103,7 +1103,7 @@ run_state_machine_and_fault_matrix() {
     run_cargo_tests -p lash-internal-provider-anthropic --locked --test property
     run_cargo_tests -p lash-internal-provider-google --locked --test property
     step "Provider retry fault-matrix evidence"
-    run_cargo_tests -p lash-runtime --lib --locked \
+    run_cargo_tests -p lash-internal-facade-tests --test facade_turns --locked \
       tests::turn_checkpoints::retryable_llm_failures_exhaust_and_fail_turn
     run_cargo_tests -p lash-internal-protocol-standard --locked --test protocol_scenarios \
       standard_protocol_scenario_provider_error_stops_without_checkpoint
