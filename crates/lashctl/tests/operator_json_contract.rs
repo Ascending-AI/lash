@@ -803,6 +803,18 @@ fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
     let path = std::env::temp_dir()
         .join(format!("lashctl-recovery-{}", uuid::Uuid::new_v4()))
         .join("lash.db");
+    // Recovery reads inspect an existing deployment; fixture setup owns
+    // provisioning, rather than the first stalled-list call.
+    std::fs::create_dir_all(path.parent().expect("store directory")).expect("fixture directory");
+    let runtime = tokio::runtime::Runtime::new().expect("recovery store setup runtime");
+    drop(
+        runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &path,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("provision the selected store"),
+    );
     let invoke = |args: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
             .args(args)
@@ -841,7 +853,6 @@ fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
     assert_eq!(unknown["error"]["code"], "usage");
 
     // Two stalled cleanups, seeded through the store's own ports.
-    let runtime = tokio::runtime::Runtime::new().expect("recovery store setup runtime");
     let ids = runtime.block_on(async {
         use lash::StoreSet as _;
         use lash_core_store::store::{

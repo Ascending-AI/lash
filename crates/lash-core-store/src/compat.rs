@@ -217,9 +217,10 @@ pub enum CompatAdmission {
 #[non_exhaustive]
 pub enum CompatRefusal {
     #[error(
-        "{component} holds lash data but carries no compatibility stamp; a stamp is never \
-         assumed, so the store is refused unchanged. Restore it from a backup or recreate it; \
-         `lashctl preflight` reports what it found{}",
+        "{component} has no store at this location, or has data without a compatibility stamp; \
+         the store is refused unchanged. Check the location and use `lashctl preflight` for \
+         PostgreSQL or the host's `verify_schema_at` for SQLite. This refusal alone authorizes \
+         no deletion{}",
         release_suffix(.writing_release)
     )]
     Unstamped {
@@ -580,6 +581,32 @@ mod tests {
         .to_string();
         assert!(supported.contains("SqliteStoreSet::open"), "{supported}");
         assert!(!supported.contains("reset"), "{supported}");
+    }
+
+    /// Missing storage and unstamped data share a refusal, so its remedy
+    /// must ask for backend-specific inspection without authorizing deletion.
+    #[test]
+    fn unstamped_refusals_require_backend_inspection_without_destructive_remedy() {
+        for component in ["postgres", "sqlite-core"] {
+            let text = CompatRefusal::Unstamped {
+                component: component.into(),
+                writing_release: None,
+            }
+            .to_string();
+            assert!(text.contains("no store at this location"), "{text}");
+            assert!(
+                text.contains("data without a compatibility stamp"),
+                "{text}"
+            );
+            assert!(
+                text.contains("`lashctl preflight` for PostgreSQL"),
+                "{text}"
+            );
+            assert!(text.contains("`verify_schema_at` for SQLite"), "{text}");
+            for directive in ["holds lash data", "reset", "recreate", "Restore"] {
+                assert!(!text.contains(directive), "{text}");
+            }
+        }
     }
 
     /// A replay reconstructs the stored refusal, including the old writer's
