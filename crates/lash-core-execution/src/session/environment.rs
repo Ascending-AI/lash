@@ -16,6 +16,32 @@ pub struct ClaimedEnvironment {
     pub registered: BTreeSet<SourceId>,
 }
 
+impl ClaimedEnvironment {
+    pub fn new(
+        plugins: Arc<crate::PluginSession>,
+        sources: EnvironmentSources,
+        mailbox: Arc<Mutex<Vec<(uuid::Uuid, EnvironmentChange)>>>,
+        projection: EnvironmentProjection,
+    ) -> Self {
+        let registered = sources
+            .descriptors()
+            .map(|descriptor| descriptor.source)
+            .collect();
+        Self {
+            plugins,
+            sources,
+            #[cfg(any(test, feature = "testing"))]
+            assemblies: Default::default(),
+            mailbox,
+            state: Mutex::new(ResidentEnvironment {
+                projection,
+                ..Default::default()
+            }),
+            registered,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ResidentEnvironment {
     pub epoch: Option<lash_durable::Epoch>,

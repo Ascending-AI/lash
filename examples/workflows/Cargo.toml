@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 lash-kernel-value = { workspace = true }
 lash-vocabulary = { workspace = true }
-lash = { workspace = true, features = ["codemode"] }
+lash = { workspace = true, features = ["codemode", "workflow-authoring"] }
 anyhow.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

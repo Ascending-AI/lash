@@ -6,7 +6,7 @@ mod embed_plugins;
 mod facade_host_wrappers;
 #[path = "integration/facade_inventory.rs"]
 mod facade_inventory;
-#[cfg(feature = "mcp")]
+#[cfg(all(feature = "mcp", feature = "testing"))]
 #[path = "integration/mcp_catalog.rs"]
 mod mcp_catalog;
 #[path = "integration/one_home.rs"]

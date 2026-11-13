@@ -251,23 +251,13 @@ impl SessionEnvironment {
                     .push((lash_core_store::environment::fresh_identity(), change));
             }))?;
         let projection = hydrate(store, session.session_id()).await?;
-        let registered = sources
-            .descriptors()
-            .map(|descriptor| descriptor.source)
-            .collect();
         Ok(Arc::new(Self {
-            shared: Arc::new(ClaimedEnvironment {
-                plugins: session.plugins().clone(),
+            shared: Arc::new(ClaimedEnvironment::new(
+                session.plugins().clone(),
                 sources,
-                registered,
-                #[cfg(any(test, feature = "testing"))]
-                assemblies: Default::default(),
                 mailbox,
-                state: Mutex::new(Resident {
-                    projection,
-                    ..Default::default()
-                }),
-            }),
+                projection,
+            )),
         }))
     }
 

@@ -83,7 +83,7 @@ lash-vm-runtime = { package = "lash-internal-vm-runtime", path = "../lash-vm-run
 lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
-lash-sansio = { workspace = true }
+lash-sansio = { workspace = true, features = ["testing"] }
 lash-protocol-types = { workspace = true }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
 # The worker a Python-dialect law runs its cell in: this crate's test binary

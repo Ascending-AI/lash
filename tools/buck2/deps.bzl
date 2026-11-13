@@ -539,6 +539,7 @@ PACKAGE_DEPS = {
     "lash-internal-core-store": {
         "build": {},
         "dev": {
+            "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
