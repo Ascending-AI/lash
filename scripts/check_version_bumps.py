@@ -83,7 +83,9 @@ what the walk leaves opaque.
 Guard hashing ignores only allowlisted non-wire derives inside top-level
 ``derive`` attributes and ``derive`` entries of ``cfg_attr``. Wire-producing
 and unknown derives remain in the preimage, as do namespaced attributes, macro
-arguments, and every ``serde`` attribute.
+arguments, and every ``serde`` attribute. Serialized-shape projections also
+ignore only the format-string literal in an exact ``#[error(...)]`` helper;
+its arguments and all other tokens remain guarded.
 
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.
@@ -390,6 +392,66 @@ def normalize_rust_derive_lists(text: str) -> str:
     return normalized
 
 
+# Attributes whose wording supplies a parsed protocol token or structure.
+# Keys are (type name, enum variant or None for a type attribute); values name
+# the production readers. Presentation-only comparisons do not belong here.
+# The audited list is empty: the JSON fault record comes from to_record/format!,
+# and TypeScript's Unsupported convention comes from constants/format!, not an
+# error attribute. See r57/evidence/l58/rendered-message-audit.md.
+ERROR_ATTRIBUTE_DATA_READERS: dict[tuple[str, str | None], tuple[str, ...]] = {}
+
+
+def error_attribute_owner(text: str, attribute_end: int) -> tuple[str, str | None] | None:
+    """Identify a type/variant without treating tokens inside attributes as code."""
+    attributes = rust_outer_attribute_ranges(text)
+    tokens = [token for token in rust_lexemes(text)
+              if token.kind not in {"space", "comment"}]
+    declaration = next((index for index, token in enumerate(tokens[:-1])
+                        if token.kind == "ident" and token.value in {"enum", "struct"}
+                        and tokens[index + 1].kind == "ident"
+                        and not any(a <= token.start < b for a, b in attributes)), None)
+    if declaration is None:
+        return None
+    kind, name = tokens[declaration:declaration + 2]
+    if kind.value == "struct" or attribute_end <= kind.start:
+        return name.value, None
+    cursor = _rust_trivia_end(text, attribute_end)
+    by_start = dict(attributes)
+    while cursor in by_start:
+        cursor = _rust_trivia_end(text, by_start[cursor])
+    variant = next((token for token in tokens if cursor is not None and token.start >= cursor), None)
+    if variant is None or variant.kind != "ident":
+        return None
+    return name.value, variant.value
+
+
+def normalize_rust_shape_attributes(text: str) -> str:
+    """Exclude only the format string of an exact `#[error(...)]` helper.
+
+    Keep its format arguments and every other attribute token. The lexer makes
+    literals indivisible, so an attribute spelling inside data is never elided.
+    """
+    replacements: list[tuple[int, int]] = []
+    for start, end in rust_outer_attribute_ranges(text):
+        if ERROR_ATTRIBUTE_DATA_READERS:
+            owner = error_attribute_owner(text, end)
+            if owner is None or owner in ERROR_ATTRIBUTE_DATA_READERS:
+                continue
+        tokens = [token for token in rust_lexemes(text[start:end])
+                  if token.kind not in {"space", "comment"}]
+        if (len(tokens) >= 7
+                and [(token.kind, token.value) for token in tokens[:4]]
+                == [("punct", "#"), ("punct", "["), ("ident", "error"), ("punct", "(")]
+                and tokens[4].kind == "literal"
+                and text[start + tokens[4].start] in {'"', 'r'}
+                and tokens[5].value in {",", ")"}
+                and tokens[-2].value == ")" and tokens[-1].value == "]"):
+            replacements.append((start + tokens[4].start, start + tokens[4].end))
+    for start, end in reversed(replacements):
+        text = text[:start] + '""' + text[end:]
+    return normalize_rust_derive_lists(text)
+
+
 RUST_DECLARATION = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
     r"(?:(?:const[ \t]+)?(?:async[ \t]+)?(?:unsafe[ \t]+)?fn|const|static|struct|enum|type)"
@@ -429,7 +491,10 @@ def named_rust_items(
             continue
         end = rust_item_end(text, match.start())
         raw = text[start:end] if strip is None else strip(name, text[start:end])
-        value = strip_rust_trivia(normalize_rust_derive_lists(raw))
+        normalize = (normalize_rust_shape_attributes
+                     if re.search(r"\b(?:struct|enum)\s+" + re.escape(name) + r"\b", match[0])
+                     else normalize_rust_derive_lists)
+        value = strip_rust_trivia(normalize(raw))
         key = name
         ordinal = 2
         while key in found:
@@ -470,7 +535,7 @@ def serde_shapes(text: str, strip: Callable[[str, str], str] | None = None) -> d
             continue
         end = rust_item_end(text, match.start())
         raw = text[start:end] if strip is None else strip(name, text[start:end])
-        value = strip_rust_trivia(normalize_rust_derive_lists(raw))
+        value = strip_rust_trivia(normalize_rust_shape_attributes(raw))
         key = name
         ordinal = 2
         while key in found:
@@ -2016,7 +2081,7 @@ class Reachability:
         return (
             shape.path,
             shape.name,
-            strip_rust_trivia(normalize_rust_derive_lists(text)),
+            strip_rust_trivia(normalize_rust_shape_attributes(text)),
         )
 
     def _expand(self, shape: Shape):

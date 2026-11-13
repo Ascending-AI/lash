@@ -951,6 +951,101 @@ class Projection(Harness):
         self.assertEqual(code, 1, output)
 
 
+class ErrorDisplayProjection(Harness):
+    """Display wording cannot move a witness; the same type's wire edits must."""
+
+    SHAPE = '''
+    #[derive(Serialize, Deserialize, thiserror::Error)]
+    #[serde(tag = "refusal", rename_all = "snake_case")]
+    pub enum CompatRefusal {
+        #[error("old wording: {message}")]
+        TooOld { message: String },
+        #[error(r#"another message"#)]
+        Missing,
+    }
+    '''
+
+    def source(self, guard: str, shape: str) -> str:
+        return (f'/// version_surface = "coexist"\n'
+                f'/// version_guard({guard})\n'
+                'pub const PEER_PROTOCOL_VERSION: u32 = 1;\n' + textwrap.dedent(shape))
+
+    def test_only_error_display_text_is_neutral(self) -> None:
+        for guard in ["items(CompatRefusal)", "shapes(cover(CompatRefusal))", "roots(CompatRefusal)"]:
+            with self.subTest(guard=guard):
+                self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE))
+                base = self.commit("error shape")
+                changed = self.SHAPE.replace("old wording: {message}", "new wording: {message}")
+                changed = changed.replace('r#"another message"#', '"new second message"')
+                self.write("crates/demo/src/peer.rs", self.source(guard, changed))
+                code, output = self.verdict(self.commit("display wording only"), base)
+                self.assertEqual(code, 0, output)
+
+    def test_error_types_still_require_witnesses_for_wire_changes(self) -> None:
+        mutations = {
+            "field": ("message: String", "detail: String"),
+            "field type": ("message: String", "message: Vec<String>"),
+            "serde attribute": ('rename_all = "snake_case"', 'rename_all = "camelCase"'),
+            "variant name": ("TooOld {", "Retired {"),
+            "variant order": (
+                '        TooOld { message: String },\n        #[error(r#"another message"#)]\n        Missing,',
+                '        Missing,\n        #[error(r#"another message"#)]\n        TooOld { message: String },',
+            ),
+        }
+        for guard in ["items(CompatRefusal)", "shapes(cover(CompatRefusal))", "roots(CompatRefusal)"]:
+            self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE))
+            base = self.commit("error shape")
+            for label, (old, new) in mutations.items():
+                with self.subTest(guard=guard, mutation=label):
+                    self.assertIn(old, self.SHAPE)
+                    self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE.replace(old, new)))
+                    code, output = self.verdict(self.commit(label), base)
+                    self.assertEqual(code, 1, output)
+                    self.assertIn("PEER_PROTOCOL_VERSION is 1 on both sides", output)
+
+    def test_error_lookalikes_and_format_arguments_remain_guarded(self) -> None:
+        for old, new in [
+            ('#[error("old wording: {message}")]', '#[custom::error("new wording")]'),
+            ('#[error("old wording: {message}")]', '#[serde(rename = "wire")]'),
+            ('#[error("old wording: {message}")]', '#[error("old wording: {message}", helper(.message))]'),
+        ]:
+            with self.subTest(new=new):
+                before = gate.serde_shapes(textwrap.dedent(self.SHAPE))
+                after = gate.serde_shapes(textwrap.dedent(self.SHAPE.replace(old, new)))
+                self.assertNotEqual(before, after)
+
+
+    def test_named_protocol_attribute_stays_guarded_while_other_wording_is_neutral(self) -> None:
+        # The production audit currently has no entries. Plant a protocol
+        # producer to pin the exception's semantics before one is added.
+        with patch.dict(gate.ERROR_ATTRIBUTE_DATA_READERS,
+                        {("CompatRefusal", "TooOld"): ("fixture::parse_refusal_token",)}):
+            for guard in ["items(CompatRefusal)", "shapes(cover(CompatRefusal))", "roots(CompatRefusal)"]:
+                self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE))
+                base = self.commit("named protocol attribute")
+                for old, new, expected in [
+                    ("old wording: {message}", "changed protocol token", 1),
+                    ("another message", "changed display text", 0),
+                ]:
+                    with self.subTest(guard=guard, old=old):
+                        self.write("crates/demo/src/peer.rs",
+                                   self.source(guard, self.SHAPE.replace(old, new)))
+                        code, output = self.verdict(self.commit(new), base)
+                        self.assertEqual(code, expected, output)
+
+    def test_namespaced_attributes_and_attribute_spellings_in_data_are_not_elided(self) -> None:
+        for attribute in [
+            '#[custom::error("old")]',
+            '#[serde(rename = "old")]',
+            '#[custom(r##"#[error("old")]"##)]',
+        ]:
+            with self.subTest(attribute=attribute):
+                before = attribute + "\npub struct Record { id: String }"
+                after = before.replace("old", "new")
+                self.assertNotEqual(gate.serde_shapes("#[derive(Serialize)]\n" + before),
+                                    gate.serde_shapes("#[derive(Serialize)]\n" + after))
+
+
 class GuardSet(Harness):
     def test_dropping_a_shape_from_the_marker_does_not_excuse_changing_it(self) -> None:
         self.write(
