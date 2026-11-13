@@ -95,13 +95,13 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::DOCUMEN
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 20;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 21;
 /// The synthetic successor's parked-run format.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelParkedState"
 /// version_surface = "migrate"
 /// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
-pub const KERNEL_PARKED_STATE_VERSION: u32 = 21;
+pub const KERNEL_PARKED_STATE_VERSION: u32 = 22;
 
 /// A saved function: a function a session keeps between cells, held in an
 /// immutable FunctionBundle node with every saved function it uses. Its
@@ -129,7 +129,7 @@ pub const KERNEL_PARKED_STATE_VERSION: u32 = 21;
 /// format_manifest = "KernelSavedFunction"
 /// version_unguarded = "saved-function bundles are unversioned graph nodes; their document encoding and kernel admission govern compatibility, not record upcasters"
 /// version_surface = "migrate"
-pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 9;
+pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 10;
 
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored
