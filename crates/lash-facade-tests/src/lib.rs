@@ -373,6 +373,7 @@ pub fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
             .build(),
         lash_protocol_rlm::CellDialect::typescript(),
     )
+    .with_kernel_succession(Arc::new(lash::vm::plan_migration))
     .with_worker_service(untimed_fixture_workers())
 }
 
