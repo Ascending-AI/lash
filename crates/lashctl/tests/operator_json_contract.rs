@@ -460,14 +460,22 @@ async fn postgres_operator_reads_never_claim_obligations_or_create_files() {
     std::fs::remove_dir_all(cwd).expect("remove cwd");
 }
 
-fn assert_too_old(code: i32, body: &Value, component: &str, found: u32, expected: u32) {
+fn assert_too_old(
+    code: i32,
+    body: &Value,
+    component: lash_core_store::compat::ComponentId,
+    found: u32,
+) {
+    let reads = lash_core_store::compat::descriptor(component)
+        .expect("the store component is declared")
+        .reads;
     assert_eq!(code, 4, "{body}");
     assert_eq!(body["error"]["code"], "incompatible_store", "{body}");
     assert_eq!(
         body["error"]["refusal"],
         json!({
-            "refusal": "too_old", "component": component, "found": found,
-            "reads": {"min": expected, "max": expected},
+            "refusal": "too_old", "component": component.as_str(), "found": found,
+            "reads": reads,
             "writing_release": env!("CARGO_PKG_VERSION")
         })
     );
@@ -493,7 +501,6 @@ fn recovery_preserves_old_sqlite_store_refusals() {
     connection
         .execute("UPDATE lash_compat SET version = 24, min_reader = 24", [])
         .expect("main's old schema stamp");
-    let expected = lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION;
     for args in recovery_commands() {
         let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
             .args(args)
@@ -507,9 +514,8 @@ fn recovery_preserves_old_sqlite_store_refusals() {
         assert_too_old(
             output.status.code().expect("exit code"),
             &body,
-            "sqlite-core",
+            lash_core_store::compat::ComponentId::SQLITE_CORE,
             24,
-            expected,
         );
     }
     let found: u32 = connection
@@ -550,9 +556,8 @@ async fn recovery_preserves_old_postgres_store_refusals() {
         assert_too_old(
             code,
             &body,
-            "postgres",
+            lash_core_store::compat::ComponentId::POSTGRES,
             37,
-            lash_core_store::compat::POSTGRES_SCHEMA_VERSION,
         );
     }
     let found: i32 = sqlx::query_scalar(
