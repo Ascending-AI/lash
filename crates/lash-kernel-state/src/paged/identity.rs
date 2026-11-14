@@ -29,6 +29,7 @@
 //! read rest on canonical construction: the hash commits to them but does
 //! not prove them true.
 
+use super::run::objects::{Head, Heads, ObjectKind, RunValue};
 use lash_kernel_doc::heap::{HeapFault, NormalKey, TextSummary};
 use lash_kernel_doc::heap_values::{key_digest, sha256, text_summary};
 use lash_kernel_value::tokens::TokenWriter;
@@ -246,4 +247,353 @@ fn encode(counts: TextSummary) -> [u8; 24] {
     out[8..16].copy_from_slice(&counts.chars.to_le_bytes());
     out[16..].copy_from_slice(&counts.utf16_units.to_le_bytes());
     out
+}
+
+// Tuple and error content identity (seal design, "Tuple identity and
+// loads"): what a tuple's head and row commit to, built from its members
+// as the arena holds them or as a chunk page writes them, so a load checks
+// each page it reads against the head every referrer names the tuple by.
+//
+// - each member writes one token stream ([`Member::write`]): a keyable
+//   member exactly the tokens it contributes to a tuple's flat normal
+//   form, any other member under its own tag, by its head or its durable
+//   id;
+// - leaves group [`TUPLE_LEAF`] members by position,
+//   `leaf = SHA-256(lash.tuple.leaf ‖ start ‖ count ‖ tokens)`;
+// - each level above groups [`FANOUT`] children left to right,
+//   `index = SHA-256(lash.tuple.index ‖ start ‖ count ‖ n ‖ idⁿ)`, with
+//   start and count u64 and n u32, little-endian; level one always exists,
+//   so the root is an index node however few members the tuple has;
+// - a keyable tuple's normal form is its flat tokens,
+//   `sum(9) seq(len) ‖ member tokens`, inline within
+//   [`NormalKey::INLINE_MAX`], else the root's digest.
+//
+// Storage, chunking, concatenation and history never change it: only the
+// members' positions and tokens do.
+
+/// The members one tuple leaf groups: a chunk page's, by position.
+pub const TUPLE_LEAF: usize = 64;
+
+/// The members one level-one tuple node spans.
+pub const TUPLE_NODE: u64 = (TUPLE_LEAF * FANOUT) as u64;
+
+const TUPLE_LEAF_TAG: &[u8] = b"lash.tuple.leaf.v1\0";
+const TUPLE_INDEX_TAG: &[u8] = b"lash.tuple.index.v1\0";
+const ERROR_TAG: &[u8] = b"lash.error.v1\0";
+
+/// A member of a tuple or an error, as its content identity names it.
+#[derive(Clone, Debug)]
+pub enum Member<'a> {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(lash_kernel_doc::Float),
+    Text(&'a str),
+    Timestamp(i64),
+    TaskRef(lash_kernel_doc::TaskId),
+    /// A ref, by its referent's durable id.
+    Ref(lash_kernel_doc::heap::EntityId),
+    /// A ref whose referent has no durable id yet, by its process-local
+    /// token: a tuple naming one is not certified before its seal.
+    LocalRef(u64),
+    /// An immutable object, by its head.
+    Immutable(std::borrow::Cow<'a, Head>),
+    /// A mutable object, by its durable id.
+    Object(lash_kernel_doc::heap::EntityId),
+    /// A mutable object with no durable id yet, by its process-local token.
+    LocalObject(u64),
+    Task(u64),
+    Absent,
+}
+
+impl Member<'_> {
+    /// Writes the member's tokens; gives whether it is a legal key, whose
+    /// tokens are then the ones its key embeds in a tuple's normal form.
+    pub fn write(&self, out: &mut TokenWriter) -> bool {
+        use lash_kernel_doc::heap::Identity;
+        use lash_kernel_value::tokens::TokenCodec;
+        match self {
+            Self::Null => out.sum(0, 0),
+            Self::Bool(flag) => {
+                out.sum(1, 1);
+                flag.encode(out);
+            }
+            Self::Int(word) => {
+                out.sum(2, 1);
+                lash_kernel_doc::Integer::from(*word).encode(out);
+            }
+            Self::Float(float) => match lash_kernel_doc::heap_values::integral_float(float.get()) {
+                Some(int) => {
+                    out.sum(2, 1);
+                    int.encode(out);
+                }
+                None => {
+                    out.sum(3, 1);
+                    float.encode(out);
+                }
+            },
+            Self::Text(text) => {
+                out.sum(4, 1);
+                out.text(text);
+            }
+            Self::Timestamp(word) => {
+                out.sum(6, 1);
+                lash_kernel_doc::Timestamp {
+                    nanoseconds: lash_kernel_doc::Integer::from(*word),
+                }
+                .encode(out);
+            }
+            Self::TaskRef(task) => {
+                out.sum(7, 1);
+                Identity::Task(*task).encode(out);
+            }
+            Self::Ref(entity) => {
+                out.sum(10, 1);
+                Identity::Object(*entity).encode(out);
+            }
+            Self::LocalRef(token) => {
+                out.sum(12, 1);
+                out.unsigned(*token);
+            }
+            Self::Immutable(head) => match (&**head, head.normal()) {
+                (_, Some(normal)) => {
+                    embed(normal, out);
+                }
+                (Head::Function(callable), None) => {
+                    out.sum(8, 1);
+                    callable.encode(out);
+                }
+                (head, None) => {
+                    out.sum(21, 1);
+                    head.encode(out);
+                    return false;
+                }
+            },
+            Self::Object(entity) => {
+                out.sum(20, 1);
+                Identity::Object(*entity).encode(out);
+                return false;
+            }
+            Self::LocalObject(token) => {
+                out.sum(24, 1);
+                out.unsigned(*token);
+                return false;
+            }
+            Self::Task(task) => {
+                out.sum(22, 1);
+                out.unsigned(*task);
+                return false;
+            }
+            Self::Absent => {
+                out.sum(23, 0);
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The member `value` names, which a page holding `heads` wrote;
+    /// `None` for an immutable the page holds no head of.
+    pub fn of_run<'h>(value: &'h RunValue, heads: &'h Heads) -> Option<Member<'h>> {
+        use lash_kernel_doc::heap::{EntityId, FamilyId};
+        let entity = |id: super::run::ids::ObjectId| EntityId {
+            family: FamilyId::PRIMARY,
+            ordinal: id.0,
+        };
+        Some(match value {
+            RunValue::Null => Member::Null,
+            RunValue::Absent => Member::Absent,
+            RunValue::Bool(flag) => Member::Bool(*flag),
+            RunValue::Int(word) => Member::Int(*word),
+            RunValue::Float(float) => Member::Float(*float),
+            RunValue::Text(text) => Member::Text(text),
+            RunValue::Timestamp(word) => Member::Timestamp(*word),
+            RunValue::Task(task) => Member::Task(*task),
+            RunValue::TaskRef(task) => Member::TaskRef(lash_kernel_doc::TaskId(*task)),
+            RunValue::Ref(id) => Member::Ref(entity(*id)),
+            RunValue::Object(kind, id) if headed(*kind) => {
+                Member::Immutable(std::borrow::Cow::Borrowed(heads.get(*id)?))
+            }
+            RunValue::Object(_, id) => Member::Object(entity(*id)),
+        })
+    }
+}
+
+/// Whether an object of `kind` is named by its head.
+pub fn headed(kind: ObjectKind) -> bool {
+    matches!(
+        kind,
+        ObjectKind::Tuple
+            | ObjectKind::Error
+            | ObjectKind::BigInt
+            | ObjectKind::Timestamp
+            | ObjectKind::LongText
+            | ObjectKind::Bytes
+            | ObjectKind::Function
+            | ObjectKind::Handle
+    )
+}
+
+/// The leaf over members `start .. start + count`, whose tokens are
+/// `tokens`.
+pub fn tuple_leaf(start: u64, count: u64, tokens: &[u8]) -> [u8; 32] {
+    sha256(&[
+        TUPLE_LEAF_TAG,
+        &start.to_le_bytes(),
+        &count.to_le_bytes(),
+        tokens,
+    ])
+}
+
+/// The nodes one level above `ids`, the nodes of a tuple of `len` members
+/// that each span `span` members, grouped [`FANOUT`] to a node; the first
+/// of them is node `first` of its level.
+pub fn tuple_parents(len: u64, span: u64, first: u64, ids: &[[u8; 32]]) -> Vec<[u8; 32]> {
+    let width = span.saturating_mul(FANOUT as u64);
+    ids.chunks(FANOUT)
+        .enumerate()
+        .map(|(at, group)| {
+            let start = (first + at as u64).saturating_mul(width);
+            let count = len.saturating_sub(start).min(width);
+            let mut preimage = Vec::with_capacity(20 + group.len() * 32);
+            preimage.extend_from_slice(&start.to_le_bytes());
+            preimage.extend_from_slice(&count.to_le_bytes());
+            preimage.extend_from_slice(&(group.len() as u32).to_le_bytes());
+            for id in group {
+                preimage.extend_from_slice(id);
+            }
+            sha256(&[TUPLE_INDEX_TAG, &preimage])
+        })
+        .collect()
+}
+
+/// The root of a tuple of `len` members whose level-one nodes are `nodes`.
+pub fn tuple_root(len: u64, nodes: &[[u8; 32]]) -> [u8; 32] {
+    let mut level = nodes.to_vec();
+    let mut span = TUPLE_NODE;
+    while level.len() > 1 {
+        level = tuple_parents(len, span, 0, &level);
+        span = span.saturating_mul(FANOUT as u64);
+    }
+    level.first().copied().unwrap_or([0; 32])
+}
+
+/// The leaves of a tuple of `len` members: one per [`TUPLE_LEAF`], and
+/// one empty leaf for the empty tuple.
+pub fn tuple_leaves(len: u64) -> u64 {
+    len.div_ceil(TUPLE_LEAF as u64).max(1)
+}
+
+/// A tuple's content identity: its normal form when it is a legal key,
+/// its level-one nodes and its root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TupleContent {
+    pub normal: Option<NormalKey>,
+    pub nodes: Vec<[u8; 32]>,
+    pub root: [u8; 32],
+}
+
+/// Builds a tuple's [`TupleContent`] from its members, in order.
+pub struct TupleBuilder {
+    len: u64,
+    at: u64,
+    keyable: bool,
+    member: TokenWriter,
+    leaf: Vec<u8>,
+    leaves: Vec<[u8; 32]>,
+    /// The flat tokens, while they still fit inline.
+    flat: Option<TokenWriter>,
+}
+
+impl TupleBuilder {
+    /// A builder for a tuple of `len` members.
+    pub fn new(len: u64) -> Self {
+        let mut flat = TokenWriter::new();
+        flat.sum(9, 1);
+        flat.seq(len);
+        Self {
+            len,
+            at: 0,
+            keyable: true,
+            member: TokenWriter::new(),
+            leaf: Vec::new(),
+            leaves: Vec::new(),
+            flat: Some(flat),
+        }
+    }
+
+    /// Adds the next member.
+    pub fn push(&mut self, member: &Member<'_>) {
+        self.member.clear();
+        self.keyable &= member.write(&mut self.member);
+        let tokens = self.member.as_bytes();
+        self.leaf.extend_from_slice(tokens);
+        if let Some(flat) = &mut self.flat {
+            if self.keyable && flat.len() + tokens.len() <= NormalKey::INLINE_MAX {
+                flat.raw(tokens);
+            } else {
+                self.flat = None;
+            }
+        }
+        self.at += 1;
+        if self.at.is_multiple_of(TUPLE_LEAF as u64) {
+            self.close_leaf();
+        }
+    }
+
+    fn close_leaf(&mut self) {
+        let count = self.at - self.leaves.len() as u64 * TUPLE_LEAF as u64;
+        let start = self.at - count;
+        self.leaves.push(tuple_leaf(start, count, &self.leaf));
+        self.leaf.clear();
+    }
+
+    /// The content of the tuple.
+    ///
+    /// # Errors
+    ///
+    /// Members other than the tuple's length in number.
+    pub fn finish(mut self) -> Result<TupleContent, HeapFault> {
+        if self.at != self.len {
+            return Err(HeapFault::Malformed(format!(
+                "a tuple of {} members was given {}",
+                self.len, self.at
+            )));
+        }
+        if self.leaves.len() as u64 != tuple_leaves(self.len) {
+            self.close_leaf();
+        }
+        let nodes = tuple_parents(self.len, TUPLE_LEAF as u64, 0, &self.leaves);
+        let root = tuple_root(self.len, &nodes);
+        let normal = self.keyable.then(|| match self.flat {
+            Some(flat) => NormalKey::Inline(flat.into_bytes()),
+            None => NormalKey::Digest(root),
+        });
+        Ok(TupleContent {
+            normal,
+            nodes,
+            root,
+        })
+    }
+}
+
+/// The leaf over the chunk of a tuple that holds members `start ..`, as
+/// a page holding `heads` wrote them: `None` for a member the page names
+/// no head of.
+pub fn chunk_leaf(start: u64, members: &[RunValue], heads: &Heads) -> Option<[u8; 32]> {
+    let mut tokens = TokenWriter::new();
+    for member in members {
+        Member::of_run(member, heads)?.write(&mut tokens);
+    }
+    Some(tuple_leaf(start, members.len() as u64, tokens.as_bytes()))
+}
+
+/// The content digest of an error whose kind, message and data are
+/// `members`.
+pub fn error_content(members: &[Member<'_>; 3]) -> [u8; 32] {
+    let mut out = TokenWriter::new();
+    for member in members {
+        member.write(&mut out);
+    }
+    sha256(&[ERROR_TAG, out.as_bytes()])
 }

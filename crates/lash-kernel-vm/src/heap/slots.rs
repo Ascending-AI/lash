@@ -14,9 +14,10 @@ use lash_kernel_doc::arena::native::{Args, NativeError, NewObject, Nursery};
 use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 
 use lash_kernel_state::arena::{LOOKUP, ProxyKind};
+use lash_kernel_state::paged::identity::tuple_root;
 use lash_kernel_state::paged::run::chunked::{Chunked, Members, Placement, placement};
 use lash_kernel_state::paged::run::ids::ObjectId;
-use lash_kernel_state::paged::run::objects::{ObjectKind, Paged, PagedNode, Record};
+use lash_kernel_state::paged::run::objects::{Head, ObjectKind, Paged, PagedNode, Record};
 
 use super::open;
 use super::{Heap, LoadError, MemoryRefused};
@@ -346,6 +347,32 @@ impl SlotHeap {
             .map_err(|_| malformed("a large object's chunk count is past memory".into()))?;
         let opened = match chunked.kind {
             ObjectKind::List => self.arena.open_list(object, chunked.len),
+            ObjectKind::Tuple => {
+                // The row must be the tuple every referrer's head names:
+                // its length and its content root, which its level-one
+                // nodes make; each page read later is checked against
+                // those nodes ([`super::large::Large::read`]).
+                let head = self
+                    .arena
+                    .facts(object)
+                    .map_err(|error| malformed(error.to_string()))?
+                    .head()
+                    .cloned();
+                let named = match (&head, &chunked.tuple) {
+                    (Some(Head::Tuple { len, root, .. }), Some(index)) => {
+                        *len == chunked.len
+                            && index.root == *root
+                            && tuple_root(chunked.len, &index.nodes) == *root
+                    }
+                    _ => false,
+                };
+                if !named {
+                    return Err(self.corrupt_row(format!(
+                        "a chunked tuple's row disagrees with the head its referrers name it by: {head:?}"
+                    )));
+                }
+                self.arena.open_tuple(object, chunked.len)
+            }
             kind => {
                 let proxy = match kind {
                     ObjectKind::Map => ProxyKind::Map,
@@ -374,6 +401,15 @@ impl SlotHeap {
         self.held = self.held.saturating_add(now);
         self.place(object, now);
         Ok(())
+    }
+
+    /// The store's corruption fault for `reason`.
+    fn corrupt_row(&self, reason: String) -> LoadError {
+        use lash_kernel_doc::heap::HeapFault;
+        LoadError::Store(self.durable.as_ref().map_or_else(
+            || HeapFault::Malformed(reason.clone()),
+            |durable| durable.corrupt(reason.clone()),
+        ))
     }
 
     /// Loads what the resident `object` waits for: chunk `chunk`, the

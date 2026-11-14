@@ -52,9 +52,13 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/identity.rs",
 ///         FLAT_MAX, LEAF, FANOUT, Kind, Node, counts, cuts, leaf, index, of, text_key, bytes_key, long,
-///         embed, flat, encode,
+///         embed, flat, encode, TUPLE_LEAF, TUPLE_NODE, TUPLE_LEAF_TAG, TUPLE_INDEX_TAG, ERROR_TAG, Member, headed,
+///         tuple_leaf, tuple_parents, tuple_root, tuple_leaves, TupleContent, TupleBuilder, chunk_leaf, error_content,
 ///     ),
-///     items(path = "crates/lash-kernel-state/src/arena/keys.rs", nested, normal_key, long_key, tokens, body_tokens, detached_normal),
+///     items(
+///         path = "crates/lash-kernel-state/src/arena/keys.rs",
+///         normal_key, long_key, tokens, body_tokens, member, object_head, content_head,
+///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/metadata.rs",
 ///         NameRef, UnitRef, SiteRef, TaskIdentityRef, SpawnNode, encode, decode,

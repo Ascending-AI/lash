@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::hash::BuildHasher;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Sequence, ShortText, Table};
-use lash_kernel_doc::heap::{Identity, NormalKey};
+use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::heap_values::integral_float;
 use lash_kernel_doc::{Integer, NativeError, Retry, Semantics, Timestamp, Value};
 
@@ -22,7 +22,8 @@ use lash_kernel_value::data_limits::KernelDataLimits;
 use {lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenWriter};
 
 use super::Facts;
-use crate::paged::identity;
+use crate::paged::identity::{self, Member};
+use crate::paged::run::objects::Head;
 
 /// Bounded, process-local normalized short keys. Colliding cache slots compare
 /// the complete short text; a miss replaces the slot, never aliases its key.
@@ -188,32 +189,6 @@ fn certified<'a>(
             .head()
             .map(super::Head::normal),
         _ => None,
-    }
-}
-
-/// The tokens a tuple's member contributes to the tuple's normal form: an
-/// immutable object's own normal form, embedded by
-/// [`identity::embed`](crate::paged::identity::embed), so a tuple's normal
-/// form needs no member's body once the member has a head (`D-KEY`).
-fn nested(
-    objects: &(impl super::Bodies + ?Sized),
-    facts: &(impl super::FactTable + ?Sized),
-    member: &Value,
-    out: &mut TokenWriter,
-) -> Result<bool, NativeError> {
-    match member {
-        Value::Tuple(_)
-        | Value::LongText(_)
-        | Value::BigInt(_)
-        | Value::BigTimestamp(_)
-        | Value::Bytes(_) => match normal_key(objects, facts, member)? {
-            None => Ok(false),
-            Some(key) => {
-                identity::embed(&key, out);
-                Ok(true)
-            }
-        },
-        _ => tokens(objects, facts, member, out),
     }
 }
 
@@ -419,6 +394,11 @@ pub(crate) fn normal_key(
     if let Some(normal) = certified(facts, value) {
         return Ok(normal.cloned());
     }
+    if let Value::Tuple(handle) = value {
+        return Ok(object_head(objects, facts, *handle, true)?
+            .normal()
+            .cloned());
+    }
     let normal = if let Value::LongText(handle) | Value::Bytes(handle) = value {
         Some(long_key(objects, Some(*handle), body(objects, *handle)?)?)
     } else {
@@ -429,21 +409,16 @@ pub(crate) fn normal_key(
     Ok(normal)
 }
 
-/// Installs the head `normal` completes on the immutable `value`, so its
-/// key is computed once: a tuple embeds each member's key ([`nested`]),
-/// and a member already keyed answers by its head, so keying a shared
-/// graph is linear in its distinct objects, not its leaves. Nothing else
-/// changes with it: the head is what a seal would certify. A value that
-/// names an object or task at any depth is left to its seal: a ref keyed
-/// before its referent's first seal is keyed by a token that changes.
+/// Installs the head `normal` completes on the immutable scalar `value`,
+/// so its key is computed once ([`object_head`] does so for a tuple).
+/// Nothing else changes with it: the head is what a seal would certify.
 fn certify(
     objects: &(impl super::Bodies + ?Sized),
     facts: &(impl super::FactTable + ?Sized),
     value: &Value,
     normal: &Option<NormalKey>,
 ) {
-    let (Value::Tuple(handle)
-    | Value::LongText(handle)
+    let (Value::LongText(handle)
     | Value::BigInt(handle)
     | Value::BigTimestamp(handle)
     | Value::Bytes(handle)) = value
@@ -458,7 +433,7 @@ fn certify(
         return;
     }
     if let (Ok(head), Ok(projected)) = (
-        super::heads::head_of(body, fact.summary, || Ok(normal.clone())),
+        super::heads::head_of(body, || Ok(normal.clone())),
         fact.try_projection(),
     ) {
         super::freeze(body);
@@ -515,77 +490,175 @@ pub(super) fn tokens(
     out: &mut TokenWriter,
 ) -> Result<bool, NativeError> {
     match value {
-        Value::Null => out.sum(0, 0),
-        Value::Bool(flag) => {
-            out.sum(1, 1);
-            flag.encode(out);
+        Value::Null
+        | Value::Bool(_)
+        | Value::Int(_)
+        | Value::Float(_)
+        | Value::Text(_)
+        | Value::Timestamp(_)
+        | Value::TaskRef(_)
+        | Value::ObjectRef(_) => Ok(member(objects, facts, value)?.write(out)),
+        // A text, bytes or tuple object is keyed by its identity, which a
+        // token stream holds only embedded (`identity::Member::write`).
+        Value::LongText(_) | Value::Bytes(_) | Value::Tuple(_) => Err(NativeError::Malformed(
+            "a text, bytes or tuple object is keyed by its identity, not its tokens",
+        )),
+        Value::BigInt(handle) | Value::BigTimestamp(handle) | Value::Function(handle) => {
+            body_tokens(objects, Some(*handle), body(objects, *handle)?, out)
         }
-        Value::Int(word) => {
-            out.sum(2, 1);
-            Integer::from(*word).encode(out);
-        }
-        Value::Float(float) => match integral_float(float.get()) {
-            Some(int) => {
-                out.sum(2, 1);
-                int.encode(out);
-            }
-            None => {
-                out.sum(3, 1);
-                float.encode(out);
-            }
-        },
-        Value::Text(short) => {
-            out.sum(4, 1);
-            out.text(short.as_str());
-        }
-        Value::Timestamp(word) => {
-            out.sum(6, 1);
-            Timestamp {
-                nanoseconds: Integer::from(*word),
-            }
-            .encode(out);
-        }
-        Value::TaskRef(task) => {
-            out.sum(7, 1);
-            Identity::Task(*task).encode(out);
-        }
-        // A ref is keyed by its referent's durable id, which a sealed key
-        // names it by on its pages and after a reopen. Until the referent
-        // has one it is keyed by its process-local token, and giving it an
-        // id re-keys the tables that key it so ([`super::Arena::assign`]).
+        _ => Ok(false),
+    }
+}
+
+/// The member `value` is of a tuple or an error ([`identity::Member`]): a
+/// scalar by value, a ref by its referent's durable id (until it has one,
+/// by its process-local token, and giving it one re-keys the tables that
+/// key it so: [`super::Arena::assign`]), an immutable by its head, and a
+/// mutable object by its durable id, or its token before it has one.
+fn member<'v>(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    value: &'v Value,
+) -> Result<Member<'v>, NativeError> {
+    let fact = |handle: &ArenaHandle| {
+        facts
+            .get(handle.index() as usize)
+            .filter(|_| objects.get(*handle).is_some())
+            .ok_or(NativeError::Malformed("a ref names no object of the run"))
+    };
+    let durable = |handle: &ArenaHandle| -> Result<Member<'v>, NativeError> {
+        let held = fact(handle)?;
+        Ok(match held.entity() {
+            Some(entity) => Member::Object(entity),
+            None => Member::LocalObject(held.token),
+        })
+    };
+    let immutable = |handle: &ArenaHandle| -> Result<Member<'v>, NativeError> {
+        Ok(Member::Immutable(std::borrow::Cow::Owned(object_head(
+            objects, facts, *handle, true,
+        )?)))
+    };
+    Ok(match value {
+        Value::Null => Member::Null,
+        Value::Absent => Member::Absent,
+        Value::Bool(flag) => Member::Bool(*flag),
+        Value::Int(word) => Member::Int(*word),
+        Value::Float(float) => Member::Float(*float),
+        Value::Text(short) => Member::Text(short.as_str()),
+        Value::Timestamp(word) => Member::Timestamp(*word),
+        Value::Task(task) => Member::Task(task.0),
+        Value::TaskRef(task) => Member::TaskRef(*task),
         Value::ObjectRef(handle) => {
-            let referent = facts
-                .get(handle.index() as usize)
-                .filter(|_| objects.get(*handle).is_some())
-                .ok_or(NativeError::Malformed("a ref names no object of the run"))?;
+            let referent = fact(handle)?;
             match referent.entity() {
-                Some(entity) => {
-                    out.sum(10, 1);
-                    Identity::Object(entity).encode(out);
-                }
+                Some(entity) => Member::Ref(entity),
                 None => {
                     referent.token_keyed.set(true);
-                    out.sum(12, 1);
-                    out.unsigned(referent.token);
+                    Member::LocalRef(referent.token)
                 }
             }
         }
-        // A text or bytes object is keyed by its identity, which a token
-        // stream holds only embedded ([`nested`]).
-        Value::LongText(_) | Value::Bytes(_) => {
-            return Err(NativeError::Malformed(
-                "a text or bytes object is keyed by its identity, not its tokens",
-            ));
+        Value::Handle(handle) if matches!(body(objects, *handle)?, Body::Cell(_)) => {
+            durable(handle)?
         }
-        Value::BigInt(handle)
+        Value::Function(handle)
+        | Value::BigInt(handle)
+        | Value::LongText(handle)
+        | Value::Bytes(handle)
         | Value::BigTimestamp(handle)
-        | Value::Function(handle)
-        | Value::Tuple(handle) => {
-            return body_tokens(objects, facts, Some(*handle), body(objects, *handle)?, out);
-        }
-        _ => return Ok(false),
+        | Value::Tuple(handle)
+        | Value::Error(handle)
+        | Value::Handle(handle) => immutable(handle)?,
+        Value::List(handle)
+        | Value::Map(handle)
+        | Value::Set(handle)
+        | Value::Record(handle)
+        | Value::Closure(handle) => durable(handle)?,
+    })
+}
+
+/// The head of the immutable `handle`: the one it holds, else the one its
+/// resident body gives, which is installed when `keep` and the object
+/// names no object or task at any depth (a ref keyed before its
+/// referent's first seal is keyed by a token that changes). A member
+/// already headed answers by its head, so heading a shared graph is linear
+/// in its distinct objects, not its leaves.
+pub(crate) fn object_head(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    handle: ArenaHandle,
+    keep: bool,
+) -> Result<Head, NativeError> {
+    let fact = facts
+        .get(handle.index() as usize)
+        .ok_or(NativeError::Malformed("a stale handle reached the arena"))?;
+    if let Some(head) = fact.head() {
+        return Ok(head.clone());
     }
-    Ok(true)
+    let body = body(objects, handle)?;
+    let head = content_head(objects, facts, Some(handle), body, fact.summary)?;
+    if keep
+        && !fact.summary.has_edges
+        && let Ok(projected) = fact.try_projection()
+    {
+        super::freeze(body);
+        let _ = projected.head.set(head.clone());
+    }
+    Ok(head)
+}
+
+/// The head of the immutable `body`, whose summary is `shape`, held by
+/// `object` when the arena holds it; a detached body (one a load decoded
+/// and has not installed) is whole. A tuple's and an error's head commit
+/// to their members' content ([`identity::TupleBuilder`],
+/// [`identity::error_content`]), read from their members' heads, never
+/// their bodies.
+pub(crate) fn content_head(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    object: Option<ArenaHandle>,
+    body: &Body,
+    shape: super::Summary,
+) -> Result<Head, NativeError> {
+    match body {
+        Body::Tuple(sequence) => {
+            let members = match object {
+                Some(object) => super::ops::values(object, &sequence.chunks)?,
+                None => sequence
+                    .chunks
+                    .values()
+                    .ok_or(NativeError::Malformed("a detached body holds a cold chunk"))?,
+            };
+            let mut content = identity::TupleBuilder::new(sequence.len);
+            for value in members {
+                content.push(&member(objects, facts, value)?);
+            }
+            let content = content.finish().map_err(|_| {
+                NativeError::Malformed("a tuple's length disagrees with its members")
+            })?;
+            Ok(Head::Tuple {
+                len: sequence.len,
+                shape,
+                normal: content.normal,
+                root: content.root,
+            })
+        }
+        Body::Error(error) => Ok(Head::Error {
+            shape,
+            content: identity::error_content(&[
+                member(objects, facts, &error.kind)?,
+                member(objects, facts, &error.message)?,
+                member(objects, facts, &error.data)?,
+            ]),
+        }),
+        _ => super::heads::head_of(body, || match body {
+            Body::LongText(_) | Body::Bytes(_) => long_key(objects, object, body).map(Some),
+            _ => {
+                let mut out = TokenWriter::new();
+                Ok(body_tokens(objects, object, body, &mut out)?.then(|| identity::flat(out)))
+            }
+        }),
+    }
 }
 
 /// The tokens of the immutable `body`, held by `object` when the arena
@@ -593,7 +666,6 @@ pub(super) fn tokens(
 /// (one a load decoded and has not installed) is whole.
 fn body_tokens(
     objects: &(impl super::Bodies + ?Sized),
-    facts: &(impl super::FactTable + ?Sized),
     object: Option<ArenaHandle>,
     body: &Body,
     out: &mut TokenWriter,
@@ -621,40 +693,10 @@ fn body_tokens(
             out.sum(8, 1);
             callable.encode(out);
         }
-        Body::Tuple(sequence) => {
-            let members = match object {
-                Some(object) => super::ops::values(object, &sequence.chunks)?,
-                None => sequence.chunks.values().ok_or_else(|| unread(0))?,
-            };
-            out.sum(9, 1);
-            out.seq(members.len() as u64);
-            for member in members {
-                if !nested(objects, facts, member, out)? {
-                    return Ok(false);
-                }
-            }
-        }
         Body::Cold(_) => return Err(unread(0)),
         _ => return Ok(false),
     }
     Ok(true)
-}
-
-/// The normal form of the immutable `body`, which a load decoded and has
-/// not installed: what [`normal_key`] would give once it is.
-pub(crate) fn detached_normal(
-    objects: &(impl super::Bodies + ?Sized),
-    facts: &(impl super::FactTable + ?Sized),
-    body: &Body,
-) -> Result<Option<NormalKey>, NativeError> {
-    if let Body::LongText(_) | Body::Bytes(_) = body {
-        return long_key(objects, None, body).map(Some);
-    }
-    let mut out = TokenWriter::new();
-    if !body_tokens(objects, facts, None, body, &mut out)? {
-        return Ok(None);
-    }
-    Ok(Some(identity::flat(out)))
 }
 
 enum Step<'a> {

@@ -90,18 +90,13 @@ impl Arena {
         if let Some(head) = facts.head() {
             return Ok(head.clone());
         }
-        let body = self.body(handle)?;
-        let value = match body {
-            Body::Tuple(_) => Value::Tuple(handle),
-            Body::BigInt(_) => Value::BigInt(handle),
-            Body::Timestamp(_) => Value::BigTimestamp(handle),
-            Body::LongText(_) => Value::LongText(handle),
-            Body::Bytes(_) => Value::Bytes(handle),
-            _ => Value::Absent,
-        };
-        head_of(body, facts.summary, || {
-            keys::normal_key(&self.objects, &self.facts, &value)
-        })
+        keys::content_head(
+            &self.objects,
+            &self.facts,
+            Some(handle),
+            self.body(handle)?,
+            facts.summary,
+        )
     }
 
     /// The head of the immutable `body`, which a load decoded and has not
@@ -124,9 +119,7 @@ impl Arena {
             Body::Error(error) => composite(&self.facts, std::slice::from_ref(&error.data)),
             _ => Summary::default(),
         };
-        head_of(body, shape, || {
-            keys::detached_normal(&self.objects, &self.facts, body)
-        })
+        keys::content_head(&self.objects, &self.facts, None, body, shape)
     }
 
     /// Fixes `head` as the immutable `handle`'s, as a seal that wrote a row
@@ -194,7 +187,7 @@ pub fn opened(head: &Head) -> (Body, Summary) {
             }),
             *shape,
         ),
-        Head::Error(shape) => (Body::Cold(ColdImmutable::Error), *shape),
+        Head::Error { shape, .. } => (Body::Cold(ColdImmutable::Error), *shape),
         Head::BigInt { summary, .. } => (
             Body::Cold(ColdImmutable::BigInt(*summary)),
             Summary::default(),
@@ -233,11 +226,10 @@ pub fn opened(head: &Head) -> (Body, Summary) {
     }
 }
 
-/// The head of the immutable `body`, whose summary is `shape` and whose
-/// normal form `normal` gives.
+/// The head of the immutable scalar `body`, whose normal form `normal`
+/// gives; a tuple's and an error's are [`keys::content_head`]'s.
 pub(super) fn head_of(
     body: &Body,
-    shape: Summary,
     normal: impl FnOnce() -> Result<Option<NormalKey>, NativeError>,
 ) -> Result<Head, NativeError> {
     let int = |int: &Integer| IntSummary {
@@ -248,12 +240,6 @@ pub(super) fn head_of(
         normal.ok_or_else(|| malformed("an immutable scalar is no legal key"))
     };
     Ok(match body {
-        Body::Tuple(sequence) => Head::Tuple {
-            len: sequence.len,
-            shape,
-            normal: normal()?,
-        },
-        Body::Error(_) => Head::Error(shape),
         Body::BigInt(value) => Head::BigInt {
             summary: int(value),
             normal: key(normal()?)?,
@@ -272,6 +258,9 @@ pub(super) fn head_of(
         },
         Body::Function(callable) => Head::Function(**callable),
         Body::Handle(host) => Head::handle(host),
+        Body::Tuple(_) | Body::Error(_) => {
+            return Err(malformed("a tuple's or an error's head is its content's"));
+        }
         Body::Cold(_) => return Err(malformed("a cold immutable has no head")),
         _ => return Err(malformed("a mutable object has no head")),
     })

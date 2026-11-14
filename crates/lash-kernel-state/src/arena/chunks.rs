@@ -50,8 +50,8 @@ fn cold<T>(len: u64) -> Chunk<T> {
 
 fn sequence_mut(body: &mut Body) -> Result<&mut Sequence, NativeError> {
     match body {
-        Body::List(sequence) => Ok(sequence),
-        _ => Err(malformed("a list handle names another body")),
+        Body::List(sequence) | Body::Tuple(sequence) => Ok(sequence),
+        _ => Err(malformed("a sequence handle names another body")),
     }
 }
 
@@ -85,6 +85,30 @@ impl Arena {
         );
         let (body, facts) = self.parts_mut(handle)?;
         *body = Body::List(Sequence { len, chunks });
+        facts.cold = false;
+        Ok(())
+    }
+
+    /// Opens the cold tuple `handle` of `len` members, written chunked, as
+    /// its chunks: one cold chunk per [`Sequence::CHUNK`] positions, as a
+    /// large list opens. Its head stays the one its referrers named it by.
+    ///
+    /// # Errors
+    ///
+    /// A malformed fault when `handle` is no cold tuple of `len` members.
+    pub fn open_tuple(&mut self, handle: ArenaHandle, len: u64) -> Result<(), NativeError> {
+        let width = Sequence::CHUNK as u64;
+        let (body, facts) = self.parts_mut(handle)?;
+        match body {
+            Body::Tuple(sequence) if facts.cold && sequence.len == len => {
+                sequence.chunks = Chunks::Split(
+                    (0..len.div_ceil(width))
+                        .map(|chunk| cold(width.min(len - chunk * width)))
+                        .collect(),
+                );
+            }
+            _ => return Err(malformed("a chunked tuple's row names another body")),
+        }
         facts.cold = false;
         Ok(())
     }
@@ -184,9 +208,10 @@ impl Arena {
         Ok(Some((key, normal)))
     }
 
-    /// Puts the clean list or table `handle`, which has an id, back on its
-    /// row as a proxy of its kind, whatever chunks it holds: what its body
-    /// held is held no longer. Gives whether it did.
+    /// Puts the clean list, tuple or table `handle`, which has an id, back
+    /// on its row as a proxy of its kind (a tuple keeps its head), whatever
+    /// chunks it holds: what its body held is held no longer. Gives
+    /// whether it did.
     pub fn drop_large(&mut self, handle: ArenaHandle) -> Result<bool, NativeError> {
         let facts = self.facts(handle)?;
         if facts.entity().is_none() || facts.dirty || facts.cold {
@@ -194,7 +219,7 @@ impl Arena {
         }
         if !matches!(
             self.body(handle)?,
-            Body::List(_) | Body::Map(_) | Body::Set(_) | Body::Record(_)
+            Body::List(_) | Body::Tuple(_) | Body::Map(_) | Body::Set(_) | Body::Record(_)
         ) {
             return Ok(false);
         }
@@ -239,7 +264,7 @@ impl Arena {
             .collect())
     }
 
-    /// Up to `count` cold chunks of the list or table `handle`, from chunk
+    /// Up to `count` cold chunks of the list, tuple or table `handle`, from chunk
     /// `from` on: what the machine reads next. A resident chunk among them
     /// is skipped.
     pub fn cold_chunks(
@@ -251,7 +276,7 @@ impl Arena {
         let width = Sequence::CHUNK as u64;
         let mut out = Vec::new();
         match self.body(handle)? {
-            Body::List(sequence) => {
+            Body::List(sequence) | Body::Tuple(sequence) => {
                 for (at, chunk) in sequence.chunks.iter().enumerate().skip(from as usize) {
                     if out.len() as u32 == count {
                         break;
@@ -292,7 +317,8 @@ impl Arena {
         Ok(out)
     }
 
-    /// Chunk `chunk` of the list `handle`, decoded: its values, resident.
+    /// Chunk `chunk` of the list or tuple `handle`, decoded: its values,
+    /// resident.
     pub fn decoded_list(
         &mut self,
         handle: ArenaHandle,
@@ -717,8 +743,8 @@ impl Arena {
     }
 
     /// Drops every clean large object the heap holds back to its pages: a
-    /// list or a table of more than one chunk, and a long text or bytes on
-    /// payload pages past one leaf.
+    /// list, tuple or table of more than one chunk, and a long text or
+    /// bytes on payload pages past one leaf.
     fn evict_clean(&mut self) {
         for index in 0..self.facts.len() {
             let Some(handle) = self.objects.handle_at(index as u32) else {
@@ -726,7 +752,9 @@ impl Arena {
             };
             let facts = &self.facts[index];
             let large = match self.objects.get(handle) {
-                Some(Body::List(sequence)) => sequence.len > Sequence::CHUNK as u64,
+                Some(Body::List(sequence) | Body::Tuple(sequence)) => {
+                    sequence.len > Sequence::CHUNK as u64
+                }
                 Some(Body::Map(table) | Body::Set(table) | Body::Record(table)) => {
                     table.len > Sequence::CHUNK as u64
                 }
@@ -758,8 +786,8 @@ impl Arena {
     }
 
     /// Puts the clean large object `handle` back on its pages: a list or a
-    /// table becomes a proxy of its kind, a long text or bytes one cold
-    /// chunk of its payload. What its body held is held no longer.
+    /// table becomes a proxy of its kind, a tuple, a long text or bytes one
+    /// cold chunk of its whole. What its body held is held no longer.
     fn drop_to_pages(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
         let before = self.needs_decode(handle)?;
         let body = match self.body(handle)? {
@@ -767,6 +795,10 @@ impl Arena {
             Body::Map(_) => ProxyKind::Map.placeholder(),
             Body::Set(_) => ProxyKind::Set.placeholder(),
             Body::Record(_) => ProxyKind::Record.placeholder(),
+            Body::Tuple(sequence) => Body::Tuple(Sequence {
+                len: sequence.len,
+                chunks: Chunks::Split(vec![cold(sequence.len)]),
+            }),
             Body::LongText(text) => Body::LongText(LongText {
                 summary: text.summary,
                 chunks: Box::new([cold(text.summary.utf8_bytes)]),

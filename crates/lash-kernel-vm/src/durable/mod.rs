@@ -415,7 +415,7 @@ fn saved_cursor(arena: &Arena, walked: Value, cursor: Value) -> Result<Value, Se
         return Ok(cursor);
     };
     let native = |error: lash_kernel_doc::NativeError| fault(error.to_string());
-    if crate::heap::large::is_large(arena.body(table).map_err(native)?) {
+    if crate::heap::large::is_large(arena, arena.body(table).map_err(native)?) {
         return Ok(cursor);
     }
     let mut position = None;

@@ -120,8 +120,7 @@ pub(crate) fn body(body: &Body) -> u64 {
         Body::BigInt(int) | Body::Timestamp(int) => integer(int),
         Body::LongText(text) => resident(&text.chunks),
         Body::Bytes(bytes) => resident(&bytes.chunks),
-        Body::Tuple(sequence) => values(sequence.chunks.resident_len()),
-        Body::List(sequence) => split(&sequence.chunks, 1),
+        Body::List(sequence) | Body::Tuple(sequence) => split(&sequence.chunks, 1),
         Body::Set(table) => split(&table.chunks, 2),
         Body::Map(table) | Body::Record(table) => split(&table.chunks, 1),
         Body::Error(ErrorBody { .. }) => values(3),
@@ -171,7 +170,7 @@ pub(crate) fn record(record: &Record) -> u64 {
     OBJECT.saturating_add(length)
 }
 
-/// What a list's or table's `chunks` hold: each resident value, `per` of
+/// What a list's, tuple's or table's `chunks` hold: each resident value, `per` of
 /// them to a member (a set's entry holds its key and an absent value), and
 /// each cold chunk.
 fn split(chunks: &lash_kernel_doc::arena::Chunks, per: u64) -> u64 {

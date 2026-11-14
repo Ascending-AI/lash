@@ -41,7 +41,7 @@ pub(super) fn fault(problem: impl Into<String>) -> SealError {
 
 /// Writes every object `roots` reach that changed since the last seal into
 /// `directory`, minting ids from `high_water`, prunes what they no longer
-/// reach and seals it. A large list or table is written by its changed
+/// reach and seals it. A large list, tuple or table is written by its changed
 /// chunks ([`super::large`]); gives, besides the root, the large objects
 /// whose chunks moved, for the caller to put back on their rows once the
 /// seal stands.
@@ -82,7 +82,7 @@ pub(crate) fn seal(
         let body = arena
             .body(handle)
             .map_err(|error| fault(error.to_string()))?;
-        let row = if super::large::is_large(body) {
+        let row = if super::large::is_large(arena, body) {
             let (row, relayout) = large.write(arena, handle, id, directory.access())?;
             if relayout {
                 moved.push(handle);
@@ -158,23 +158,9 @@ pub(crate) fn seal(
 pub(super) fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError> {
     let mut heads = std::collections::BTreeMap::new();
     for value in values {
-        let immutable = matches!(
-            value,
-            Value::Function(_)
-                | Value::BigInt(_)
-                | Value::LongText(_)
-                | Value::Bytes(_)
-                | Value::BigTimestamp(_)
-                | Value::Tuple(_)
-                | Value::Error(_)
-                | Value::Handle(_)
-        );
-        let Some(handle) = value.handle().filter(|_| immutable) else {
+        let Some(handle) = named_immutable(arena, value) else {
             continue;
         };
-        if is_cell(arena, *value) {
-            continue;
-        }
         let id = id_of(arena, handle)?;
         if heads.contains_key(&id) {
             continue;
@@ -188,6 +174,24 @@ pub(super) fn heads(arena: &Arena, values: &[Value]) -> Result<Heads, SealError>
         heads.insert(id, head);
     }
     Ok(Heads(heads.into_iter().collect()))
+}
+
+/// The immutable `value` names, whose head a row naming it carries.
+pub(super) fn named_immutable(arena: &Arena, value: &Value) -> Option<ArenaHandle> {
+    let immutable = matches!(
+        value,
+        Value::Function(_)
+            | Value::BigInt(_)
+            | Value::LongText(_)
+            | Value::Bytes(_)
+            | Value::BigTimestamp(_)
+            | Value::Tuple(_)
+            | Value::Error(_)
+            | Value::Handle(_)
+    );
+    value
+        .handle()
+        .filter(|_| immutable && !is_cell(arena, *value))
 }
 
 /// Whether `value` names a cell: a frame slot holds a variable a closure

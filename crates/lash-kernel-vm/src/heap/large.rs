@@ -1,4 +1,6 @@
-//! Large lists and tables (cutover contract §6, cold access): written as
+//! Large lists, tuples and tables (cutover contract §6, cold access): a
+//! list, tuple or table past [`LARGE`] members, or whose row would pass
+//! [`ROW_BYTES`], is written as
 //! a [`Chunked`] row over index pages and chunk pages, opened by their row
 //! alone, and read one chunk at a time.
 //!
@@ -12,7 +14,7 @@
 //! chunks moved goes back to its row as a proxy, so the arena's chunks are
 //! always the row's.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Sequence, Table};
@@ -20,16 +22,18 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 use lash_kernel_state::arena::Arena;
 use lash_kernel_state::kernel_internals::tree::{Access, grant};
 use lash_kernel_state::paged::PageKind;
+use lash_kernel_state::paged::identity::{chunk_leaf, tuple_parents, tuple_root};
 use lash_kernel_state::paged::run::chunked::{
     CHUNK, ChunkPage, ChunkRef, Chunked, Entry, INDEX_REFS, IndexPage, LARGE, Members, Part,
-    Placement, placement, rewrite_edges,
+    Placement, ROW_BYTES, TupleIndex, check_tuple_chunk, check_tuple_index, placement,
+    rewrite_edges,
 };
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::ObjectId;
 use lash_kernel_state::paged::run::objects::{Heads, ObjectKind, Record, RunValue};
 use lash_kernel_value::tokens::{decode_body, encode_body, logical_digest};
 
-use super::seal::{fault, heads, run_value};
+use super::seal::{fault, heads, named_immutable, run_value};
 use crate::paged::SealError;
 
 /// The entries a table's chunk holds when it is first written: room for a
@@ -63,18 +67,52 @@ pub(crate) struct Large {
     opened: HashMap<ObjectId, Opened>,
 }
 
-/// Whether `body` is written chunked: a list or table past [`LARGE`]
-/// members, or one opened from its chunks.
-pub(crate) fn is_large(body: &Body) -> bool {
-    match body {
-        Body::List(sequence) => {
-            sequence.len > LARGE as u64 || matches!(sequence.chunks, Chunks::Split(_))
-        }
-        Body::Map(table) | Body::Set(table) | Body::Record(table) => {
-            table.len > LARGE as u64 || matches!(table.chunks, Chunks::Split(_))
-        }
-        _ => false,
+/// Whether `body` is written chunked: a list, tuple or table past
+/// [`LARGE`] members, one opened from its chunks, or one whose row the
+/// heads of the immutables it names would make wider than [`ROW_BYTES`].
+/// The seal and a loop's saved cursor both ask it, so a table's cursor is
+/// saved the way the table is written.
+pub(crate) fn is_large(arena: &Arena, body: &Body) -> bool {
+    let (len, chunks) = match body {
+        Body::List(sequence) | Body::Tuple(sequence) => (sequence.len, &sequence.chunks),
+        Body::Map(table) | Body::Set(table) | Body::Record(table) => (table.len, &table.chunks),
+        _ => return false,
+    };
+    if len > LARGE as u64 || matches!(chunks, Chunks::Split(_)) {
+        return true;
     }
+    chunks
+        .resident(0)
+        .is_some_and(|values| row_bytes(arena, values) > ROW_BYTES)
+}
+
+/// The most bytes one member value takes in a row.
+const VALUE_BYTES: usize = 16;
+
+/// The most bytes a row takes besides its values and heads.
+const ROW_FRAME_BYTES: usize = 64;
+
+/// An upper bound of the bytes the row of an object holding `values`
+/// takes, from its values and the heads of the immutables they name, once
+/// each; stops counting past [`ROW_BYTES`].
+fn row_bytes(arena: &Arena, values: &[Value]) -> usize {
+    let mut bytes = ROW_FRAME_BYTES + values.len() * VALUE_BYTES;
+    let mut named = HashSet::new();
+    for value in values {
+        if bytes > ROW_BYTES {
+            break;
+        }
+        let Some(handle) = named_immutable(arena, value) else {
+            continue;
+        };
+        if !named.insert(handle.index()) {
+            continue;
+        }
+        if let Ok(head) = arena.head(handle) {
+            bytes += VALUE_BYTES + encode_body(&head).len();
+        }
+    }
+    bytes
 }
 
 fn corrupt(page: PageRef, reason: impl Into<String>) -> HeapFault {
@@ -127,9 +165,14 @@ pub(crate) fn any_value(
     row: &Chunked,
     visit: &mut dyn FnMut(&RunValue) -> bool,
 ) -> Result<bool, HeapFault> {
-    for part in &row.parts {
-        for chunk in &index_page(access, part)?.0 {
+    let mut at = 0;
+    for (part, held) in row.parts.iter().enumerate() {
+        let index = index_page(access, held)?;
+        check_tuple_index(row, part, &index)?;
+        for chunk in &index.0 {
             let (page, _) = chunk_page(access, chunk)?;
+            check_tuple_chunk(row, at, chunk, &page)?;
+            at += 1;
             if page.members.values().into_iter().any(&mut *visit) {
                 return Ok(true);
             }
@@ -177,6 +220,8 @@ struct Piece {
     len: u32,
     tokens: Vec<u8>,
     seen: Seen,
+    /// A tuple chunk's content leaf.
+    leaf: Option<[u8; 32]>,
 }
 
 impl Piece {
@@ -190,6 +235,7 @@ impl Piece {
             len,
             tokens,
             seen: Seen { digest, edges },
+            leaf: None,
         }
     }
 }
@@ -275,6 +321,8 @@ impl Large {
         })?;
         let index = index_page(access, &opened.row.parts[part])?;
         let (page, digest) = chunk_page(access, &index.0[slot])?;
+        check_tuple_index(&opened.row, part, &index)?;
+        check_tuple_chunk(&opened.row, chunk, &index.0[slot], &page)?;
         let edges = edges_of(page.members.values());
         opened.seen.insert(chunk, Seen { digest, edges });
         Ok(page)
@@ -295,9 +343,14 @@ impl Large {
             .body(handle)
             .map_err(|error| fault(error.to_string()))?;
         let (kind, outcomes, len, next, fresh_firsts) = match body {
-            Body::List(sequence) => {
-                let outcomes = list_outcomes(arena, sequence, old.as_ref())?;
-                (ObjectKind::List, outcomes, sequence.len, sequence.len, None)
+            Body::List(sequence) | Body::Tuple(sequence) => {
+                let kind = match body {
+                    Body::List(_) => ObjectKind::List,
+                    _ => ObjectKind::Tuple,
+                };
+                let outcomes =
+                    list_outcomes(arena, sequence, old.as_ref(), kind == ObjectKind::Tuple)?;
+                (kind, outcomes, sequence.len, sequence.len, None)
             }
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
                 let kind = match body {
@@ -349,12 +402,14 @@ fn values(arena: &Arena, values: &[Value]) -> Result<(Vec<RunValue>, Heads), Sea
     Ok((members, heads(arena, values)?))
 }
 
-/// What becomes of each chunk of a list: its chunks are positional, so
-/// chunk `k` of the arena is chunk `k` of the row.
+/// What becomes of each chunk of a list or, when `tuple`, a tuple: its
+/// chunks are positional, so chunk `k` of the arena is chunk `k` of the
+/// row, and a tuple's chunk carries its content leaf.
 fn list_outcomes(
     arena: &Arena,
     sequence: &Sequence,
     old: Option<&Opened>,
+    tuple: bool,
 ) -> Result<Vec<Outcome>, SealError> {
     let mut groups: Vec<Option<&[Value]>> = Vec::new();
     match &sequence.chunks {
@@ -393,7 +448,16 @@ fn list_outcomes(
                 return Ok(Outcome::Same);
             };
             let (members, heads) = values(arena, group)?;
-            let piece = Piece::new(Members::List(members), heads, None);
+            let leaf = if tuple {
+                Some(
+                    chunk_leaf((at * CHUNK) as u64, &members, &heads)
+                        .ok_or_else(|| fault("a tuple's chunk names an immutable with no head"))?,
+                )
+            } else {
+                None
+            };
+            let mut piece = Piece::new(Members::List(members), heads, None);
+            piece.leaf = leaf;
             let same = (at as u64) < old_count
                 && old
                     .and_then(|old| old.seen.get(&(at as u32)))
@@ -672,6 +736,7 @@ fn assemble(
                 first: piece.first,
                 len: piece.len,
                 page,
+                leaf: piece.leaf,
             },
             Some(piece.seen),
         ))
@@ -762,6 +827,10 @@ fn assemble(
 
     let old_firsts = old.and_then(|old| old.firsts.as_ref());
     let mut firsts = Some(Vec::new());
+    let mut leaves: Vec<Option<[u8; 32]>> = Vec::new();
+    let kept = builds
+        .iter()
+        .any(|build| matches!(build, Build::Keep { .. }));
     let mut parts = Vec::new();
     let mut seen = HashMap::new();
     let mut chunk = 0u32;
@@ -794,13 +863,20 @@ fn assemble(
                 if refs.is_empty() {
                     continue;
                 }
-                let count = if refs.len() > INDEX_REFS {
-                    refs.len().div_ceil(INDEX_FILL)
+                // A tuple's pages are positional, one content node
+                // apart; another object's leave room to grow.
+                let width = if kind == ObjectKind::Tuple {
+                    INDEX_REFS
                 } else {
-                    1
+                    let count = if refs.len() > INDEX_REFS {
+                        refs.len().div_ceil(INDEX_FILL)
+                    } else {
+                        1
+                    };
+                    refs.len().div_ceil(count)
                 };
-                let width = refs.len().div_ceil(count);
                 for run in refs.chunks(width) {
+                    leaves.extend(run.iter().map(|(held, _)| held.leaf));
                     let children: Vec<PageRef> = run.iter().map(|(held, _)| held.page).collect();
                     let index = IndexPage(run.iter().map(|(held, _)| *held).collect());
                     let page =
@@ -823,12 +899,32 @@ fn assemble(
             }
         }
     }
+    // A tuple is immutable: one its heap opened keeps its content index,
+    // and one written whole makes it from its chunks' leaves.
+    let tuple = match (kind, old) {
+        (ObjectKind::Tuple, Some(old)) if kept => old.row.tuple.clone(),
+        (ObjectKind::Tuple, _) => {
+            let leaves = leaves
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    HeapFault::Malformed("a tuple's chunk has no content leaf".into())
+                })?;
+            let nodes = tuple_parents(len, CHUNK as u64, 0, &leaves);
+            Some(TupleIndex {
+                root: tuple_root(len, &nodes),
+                nodes,
+            })
+        }
+        _ => None,
+    };
     let chunked = Chunked {
         kind,
         len,
         next,
         parts,
         edges,
+        tuple,
     };
     chunked.check().map_err(HeapFault::Malformed)?;
     Ok((chunked, seen, firsts))

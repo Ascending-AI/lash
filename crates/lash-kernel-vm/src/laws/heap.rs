@@ -567,16 +567,18 @@ fn immutable_head_summary_equals_resident_body() {
         has_edges: true,
     };
     // (( text, 1 ), list): two tuples deep, and a list is no key.
-    assert_eq!(
-        head(&heap, tuple),
-        Head::Tuple {
-            len: 2,
-            shape: edges(2),
-            normal: None,
-        }
-    );
+    let Head::Tuple {
+        len, shape, normal, ..
+    } = head(&heap, tuple)
+    else {
+        panic!("a tuple head");
+    };
+    assert_eq!((len, shape, normal), (2, edges(2), None));
     // The error over a data record holding the list.
-    assert_eq!(head(&heap, error), Head::Error(edges(1)));
+    let Head::Error { shape, .. } = head(&heap, error) else {
+        panic!("an error head");
+    };
+    assert_eq!(shape, edges(1));
 
     let heads = six.members.map(|member| head(&heap, member));
     for member in six.members {

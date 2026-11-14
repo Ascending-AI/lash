@@ -810,13 +810,21 @@ impl TokenCodec for ScalarPayload {
 /// it opens cold like a big integer.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Head {
-    /// `normal` is `None` exactly when the tuple is no legal key.
+    /// `normal` is `None` exactly when the tuple is no legal key; `root`
+    /// is its content root ([`crate::paged::identity::TupleContent`]),
+    /// which every page of a chunked tuple is checked against.
     Tuple {
         len: u64,
         shape: Summary,
         normal: Option<NormalKey>,
+        root: [u8; 32],
     },
-    Error(Summary),
+    /// `content` is the digest of the error's kind, message and data
+    /// ([`crate::paged::identity::error_content`]).
+    Error {
+        shape: Summary,
+        content: [u8; 32],
+    },
     BigInt {
         summary: IntSummary,
         normal: NormalKey,
@@ -880,7 +888,7 @@ impl Head {
     pub fn kind(&self) -> ObjectKind {
         match self {
             Self::Tuple { .. } => ObjectKind::Tuple,
-            Self::Error(_) => ObjectKind::Error,
+            Self::Error { .. } => ObjectKind::Error,
             Self::BigInt { .. } => ObjectKind::BigInt,
             Self::Timestamp { .. } => ObjectKind::Timestamp,
             Self::LongText { .. } => ObjectKind::LongText,
@@ -898,7 +906,7 @@ impl Head {
             | Self::Timestamp { normal, .. }
             | Self::LongText { normal, .. }
             | Self::Bytes { normal, .. } => Some(normal),
-            Self::Error(_) | Self::Function(_) | Self::Handle { .. } => None,
+            Self::Error { .. } | Self::Function(_) | Self::Handle { .. } => None,
         }
     }
 }
@@ -961,6 +969,13 @@ fn decode_normal(input: &mut TokenReader<'_>) -> Result<NormalKey, TokenError> {
     }
 }
 
+fn digest(input: &mut TokenReader<'_>) -> Result<[u8; 32], TokenError> {
+    input
+        .bytes()?
+        .try_into()
+        .map_err(|_| TokenError::Invalid("a head's content digest is not 32 bytes".into()))
+}
+
 fn encode_int(summary: &IntSummary, out: &mut TokenWriter) {
     out.seq(2);
     out.unsigned(summary.bits);
@@ -986,8 +1001,13 @@ fn decode_int(input: &mut TokenReader<'_>) -> Result<IntSummary, TokenError> {
 impl TokenCodec for Head {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Tuple { len, shape, normal } => {
-                out.sum(0, 3);
+            Self::Tuple {
+                len,
+                shape,
+                normal,
+                root,
+            } => {
+                out.sum(0, 4);
                 out.unsigned(*len);
                 encode_shape(shape, out);
                 match normal {
@@ -997,10 +1017,12 @@ impl TokenCodec for Head {
                         encode_normal(normal, out);
                     }
                 }
+                out.bytes(root);
             }
-            Self::Error(shape) => {
-                out.sum(1, 1);
+            Self::Error { shape, content } => {
+                out.sum(1, 2);
                 encode_shape(shape, out);
+                out.bytes(content);
             }
             Self::BigInt { summary, normal } => {
                 out.sum(2, 2);
@@ -1046,7 +1068,7 @@ impl TokenCodec for Head {
         let expect = |count| TokenReader::expect_fields(fields, count);
         Ok(match tag {
             0 => {
-                expect(3)?;
+                expect(4)?;
                 let len = input.unsigned()?;
                 let shape = decode_shape(input)?;
                 let (present, fields) = input.sum()?;
@@ -1061,11 +1083,19 @@ impl TokenCodec for Head {
                     }
                     _ => return Err(TokenError::UnsupportedVariant { variant: present }),
                 };
-                Self::Tuple { len, shape, normal }
+                Self::Tuple {
+                    len,
+                    shape,
+                    normal,
+                    root: digest(input)?,
+                }
             }
             1 => {
-                expect(1)?;
-                Self::Error(decode_shape(input)?)
+                expect(2)?;
+                Self::Error {
+                    shape: decode_shape(input)?,
+                    content: digest(input)?,
+                }
             }
             2 => {
                 expect(2)?;
