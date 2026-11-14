@@ -219,6 +219,7 @@ fn rlm_core_in_dialect_with_instruction_limit(
             .build(),
         dialect,
     );
+    let factory = factory.with_kernel_succession(Arc::new(lash::vm::plan_migration));
     let factory = if python {
         factory.with_worker_service(python_process_workers())
     } else {
