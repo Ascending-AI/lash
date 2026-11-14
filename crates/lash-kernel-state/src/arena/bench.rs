@@ -292,6 +292,13 @@ impl Bench {
             Value::Bytes(bytes) => Datum::Bytes(Bytes::new(semantics.bytes(*bytes)?.to_vec())),
             Value::Handle(handle) => match self.arena.body(*handle)? {
                 Body::Handle(handle) => Datum::Handle(handle.clone()),
+                Body::Cold(_) => {
+                    return Err(lash_kernel_doc::Retry::Cold {
+                        object: *handle,
+                        chunk: 0,
+                    }
+                    .into());
+                }
                 _ => return Err(NativeError::Malformed("a handle names another body")),
             },
             Value::Tuple(tuple) => Datum::Tuple(self.each(semantics.sequence(*tuple)?)?),

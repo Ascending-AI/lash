@@ -249,7 +249,12 @@ mod run {
             let row = self.directory.get(id)?.ok_or_else(|| {
                 HeapFault::Malformed(format!("reachable object {} has no row", id.0))
             })?;
-            match row.record {
+            // A scalar payload digests as the scalar it holds.
+            let record = match row.record {
+                Record::Scalar(scalar) => scalar.read(self.directory.access())?,
+                record => record,
+            };
+            match record {
                 Record::List(values) | Record::Tuple(values) | Record::Set(values) => {
                     self.values(values.iter())?;
                 }
@@ -284,6 +289,11 @@ mod run {
                 }
                 Record::Function(callable) => self.put(&callable),
                 Record::Handle(handle) => self.put(&handle),
+                Record::Scalar(_) => {
+                    return Err(HeapFault::Malformed(
+                        "a scalar payload holds a scalar payload".into(),
+                    ));
+                }
                 Record::Chunked(chunked) => {
                     let mut items = Vec::new();
                     let mut entries = Vec::new();

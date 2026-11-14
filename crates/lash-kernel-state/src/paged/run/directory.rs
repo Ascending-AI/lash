@@ -76,6 +76,7 @@ impl Cell for Row {
                 out.extend(chunked.edges.iter().map(|part| part.page));
             }
             Record::Paged(paged) => out.push(paged.root.page),
+            Record::Scalar(scalar) => out.push(scalar.root.page),
             _ => {}
         }
     }
@@ -90,6 +91,7 @@ impl Cell for Row {
                 }
             }
             Record::Paged(paged) => super::super::tree::grant(&mut paged.root.page, children)?,
+            Record::Scalar(scalar) => super::super::tree::grant(&mut scalar.root.page, children)?,
             _ => {}
         }
         Ok(())

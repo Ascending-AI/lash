@@ -13,7 +13,9 @@ use lash_kernel_value::Name;
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::CallableId;
 use lash_kernel_value::sites::Site;
-use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_kernel_value::tokens::{
+    TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
+};
 
 use super::super::tree::Access;
 use super::chunked::Chunked;
@@ -284,7 +286,14 @@ pub enum Record {
     /// ([`crate::paged::payload`]), so no row outgrows its page.
     Paged(Paged),
     Function(CallableId),
+    /// A host handle whose kind and id take at most
+    /// [`SCALAR_INLINE_MAX`] token bytes; a longer one is
+    /// [`Self::Scalar`].
     Handle(Handle),
+    /// A big integer, a big timestamp or a host handle past
+    /// [`SCALAR_INLINE_MAX`] token bytes: its canonical tokens as a payload
+    /// tree, so no row outgrows its page.
+    Scalar(ScalarPayload),
     /// A large list or table: its index, its chunks on their own pages
     /// ([`super::chunked`]).
     Chunked(Box<Chunked>),
@@ -332,6 +341,7 @@ impl Record {
             | Self::LongText(_)
             | Self::Bytes(_)
             | Self::Paged(_)
+            | Self::Scalar(_)
             | Self::Function(_)
             | Self::Handle(_)
             | Self::Chunked(_) => {}
@@ -567,6 +577,10 @@ impl TokenCodec for Record {
                 out.sum(15, 1);
                 paged.encode(out);
             }
+            Self::Scalar(scalar) => {
+                out.sum(16, 1);
+                scalar.encode(out);
+            }
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
@@ -614,11 +628,11 @@ impl TokenCodec for Record {
             }
             8 => {
                 expect(1)?;
-                Self::BigInt(Integer::decode(input)?)
+                Self::BigInt(inline(Integer::decode(input)?)?)
             }
             9 => {
                 expect(1)?;
-                Self::Timestamp(Integer::decode(input)?)
+                Self::Timestamp(inline(Integer::decode(input)?)?)
             }
             10 => {
                 expect(1)?;
@@ -646,7 +660,7 @@ impl TokenCodec for Record {
             }
             13 => {
                 expect(1)?;
-                Self::Handle(Handle::decode(input)?)
+                Self::Handle(inline(Handle::decode(input)?)?)
             }
             14 => {
                 expect(1)?;
@@ -656,7 +670,126 @@ impl TokenCodec for Record {
                 expect(1)?;
                 Self::Paged(Paged::decode(input)?)
             }
+            16 => {
+                expect(1)?;
+                Self::Scalar(ScalarPayload::decode(input)?)
+            }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
+        })
+    }
+}
+
+/// The most token bytes a big integer, a big timestamp or a host handle
+/// holds in its own row; a longer one is a [`ScalarPayload`]. One payload
+/// leaf, as for a text or bytes.
+pub const SCALAR_INLINE_MAX: u64 = PAYLOAD_LEAF_BYTES;
+
+/// A scalar a row holds inline: one within [`SCALAR_INLINE_MAX`], so its
+/// form is canonical.
+fn inline<T: TokenCodec>(scalar: T) -> Result<T, TokenError> {
+    if encode_body(&scalar).len() as u64 > SCALAR_INLINE_MAX {
+        return Err(TokenError::Invalid(
+            "a scalar past one payload leaf is inline".into(),
+        ));
+    }
+    Ok(scalar)
+}
+
+/// A big integer's, a big timestamp's or a host handle's canonical tokens
+/// as a payload tree: its kind, the tree's counts (bytes count only their
+/// bytes) and its root page with the identity it commits to. Its head
+/// carries the scalar's own summary and key, which a load checks the
+/// decoded scalar against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScalarPayload {
+    pub kind: ObjectKind,
+    pub summary: TextSummary,
+    pub root: PayloadRoot,
+}
+
+impl ScalarPayload {
+    /// `record`, a big integer, timestamp or host handle, as its row holds
+    /// it: inline within [`SCALAR_INLINE_MAX`] token bytes, else written as
+    /// a payload tree. Any other record is returned as it is.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults.
+    pub fn place(access: &Access<'_>, record: Record) -> Result<Record, HeapFault> {
+        let (kind, tokens) = match &record {
+            Record::BigInt(int) => (ObjectKind::BigInt, encode_body(int)),
+            Record::Timestamp(int) => (ObjectKind::Timestamp, encode_body(int)),
+            Record::Handle(handle) => (ObjectKind::Handle, encode_body(handle)),
+            _ => return Ok(record),
+        };
+        if tokens.len() as u64 <= SCALAR_INLINE_MAX {
+            return Ok(record);
+        }
+        Ok(Record::Scalar(Self {
+            kind,
+            summary: TextSummary {
+                utf8_bytes: tokens.len() as u64,
+                chars: 0,
+                utf16_units: 0,
+            },
+            root: crate::paged::payload::build(access, &tokens, false)?,
+        }))
+    }
+
+    /// The scalar record this payload holds, read from its pages, every
+    /// edge checked against the root id.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults; a tree that disagrees with its counts or
+    /// identity, or whose tokens are no canonical scalar of its kind.
+    pub fn read(&self, access: &Access<'_>) -> Result<Record, HeapFault> {
+        let tokens = super::super::payload::copy(access, self.root, self.summary, false)?;
+        let corrupt = |error: TokenError| HeapFault::Corrupt {
+            page: self.root.page.id,
+            reason: format!("a scalar payload holds no scalar of its kind: {error}"),
+        };
+        let record = match self.kind {
+            ObjectKind::BigInt => Record::BigInt(decode_body(&tokens).map_err(corrupt)?),
+            ObjectKind::Timestamp => Record::Timestamp(decode_body(&tokens).map_err(corrupt)?),
+            _ => Record::Handle(decode_body(&tokens).map_err(corrupt)?),
+        };
+        Ok(record)
+    }
+}
+
+impl TokenCodec for ScalarPayload {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(3);
+        self.kind.encode(out);
+        out.unsigned(self.summary.utf8_bytes);
+        self.root.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(3)?;
+        let kind = ObjectKind::decode(input)?;
+        let bytes = input.unsigned()?;
+        if !matches!(
+            kind,
+            ObjectKind::BigInt | ObjectKind::Timestamp | ObjectKind::Handle
+        ) {
+            return Err(TokenError::Invalid(
+                "a scalar payload holds no big integer, timestamp or handle".into(),
+            ));
+        }
+        if bytes <= SCALAR_INLINE_MAX {
+            return Err(TokenError::Invalid(
+                "a scalar within one payload leaf is paged".into(),
+            ));
+        }
+        Ok(Self {
+            kind,
+            summary: TextSummary {
+                utf8_bytes: bytes,
+                chars: 0,
+                utf16_units: 0,
+            },
+            root: PayloadRoot::decode(input)?,
         })
     }
 }
@@ -670,8 +803,11 @@ impl TokenCodec for Record {
 /// is derived from the same sealed object, and a load checks the body it
 /// decodes against the head the object opened with.
 ///
-/// A function's and a host handle's heads hold the whole object: what it
-/// is is bounded, so it opens resident.
+/// Every head is bounded by construction. A function's head holds the
+/// whole callable id, so it opens resident; a host handle's holds its kind
+/// and id lengths and its content: its tokens whole within
+/// [`NormalKey::INLINE_MAX`], so it opens resident, else their digest, so
+/// it opens cold like a big integer.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Head {
     /// `normal` is `None` exactly when the tuple is no legal key.
@@ -698,10 +834,48 @@ pub enum Head {
         normal: NormalKey,
     },
     Function(CallableId),
-    Handle(Handle),
+    Handle {
+        kind_len: u64,
+        id_len: u64,
+        content: NormalKey,
+    },
 }
 
+/// The domain of a long host handle's content digest.
+const HANDLE_DIGEST: &[u8] = b"lash.handle.v1\0";
+
 impl Head {
+    /// The head of host handle `handle`.
+    #[must_use]
+    pub fn handle(handle: &Handle) -> Self {
+        let tokens = encode_body(handle);
+        let content = if tokens.len() <= NormalKey::INLINE_MAX {
+            NormalKey::Inline(tokens)
+        } else {
+            NormalKey::Digest(lash_kernel_doc::heap_values::sha256(&[
+                HANDLE_DIGEST,
+                &tokens,
+            ]))
+        };
+        Self::Handle {
+            kind_len: handle.kind.len() as u64,
+            id_len: handle.id.len() as u64,
+            content,
+        }
+    }
+
+    /// The host handle a handle head holds whole, when it does.
+    #[must_use]
+    pub fn resident_handle(&self) -> Option<Handle> {
+        match self {
+            Self::Handle {
+                content: NormalKey::Inline(tokens),
+                ..
+            } => decode_body(tokens).ok(),
+            _ => None,
+        }
+    }
+
     /// The kind of object the head certifies.
     pub fn kind(&self) -> ObjectKind {
         match self {
@@ -712,7 +886,7 @@ impl Head {
             Self::LongText { .. } => ObjectKind::LongText,
             Self::Bytes { .. } => ObjectKind::Bytes,
             Self::Function(_) => ObjectKind::Function,
-            Self::Handle(_) => ObjectKind::Handle,
+            Self::Handle { .. } => ObjectKind::Handle,
         }
     }
 
@@ -724,7 +898,7 @@ impl Head {
             | Self::Timestamp { normal, .. }
             | Self::LongText { normal, .. }
             | Self::Bytes { normal, .. } => Some(normal),
-            Self::Error(_) | Self::Function(_) | Self::Handle(_) => None,
+            Self::Error(_) | Self::Function(_) | Self::Handle { .. } => None,
         }
     }
 }
@@ -855,9 +1029,15 @@ impl TokenCodec for Head {
                 out.sum(6, 1);
                 callable.encode(out);
             }
-            Self::Handle(handle) => {
-                out.sum(7, 1);
-                handle.encode(out);
+            Self::Handle {
+                kind_len,
+                id_len,
+                content,
+            } => {
+                out.sum(7, 3);
+                out.unsigned(*kind_len);
+                out.unsigned(*id_len);
+                encode_normal(content, out);
             }
         }
     }
@@ -938,8 +1118,29 @@ impl TokenCodec for Head {
                 Self::Function(CallableId::decode(input)?)
             }
             7 => {
-                expect(1)?;
-                Self::Handle(Handle::decode(input)?)
+                expect(3)?;
+                let kind_len = input.unsigned()?;
+                let id_len = input.unsigned()?;
+                let content = decode_normal(input)?;
+                let whole = matches!(content, NormalKey::Inline(_));
+                let head = Self::Handle {
+                    kind_len,
+                    id_len,
+                    content,
+                };
+                // A whole handle's head is the one it gives; a digest
+                // stands for one too long to hold whole, which a load
+                // checks the row against.
+                if whole
+                    && head
+                        .resident_handle()
+                        .is_none_or(|handle| Self::handle(&handle) != head)
+                {
+                    return Err(TokenError::Invalid(
+                        "a handle head's content disagrees with its lengths".into(),
+                    ));
+                }
+                head
             }
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })

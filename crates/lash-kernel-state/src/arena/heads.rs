@@ -16,8 +16,8 @@ use super::{Arena, Facts, Head, NO_PAGE, Summary, has_cold, keys, malformed, tab
 impl Arena {
     /// The one handle of durable immutable `entity`, which a row names
     /// with `head`: the one the run already has, whose head must be
-    /// `head`, else a proxy true to it. A function and a host handle open
-    /// resident, as does an empty tuple; any other opens cold, its head's
+    /// `head`, else a proxy true to it. A function and a host handle its
+    /// head holds whole open resident, as does an empty tuple; any other opens cold, its head's
     /// summaries in its body and facts, and every read of its payload
     /// answers [`lash_kernel_doc::Retry::Cold`].
     ///
@@ -218,7 +218,18 @@ pub fn opened(head: &Head) -> (Body, Summary) {
             Summary::default(),
         ),
         Head::Function(callable) => (Body::Function(Box::new(*callable)), Summary::default()),
-        Head::Handle(host) => (Body::Handle(host.clone()), Summary::default()),
+        Head::Handle {
+            kind_len, id_len, ..
+        } => (
+            match head.resident_handle() {
+                Some(host) => Body::Handle(host),
+                None => Body::Cold(ColdImmutable::Handle {
+                    kind_len: *kind_len,
+                    id_len: *id_len,
+                }),
+            },
+            Summary::default(),
+        ),
     }
 }
 
@@ -260,7 +271,7 @@ pub(super) fn head_of(
             normal: key(normal()?)?,
         },
         Body::Function(callable) => Head::Function(**callable),
-        Body::Handle(host) => Head::Handle(host.clone()),
+        Body::Handle(host) => Head::handle(host),
         Body::Cold(_) => return Err(malformed("a cold immutable has no head")),
         _ => return Err(malformed("a mutable object has no head")),
     })

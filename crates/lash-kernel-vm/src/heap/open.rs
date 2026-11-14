@@ -265,5 +265,8 @@ pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<
         Record::Handle(host) => Body::Handle(host.clone()),
         Record::Chunked(_) => return Err("a chunked row opens by its index, not whole".into()),
         Record::Paged(_) => return Err("a paged payload opens from its pages, not its row".into()),
+        Record::Scalar(_) => {
+            return Err("a scalar payload opens from its pages, not its row".into());
+        }
     })
 }

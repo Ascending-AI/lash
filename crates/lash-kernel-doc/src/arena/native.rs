@@ -337,6 +337,7 @@ impl<'call> Args<'call> {
         };
         match self.body(object)? {
             Body::Handle(handle) => Ok(Some(handle)),
+            Body::Cold(_) => Err(Retry::Cold { object, chunk: 0 }.into()),
             _ => Err(NativeError::Malformed("a host handle names another body")),
         }
     }

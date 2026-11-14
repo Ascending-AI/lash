@@ -766,6 +766,8 @@ pub(crate) fn equal(
             }
             (V::Handle(a), V::Handle(b)) => match (body(objects, *a)?, body(objects, *b)?) {
                 (Body::Handle(a), Body::Handle(b)) => a == b,
+                (Body::Cold(_), _) => return Err(cold(*a)),
+                (_, Body::Cold(_)) => return Err(cold(*b)),
                 _ => return Err(NativeError::Malformed("a handle names another body")),
             },
             (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,

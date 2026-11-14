@@ -937,6 +937,24 @@ impl Heap for SlotHeap {
         if let Record::Chunked(chunked) = &row.record {
             return self.open_large(object, id, chunked, roots);
         }
+        // A scalar payload reads whole: an integer or a host handle is one
+        // value. Its pages are checked against the row's root as they are
+        // read, and the scalar against its referrers' head below, before
+        // the run sees it.
+        let row = match &row.record {
+            Record::Scalar(scalar) => {
+                let access = self
+                    .durable
+                    .as_ref()
+                    .map(|durable| durable.directory.access())
+                    .ok_or_else(|| malformed("a cold object in a heap with no directory".into()))?;
+                lash_kernel_state::paged::run::directory::Row {
+                    record: scalar.read(access).map_err(LoadError::Store)?,
+                    ..row
+                }
+            }
+            _ => row,
+        };
 
         // Admission of the growth: the body replaces the proxy's
         // placeholder. Then one collection from the roots, and once more.

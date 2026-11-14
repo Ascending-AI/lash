@@ -164,8 +164,12 @@ fn fits(
         Value::BigInt(handle) | Value::BigTimestamp(handle) => {
             take(remaining, bits(arena, *handle)?.div_ceil(8))
         }
-        Value::Handle(handle) => match resident(arena, *handle)? {
+        Value::Handle(handle) => match arena.body(*handle)? {
             Body::Handle(handle) => take(remaining, (handle.kind.len() + handle.id.len()) as u64),
+            // A cold handle's head certifies its lengths.
+            Body::Cold(lash_kernel_doc::arena::ColdImmutable::Handle { kind_len, id_len }) => {
+                take(remaining, kind_len.saturating_add(*id_len))
+            }
             _ => true,
         },
         Value::Error(error) => match resident(arena, *error)? {

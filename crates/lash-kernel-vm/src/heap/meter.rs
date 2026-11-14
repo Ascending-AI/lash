@@ -153,6 +153,8 @@ pub(crate) fn record(record: &Record) -> u64 {
         Record::Bytes(bytes) => bytes.len() as u64,
         // A paged payload opens cold: its counts, and none of its bytes.
         Record::Paged(_) => 0,
+        // A scalar payload decodes to its scalar: at most its tokens.
+        Record::Scalar(scalar) => scalar.summary.utf8_bytes,
         Record::List(members) | Record::Tuple(members) | Record::Set(members) => {
             values(members.len() as u64)
         }

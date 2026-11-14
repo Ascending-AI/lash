@@ -25,7 +25,7 @@ use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{
-    ClosureCode, Heads, ObjectKind, Paged, Record, RunValue,
+    ClosureCode, Heads, ObjectKind, Paged, Record, RunValue, ScalarPayload,
 };
 use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_value::FunctionId;
@@ -340,6 +340,7 @@ fn published(arena: &Arena, handle: ArenaHandle, paged: Paged) -> Result<Record,
 
 fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Record, SealError> {
     let value = |value: &Value| run_value(arena, value);
+    let scalar = |record: Record| ScalarPayload::place(access, record).map_err(SealError::Heap);
     let values = |chunks: &Chunks| -> Result<Vec<RunValue>, SealError> {
         resident(chunks)?.into_iter().map(value).collect()
     };
@@ -392,8 +393,8 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
             message: value(message)?,
             data: value(data)?,
         },
-        Body::BigInt(int) => Record::BigInt(int.clone()),
-        Body::Timestamp(int) => Record::Timestamp(int.clone()),
+        Body::BigInt(int) => scalar(Record::BigInt(int.clone()))?,
+        Body::Timestamp(int) => scalar(Record::Timestamp(int.clone()))?,
         Body::LongText(text) => {
             let mut whole = String::with_capacity(text.summary.utf8_bytes as usize);
             for chunk in text.chunks.iter() {
@@ -435,7 +436,7 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
             }
         }
         Body::Function(callable) => Record::Function(**callable),
-        Body::Handle(host) => Record::Handle(host.clone()),
+        Body::Handle(host) => scalar(Record::Handle(host.clone()))?,
         Body::Cold(_) => return Err(fault("a cold immutable reached the seal")),
     })
 }
