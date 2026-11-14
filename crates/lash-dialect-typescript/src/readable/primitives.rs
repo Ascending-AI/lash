@@ -231,7 +231,7 @@ impl Lifter<'_> {
         Ok(None)
     }
 
-    /// `receiver.method(args)`, or under [`super::lift::Style::exact`] on a
+    /// `receiver.method(args)`, or under [`super::style::Style::exact`] on a
     /// receiver binding the kind's own row, `spelling(receiver, "method",
     /// args)`: a capture cell is of no known kind.
     fn own_method(

@@ -15,6 +15,7 @@ mod patterns;
 mod primitives;
 mod source;
 mod statements;
+mod style;
 mod switches;
 mod updates;
 
@@ -41,25 +42,10 @@ pub fn print(
     library: &dyn Library,
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
-    let mut printed = print_attempt(document, captions, library, options, STYLES[0]);
+    let mut printed = print_attempt(document, captions, library, options, style::STYLES[0]);
     // Exact operation spellings come last: only a document whose convenient
     // reads and method calls do not read back is printed with them.
-    for style in [false, true]
-        .into_iter()
-        .flat_map(|exact| {
-            [false, true].into_iter().flat_map(move |block_bodies| {
-                [false, true].into_iter().flat_map(move |const_functions| {
-                    STYLES.iter().map(move |style| lift::Style {
-                        block_bodies,
-                        const_functions,
-                        exact,
-                        ..*style
-                    })
-                })
-            })
-        })
-        .skip(1)
-    {
+    for style in style::attempts().skip(1) {
         if !matches!(printed, Err(PrintError::Unprintable { .. })) {
             break;
         }
@@ -68,45 +54,12 @@ pub fn print(
     printed
 }
 
-/// Plainest first: operators over constructor calls, then temporaries
-/// written where they are read over their own `const`s.
-const STYLES: [lift::Style; 4] = [
-    lift::Style {
-        block_bodies: false,
-        const_functions: false,
-        operators: true,
-        preserve_temporaries: false,
-        exact: false,
-    },
-    lift::Style {
-        block_bodies: false,
-        const_functions: false,
-        operators: true,
-        preserve_temporaries: true,
-        exact: false,
-    },
-    lift::Style {
-        block_bodies: false,
-        const_functions: false,
-        operators: false,
-        preserve_temporaries: false,
-        exact: false,
-    },
-    lift::Style {
-        block_bodies: false,
-        const_functions: false,
-        operators: false,
-        preserve_temporaries: true,
-        exact: false,
-    },
-];
-
 fn print_attempt(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn Library,
     options: PrintOptions,
-    style: lift::Style,
+    style: style::Style,
 ) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     crate::constructs::conventions::CONVENTIONS.check_document(document, library)?;
@@ -1402,7 +1355,7 @@ console.log(JSON.stringify(created));
                         &lowered.document,
                         Some(&lowered.captions),
                         library,
-                        STYLES[0],
+                        style::STYLES[0],
                     )
                     .functions
                     .into_iter()

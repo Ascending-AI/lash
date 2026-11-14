@@ -71,7 +71,8 @@ impl Lifter<'_> {
                     if entry.field == "__proto__" {
                         return refuse("a field an object literal cannot name");
                     }
-                    fields.push((entry.field.clone(), self.expr(&entry.value)?));
+                    let value = self.operand(&entry.value, "value.operand")?;
+                    fields.push((entry.field.clone(), value));
                 }
                 Ok(Expr::Object(fields))
             }
@@ -100,7 +101,14 @@ impl Lifter<'_> {
         {
             return self.expr(value);
         }
-        self.expr(expr)
+        let value = self.expr(expr)?;
+        Ok(
+            if self.style.exact && matches!(expr, k::Expr::Variable(_)) {
+                Expr::As(Box::new(value), source::Type::Word("boolean"))
+            } else {
+                value
+            },
+        )
     }
 
     /// A temporary the source wrote in place, or a variable.
@@ -358,8 +366,12 @@ impl Lifter<'_> {
     fn operator(&mut self, name: &str, args: &[k::Expr]) -> Option<Lift<Expr>> {
         match (name, args) {
             (crate::constructs::operators::NUMBER_GUARD, [value]) => Some(self.expr(value)),
-            // Text operands read as text without the assertions.
-            ("text.concat", [left, right]) => Some(self.binary("+", left, right)),
+            // The exact style keeps the text assertions below: array element
+            // annotations may have been erased while lifting their reads.
+            ("text.concat", [left, right]) if !self.style.exact => {
+                Some(self.binary("+", left, right))
+            }
+            ("text.concat", _) => None,
             (name, [k::Expr::Call { function, args }])
                 if name == crate::constructs::operators::native_not()
                     && self.is(

@@ -19,10 +19,36 @@ use lash_kernel_doc::{self as k};
 use lash_kernel_value::Name;
 use lash_kernel_value::sites::Site;
 
-use super::lift::{Lift, Lifter};
+use super::lift::{Lift, Lifter, reads_name};
 use super::source::Expr;
 
 impl Lifter<'_> {
+    /// RegExp literal lowering holds its argument array once before the
+    /// constructor. Keep that array pending even when other temporaries
+    /// retain declarations, so the ordinary literal can recreate the hold.
+    pub(super) fn regexp_argument_array(&self, block: &[k::Stmt], name: &Name) -> bool {
+        let [
+            k::Stmt::Let {
+                value: k::Rhs::Expr(k::Expr::List(_)),
+                ..
+            },
+            k::Stmt::Let { value, .. },
+            rest @ ..,
+        ] = block
+        else {
+            return false;
+        };
+        let Some(helper) = lash_ext_ts_helpers::builtins::table()
+            .constructors
+            .get("RegExp")
+        else {
+            return false;
+        };
+        self.helper_read(value, helper).is_some_and(|arguments| {
+            matches!(arguments.as_slice(), [k::Expr::Literal(k::Literal::Absent), k::Expr::Variable(read)] if read == name)
+        }) && !reads_name(k::Node::Block(rest), name)
+    }
+
     /// `x.get(k)`, `x.set(k, v)` or `x.has(k)` on a value of no single
     /// known kind:
     ///
@@ -262,7 +288,12 @@ impl Lifter<'_> {
 
     /// The array read or method call at the start of `block`, its result
     /// temporary, and how many statements it takes.
-    pub(super) fn array_ladder(&mut self, block: &[k::Stmt]) -> Lift<Option<(Name, Expr, usize)>> {
+    pub(super) fn array_ladder(
+        &mut self,
+        block: &[k::Stmt],
+        site: &Site,
+        at: usize,
+    ) -> Lift<Option<(Name, Expr, usize)>> {
         let [
             k::Stmt::Let {
                 name: test,
@@ -312,7 +343,8 @@ impl Lifter<'_> {
             && let [receiver, key] = args.as_slice()
             && receiver == target
         {
-            let read = Expr::Index(Box::new(self.expr(target)?), Box::new(self.expr(key)?));
+            let target = self.array_read_receiver(target)?;
+            let read = Expr::Index(Box::new(target), Box::new(self.expr(key)?));
             return Ok(Some((result.clone(), read, 4)));
         }
         // A checked array's length: `ts.get(x, "length")` in the general arm.
@@ -331,7 +363,8 @@ impl Lifter<'_> {
                     k::Expr::Literal(k::Literal::Text("length".into())),
                 ]
         {
-            let read = Expr::Field(Box::new(self.expr(target)?), "length".into());
+            let target = self.array_read_receiver(target)?;
+            let read = Expr::Field(Box::new(target), "length".into());
             return Ok(Some((result.clone(), read, 4)));
         }
         let [
@@ -370,58 +403,35 @@ impl Lifter<'_> {
         let Some(args) = self.method_arguments(member, target, &method, call) else {
             return Ok(None);
         };
-        // The general arm's own temporaries: the function values it passes.
-        let saved = self.enter();
-        let mut bound = Vec::new();
-        let mut lifted = Ok(());
-        for statement in middle {
-            let k::Stmt::Let {
-                name,
-                value: k::Rhs::Expr(value),
-            } = statement
-            else {
-                lifted = Err("a statement among a method's arguments".to_owned());
-                break;
-            };
-            let value = self.expr(value);
-            match value {
-                Ok(value) => bound.push((name.clone(), value)),
-                Err(why) => {
-                    lifted = Err(why);
-                    break;
-                }
-            }
-        }
-        self.leave(saved);
-        lifted?;
         // A local annotation can be erased while its initializer infers a
         // narrower receiver. Retain the kind check this ladder declares.
         let target = Expr::As(
             Box::new(self.expr(target)?),
             super::source::Type::Array(Box::new(super::source::Type::Word("any"))),
         );
-        let mut written = Vec::with_capacity(args.len());
-        for arg in args {
-            let value = match arg {
-                k::Expr::Variable(name) => bound
-                    .iter()
-                    .position(|(bound, _)| bound == name)
-                    .map(|at| bound.remove(at).1),
-                _ => None,
-            };
-            written.push(match value {
-                Some(value) => value,
-                None => self.expr(arg)?,
-            });
-        }
-        if !bound.is_empty() {
-            return Ok(None);
-        }
+        let written =
+            self.statement_arguments(middle, args, &site.child((at + 3) as u32).child(2), 1)?;
         Ok(Some((
             result.clone(),
             Expr::Call(Box::new(Expr::Field(Box::new(target), method)), written),
             4,
         )))
+    }
+
+    /// Retain typed-array dispatch when a local array initializer would infer
+    /// a plain list. Captured cells still need their declared source evidence.
+    fn array_read_receiver(&mut self, target: &k::Expr) -> Lift<Expr> {
+        let annotated = self.style.exact
+            && matches!(target, k::Expr::Variable(name) if self.constructed_lists.contains(name));
+        let target = self.expr(target)?;
+        Ok(if annotated {
+            Expr::As(
+                Box::new(target),
+                super::source::Type::Array(Box::new(super::source::Type::Word("any"))),
+            )
+        } else {
+            target
+        })
     }
 
     /// `if invoke ts.array.is(x) {} else { throw ... }`.
@@ -495,8 +505,21 @@ impl Lifter<'_> {
             return Err("a method called by another name than it was read by".to_owned());
         }
         let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
-        if self.style.exact && self.reads_binding(target) {
-            return Ok(Some(self.method_call(target, method, args)?));
+        if self.style.exact
+            && self.reads_binding(target)
+            && let (k::Expr::Variable(binding), Expr::Field(receiver, _)) = (target, &read)
+            && matches!(receiver.as_ref(), Expr::Ident(name) if self.binding(binding).as_ref() == Ok(name))
+        {
+            let Expr::Field(receiver, _) = read else {
+                unreachable!()
+            };
+            return Ok(Some(super::expressions::constructor(
+                "callable.method",
+                [*receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )));
         }
         Ok(Some(Expr::Call(Box::new(read), args)))
     }

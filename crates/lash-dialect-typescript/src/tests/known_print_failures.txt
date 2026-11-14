@@ -295,8 +295,6 @@ position binary !==/pattern-rhs/cell
 position binary !==/pattern-rhs/module
 position binary %/call-key/cell
 position binary %/call-key/module
-position binary %/call-receiver/cell
-position binary %/call-receiver/module
 position binary %/compound-key/cell
 position binary %/compound-key/module
 position binary %/field-rhs/cell
@@ -307,8 +305,6 @@ position binary %/pattern-rhs/cell
 position binary %/pattern-rhs/module
 position binary &/call-key/cell
 position binary &/call-key/module
-position binary &/call-receiver/cell
-position binary &/call-receiver/module
 position binary &/compound-key/cell
 position binary &/compound-key/module
 position binary &/field-rhs/cell
@@ -329,8 +325,6 @@ position binary **/pattern-rhs/cell
 position binary **/pattern-rhs/module
 position binary */call-key/cell
 position binary */call-key/module
-position binary */call-receiver/cell
-position binary */call-receiver/module
 position binary */compound-key/cell
 position binary */compound-key/module
 position binary */field-rhs/cell
@@ -341,8 +335,6 @@ position binary */pattern-rhs/cell
 position binary */pattern-rhs/module
 position binary +/call-key/cell
 position binary +/call-key/module
-position binary +/call-receiver/cell
-position binary +/call-receiver/module
 position binary +/compound-key/cell
 position binary +/compound-key/module
 position binary +/field-rhs/cell
@@ -353,8 +345,6 @@ position binary +/pattern-rhs/cell
 position binary +/pattern-rhs/module
 position binary -/call-key/cell
 position binary -/call-key/module
-position binary -/call-receiver/cell
-position binary -/call-receiver/module
 position binary -/compound-key/cell
 position binary -/compound-key/module
 position binary -/field-rhs/cell
@@ -365,8 +355,6 @@ position binary -/pattern-rhs/cell
 position binary -/pattern-rhs/module
 position binary //call-key/cell
 position binary //call-key/module
-position binary //call-receiver/cell
-position binary //call-receiver/module
 position binary //compound-key/cell
 position binary //compound-key/module
 position binary //field-rhs/cell
@@ -387,8 +375,6 @@ position binary </pattern-rhs/cell
 position binary </pattern-rhs/module
 position binary <</call-key/cell
 position binary <</call-key/module
-position binary <</call-receiver/cell
-position binary <</call-receiver/module
 position binary <</compound-key/cell
 position binary <</compound-key/module
 position binary <</field-rhs/cell
@@ -449,8 +435,6 @@ position binary >=/pattern-rhs/cell
 position binary >=/pattern-rhs/module
 position binary >>/call-key/cell
 position binary >>/call-key/module
-position binary >>/call-receiver/cell
-position binary >>/call-receiver/module
 position binary >>/compound-key/cell
 position binary >>/compound-key/module
 position binary >>/field-rhs/cell
@@ -461,8 +445,6 @@ position binary >>/pattern-rhs/cell
 position binary >>/pattern-rhs/module
 position binary >>>/call-key/cell
 position binary >>>/call-key/module
-position binary >>>/call-receiver/cell
-position binary >>>/call-receiver/module
 position binary >>>/compound-key/cell
 position binary >>>/compound-key/module
 position binary >>>/field-rhs/cell
@@ -473,8 +455,6 @@ position binary >>>/pattern-rhs/cell
 position binary >>>/pattern-rhs/module
 position binary ^/call-key/cell
 position binary ^/call-key/module
-position binary ^/call-receiver/cell
-position binary ^/call-receiver/module
 position binary ^/compound-key/cell
 position binary ^/compound-key/module
 position binary ^/field-rhs/cell
@@ -509,8 +489,6 @@ position binary instanceof/pattern-rhs/cell
 position binary instanceof/pattern-rhs/module
 position binary |/call-key/cell
 position binary |/call-key/module
-position binary |/call-receiver/cell
-position binary |/call-receiver/module
 position binary |/compound-key/cell
 position binary |/compound-key/module
 position binary |/field-rhs/cell
@@ -637,8 +615,6 @@ position expression function/pattern-rhs/cell
 position expression function/pattern-rhs/module
 position expression ident/call-key/cell
 position expression ident/call-key/module
-position expression ident/call-receiver/cell
-position expression ident/call-receiver/module
 position expression ident/compound-key/cell
 position expression ident/compound-key/module
 position expression ident/field-rhs/cell
@@ -651,8 +627,6 @@ position expression index/call-callee/cell
 position expression index/call-callee/module
 position expression index/call-key/cell
 position expression index/call-key/module
-position expression index/call-receiver/cell
-position expression index/call-receiver/module
 position expression index/compound-key/cell
 position expression index/compound-key/module
 position expression index/field-rhs/cell
@@ -663,8 +637,6 @@ position expression index/pattern-rhs/cell
 position expression index/pattern-rhs/module
 position expression logical and/call-key/cell
 position expression logical and/call-key/module
-position expression logical and/call-receiver/cell
-position expression logical and/call-receiver/module
 position expression logical and/compound-key/cell
 position expression logical and/compound-key/module
 position expression logical and/field-rhs/cell
@@ -675,8 +647,6 @@ position expression logical and/pattern-rhs/cell
 position expression logical and/pattern-rhs/module
 position expression logical or/call-key/cell
 position expression logical or/call-key/module
-position expression logical or/call-receiver/cell
-position expression logical or/call-receiver/module
 position expression logical or/compound-key/cell
 position expression logical or/compound-key/module
 position expression logical or/field-rhs/cell
@@ -729,8 +699,6 @@ position expression null/pattern-rhs/cell
 position expression null/pattern-rhs/module
 position expression nullish/call-key/cell
 position expression nullish/call-key/module
-position expression nullish/call-receiver/cell
-position expression nullish/call-receiver/module
 position expression nullish/compound-key/cell
 position expression nullish/compound-key/module
 position expression nullish/field-rhs/cell
@@ -847,8 +815,6 @@ position expression optional method/pattern-rhs/cell
 position expression optional method/pattern-rhs/module
 position expression post decrement/call-key/cell
 position expression post decrement/call-key/module
-position expression post decrement/call-receiver/cell
-position expression post decrement/call-receiver/module
 position expression post decrement/compound-key/cell
 position expression post decrement/compound-key/module
 position expression post decrement/field-rhs/cell
@@ -861,8 +827,6 @@ position expression post decrement/pattern-rhs/cell
 position expression post decrement/pattern-rhs/module
 position expression post increment/call-key/cell
 position expression post increment/call-key/module
-position expression post increment/call-receiver/cell
-position expression post increment/call-receiver/module
 position expression post increment/compound-key/cell
 position expression post increment/compound-key/module
 position expression post increment/field-rhs/cell
@@ -875,8 +839,6 @@ position expression post increment/pattern-rhs/cell
 position expression post increment/pattern-rhs/module
 position expression pre decrement/call-key/cell
 position expression pre decrement/call-key/module
-position expression pre decrement/call-receiver/cell
-position expression pre decrement/call-receiver/module
 position expression pre decrement/compound-key/cell
 position expression pre decrement/compound-key/module
 position expression pre decrement/compound-rhs/cell
@@ -891,8 +853,6 @@ position expression pre decrement/pattern-rhs/cell
 position expression pre decrement/pattern-rhs/module
 position expression pre increment/call-key/cell
 position expression pre increment/call-key/module
-position expression pre increment/call-receiver/cell
-position expression pre increment/call-receiver/module
 position expression pre increment/compound-key/cell
 position expression pre increment/compound-key/module
 position expression pre increment/compound-rhs/cell
@@ -919,8 +879,6 @@ position expression regexp/pattern-rhs/cell
 position expression regexp/pattern-rhs/module
 position expression sequence/call-key/cell
 position expression sequence/call-key/module
-position expression sequence/call-receiver/cell
-position expression sequence/call-receiver/module
 position expression sequence/compound-key/cell
 position expression sequence/compound-key/module
 position expression sequence/field-rhs/cell
@@ -953,8 +911,6 @@ position expression spread method/pattern-rhs/cell
 position expression spread method/pattern-rhs/module
 position expression string/assignment-key/cell
 position expression string/assignment-key/module
-position expression string/call-key/cell
-position expression string/call-key/module
 position expression string/compound-key/cell
 position expression string/compound-key/module
 position expression string/field-rhs/cell
@@ -1003,20 +959,14 @@ position unary !/logical-key/cell
 position unary !/logical-key/module
 position unary !/pattern-rhs/cell
 position unary !/pattern-rhs/module
-position unary +/call-key/cell
-position unary +/call-key/module
 position unary +/compound-key/cell
 position unary +/compound-key/module
 position unary +/field-rhs/cell
 position unary +/field-rhs/module
-position unary +/logical-key/cell
-position unary +/logical-key/module
 position unary +/pattern-rhs/cell
 position unary +/pattern-rhs/module
 position unary -/call-key/cell
 position unary -/call-key/module
-position unary -/call-receiver/cell
-position unary -/call-receiver/module
 position unary -/compound-key/cell
 position unary -/compound-key/module
 position unary -/field-rhs/cell
@@ -1043,8 +993,6 @@ position unary void/pattern-rhs/cell
 position unary void/pattern-rhs/module
 position unary ~/call-key/cell
 position unary ~/call-key/module
-position unary ~/call-receiver/cell
-position unary ~/call-receiver/module
 position unary ~/compound-key/cell
 position unary ~/compound-key/module
 position unary ~/field-rhs/cell

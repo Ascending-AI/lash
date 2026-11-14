@@ -14,31 +14,10 @@ use lash_kernel_value::Name;
 use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use super::source::{self, Item, Param, Property, Stmt, Type};
+use super::style::Style;
 
 /// Why a region did not lift.
 pub(super) type Lift<T> = Result<T, String>;
-
-/// How a lift spells what it may spell more than one way. [`super::print`]
-/// tries the plainest style first and keeps the first one that reads back.
-#[derive(Clone, Copy)]
-pub(super) struct Style {
-    /// Keep a singleton return in a block: lowering an arrow expression can
-    /// introduce an additional scope around nested callable metadata.
-    pub(super) block_bodies: bool,
-    /// Captured module functions retain their `const` declaration form.
-    pub(super) const_functions: bool,
-    /// Front-end temporaries keep their own `const`s instead of being written
-    /// where they are read.
-    pub(super) preserve_temporaries: bool,
-    /// Numeric natives over checked `number` operands are written as the
-    /// operators they lower from (`n < 1`), not as `num.lt(num.checked_float(n), 1)`.
-    pub(super) operators: bool,
-    /// An unchecked list read and a method call on a receiver read in place
-    /// are written as the exact operations they lower from
-    /// (`list.element`, `callable.method`), not as `xs[i]` and `m.get(k)`,
-    /// whose ordinary lowering takes the receiver binding's own facts.
-    pub(super) exact: bool,
-}
 
 pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
     Err(why.into())
@@ -141,9 +120,6 @@ fn module_main(
         .collect()
 }
 
-/// What [`Lifter::enter`] set aside.
-pub(super) struct Saved(Vec<Pending>, Vec<Caption>);
-
 /// A temporary the front end introduced, waiting to be written where it is
 /// read.
 struct Pending {
@@ -162,6 +138,8 @@ pub(super) struct Lifter<'a> {
     pending: Vec<Pending>,
     pub(super) substitutions: BTreeMap<Name, source::Expr>,
     pub(super) templates: BTreeMap<Name, Vec<String>>,
+    pub(super) constructed_records: BTreeSet<Name>,
+    pub(super) constructed_lists: BTreeSet<Name>,
     pub(super) style: Style,
     /// The captions of the temporaries the statement being lifted read.
     taken_captions: Vec<Caption>,
@@ -307,6 +285,8 @@ impl<'a> Lifter<'a> {
             pending: Vec::new(),
             substitutions: BTreeMap::new(),
             templates: BTreeMap::new(),
+            constructed_records: BTreeSet::new(),
+            constructed_lists: BTreeSet::new(),
             style,
             taken_captions: Vec::new(),
             assigned,
@@ -340,6 +320,22 @@ impl<'a> Lifter<'a> {
                     && let Some(raw) = super::expressions::template_object(value)
                 {
                     lifter.templates.insert(name.clone(), raw);
+                }
+                if let k::Node::Stmt(k::Stmt::Let {
+                    name,
+                    value: k::Rhs::Expr(k::Expr::Record(_)),
+                }) = node
+                    && !lifter.assigned.contains(name)
+                {
+                    lifter.constructed_records.insert(name.clone());
+                }
+                if let k::Node::Stmt(k::Stmt::Let {
+                    name,
+                    value: k::Rhs::Expr(k::Expr::List(_)),
+                }) = node
+                    && !lifter.assigned.contains(name)
+                {
+                    lifter.constructed_lists.insert(name.clone());
                 }
                 pending.extend(node.children());
             }
@@ -737,20 +733,6 @@ impl<'a> Lifter<'a> {
         self.block_at(block, site, 0)
     }
 
-    /// The temporaries waiting to be read, set aside while a function value
-    /// nested in the statement being lifted is: it reads none of them.
-    pub(super) fn enter(&mut self) -> Saved {
-        Saved(
-            std::mem::take(&mut self.pending),
-            std::mem::take(&mut self.taken_captions),
-        )
-    }
-
-    pub(super) fn leave(&mut self, saved: Saved) {
-        self.pending = saved.0;
-        self.taken_captions = saved.1;
-    }
-
     /// An expression-scoped temporary is spelled at its one consuming read,
     /// just like a statement temporary. Unconsumed effects cannot disappear.
     pub(super) fn scoped_temporary(
@@ -776,6 +758,49 @@ impl<'a> Lifter<'a> {
             result?;
             return refuse("an unconsumed expression temporary");
         }
+        result
+    }
+
+    /// Lift argument evaluation through the same read/conditional recipes
+    /// used by ordinary statement temporaries. Every introduced value must
+    /// be consumed; statement effects cannot disappear from an argument.
+    pub(super) fn statement_arguments(
+        &mut self,
+        statements: &[k::Stmt],
+        arguments: &[k::Expr],
+        site: &Site,
+        first: usize,
+    ) -> Lift<Vec<source::Expr>> {
+        let preserve = self.style.preserve_temporaries;
+        self.style.preserve_temporaries = false;
+        let result = (|| {
+            let outer = self
+                .pending
+                .iter()
+                .map(|pending| pending.name.clone())
+                .collect::<BTreeSet<_>>();
+            let mut index = 0;
+            while index < statements.len() {
+                let taken = self.pend(&statements[index..], site, first + index)?;
+                if taken == 0 {
+                    return refuse("a statement among a method's arguments");
+                }
+                index += taken;
+            }
+            let written = arguments
+                .iter()
+                .map(|argument| self.expr(argument))
+                .collect::<Lift<_>>()?;
+            if self
+                .pending
+                .iter()
+                .any(|pending| !outer.contains(&pending.name))
+            {
+                return refuse("an unconsumed method argument temporary");
+            }
+            Ok(written)
+        })();
+        self.style.preserve_temporaries = preserve;
         result
     }
 
@@ -1023,7 +1048,7 @@ impl<'a> Lifter<'a> {
         }
         let ladder = match self.constructed_map(block)? {
             Some(ladder) => Some(ladder),
-            None => self.array_ladder(block)?,
+            None => self.array_ladder(block, site, at)?,
         };
         let ladder = match ladder {
             Some(ladder) => Some(ladder),
@@ -1053,15 +1078,22 @@ impl<'a> Lifter<'a> {
             });
             return Ok(2);
         }
-        // A helper call's result is a temporary too: reading the call where
-        // it is read hoists it again.
+        // Reading a helper result in place hoists it again. Record construction,
+        // snapshots and TDZ reads must remain in place even in the style that
+        // names other intermediates, or preceding pending reads move past them.
         if let k::Stmt::Let { name, value } = &block[0]
             && matches!(
                 value,
                 k::Rhs::Expr(_) | k::Rhs::Action(k::Action::Call { .. })
             )
             && temporary(name)
-            && !self.style.preserve_temporaries
+            && (!self.style.preserve_temporaries
+                || (!self.reassigned(name.as_str())
+                    && (matches!(
+                        value,
+                        k::Rhs::Expr(k::Expr::Record(_) | k::Expr::Variable(_))
+                    ) || self.helper_read(value, "ts.tdz").is_some()
+                        || self.regexp_argument_array(block, name))))
         {
             let value = self.rhs(value)?;
             self.pending.push(Pending {

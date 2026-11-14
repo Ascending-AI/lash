@@ -51,8 +51,11 @@ impl Lifter<'_> {
                         },
                     });
                 }
+                // Numeric initializers retain their float evidence. Widening
+                // them to `any` changes index guards and String conversions.
                 if self.style.exact
-                    && matches!(value, Expr::Number(_) | Expr::Text(_) | Expr::Bool(_))
+                    && (matches!(value, Expr::Text(_) | Expr::Bool(_))
+                        || (!self.style.float_initializers && matches!(value, Expr::Number(_))))
                 {
                     return Ok(StmtKind::Declared {
                         constant: false,
@@ -645,10 +648,17 @@ impl Lifter<'_> {
             return Ok(None);
         }
         let exact = otherwise.is_none() && self.style.exact && self.reads_binding(target);
+        let erase_inferred_record = otherwise.is_some()
+            && matches!(target, k::Expr::Variable(name) if self.constructed_records.contains(name));
         let target = match (exact, otherwise) {
             (true, _) => self.expr(target)?,
             (false, None) => self.operand(target, "record.operand")?,
             (false, Some(_)) => self.operand(target, "value.operand")?,
+        };
+        let target = if erase_inferred_record {
+            Expr::As(Box::new(target), source::Type::Word("any"))
+        } else {
+            target
         };
         Ok(Some(if exact {
             super::expressions::constructor("record.field", vec![target, Expr::Text(field.clone())])
@@ -789,6 +799,12 @@ impl Lifter<'_> {
             "value.operand"
         };
         let target = self.spell_operand(read, target, spelling);
+        let target =
+            if self.style.exact && otherwise.is_some() && !matches!(target, Expr::Optional(_)) {
+                Expr::As(Box::new(target), source::Type::Word("any"))
+            } else {
+                target
+            };
         Ok(Some(Expr::Index(Box::new(target), Box::new(index))))
     }
 
