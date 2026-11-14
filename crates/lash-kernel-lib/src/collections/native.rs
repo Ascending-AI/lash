@@ -975,9 +975,11 @@ impl Native {
         let values = args.values();
         let xs = nth(values, 0)?;
         object(self.kind, xs)?;
-        // A table is resolved once: its length and its lookups read the
-        // one view.
-        let table = args.table(xs)?;
+        let table = if matches!(self.op, Op::Get | Op::Contains) {
+            args.point_table(xs)?
+        } else {
+            args.table(xs)?
+        };
         let length = match table {
             Some(table) => table.len() as usize,
             None => length(args, xs)?,

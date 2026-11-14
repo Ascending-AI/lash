@@ -205,12 +205,25 @@ impl<'call> Args<'call> {
     /// The map, set or record `value` is.
     #[inline]
     pub fn table(&self, value: &Value) -> Result<Option<TableView<'call>>, NativeError> {
+        let table = self.point_table(value)?;
+        if let Some(table) = table {
+            warm(table.object, &table.table.chunks)?;
+        }
+        Ok(table)
+    }
+
+    /// A map, set or record view for keyed lookup. Opens a cold head,
+    /// leaving payload chunks to the table's existing lookup index.
+    #[inline]
+    pub fn point_table(&self, value: &Value) -> Result<Option<TableView<'call>>, NativeError> {
         let (Value::Map(object) | Value::Set(object) | Value::Record(object)) = *value else {
             return Ok(None);
         };
         match self.body(object)? {
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
-                warm(object, &table.chunks)?;
+                if table.len == 0 && matches!(table.chunks.get(0), Some(Chunk::Cold { .. })) {
+                    return Err(Retry::Cold { object, chunk: 0 }.into());
+                }
                 Ok(Some(TableView { object, table }))
             }
             _ => Err(NativeError::Malformed("a table handle names another body")),
@@ -1291,7 +1304,7 @@ impl InlineOperation {
             let [target, key] = args.values() else {
                 return Ok(None);
             };
-            return match args.table(target)? {
+            return match args.point_table(target)? {
                 Some(table) => Ok(Some(Value::Bool(args.lookup(table, key)?.is_some()))),
                 None => Ok(None),
             };

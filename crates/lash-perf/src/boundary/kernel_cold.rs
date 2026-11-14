@@ -38,6 +38,8 @@ struct Storage {
     bytes: u64,
     total_reads: u64,
     total_writes: u64,
+    #[cfg(test)]
+    read_pages: Vec<(PageKind, PageId)>,
 }
 /// What a sealed container occupies: its chunks under their chunk index,
 /// and the object directory holding its row.
@@ -106,6 +108,8 @@ impl Pages {
         storage.bytes = 0;
         storage.total_reads = 0;
         storage.total_writes = 0;
+        #[cfg(test)]
+        storage.read_pages.clear();
     }
 }
 impl PageSource for Pages {
@@ -121,6 +125,13 @@ impl PageSource for Pages {
                     .ok_or(HeapFault::Missing { page: p.id })
             })
             .collect::<Vec<_>>();
+        #[cfg(test)]
+        storage.read_pages.extend(
+            answers
+                .iter()
+                .filter_map(|answer| answer.as_ref().ok())
+                .map(|page| (page.kind, page.page.id)),
+        );
         storage.total_reads += pages.len() as u64;
         storage.reads += answers
             .iter()
@@ -437,6 +448,490 @@ mod tests {
             directory_depth: 1,
         };
         assert_eq!(pages.geometry(), expected);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod point_reads {
+    use super::*;
+    use lash_kernel_dialect::{
+        CellEnvironment, Environment, Mode, NamespaceKind, NamespaceMember, Namespaces,
+        OperationSignature,
+    };
+    use lash_kernel_value::{Signature, Type};
+
+    fn authored(dialect: &str, operation: &str) -> Result<Program> {
+        let embedding =
+            lash_vm_worker::built_embedding(&Default::default()).map_err(|e| anyhow!("{e}"))?;
+        let signature = Signature {
+            params: Vec::new(),
+            result: Type::Any,
+        };
+        let seed = lash_kernel_value::QualifiedOperation::from_effect(
+            &lash_kernel_value::EffectName::new("host.seed")?,
+        )?;
+        let pause = lash_kernel_value::QualifiedOperation::from_effect(
+            &lash_kernel_value::EffectName::new("host.pause")?,
+        )?;
+        let packages = BTreeMap::from([(
+            seed.package,
+            BTreeMap::from([
+                (
+                    seed.name,
+                    NamespaceMember {
+                        visibility: lash_kernel_value::Visibility::Public,
+                        kind: NamespaceKind::Operation(OperationSignature {
+                            signature: signature.clone(),
+                            controls: Default::default(),
+                            mode: lash_kernel_value::OperationMode::Waited,
+                        }),
+                    },
+                ),
+                (
+                    pause.name,
+                    NamespaceMember {
+                        visibility: lash_kernel_value::Visibility::Public,
+                        kind: NamespaceKind::Operation(OperationSignature {
+                            signature,
+                            controls: Default::default(),
+                            mode: lash_kernel_value::OperationMode::Waited,
+                        }),
+                    },
+                ),
+            ]),
+        )]);
+        let namespaces = Namespaces::new(packages, Default::default(), &|_| false)?;
+        let environment = Environment::new(embedding.library(), &namespaces);
+        let source = if dialect == "python" {
+            format!("xs = await host.seed()\nawait host.pause()\n{operation}\nawait host.pause()\n")
+        } else {
+            format!(
+                "let xs = await host.seed();\nawait host.pause();\n{operation}\nawait host.pause();\n"
+            )
+        };
+        let document = Arc::new(
+            embedding
+                .lower(
+                    dialect,
+                    &source,
+                    &environment,
+                    Mode::Cell(CellEnvironment::first()),
+                )
+                .ok_or_else(|| anyhow!("missing dialect {dialect}"))?
+                .map_err(|e| anyhow!("{e}"))?
+                .document
+                .into_document(),
+        );
+        let library = embedding
+            .prepared_library()
+            .map_err(|e| anyhow!("{e}"))?
+            .clone();
+        prepare(document, library)
+    }
+
+    fn prepare(
+        document: Arc<lash_kernel_doc::Document>,
+        library: PreparedLibrary,
+    ) -> Result<Program> {
+        let fills = document
+            .imports
+            .iter()
+            .map(|(slot, import)| {
+                let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
+                    return Err(anyhow!("unexpected import"));
+                };
+                Ok((
+                    *slot,
+                    Fill::Operation(lash_kernel_value::OperationRequirement::new(
+                        signature.clone(),
+                        lash_kernel_value::ContractId::new("cold-point-law"),
+                    )),
+                ))
+            })
+            .collect::<Result<_>>()?;
+        let helper_fills = lash_kernel_doc::helper_imports(&document, library.helpers().as_ref())?
+            .into_iter()
+            .map(|(id, import)| {
+                let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
+                    return Err(anyhow!("unexpected helper import"));
+                };
+                let fill = Fill::Operation(lash_kernel_value::OperationRequirement::new(
+                    signature.clone(),
+                    lash_kernel_value::ContractId::new("cold-point-law"),
+                ));
+                Ok((id, lash_kernel_value::HelperFill { import, fill }))
+            })
+            .collect::<Result<_>>()?;
+        let link = Link {
+            document: document.identity(),
+            fills,
+            helper_fills,
+        };
+        Ok(Program::prepare(
+            link.identity(),
+            BTreeMap::from([(document.identity(), document)]),
+            &BTreeMap::from([(link.identity(), link)]),
+            PageId([7; 32]),
+            library,
+        )?)
+    }
+
+    fn native(operation: &str) -> Result<Program> {
+        native_program(operation, false)
+    }
+    fn native_program(operation: &str, session: bool) -> Result<Program> {
+        let embedding =
+            lash_vm_worker::built_embedding(&Default::default()).map_err(|e| anyhow!("{e}"))?;
+        let registry = Arc::clone(embedding.registry().map_err(|e| anyhow!("{e}"))?);
+        let mut source = String::from(
+            "kernel 1\nnumbers by_spelling\nimport 0 operation host.seed() -> Any\nimport 1 operation host.pause() -> Any\n",
+        );
+        for name in [
+            "map.get",
+            "record.get",
+            "map.contains",
+            "set.contains",
+            "record.contains",
+            "list.at",
+            "tuple.at",
+        ] {
+            let id = lash_kernel_dialect::Library::resolve(embedding.library(), name)
+                .ok_or_else(|| anyhow!("missing {name}"))?;
+            let function = registry.get(&id).ok_or_else(|| anyhow!("missing native"))?;
+            source.push_str(&format!(
+                "native @{id}\ndefinition {}\n",
+                serde_json::to_string(&lash_kernel_doc::print_definition(function.definition()))?
+            ));
+        }
+        let seed = if session {
+            ""
+        } else {
+            "let xs = perform 0() as Any"
+        };
+        source.push_str(&format!("main {{ {seed} let pause = perform 1() as Any {operation} let done = perform 1() as Any return null }}"));
+        let document = Arc::new(lash_kernel_doc::parse_document(&source)?);
+        prepare(document, PreparedLibrary::new(registry))
+    }
+
+    #[derive(Clone, Copy)]
+    enum Fixture {
+        Map,
+        Set,
+        Record,
+        List,
+        Tuple,
+    }
+    fn datum(kind: Fixture) -> Datum {
+        let values = (0..ELEMENTS).map(|i| Datum::Int((i as i64).into()));
+        match kind {
+            Fixture::Map => Datum::Map(values.map(|v| (v.clone(), v)).collect()),
+            Fixture::Set => Datum::Set(values.collect()),
+            Fixture::Record => Datum::Record(
+                (0..ELEMENTS)
+                    .map(|i| (format!("k{i}"), Datum::Int((i as i64).into())))
+                    .collect(),
+            ),
+            Fixture::List => Datum::List(values.collect()),
+            Fixture::Tuple => Datum::Tuple(values.collect()),
+        }
+    }
+    fn bounds() -> Bounds {
+        Bounds {
+            charge: lash_kernel_vm::Charge::Exact,
+            memory_meter: lash_kernel_vm::MemoryMeter::On,
+            charge_limit: u64::MAX,
+            memory: 512 << 20,
+            call_depth: 100,
+            live_tasks: 16,
+            requests_per_park: 16,
+            join_members: 16,
+        }
+    }
+    fn seeded(
+        program: &Program,
+        kind: Fixture,
+    ) -> Result<(KernelMachine, Pages, Console, lash_kernel_vm::WaitId)> {
+        let pages = Pages::default();
+        let mut machine = KernelMachine::start(
+            program.clone(),
+            bounds(),
+            CellStart {
+                target: Target::Main,
+                args: Vec::new(),
+                session: None,
+                owner: PageId([9; 32]),
+                modes: Default::default(),
+                host: Vec::new(),
+            },
+            Box::new(pages.clone()),
+        )?;
+        let mut console = Console::default();
+        let seed = park(&mut machine, &mut console)?;
+        machine.deliver(seed, Outcome::Completed(datum(kind)))?;
+        let pause = park(&mut machine, &mut console)?;
+        Ok((machine, pages, console, pause))
+    }
+    fn measure(program: &Program, kind: Fixture) -> Result<(u64, u64, Vec<Datum>)> {
+        let (mut machine, pages, mut console, pause) = seeded(program, kind)?;
+        let root = machine
+            .seal(BUDGET)?
+            .ok_or_else(|| anyhow!("seed seal incomplete"))?;
+        // The paired run starts at the same park and uses the same source program.
+        machine.deliver(pause, Outcome::Completed(Datum::Null))?;
+        park(&mut machine, &mut console)?;
+        let warm = console.0.clone();
+        let charged = machine.meters().charged;
+        drop(machine);
+        pages.reset();
+        let mut machine = KernelMachine::open(
+            program.clone(),
+            bounds(),
+            &root.checkpoint(),
+            Box::new(pages.clone()),
+        )?;
+        machine.deliver(pause, Outcome::Completed(Datum::Null))?;
+        console.0.clear();
+        park(&mut machine, &mut console)?;
+        ensure!(
+            console.0 == warm,
+            "warm/cold results differ: {:?} / {:?}",
+            warm,
+            console.0
+        );
+        ensure!(
+            machine.meters().charged == charged,
+            "warm/cold charges differ"
+        );
+        let reads = pages.0.borrow().reads;
+        Ok((
+            reads,
+            charged.ok_or_else(|| anyhow!("charge meter off"))?,
+            warm,
+        ))
+    }
+
+    // This is a measurement command for the lane inventory, not an acceptance test.
+    #[test]
+    #[ignore = "explicit cold point-operation inventory"]
+    fn cold_point_operation_inventory() -> Result<()> {
+        use Fixture::*;
+        let cases = [
+            ("python", Map, "print(xs.get(100003))"),
+            ("python", Map, "print(xs.get(200003))"),
+            ("python", Map, "print(xs.get(200003, -1))"),
+            ("python", Map, "print(xs[100003])"),
+            ("python", Map, "print(100003 in xs)"),
+            ("python", Map, "xs[100003] = -1"),
+            ("python", Map, "del xs[100003]"),
+            ("python", Map, "print(xs.pop(100003))"),
+            ("python", Map, "print(xs.setdefault(100003, -1))"),
+            ("python", Map, "print(xs.setdefault(200003, -1))"),
+            ("python", Set, "print(100003 in xs)"),
+            ("python", Set, "xs.add(100003)"),
+            ("python", Set, "xs.remove(100003)"),
+            ("python", Set, "xs.discard(100003)"),
+            ("python", Record, "print(xs.k100003)"),
+            ("python", Record, "print(xs['k100003'])"),
+            ("python", Record, "print(xs.get('k100003'))"),
+            ("python", Record, "print('k100003' in xs)"),
+            ("python", List, "print(xs[100003])"),
+            ("python", List, "xs[100003] = -1"),
+            ("python", List, "print(xs.pop())"),
+            ("python", Tuple, "print(xs[100003])"),
+            ("typescript", Map, "console.log(xs.get(100003));"),
+            ("typescript", Map, "console.log(xs.get(200003));"),
+            ("typescript", Map, "console.log(xs.has(100003));"),
+            ("typescript", Map, "xs.set(100003, -1);"),
+            ("typescript", Map, "console.log(xs.delete(100003));"),
+            ("typescript", Set, "console.log(xs.has(100003));"),
+            ("typescript", Set, "xs.add(100003);"),
+            ("typescript", Set, "console.log(xs.delete(100003));"),
+            ("typescript", Record, "console.log(xs.k100003);"),
+            ("typescript", Record, "console.log(xs['k100003']);"),
+            ("typescript", Record, "console.log('k100003' in xs);"),
+            ("typescript", Record, "xs.k100003 = -1;"),
+            ("typescript", Record, "xs['k100003'] = -1;"),
+            ("typescript", Record, "console.log(delete xs.k100003);"),
+            ("typescript", List, "console.log(xs[100003]);"),
+            ("typescript", List, "xs[100003] = -1;"),
+            ("typescript", List, "console.log(xs.pop());"),
+            ("typescript", Tuple, "console.log(xs[100003]);"),
+        ];
+        for (dialect, kind, operation) in cases {
+            match authored(dialect, operation).and_then(|p| measure(&p, kind)) {
+                Ok((reads, charge, _)) => {
+                    println!("POINT | {dialect} | {operation} | {reads} | {charge}")
+                }
+                Err(e) => println!("POINT | {dialect} | {operation} | ERROR {e:#}"),
+            }
+        }
+        for (kind, operation) in [
+            (Map, "print map.get(xs, 100003)"),
+            (Record, "print record.get(xs, \"k100003\")"),
+            (Map, "print map.contains(xs, 100003)"),
+            (Set, "print set.contains(xs, 100003)"),
+            (Record, "print record.contains(xs, \"k100003\")"),
+            (List, "print list.at(xs, 100003)"),
+            (Tuple, "print tuple.at(xs, 100003)"),
+        ] {
+            match measure(&native(operation)?, kind) {
+                Ok((reads, charge, _)) => {
+                    println!("POINT | kernel | {operation} | {reads} | {charge}")
+                }
+                Err(e) => println!("POINT | kernel | {operation} | ERROR {e:#}"),
+            }
+        }
+        Ok(())
+    }
+    fn get_law(key: i64, default: bool) -> Result<()> {
+        // Contract §6: d is the directory depth, not the chunk-index height.
+        // These integer-only maps have one directory leaf, so d = 1.
+        let d = 1;
+        let py = if default {
+            format!("print(xs.get({key}, -1))")
+        } else {
+            format!("print(xs.get({key}))")
+        };
+        let ts = if default {
+            format!("console.log(xs.get({key}) ?? -1);")
+        } else {
+            format!("console.log(xs.get({key}));")
+        };
+        let mut violations = Vec::new();
+        for (dialect, source) in [("python", py), ("typescript", ts)] {
+            let (reads, charge, result) = measure(&authored(dialect, &source)?, Fixture::Map)?;
+            let expected = Datum::Text(if key < ELEMENTS as i64 {
+                key.to_string()
+            } else if default {
+                "-1".into()
+            } else if dialect == "python" {
+                "None".into()
+            } else {
+                "undefined".into()
+            });
+            ensure!(
+                result == [expected],
+                "wrong {dialect} get result: {result:?}"
+            );
+            println!("{dialect}: {source}: {reads} pages, {charge} charge units");
+            if reads > d + 2 {
+                violations.push(format!("{dialect}: {reads} > d + 2 = {}", d + 2));
+            }
+        }
+        // The kernel native is also a public keyed read, with a strict
+        // missing-key error rather than either dialect's default result.
+        if !default {
+            let operation =
+                format!("try {{ print map.get(xs, {key}) }} catch e {{ print \"missing\" }}");
+            let (reads, charge, result) = measure(&native(&operation)?, Fixture::Map)?;
+            let expected = if key < ELEMENTS as i64 {
+                Datum::Int(key.into())
+            } else {
+                Datum::Text("missing".into())
+            };
+            ensure!(result == [expected], "wrong native get result: {result:?}");
+            println!("kernel: {reads} pages, {charge} charge units");
+            if reads > d + 2 {
+                violations.push(format!("kernel: {reads} > d + 2 = {}", d + 2));
+            }
+        }
+        ensure!(violations.is_empty(), "{}", violations.join("; "));
+        Ok(())
+    }
+    #[test]
+    fn a_cold_present_map_get_loads_one_chunk_with_the_warm_result_and_charge() -> Result<()> {
+        get_law(INDEX, false)
+    }
+    #[test]
+    fn a_cold_absent_map_get_loads_one_chunk_with_the_warm_result_and_charge() -> Result<()> {
+        get_law(200_003, false)
+    }
+    #[test]
+    fn a_cold_defaulted_map_get_loads_one_chunk_with_the_warm_result_and_charge() -> Result<()> {
+        get_law(200_003, true)
+    }
+
+    fn refused_chunk(operation: &str) -> Result<(lash_kernel_vm::Bound, Vec<PageId>)> {
+        let program = native_program(operation, true)?;
+        let seed_program = native("")?;
+        let (mut seed, pages, mut console, first) = seeded(&seed_program, Fixture::Map)?;
+        seed.deliver(first, Outcome::Completed(Datum::Null))?;
+        let second = park(&mut seed, &mut console)?;
+        seed.deliver(second, Outcome::Completed(Datum::Null))?;
+        let Step::Ended(End::Finished(finished)) = seed.run(&mut console, u64::MAX)? else {
+            return Err(anyhow!("seed cell did not finish"));
+        };
+        let session = finished
+            .carry
+            .ok_or_else(|| anyhow!("seed cell has no carry"))?;
+        drop(seed);
+        // Each bound is a fresh cold run. Reopening a checkpoint preserves
+        // its stored bounds, so changing open()'s fallback would not test
+        // a different memory bound.
+        for memory in (128..=512_000).step_by(128) {
+            let Ok(mut machine) = KernelMachine::start(
+                program.clone(),
+                Bounds { memory, ..bounds() },
+                CellStart {
+                    target: Target::Main,
+                    args: Vec::new(),
+                    session: Some(session),
+                    owner: PageId([9; 32]),
+                    modes: Default::default(),
+                    host: Vec::new(),
+                },
+                Box::new(pages.clone()),
+            ) else {
+                continue;
+            };
+            let mut before = Console::default();
+            let Ok(pause) = park(&mut machine, &mut before) else {
+                continue;
+            };
+            pages.reset();
+            machine.deliver(pause, Outcome::Completed(Datum::Null))?;
+            let mut console = Console::default();
+            let step = machine.run(&mut console, u64::MAX)?;
+            let leaves = pages
+                .0
+                .borrow()
+                .read_pages
+                .iter()
+                .filter(|(kind, _)| *kind == PageKind::SEQUENCE_LEAF)
+                .map(|(_, id)| *id)
+                .collect::<Vec<_>>();
+            if let Step::Ended(End::Error(lash_kernel_vm::RunError::Bound(exceeded))) = step
+                && exceeded.bound == lash_kernel_vm::Bound::Memory
+                && !leaves.is_empty()
+            {
+                ensure!(console.0.is_empty(), "refused get printed a result");
+                println!(
+                    "{operation}: chunk refused at memory={memory}, leaves={}",
+                    leaves.len()
+                );
+                return Ok((exceeded.bound, leaves));
+            }
+        }
+        Err(anyhow!(
+            "no chunk-load memory refusal for {operation}; last read kinds: {:?}",
+            pages
+                .0
+                .borrow()
+                .read_pages
+                .iter()
+                .map(|(kind, _)| kind)
+                .collect::<Vec<_>>()
+        ))
+    }
+    #[test]
+    fn a_cold_get_refuses_the_same_chunk_load_as_a_subscript_at_the_memory_bound() -> Result<()> {
+        let subscript = refused_chunk("print xs[100003]")?;
+        let get = refused_chunk("print map.get(xs, 100003)")?;
+        ensure!(
+            get == subscript,
+            "get refused a different chunk load: {get:?} / {subscript:?}"
+        );
         Ok(())
     }
 }
