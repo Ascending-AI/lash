@@ -2029,3 +2029,6 @@ async fn print_environment_selects_fresh_dependencies_and_refuses_conflicts() {
     ));
     core.shutdown().await.unwrap();
 }
+
+#[path = "callable_source/cenote_r14.rs"]
+mod cenote_r14;

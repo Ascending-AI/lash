@@ -109,6 +109,20 @@ pub(super) async fn capturing_views() -> (
         .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
         .build()
         .unwrap();
+    capturing_views_on(core, pin, base).await
+}
+
+pub(super) async fn capturing_views_on(
+    core: lash::LashCore,
+    pin: lash::process::HostArtifactPin,
+    base: lash::process::ProcessEnv,
+) -> (
+    lash::LashCore,
+    lash::process::HostArtifactPin,
+    lash::process::ProcessEnv,
+    lash::package::RecordedPackages,
+    lash::vm::WorkflowEnvironmentRequest,
+) {
     let (packages, namespace) = namespace(&core, &pin, &base).await;
     let mut fixture = Packages {
         core,

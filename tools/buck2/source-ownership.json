@@ -50,6 +50,7 @@
         "tests/workflow_laws.rs",
         "tests/workflow_laws/callable_env.rs",
         "tests/workflow_laws/callable_source.rs",
+        "tests/workflow_laws/callable_source/cenote_r14.rs",
         "tests/workflow_laws/cancelled_sleep.rs",
         "tests/workflow_laws/coarse.rs",
         "tests/workflow_laws/crossing.rs",
@@ -99,6 +100,11 @@
     "derive_tests": true,
     "test_includes": {
       "workflow_laws": [
+        "tests/workflow_laws/callable_source/r14/attempt_1.ts",
+        "tests/workflow_laws/callable_source/r14/attempt_2.ts",
+        "tests/workflow_laws/callable_source/r14/attempt_3.ts",
+        "tests/workflow_laws/callable_source/r14/method_argument.ts",
+        "tests/workflow_laws/callable_source/r14/numeric_label.ts",
         "tests/workflow_laws/fixtures/canvas-insert-request.json",
         "tests/workflow_laws/fixtures/information-create-request.json"
       ]
