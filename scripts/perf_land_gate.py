@@ -81,6 +81,9 @@ def check_cold_access(key, row):
     heap = fixture["heap_writes"]
     total = heap + fixture["run_segments"] + 2
     errors = []
+    if row.get("directory_depth") != fixture["directory_depth"]:
+        errors.append(f"{key}: directory depth {row.get('directory_depth')} differs from the fixture's "
+                      f"d = {fixture['directory_depth']}")
     if not (type(row["cold_leaf_pages"]) is int and row["cold_leaf_pages"] > reads):
         errors.append(f"{key}: workload is not a cold collection spanning more than the read bound "
                       f"({row['cold_leaf_pages']} leaf pages measured)")

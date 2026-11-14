@@ -33,12 +33,14 @@ class GateLaws(unittest.TestCase):
         # point read or edit reads d + 2 = 3 pages; heap writes are 3; all
         # writes per seal are 3 + s + 2 = 6 with one run segment.
         row = dict(elements=200_000, reads=3, edit_reads=3, writes=3, total_writes=6,
-                   path_depth=1, cold_leaf_pages=3125)
+                   path_depth=1, cold_leaf_pages=3125, directory_depth=1)
         for key in ('list', 'map'):
             gate.check_cold_access(key, row)
             for field, planted in (('reads', 4), ('edit_reads', 4), ('writes', 4), ('total_writes', 7)):
                 with self.assertRaisesRegex(ValueError, f'cold {field} {planted} exceeds'):
                     gate.check_cold_access(key, dict(row, **{field: planted}))
+            with self.assertRaisesRegex(ValueError, 'directory depth 2 differs'):
+                gate.check_cold_access(key, dict(row, directory_depth=2))
 
     def test_unsupported_base_is_a_declared_no_comparison_that_still_holds_the_candidate(self):
         base = [dict(status='unsupported', error='cold point edit: canonical region reached an '

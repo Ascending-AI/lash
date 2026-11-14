@@ -39,11 +39,32 @@ struct Storage {
     total_reads: u64,
     total_writes: u64,
 }
+/// What a sealed container occupies: its chunks under their chunk index,
+/// and the object directory holding its row.
+#[derive(Debug, PartialEq, Eq)]
+struct Geometry {
+    chunk_pages: usize,
+    index_pages: usize,
+    index_depth: u64,
+    directory_depth: u64,
+}
 #[derive(Clone, Default)]
 struct Pages(Rc<RefCell<Storage>>);
 impl Pages {
-    fn geometry(&self, map: bool) -> (u64, usize) {
-        fn depth(page: &PageAnswer, pages: &BTreeMap<PageId, PageAnswer>, index: PageKind) -> u64 {
+    /// A list and a map are both sealed as SEQUENCE_LEAF chunks under
+    /// SEQUENCE_INDEX pages, with the container row in the KEYED directory.
+    /// The chunk-index depth counts index levels; the directory depth d
+    /// counts KEYED_INDEX levels and the leaf (contract section 6).
+    fn geometry(&self) -> Geometry {
+        fn depth(
+            page: &PageAnswer,
+            pages: &BTreeMap<PageId, PageAnswer>,
+            index: PageKind,
+            leaf: PageKind,
+        ) -> u64 {
+            if page.kind == leaf {
+                return u64::from(leaf == PageKind::KEYED_LEAF);
+            }
             if page.kind != index {
                 return 0;
             }
@@ -51,33 +72,32 @@ impl Pages {
                 .children
                 .iter()
                 .filter_map(|child| pages.get(&child.id))
-                .map(|child| depth(child, pages, index))
+                .map(|child| depth(child, pages, index, leaf))
                 .max()
                 .unwrap_or(0)
         }
         let storage = self.0.borrow();
-        let index = if map {
-            PageKind::KEYED_INDEX
-        } else {
-            PageKind::SEQUENCE_INDEX
+        let height = |index, leaf| {
+            storage
+                .pages
+                .values()
+                .map(|page| depth(page, &storage.pages, index, leaf))
+                .max()
+                .unwrap_or(0)
         };
-        let leaf = if map {
-            PageKind::KEYED_LEAF
-        } else {
-            PageKind::SEQUENCE_LEAF
+        let count = |kind| {
+            storage
+                .pages
+                .values()
+                .filter(|page| page.kind == kind)
+                .count()
         };
-        let height = storage
-            .pages
-            .values()
-            .map(|page| depth(page, &storage.pages, index))
-            .max()
-            .unwrap_or(0);
-        let leaves = storage
-            .pages
-            .values()
-            .filter(|page| page.kind == leaf)
-            .count();
-        (height, leaves)
+        Geometry {
+            chunk_pages: count(PageKind::SEQUENCE_LEAF),
+            index_pages: count(PageKind::SEQUENCE_INDEX),
+            index_depth: height(PageKind::SEQUENCE_INDEX, PageKind::SEQUENCE_LEAF),
+            directory_depth: height(PageKind::KEYED_INDEX, PageKind::KEYED_LEAF),
+        }
     }
     fn reset(&self) {
         let mut storage = self.0.borrow_mut();
@@ -259,7 +279,7 @@ fn population(program: &Program, map: bool) -> Result<serde_json::Value> {
     let root = machine
         .seal(BUDGET)?
         .ok_or_else(|| anyhow!("cold seed seal incomplete"))?;
-    let (path_depth, cold_leaf_pages) = pages.geometry(map);
+    let geometry = pages.geometry();
     drop(machine);
     pages.reset();
     let mut machine = KernelMachine::open(
@@ -319,7 +339,7 @@ fn population(program: &Program, map: bool) -> Result<serde_json::Value> {
         "cold edited value differs after reopen"
     );
     Ok(
-        json!({"status": "supported", "elements": ELEMENTS, "reads": reads, "total_reads": total_reads, "edit_reads": edit_reads, "total_edit_reads": total_edit_reads, "total_writes": total_writes, "path_depth": path_depth, "cold_leaf_pages": cold_leaf_pages, "writes": writes, "bytes_written": bytes_written, "seal_ns": seal_ns, "results": [INDEX, -1]}),
+        json!({"status": "supported", "elements": ELEMENTS, "reads": reads, "total_reads": total_reads, "edit_reads": edit_reads, "total_edit_reads": total_edit_reads, "total_writes": total_writes, "path_depth": geometry.index_depth, "cold_leaf_pages": geometry.chunk_pages, "index_pages": geometry.index_pages, "directory_depth": geometry.directory_depth, "writes": writes, "bytes_written": bytes_written, "seal_ns": seal_ns, "results": [INDEX, -1]}),
     )
 }
 
@@ -377,6 +397,46 @@ mod tests {
         assert!(answers.into_iter().all(|answer| answer.is_ok()));
         assert_eq!(pages.0.borrow().reads, 2);
         assert_eq!(pages.0.borrow().total_reads, 3);
+        Ok(())
+    }
+
+    fn seal(
+        pages: &mut Pages,
+        kind: PageKind,
+        tag: u64,
+        children: Vec<PageRef>,
+    ) -> Result<PageRef> {
+        let mut tokens = lash_kernel_value::tokens::TokenWriter::new();
+        tokens.unsigned(tag);
+        for child in &children {
+            tokens.child(lash_kernel_value::tokens::ChildRef(child.id.0));
+        }
+        Ok(pages.seal(PageBody {
+            kind,
+            tokens: tokens.into_bytes(),
+            children,
+        })?)
+    }
+
+    /// A paged map is stored as a list is: chunks under a chunk index, its
+    /// row in a keyed directory. Geometry describes those pages, not only
+    /// the directory.
+    #[test]
+    fn geometry_describes_a_paged_map_by_its_chunks_index_and_directory() -> Result<()> {
+        let mut pages = Pages::default();
+        let chunks = vec![
+            seal(&mut pages, PageKind::SEQUENCE_LEAF, 1, Vec::new())?,
+            seal(&mut pages, PageKind::SEQUENCE_LEAF, 2, Vec::new())?,
+        ];
+        let index = seal(&mut pages, PageKind::SEQUENCE_INDEX, 3, chunks)?;
+        seal(&mut pages, PageKind::KEYED_LEAF, 4, vec![index])?;
+        let expected = Geometry {
+            chunk_pages: 2,
+            index_pages: 1,
+            index_depth: 1,
+            directory_depth: 1,
+        };
+        assert_eq!(pages.geometry(), expected);
         Ok(())
     }
 }

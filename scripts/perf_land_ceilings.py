@@ -6,10 +6,10 @@
 # The <=2x Monty goal is report-only until after the switch: a PY row above it
 # is named in the receipt and never fails the gate.
 # Current ceilings use the median of five raw paired secants times 1.03.
-# The four rows the reviewed replacement adds were seeded, lead as reviewer,
-# from the L7 phase-2 calibration of 5e3c0a5268: candidate medians
-# times 1.03, measured by a binary that carries the diagnostic statement
-# counters.
+# The four rows the reviewed replacement adds follow the same convention,
+# lead as reviewer: main d709cfaf7f's medians times 1.03, from the L7 land run
+# of 45f2a0ccf6 (14 Nov), whose candidate binary carries the diagnostic
+# statement counters. Ceilings are checked on both sides.
 
 MONTY_BINDING = True
 MONTY_MAX_RATIO = 3.0
@@ -138,22 +138,27 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                               'sha256': '37e6120f7e3f91f05d4cad4303562de365c1295741a2df39aa573a625558e6c7',
                               'lo': 1000,
                               'ops': 4,
-                              'ceiling': 1790.4},
+                              'ceiling': 166471.98706013156},
  'python/float_arith': {'source': 'crates/lash-perf/src/compare/workloads/float_arith.py',
                         'sha256': '096caf1f86bc46450ea51f55bd0c53074ac9c7ea82d0b05555fe8893684a45ac',
                         'lo': 1,
                         'ops': 1000,
-                        'ceiling': 761.8},
+                        'ceiling': 96336.92663894738},
  'python/string_build1': {'source': 'crates/lash-perf/src/compare/workloads/string_build1.py',
                           'sha256': 'f7f211a6d7b28ddca506ffeb9f1fd3a62b0a2db0b8dc48292d1a1be1f821d7b9',
                           'lo': 1,
                           'ops': 1000,
-                          'ceiling': 3192.2},
+                          'ceiling': 569673.8072510527},
  'python/int_to_string': {'source': 'crates/lash-perf/src/compare/workloads/int_to_string.py',
                           'sha256': '3973e856976fafb5b440acc83a65d61457ee588644b7f88864291782ff5b5cdb',
                           'lo': 1000,
                           'ops': 3,
-                          'ceiling': 1146.8}}
+                          'ceiling': 524099.4512266667}}
+
+# Information only, never checked: candidate (45f2a0ccf6) medians of the
+# rows added above, from the same land run.
+ADDED_ROW_CANDIDATE_MEDIANS = {'python/func_closure_call': 1738.2, 'python/float_arith': 739.6,
+                               'python/string_build1': 3099.2, 'python/int_to_string': 1113.5}
 
 # The old engine with this exact boundary instrument is pinned after its first land.
 CHECKPOINT_BASE = '3abbc2bd519228a4f43f7be7ba289f470324068a'
