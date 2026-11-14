@@ -169,13 +169,35 @@ pub(super) fn linked(library: &PreparedLibrary, text: &str) -> Result<Program, S
     .map_err(|error| error.to_string())
 }
 
+// The literal schedules pin release 0016's dialect natives under L46. The
+// test dependencies carry both dialect images, including in a shipped-library
+// consumer with neither dialect feature. Bind their implementations here too.
+fn probe_library() -> PreparedLibrary {
+    let release = lash_kernel_releases::helper_release().expect("helper release");
+    let mut functions = crate::installed_functions().expect("installed functions");
+    for package in lash_kernel_releases::PACKAGES {
+        match package.path {
+            "python" if !cfg!(feature = "dialect-python") => {
+                let image = lash_kernel_doc::ReleasedFunctions::read(package.image)
+                    .expect("Python helper image");
+                lash_ext_py_core::implement(&mut functions, image.ids())
+                    .expect("Python probe implementations");
+            }
+            "typescript" if !cfg!(feature = "dialect-typescript") => {
+                let image = lash_kernel_doc::ReleasedFunctions::read(package.image)
+                    .expect("TypeScript helper image");
+                lash_ext_ts_core::implement(&mut functions, image.ids())
+                    .expect("TypeScript probe implementations");
+            }
+            _ => {}
+        }
+    }
+    PreparedLibrary::with_helpers(Arc::new(functions), Arc::clone(&release.helpers))
+}
+
 #[test]
 fn every_r56_probe_holds_on_the_bytecode_core() {
-    let release = lash_kernel_releases::helper_release().expect("helper release");
-    let library = PreparedLibrary::with_helpers(
-        Arc::new(crate::installed_functions().expect("installed functions")),
-        Arc::clone(&release.helpers),
-    );
+    let library = probe_library();
     let mut failures = Vec::new();
     for (file, text) in PROBE_FILES {
         let shard: Shard = serde_json::from_str(text).expect(file);
@@ -304,11 +326,7 @@ fn seen() -> (
 // where the literal is the base's charge (probes/README.md).
 #[test]
 fn observing_the_bytecode_core_changes_nothing_and_sees_what_the_base_sees() {
-    let release = lash_kernel_releases::helper_release().expect("helper release");
-    let library = PreparedLibrary::with_helpers(
-        Arc::new(crate::installed_functions().expect("installed functions")),
-        Arc::clone(&release.helpers),
-    );
+    let library = probe_library();
     let mut failures = Vec::new();
     for (file, text) in PROBE_FILES {
         let shard: Shard = serde_json::from_str(text).expect(file);
