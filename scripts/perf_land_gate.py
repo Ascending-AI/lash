@@ -72,15 +72,45 @@ def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=
 
 
 def check_cold_access(key, row):
-    require(row["elements"] == 200_000, f"{key}: cold workload size differs")
-    require(type(row["path_depth"]) is int and row["path_depth"] >= 0,
-            f"{key}: missing store tree path depth")
-    bound = row["path_depth"] + 1
-    require(type(row["cold_leaf_pages"]) is int and row["cold_leaf_pages"] > max(3, bound),
-            f"{key}: workload is not a cold collection spanning more than the read bound")
-    for field, ceiling in (("reads", 3), ("edit_reads", bound), ("writes", bound)):
-        require(type(row[field]) is int and 0 < row[field] <= ceiling,
-                f"{key}: cold {field} {row[field]} exceeds {ceiling} or is not counted")
+    """Hold one cold row to contract section 6 for its fixture: reads d + 2
+    cold, heap writes within the fixture ceiling, all writes per seal within
+    that plus s + 2. Every failing term is named."""
+    require(row["elements"] == policy.BOUNDARY["elements"], f"{key}: cold workload size differs")
+    fixture = policy.BOUNDARY["fixtures"][key]
+    reads = fixture["directory_depth"] + 2
+    heap = fixture["heap_writes"]
+    total = heap + fixture["run_segments"] + 2
+    errors = []
+    if not (type(row["cold_leaf_pages"]) is int and row["cold_leaf_pages"] > reads):
+        errors.append(f"{key}: workload is not a cold collection spanning more than the read bound "
+                      f"({row['cold_leaf_pages']} leaf pages measured)")
+    for field, ceiling, term in (("reads", reads, "d + 2"), ("edit_reads", reads, "d + 2"),
+                                 ("writes", heap, "C + I + E + D"), ("total_writes", total, "W")):
+        if not (type(row[field]) is int and 0 < row[field] <= ceiling):
+            errors.append(f"{key}: cold {field} {row[field]} exceeds {term} = {ceiling} or is not counted")
+    require(not errors, "; ".join(errors))
+
+
+def checkpoint_outcome(key, old, new):
+    """The checkpoint comparison of one row: base-relative ratios, or the
+    declared outcome of a base that cannot perform the cold point edit
+    (FIG-7669), which records the candidate's cost as the next baseline."""
+    unsupported = [row for row in old if row["status"] == "unsupported"]
+    if unsupported:
+        require(len(unsupported) == len(old) and all(
+            "cold point edit" in row["error"] and "canonical region reached an unintegrated boundary" in row["error"]
+            for row in unsupported), f"base/{key}: unqualified failure, not FIG-7669")
+        supported = [row for row in new if row["status"] == "supported"]
+        baseline = {field: statistics.median(row[field] for row in supported) if supported else None
+                    for field in ("bytes_written", "seal_ns")}
+        return dict(outcome="base unsupported: no comparison", baseline=baseline), {}, []
+    ratios, errors = {}, []
+    if all(row["status"] == "supported" for row in new):
+        for field in ("seal_ns", "bytes_written"):
+            ratios[field] = statistics.median([n[field] / b[field] for b, n in zip(old, new, strict=True)])
+            if ratios[field] > policy.BOUNDARY["max_checkpoint_ratio"]:
+                errors.append(f"{key}: checkpoint {field} {ratios[field]:.6f}x exceeds base")
+    return dict(outcome="base-relative"), ratios, errors
 
 
 def check_rows(prior, previous_source, calibrate):
@@ -221,6 +251,11 @@ def contract(base, calibrate):
                       "PYTHON_SHA256", "PYTHON_VERSION", "MONTY_VERSION", "MONTY_SHA256", "WORKERS", "CPU_MODEL", "SCOPE"):
             require(namespace[field] == getattr(policy, field), f"{field}: measurement contract changed; reviewed replacement required")
         replacement = hashlib.sha256(old.stdout.encode()).hexdigest() == policy.REVIEWED_REPLACEMENT["previous_sha256"]
+        # The reviewed replacement introduces the reference environment;
+        # after it, the environment is part of the fixed contract.
+        require(namespace.get("REFERENCE_ENVIRONMENT", policy.REFERENCE_ENVIRONMENT if replacement else None)
+                == policy.REFERENCE_ENVIRONMENT,
+                "REFERENCE_ENVIRONMENT: measurement contract changed; reviewed replacement required")
         if replacement:
             require([key for key in policy.COST_ORDER if key not in policy.REVIEWED_REPLACEMENT["added_rows"]]
                     == namespace["COST_ORDER"], "existing cost order changed")
@@ -290,28 +325,19 @@ def boundary(base, candidate, out):
     report, errors = {}, []
     for key in ("list", "map"):
         old, new = captures["base"][key], captures["candidate"][key]
-        candidate_complete = all(row["status"] == "supported" for row in new)
         for row in new:
             try:
                 require(row["status"] == "supported", f"candidate/{key}: {row.get('error', 'incomplete point edit')}")
                 check_cold_access(key, row)
             except ValueError as error:
                 errors.append(str(error))
-        unsupported = [row for row in old if row["status"] == "unsupported"]
-        ratios = {}
-        if unsupported:
-            require(len(unsupported) == len(old) and all(
-                "cold point edit" in row["error"] and "canonical region reached an unintegrated boundary" in row["error"]
-                for row in unsupported), f"base/{key}: unqualified failure, not FIG-7669")
-            checkpoint = "unsupported at base: " + ", ".join(path for path in receipts if "boundary-base-" in path)
-        else:
-            checkpoint = "base-relative"
-            if candidate_complete:
-                for field in ("seal_ns", "bytes_written"):
-                    ratios[field] = statistics.median([n[field] / b[field] for b, n in zip(old, new, strict=True)])
-                    if ratios[field] > policy.BOUNDARY["max_checkpoint_ratio"]:
-                        errors.append(f"{key}: checkpoint {field} {ratios[field]:.6f}x exceeds base")
-        report[key] = dict(base=old, candidate=new, checkpoint=checkpoint, checkpoint_ratios=ratios)
+        checkpoint, ratios, failed = checkpoint_outcome(key, old, new)
+        errors.extend(failed)
+        print(f"perf boundary {key}: {checkpoint['outcome']}"
+              + (f"; baseline {checkpoint['baseline']}" if "baseline" in checkpoint else f"; ratios {ratios}"),
+              flush=True)
+        report[key] = dict(base=old, candidate=new, checkpoint=checkpoint, checkpoint_ratios=ratios,
+                           base_receipts=[path for path in receipts if "boundary-base-" in path])
     write(Path(out) / "boundary.json", dict(base=base, candidate=candidate, rows=report, failures=errors))
     require(not errors, "; ".join(errors))
     return report
@@ -319,7 +345,8 @@ def boundary(base, candidate, out):
 
 def capture(artifact, side, key, row, repeat, cpu, refs, out, deadline):
     stem = Path(out) / f"{side}-{key.replace('/', '-')}-{repeat}"
-    command = ["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--", artifact["binary"], "compare", "--out", str(stem.with_suffix(".json")), "--instructions",
+    command = ["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--",
+               *policy.REFERENCE_ENVIRONMENT["personality"], artifact["binary"], "compare", "--out", str(stem.with_suffix(".json")), "--instructions",
                "--runs", "1", "--warmups", "1", "--factor", "20", "--dialect", key.split("/")[0],
                "--workload", key.split("/")[1], "--cpu", str(cpu), *refs["args"]]
     remaining = deadline - time.monotonic()
@@ -327,7 +354,7 @@ def capture(artifact, side, key, row, repeat, cpu, refs, out, deadline):
     start = time.monotonic()
     with stem.with_suffix(".log").open("w") as log:
         process = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                                   start_new_session=True)
+                                   env=policy.REFERENCE_ENVIRONMENT["env"], start_new_session=True)
         try:
             process.wait(timeout=remaining)
         except subprocess.TimeoutExpired:
@@ -400,6 +427,7 @@ def measure(base_path, candidate_path, out, calibrate=False):
                               compiler=policy.COMPILER, engine=policy.ENGINE_VERSION,
                               references=dict(quickjs=policy.QUICKJS_REVISION, python=policy.PYTHON_VERSION,
                                               monty=policy.MONTY_VERSION, monty_binding=policy.MONTY_BINDING,
+                                              environment=policy.REFERENCE_ENVIRONMENT,
                                               monty_max_ratio=policy.MONTY_MAX_RATIO,
                                               monty_report_ratio=policy.MONTY_REPORT_RATIO)),
                   monty_report=[])
