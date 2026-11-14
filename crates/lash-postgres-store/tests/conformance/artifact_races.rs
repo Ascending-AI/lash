@@ -1640,12 +1640,11 @@ async fn postgres_an_execution_end_beside_a_session_delete_locks_the_deleted_fra
 }
 
 /// A publisher that loses a lock race publishes on its retry (FIG-7700).
-/// A raw transaction holds module `M`'s lock; a publisher of environment
-/// `H`, whose closure `C` holds `M`, takes `C` and waits on `M`; the raw
-/// transaction then asks for `C`. The publisher has waited longest, so
-/// its backend detects the cycle and aborts its own first attempt: the
-/// raw transaction is granted `C`, which only that abort releases, and the
-/// publication succeeds on its retry once the raw transaction ends.
+/// A raw transaction holds module `M` while its publisher waits. Observe
+/// waits from two distinct transactions before releasing `M`: the first
+/// attempt ended without publishing, and the publisher retried. Asking for
+/// its closure lock here would create a cycle whose deadlock victim is not
+/// specified by PostgreSQL.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_a_publisher_that_loses_a_lock_race_publishes_on_its_retry() {
     let Some((_lock, storage)) = storage().await else {
@@ -1654,15 +1653,38 @@ async fn postgres_a_publisher_that_loses_a_lock_race_publishes_on_its_retry() {
     reset(storage.pool()).await;
     let (_, keeper) = host_pin();
     let (env, bytes, module) = environment_over_document(&storage, &keeper, 56).await;
-    let closure = closure_holding(&storage, &module).await;
-    let (mut blocker, holder) = lock_artifact_mutations(&storage, &module).await;
+    let _closure = closure_holding(&storage, &module).await;
+    let (blocker, holder) = lock_artifact_mutations(&storage, &module).await;
     let publishing = republish_env(&storage, env, bytes)();
-    wait_until_mutations_wait(&storage, holder, 1).await;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("lash-artifact:env_closure:{closure}"))
-        .execute(&mut *blocker)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut transactions = std::collections::BTreeSet::new();
+    loop {
+        let waiting: Option<String> = sqlx::query_scalar(
+            "SELECT DISTINCT waiting.virtualtransaction FROM pg_locks waiting
+             JOIN pg_locks held ON held.locktype = waiting.locktype
+               AND held.database = waiting.database AND held.classid = waiting.classid
+               AND held.objid = waiting.objid AND held.objsubid = waiting.objsubid
+             WHERE waiting.locktype = 'advisory' AND NOT waiting.granted
+               AND waiting.pid <> $1 AND held.pid = $1 AND held.granted
+             LIMIT 1",
+        )
+        .bind(holder)
+        .fetch_optional(storage.pool())
         .await
-        .expect("the publisher's first attempt is the one aborted, not the raw transaction");
+        .expect("inspect the publisher's transaction waiting on its module");
+        if let Some(transaction) = waiting {
+            transactions.insert(transaction);
+        }
+        if transactions.len() == 2 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the publisher did not retry its blocked transaction: {transactions:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    eprintln!("publisher waited on its module in transactions {transactions:?}");
     assert!(
         !publishing.is_finished(),
         "the publisher finished while the raw transaction held its module"
