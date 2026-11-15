@@ -26,7 +26,7 @@ use lash_kernel_state::paged::run::chunked::{
 };
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
-use lash_kernel_state::paged::run::index::{Index, NODE_REFS, Seek};
+use lash_kernel_state::paged::run::index::{Index, Seek};
 use lash_kernel_state::paged::run::objects::{Record, RunValue};
 use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
@@ -491,7 +491,8 @@ fn set(heap: &mut SlotHeap, roots: &[Value], list: Value, at: i64, value: Value)
 ///
 /// The fixture: 3,125 chunks, one chunk index level below the row
 /// (I = 1); 200,000 edges at 768 a page, 261 edge pages, one edge index
-/// level (nodes over pages 0–95, 96–191, 192–260); d = 4. `heap.seal`
+/// level of four nodes, as wide as the edge index makes them for 261
+/// pages (66: pages 0–65, 66–131, 132–197, 198–260); d = 4. `heap.seal`
 /// writes no run record, so s, i and the two roots count 0.
 ///
 /// | case | C | I | E: pages + index nodes | D | W |
@@ -621,41 +622,44 @@ fn a_point_edit_in_a_four_deep_directory_seals_within_its_fixture_ceiling() {
 /// pages on a dead row's path (contract §6, ruling (A); `seal-design.md`
 /// run record).
 fn ceiling(changed: &[i64], depth: u64, dead: u64) -> u64 {
-    use std::collections::BTreeSet;
+    use lash_kernel_state::paged::run::index::Shape;
+    use lash_kernel_state::paged::run::objects::ObjectKind;
     let n = N as u64;
-    let fanout = NODE_REFS as u64;
     // An edge list past one page is cut into pages three quarters full.
     let edge_width = EDGE_REFS as u64 * 3 / 4;
-    // Index levels below a row over `leaves` pages: none for up to one
-    // node's worth, which the row holds; else one per factor of the fanout.
-    let levels = |leaves: u64| {
-        let mut levels = 0;
-        let mut top = leaves;
-        while top > fanout {
-            top = top.div_ceil(fanout);
-            levels += 1;
+    // The index pages on the paths to the leaves at `at` of an index of
+    // `shape` over `leaves`: per level below its top, the distinct nodes
+    // holding them, each level's nodes as wide as `shape` makes them for
+    // that level's count.
+    let paths = |shape: Shape, leaves: u64, at: BTreeSet<u64>| {
+        let (mut pages, mut count, mut nodes) = (0, leaves, at);
+        for _ in 0..shape.height(leaves) {
+            let width = shape.width(count);
+            nodes = nodes.iter().map(|place| place / width).collect();
+            pages += nodes.len() as u64;
+            count = count.div_ceil(width);
         }
-        levels
+        pages
     };
     // C: the one chunk both edited positions share.
     let c = 1;
+    let chunk = changed.first().map_or(0, |&at| {
+        u64::try_from(at).expect("a position") / CHUNK as u64
+    });
     // I: the chunk index path, one page per level below the row
     // (3,125 chunks: one level).
-    let i_index = levels(n.div_ceil(CHUNK as u64));
+    let i_index = paths(
+        Chunked::shape_of(ObjectKind::List, n),
+        n.div_ceil(CHUNK as u64),
+        BTreeSet::from([chunk]),
+    );
     // E: the changed edge pages, and the distinct edge index pages on
-    // their paths, one set per level below the row (261 edge pages: one
-    // level).
+    // their paths (261 edge pages: one level of four nodes).
     let edge_pages: BTreeSet<u64> = changed
         .iter()
         .map(|&at| u64::try_from(at).expect("a position") / edge_width)
         .collect();
-    let edge_levels = levels(n.div_ceil(edge_width));
-    let mut e = edge_pages.len() as u64;
-    let mut nodes = edge_pages;
-    for _ in 0..edge_levels {
-        nodes = nodes.iter().map(|page| page / fanout).collect();
-        e += nodes.len() as u64;
-    }
+    let e = edge_pages.len() as u64 + paths(EDGES, n.div_ceil(edge_width), edge_pages);
     // D: the union of the changed directory paths: the list row's, and a
     // dead row's pages it does not share.
     let d = depth + dead;
