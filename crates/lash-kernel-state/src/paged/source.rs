@@ -52,7 +52,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/identity.rs",
 ///         FLAT_MAX, LEAF, FANOUT, Kind, Node, counts, cuts, leaf, index, of, text_key, bytes_key, long,
-///         embed, flat, encode, TUPLE_LEAF, TUPLE_FANOUT, TUPLE_LEAF_TAG, TUPLE_INDEX_TAG, ERROR_TAG, Member, headed,
+///         float_key, flat, encode, TUPLE_LEAF, TUPLE_FANOUT, TUPLE_LEAF_TAG, TUPLE_INDEX_TAG, ERROR_TAG, Member, headed,
 ///         tuple_leaf, tuple_width, tuple_node, tuple_root, flat_root, tuple_leaves, TupleContent, TupleBuilder, chunk_leaf,
 ///         error_content,
 ///     ),
