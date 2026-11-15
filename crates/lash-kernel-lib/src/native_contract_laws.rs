@@ -3,6 +3,72 @@
 //! from the input-only declaration evaluator and its native-view cost adapter.
 use crate::testsupport::{Bench, decode, heap};
 
+mod allocations {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    fn record() {
+        let _ = COUNT.try_with(|count| {
+            if let Some(value) = count.get() {
+                count.set(Some(value + 1));
+            }
+        });
+    }
+
+    struct Counter;
+    #[global_allocator]
+    static ALLOCATOR: Counter = Counter;
+
+    #[expect(
+        unsafe_code,
+        reason = "test allocation counter forwards the GlobalAlloc contract unchanged to System"
+    )]
+    unsafe impl GlobalAlloc for Counter {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record();
+            // SAFETY: The caller's valid layout is passed unchanged to System.
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record();
+            // SAFETY: The caller's valid layout is passed unchanged to System.
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            // SAFETY: System allocated this pointer with the same layout.
+            unsafe { System.dealloc(pointer, layout) }
+        }
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            record();
+            // SAFETY: The caller's pointer, layout and new size are unchanged.
+            unsafe { System.realloc(pointer, layout, size) }
+        }
+    }
+
+    struct Active;
+    impl Drop for Active {
+        fn drop(&mut self) {
+            COUNT.with(|count| count.set(None));
+        }
+    }
+
+    pub(super) fn during<T>(body: impl FnOnce() -> T) -> (T, usize) {
+        COUNT.with(|count| {
+            assert!(count.get().is_none());
+            count.set(Some(0));
+        });
+        let active = Active;
+        let value = body();
+        let count = COUNT.with(|count| count.take().unwrap());
+        drop(active);
+        (value, count)
+    }
+}
+
 thread_local! {
     static OBSERVED_NAMES: std::cell::RefCell<std::collections::BTreeSet<String>> = const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
     static SORTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -177,7 +243,7 @@ pub(crate) fn new_values_bytes(
                 message,
                 data,
             } => new_values_bytes(args, new, &[*kind, *message, data.value()]) - 16,
-            NewObject::LongText(text) => 16 + text.len() as u64,
+            NewObject::LongText { text, .. } => 16 + text.len() as u64,
             NewObject::Bytes(bytes) => 16 + bytes.len() as u64,
             NewObject::BigInt(n) | NewObject::Timestamp(n) => 16 + n.bits().div_ceil(8),
             NewObject::Function(_) => 16 + 64,
@@ -207,7 +273,7 @@ pub(crate) fn decoded_values_bytes(new: &lash_kernel_doc::Nursery<'_>, values: &
                 .unwrap()
                 .1
             {
-                NewObject::LongText(text) => 16 + text.len() as u64,
+                NewObject::LongText { text, .. } => 16 + text.len() as u64,
                 NewObject::BigInt(integer) => 16 + integer.bits().div_ceil(8),
                 _ => panic!("JSON constructor produced an unexpected immutable body"),
             },
@@ -313,6 +379,409 @@ fn int(value: i64) -> Datum {
 }
 fn text(value: &str) -> Datum {
     Datum::Text(value.into())
+}
+
+/// R8: a kind tag and shallow identity need no traversal workspace. In
+/// particular, `same` must not allocate a pending-pair Vec before inspecting
+/// two inline texts, which the Python call wrapper compares on every call.
+#[test]
+fn call_wrapper_leaf_natives_answer_without_allocating() {
+    use lash_kernel_doc::{Float, NativeCall, WorkCounter};
+    let mut bench = heap();
+    let list = decode(&mut bench, Datum::List(vec![]));
+    let other = decode(&mut bench, Datum::List(vec![]));
+    let pair = decode(&mut bench, Datum::Tuple(vec![int(7), int(8)]));
+    let map = decode(&mut bench, Datum::Map(vec![(text("x"), int(7))]));
+    let short = |value| Value::Text(lash_kernel_doc::arena::ShortText::new(value).unwrap());
+    let cases: &[(&str, &[Value], Value)] = &[
+        ("kind", &[list], short("list")),
+        (
+            "same",
+            &[short("py.function"), short("py.function")],
+            Value::Bool(true),
+        ),
+        (
+            "same",
+            &[short("py.function"), short("py.builtin")],
+            Value::Bool(false),
+        ),
+        ("same", &[Value::Int(3), Value::Int(3)], Value::Bool(true)),
+        (
+            "same",
+            &[
+                Value::Float(Float::new(-0.0)),
+                Value::Float(Float::new(0.0)),
+            ],
+            Value::Bool(false),
+        ),
+        (
+            "same",
+            &[
+                Value::Float(Float::new(f64::NAN)),
+                Value::Float(Float::new(f64::NAN)),
+            ],
+            Value::Bool(true),
+        ),
+        ("same", &[list, list], Value::Bool(true)),
+        ("same", &[list, other], Value::Bool(false)),
+        ("same", &[list, Value::Absent], Value::Bool(false)),
+        ("bool.not", &[Value::Bool(true)], Value::Bool(false)),
+        ("bool.not", &[Value::Bool(false)], Value::Bool(true)),
+        ("list.len", &[list], Value::Int(0)),
+        ("tuple.len", &[pair], Value::Int(2)),
+        ("map.len", &[map], Value::Int(1)),
+        ("map.contains", &[map, short("x")], Value::Bool(true)),
+        ("map.contains", &[map, short("y")], Value::Bool(false)),
+        ("map.contains", &[map, Value::Int(7)], Value::Bool(false)),
+        ("num.to_text", &[Value::Int(-1234)], short("-1234")),
+        ("num.to_text", &[Value::Int(0)], short("0")),
+        (
+            "int.to_text",
+            &[Value::Int(255), Value::Int(16)],
+            short("ff"),
+        ),
+        (
+            "int.to_text",
+            &[Value::Int(-5), Value::Int(2)],
+            short("-101"),
+        ),
+        ("int.to_text", &[Value::Int(35), Value::Int(36)], short("z")),
+    ];
+    for &(name, values, expected) in cases {
+        let native = crate::native(name).unwrap();
+        let mut counter = WorkCounter::new(Some(0));
+        let ((answer, count), usage) = bench
+            .run(values, 0, |args, new| {
+                allocations::during(|| {
+                    native.call(NativeCall {
+                        args,
+                        new,
+                        counter: &mut counter,
+                    })
+                })
+            })
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "{name} {values:?}: a shallow answer needs no workspace"
+        );
+        assert!(answer.unwrap().same(&expected));
+        assert_eq!(counter.spent(), 0);
+        assert_eq!(usage.reserved(), 0);
+        assert_eq!(usage.grown, 0);
+        let inline = native.specialization().inline.unwrap();
+        let ((answer, count), _) = bench
+            .run(values, 0, |args, _| {
+                allocations::during(|| inline.answer_read(1, args))
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(answer.unwrap().unwrap().same(&expected));
+        assert!(inline.for_version(2).is_none());
+    }
+    let tuple = decode(&mut bench, Datum::Tuple(vec![int(3)]));
+    let same = crate::native("same")
+        .unwrap()
+        .specialization()
+        .inline
+        .unwrap();
+    assert!(same.scalar_answer(1, &[tuple, tuple]).is_none());
+
+    // Force the same registered implementations through the ordinary call,
+    // including unary completion billing and refusals at the last fee.
+    struct Ordinary(std::sync::Arc<dyn lash_kernel_doc::NativeFunction>);
+    impl lash_kernel_doc::NativeFunction for Ordinary {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            self.0.call(call)
+        }
+        fn resource_contract(
+            &self,
+            args: lash_kernel_doc::Args<'_>,
+        ) -> Result<Option<Contract>, NativeError> {
+            self.0.resource_contract(args)
+        }
+    }
+    let mut catalog = FunctionRegistry::new();
+    lash_kernel_vm::register_machine_functions(&mut catalog).unwrap();
+    crate::register_numbers(&mut catalog).unwrap();
+    crate::register_collections(&mut catalog).unwrap();
+    let run = |inline: bool, limit: u64| {
+        use lash_kernel_vm::{Bounds, Charge, CoreMachine, Machine, PreparedLibrary};
+        let mut registry = FunctionRegistry::new();
+        for (_, registered) in catalog.iter().filter(|(_, registered)| {
+            matches!(
+                registered.name(),
+                "kind"
+                    | "same"
+                    | "bool.not"
+                    | "list.len"
+                    | "tuple.len"
+                    | "map.len"
+                    | "map.contains"
+                    | "num.to_text"
+                    | "int.to_text"
+                    | "num.add"
+            )
+        }) {
+            let definition = (**registered.definition()).clone();
+            let native = std::sync::Arc::clone(registered.native().unwrap());
+            let native: std::sync::Arc<dyn lash_kernel_doc::NativeFunction> = if inline {
+                native
+            } else {
+                std::sync::Arc::new(Ordinary(native))
+            };
+            registry.register(definition, Some(native)).unwrap();
+        }
+        let document = std::sync::Arc::new(crate::testsupport::document(
+            "kernel 1\nnumbers by_spelling\nmain { let xs = [] let pair = (7, 8) let kw = map{\"x\": 7} return (kind(xs), same(\"py.function\", \"py.function\"), same(-0.0, 0.0), same(xs, xs), list.len(xs), tuple.len(pair), map.len(kw), bool.not(false), map.contains(kw, \"x\"), num.to_text(-1234), int.to_text(255, 16), num.add(-3, 1), same(\"a\", \"b\")) }",
+            &registry,
+        ));
+        let program = crate::testsupport::program(
+            document,
+            PreparedLibrary::new(std::sync::Arc::new(registry)),
+        );
+        let mut machine = CoreMachine::start(
+            program,
+            Bounds {
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: Charge::Exact,
+                charge_limit: limit,
+                memory: 64 << 20,
+                call_depth: 1,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::<crate::testsupport::Source>::default(),
+        )
+        .unwrap();
+        let step = machine
+            .run(&mut crate::testsupport::World::default(), u64::MAX)
+            .unwrap();
+        (step, machine.meters())
+    };
+    let ordinary = run(false, u64::MAX);
+    assert!(matches!(
+        ordinary.0,
+        lash_kernel_vm::Step::Ended(lash_kernel_vm::End::Finished(_))
+    ));
+    let total = ordinary.1.charged.unwrap();
+    for limit in [0, 1, total - 1, total, u64::MAX] {
+        assert_eq!(run(true, limit), run(false, limit), "charge limit {limit}");
+    }
+}
+
+/// R8/K-LIB-006: the declared word/binary64 kernel is the registered
+/// native's answer, including NaN, signed zero and word overflow fallback.
+#[test]
+fn known_answers_use_their_kernel_and_reject_disagreement() {
+    let float = |value| Value::Float(lash_kernel_doc::Float::new(value));
+    for (definition, native) in crate::numbers() {
+        let Some(inline) = native.specialization().inline else {
+            continue;
+        };
+        let version = definition.native_version;
+        let pairs = [
+            [Value::Int(3), Value::Int(4)],
+            [Value::Int(i64::MAX), Value::Int(1)],
+            [Value::Int(i64::MIN), Value::Int(-1)],
+            [float(1.0), float(2.0)],
+            [float(-0.0), float(0.0)],
+            [float(f64::INFINITY), float(f64::NEG_INFINITY)],
+            [float(f64::NAN), float(2.0)],
+            // A word and a float: the word as a binary64, exactly up to
+            // 2^53; one past it rounds to 2^53, which the ordinary call
+            // orders below it, so an inline answer there would differ.
+            [Value::Int(3), float(4.5)],
+            [float(-2.5), Value::Int(7)],
+            [Value::Int(0), float(-0.0)],
+            [Value::Int(5), float(f64::NAN)],
+            [Value::Int(1 << 53), float(9_007_199_254_740_992.0)],
+            [Value::Int((1 << 53) + 1), float(9_007_199_254_740_992.0)],
+            [float(9_007_199_254_740_992.0), Value::Int(-(1 << 53) - 1)],
+            [Value::Int(i64::MAX), float(f64::INFINITY)],
+            [Value::Int(6), float(4.0)],
+        ];
+        // One operand: a word to float rounds above 2^53, and rounding a
+        // float keeps its sign at zero and its non-finite values.
+        let singles = [
+            [Value::Int(-7)],
+            [Value::Int(i64::MAX)],
+            [Value::Int(i64::MIN)],
+            [Value::Int((1 << 53) + 1)],
+            [float(-2.5)],
+            [float(2.5)],
+            [float(-0.5)],
+            [float(-0.0)],
+            [float(f64::NEG_INFINITY)],
+            [float(f64::NAN)],
+            [float(9_007_199_254_740_993.0)],
+        ];
+        let cases = pairs
+            .iter()
+            .map(|args| &args[..])
+            .chain(singles.iter().map(|args| &args[..]));
+        for args in cases {
+            let Some(answer) = inline.scalar_answer(version, args) else {
+                continue;
+            };
+            let mut bench = heap();
+            let mut counter = lash_kernel_doc::WorkCounter::new(Some(0));
+            let called = bench.call(&*native, args, u64::MAX, &mut counter);
+            let ordinary = called.answer.unwrap();
+            assert!(answer.same(&ordinary), "{} {args:?}", definition.name);
+            assert_eq!(counter.spent(), 0);
+            assert_eq!(called.usage.objects, 0);
+            assert!(inline.scalar_answer(version + 1, args).is_none());
+        }
+    }
+    let add = crate::native("int.add").unwrap();
+    let inline = add.specialization().inline.unwrap();
+    assert!(matches!(
+        inline.scalar_answer(1, &[Value::Int(3), Value::Int(4)]),
+        Some(Value::Int(7))
+    ));
+    let args = [Value::Int(i64::MAX), Value::Int(1)];
+    assert!(inline.scalar_answer(1, &args).is_none());
+    let mut bench = heap();
+    let mut counter = lash_kernel_doc::WorkCounter::new(None);
+    let overflow = bench
+        .call(&*add, &args, u64::MAX, &mut counter)
+        .answer
+        .unwrap();
+    assert_eq!(
+        crate::testsupport::datum(&bench, &overflow),
+        Datum::Int(Integer::parse("9223372036854775808").unwrap())
+    );
+    let wrong_kind = [float(1.0), float(2.0)];
+    assert!(inline.scalar_answer(1, &wrong_kind).is_none());
+    assert!(matches!(
+        bench
+            .call(&*add, &wrong_kind, u64::MAX, &mut counter)
+            .answer,
+        Err(NativeError::Refused {
+            kind: "type_error",
+            ..
+        })
+    ));
+}
+
+/// R8: neither a replacement's name nor a different native version carries
+/// another implementation's authorization. A native may still Decline.
+#[test]
+fn inline_selection_preserves_a_replacement_natives_decline() {
+    struct Declines;
+    impl lash_kernel_doc::NativeFunction for Declines {
+        fn call(&self, _: lash_kernel_doc::NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            Err(NativeError::Decline)
+        }
+    }
+    let mut registry = FunctionRegistry::new();
+    let definition = lash_kernel_doc::parse_definition(
+        "function int.add(a: Int, b: Int) -> Int\nkernel 1\ncharge 5\nnative\nbody { return 7 }",
+    )
+    .unwrap();
+    let function = registry
+        .register(definition, Some(std::sync::Arc::new(Declines)))
+        .unwrap();
+    let registered = registry.get(&function).unwrap();
+    let native = registered.native().unwrap();
+    let args = [Value::Int(3), Value::Int(4)];
+    assert!(
+        native
+            .specialization()
+            .inline
+            .and_then(|inline| {
+                inline.scalar_answer(registered.definition().native_version, &args)
+            })
+            .is_none()
+    );
+    let mut bench = heap();
+    let mut counter = lash_kernel_doc::WorkCounter::new(None);
+    assert!(matches!(
+        bench.call(&**native, &args, u64::MAX, &mut counter).answer,
+        Err(NativeError::Decline)
+    ));
+    let declared = crate::native("int.add")
+        .unwrap()
+        .specialization()
+        .inline
+        .unwrap();
+    assert!(declared.for_version(2).is_none());
+}
+
+/// R8/K-BND-003: scalar eligibility never certifies graph-bearing operands
+/// or removes the allocation admission needed by overflow and long text.
+#[test]
+fn prepared_scalar_answers_supply_only_graph_free_contracts() {
+    let native = crate::native("int.add").unwrap();
+    let specialization = native.specialization();
+    let inline = specialization.inline.unwrap();
+    let mut bench = heap();
+    let args = [Value::Int(3), Value::Int(4)];
+    let scalar = inline.scalar_answer(1, &args).unwrap();
+    let contract = bench
+        .run(&args, 0, |args, _| native.resource_contract(args))
+        .unwrap()
+        .0
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        contract,
+        Contract::value(Exit::Returned, Cost::REFERENCE + 1, Origin::Immutable)
+    );
+    assert!(scalar.same(&Value::Int(7)));
+    for graph in [
+        Datum::List(vec![int(3)]),
+        Datum::Tuple(vec![Datum::List(vec![int(3)])]),
+        Datum::Int(Integer::parse("9223372036854775808").unwrap()),
+    ] {
+        let value = decode(&mut bench, graph);
+        assert!(!inline.operation.accepts(&[value, Value::Int(4)]));
+        assert!(inline.scalar_answer(1, &[value, Value::Int(4)]).is_none());
+    }
+    let mut counter = lash_kernel_doc::WorkCounter::new(None);
+    let overflow = [Value::Int(i64::MAX), Value::Int(1)];
+    assert!(inline.scalar_answer(1, &overflow).is_none());
+    assert!(crate::testsupport::exhausted(
+        &bench.call(&*native, &overflow, 0, &mut counter).answer
+    ));
+    let format = crate::native("num.to_text").unwrap();
+    let digits = format.specialization().inline.unwrap();
+    assert!(digits.operation.accepts(&[Value::Int(i64::MAX)]));
+    assert!((format.prepare().unwrap().entry)(&[Value::Int(i64::MAX)]).is_none());
+    assert!(digits.scalar_answer(1, &[Value::Int(i64::MAX)]).is_none());
+    assert!(crate::testsupport::exhausted(
+        &bench
+            .call(&*format, &[Value::Int(i64::MAX)], 0, &mut counter)
+            .answer
+    ));
+    let concat = crate::native("text.concat").unwrap();
+    let long = decode(&mut bench, text("longer than a short text"));
+    let args = [
+        long,
+        Value::Text(lash_kernel_doc::arena::ShortText::new("x").unwrap()),
+    ];
+    assert!(
+        concat
+            .specialization()
+            .inline
+            .unwrap()
+            .operation
+            .accepts(&args)
+    );
+    assert!((concat.prepare().unwrap().entry)(&args).is_none());
+    assert!(crate::testsupport::exhausted(
+        &bench.call(&*concat, &args, 0, &mut counter).answer
+    ));
 }
 
 /// Omitted immutable payloads, fresh bodies and record-key payloads must fail
@@ -1003,4 +1472,86 @@ fn more_shapes(registry: &FunctionRegistry) -> usize {
         checked += 1;
     }
     checked
+}
+
+/// K-LIB-006 / K-BND-002 (G147): a Declined native's nursery is released
+/// before its body runs. A native that builds 48 KiB and declines leaves the
+/// body the room a body-only call has: at the least memory bound the
+/// body-only run finishes under, the declining run finishes with the same
+/// result and charge.
+#[test]
+fn a_declined_natives_nursery_is_released_before_the_body_runs() {
+    use lash_kernel_vm::{Bounds, Charge, CoreMachine, End, Machine, PreparedLibrary, Step};
+    struct BuildsThenDeclines;
+    impl lash_kernel_doc::NativeFunction for BuildsThenDeclines {
+        fn call(&self, call: lash_kernel_doc::NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            let built = "n".repeat(48 << 10);
+            call.new.reserve(1, built.len() as u64)?;
+            let _ = call.new.text(&built);
+            Err(NativeError::Decline)
+        }
+    }
+    let run = |native: bool, memory: u64| {
+        let mut registry = FunctionRegistry::new();
+        lash_kernel_vm::register_machine_functions(&mut registry).unwrap();
+        crate::register_text_json(&mut registry).unwrap();
+        let repeat = registry.named("text.repeat").next().unwrap();
+        let definition = lash_kernel_doc::parse_definition(&format!(
+            "function probe.fill(n: Int) -> Text\nkernel 1\ncharge 5\nnative\nbody {{ return text.repeat(\"b\", n) }}\nuse text.repeat = @{repeat}"
+        ))
+        .unwrap();
+        let native: Option<std::sync::Arc<dyn lash_kernel_doc::NativeFunction>> =
+            native.then(|| std::sync::Arc::new(BuildsThenDeclines) as _);
+        registry.register(definition, native).unwrap();
+        let document = std::sync::Arc::new(crate::testsupport::document(
+            "kernel 1\nmain { return text.len(probe.fill(49152)) }",
+            &registry,
+        ));
+        let program = crate::testsupport::program(
+            document,
+            PreparedLibrary::new(std::sync::Arc::new(registry)),
+        );
+        let mut machine = CoreMachine::start(
+            program,
+            Bounds {
+                memory_meter: lash_kernel_vm::MemoryMeter::On,
+                charge: Charge::Exact,
+                charge_limit: u64::MAX,
+                memory,
+                call_depth: 100,
+                live_tasks: 100,
+                requests_per_park: 100,
+                join_members: 100,
+            },
+            lash_kernel_vm::CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: lash_kernel_vm::Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Box::<crate::testsupport::Source>::default(),
+        )
+        .unwrap();
+        let step = machine
+            .run(&mut crate::testsupport::World::default(), u64::MAX)
+            .unwrap();
+        let Step::Ended(end) = step else {
+            panic!("the run ends")
+        };
+        (end, machine.meters().charged)
+    };
+    let finishes = |native, memory| matches!(run(native, memory).0, End::Finished(_));
+    let (mut low, mut high) = (0u64, 64 << 20);
+    assert!(finishes(false, high));
+    while low + 1 < high {
+        let middle = low + (high - low) / 2;
+        if finishes(false, middle) {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    assert_eq!(run(true, high), run(false, high), "memory bound {high}");
 }

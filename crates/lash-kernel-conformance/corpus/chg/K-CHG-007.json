@@ -17,6 +17,20 @@
         "trace": []
       },
       "name": "callback code is charged within a library body"
+    },
+    {
+      "name": "a spawn in a covered body bills its atoms, and the spawned root bills its own formula",
+      "document": "kernel 1\nnumbers by_spelling\ndefinition \"function g(x: Any) -> Any\\nkernel 1\\ncharge 13\\nbody {\\n  return x\\n}\\n\"\ndefinition \"function w(x: Any) -> Any\\nkernel 1\\ncharge 5\\nuse g = @44eb6c4ea0456fe61a3950c1d9c04a9186a23d82a3a3fccb22b87fbdf1cc650d\\nbody {\\n  let h = spawn invoke g(x)\\n  let v = join h\\n  return v\\n}\\n\"\nmain {\n  let r = invoke w(7)\n  finish r\n}\n",
+      "expected": {
+        "charged": 25,
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
     }
   ],
   "rule": "K-CHG-007"

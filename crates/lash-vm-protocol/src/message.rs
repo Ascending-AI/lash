@@ -259,10 +259,6 @@ pub struct CheckpointStart {
     /// Each an admitted wait in the kernel's binary encoding
     /// (`lash_kernel_state::AdmittedWait`); the protocol does not read it.
     pub admissions: Vec<EncodedPayload>,
-    /// Parent-validated live helper selection on a library mismatch. This is
-    /// ephemeral admission data, never a stored checkpoint or helper body.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub selection: Option<EncodedPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

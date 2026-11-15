@@ -14,8 +14,13 @@ use lash_kernel_value::tokens::TokenError;
 /// decoder is provided for opaque host blobs.
 /// version_surface = "coexist"
 /// version_guard(
-///     shapes(path = "crates/lash-kernel-doc/src/document.rs", cover(Document)),
+///     roots(path = "crates/lash-kernel-doc/src/document.rs", Document),
 ///     items(path = "crates/lash-kernel-doc/src/document_bytes.rs", decode),
+///     items(
+///         path = "crates/lash-kernel-doc/src/identified.rs",
+///         new, from_shared, decode, decode_standard, id, body, shared_body,
+///     ),
+///     items(path = "crates/lash-kernel-doc/src/document.rs", identity, canonical_bytes),
 /// )
 pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
 
@@ -28,8 +33,7 @@ pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentBytes {
     source_language: Option<crate::SourceLanguage>,
-    source_evidence:
-        std::collections::BTreeMap<crate::FunctionId, Vec<crate::ImplicitTextConversion>>,
+    source_evidence: std::collections::BTreeMap<crate::FunctionId, crate::SourceEvidence>,
     grammar_version: u32,
     id: DocumentId,
     body: Arc<[u8]>,
@@ -65,7 +69,9 @@ impl DocumentBytes {
 
     /// Source facts retained by typed authoring, outside executable identity.
     pub fn source_evidence(&self) -> impl Iterator<Item = &crate::ImplicitTextConversion> {
-        self.source_evidence.values().flatten()
+        self.source_evidence
+            .values()
+            .flat_map(|evidence| &evidence.implicit_text_conversions)
     }
 
     #[must_use]

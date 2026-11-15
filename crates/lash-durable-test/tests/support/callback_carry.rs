@@ -1249,10 +1249,6 @@ fn assert_checkpoint_control(
         before.live_tasks, after.live_tasks,
         "carry preserves active identities"
     );
-    assert_eq!(
-        before.pending_waits, after.pending_waits,
-        "carry preserves pending invocations"
-    );
 }
 
 pub async fn lo_resolution(tier: served::Tier) {

@@ -52,12 +52,21 @@ impl Lowerer<'_> {
         for statement in statements {
             match statement.unspanned() {
                 ast::Stmt::Var { kind, declarations } if *kind != VarKind::Var => {
-                    let mut names = Vec::new();
                     for declaration in declarations {
+                        if let ast::Pattern::Ident(name, Some(annotation)) = &declaration.pattern {
+                            let ty = self
+                                .facts
+                                .entry_annotation(annotation, true)
+                                .ok()
+                                .filter(|ty| *ty != lash_kernel_value::Type::Any);
+                            self.declare_typed(name, kind_of(*kind), ty);
+                            continue;
+                        }
+                        let mut names = Vec::new();
                         walk::pattern_names(&declaration.pattern, &mut names);
-                    }
-                    for name in names {
-                        self.declare(&name, kind_of(*kind));
+                        for name in names {
+                            self.declare(&name, kind_of(*kind));
+                        }
                     }
                 }
                 ast::Stmt::Function { name, function } => {
@@ -222,7 +231,7 @@ impl Lowerer<'_> {
                         self.assign_member_statement(object, property, value)?;
                         Operand::undefined()
                     }
-                    _ => self.lower_expr(expr)?,
+                    _ => self.lower_unused(expr)?,
                 };
                 self.discard(value);
                 Ok(())
@@ -571,11 +580,7 @@ impl Lowerer<'_> {
                 *before_continue = BeforeContinue::Statements(copy_back(&copies));
             }
             if let (Some(first), Some(update)) = (&first, update) {
-                this.unless_first(first, |this| {
-                    let value = this.lower_expr(update)?;
-                    this.discard(value);
-                    Ok(())
-                })?;
+                this.unless_first(first, |this| this.lower_for_update(update))?;
             }
             if let Some(test) = test {
                 let test = this.lower_expr(test)?;
@@ -646,9 +651,22 @@ impl Lowerer<'_> {
     }
 
     fn lower_for_update(&mut self, update: &ast::Expr) -> Lowering<()> {
-        let value = self.lower_expr(update)?;
+        let value = self.lower_unused(update)?;
         self.discard(value);
         Ok(())
+    }
+
+    /// An expression whose value nothing reads: `++` and `--` need not
+    /// hold the value they would give.
+    fn lower_unused(&mut self, expr: &ast::Expr) -> Lowering<Operand> {
+        match expr {
+            ast::Expr::Update {
+                target,
+                delta,
+                prefix,
+            } => self.lower_update(target, *delta, *prefix, false),
+            _ => self.lower_expr(expr),
+        }
     }
 
     /// `if same(raw, ()) { set element = absent }`: the empty tuple is a

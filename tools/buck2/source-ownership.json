@@ -50,10 +50,12 @@
         "tests/workflow_laws.rs",
         "tests/workflow_laws/callable_env.rs",
         "tests/workflow_laws/callable_source.rs",
+        "tests/workflow_laws/callable_source/cenote_r14.rs",
         "tests/workflow_laws/cancelled_sleep.rs",
         "tests/workflow_laws/coarse.rs",
         "tests/workflow_laws/crossing.rs",
         "tests/workflow_laws/documents.rs",
+        "tests/workflow_laws/env_read_conformance.rs",
         "tests/workflow_laws/failures.rs",
         "tests/workflow_laws/generated_source.rs",
         "tests/workflow_laws/inline_starts.rs",
@@ -98,6 +100,11 @@
     "derive_tests": true,
     "test_includes": {
       "workflow_laws": [
+        "tests/workflow_laws/callable_source/r14/attempt_1.ts",
+        "tests/workflow_laws/callable_source/r14/attempt_2.ts",
+        "tests/workflow_laws/callable_source/r14/attempt_3.ts",
+        "tests/workflow_laws/callable_source/r14/method_argument.ts",
+        "tests/workflow_laws/callable_source/r14/numeric_label.ts",
         "tests/workflow_laws/fixtures/canvas-insert-request.json",
         "tests/workflow_laws/fixtures/information-create-request.json"
       ]
@@ -324,8 +331,10 @@
         "tests/core_node_processes.rs",
         "tests/core_node_processes/capacity_verdicts.rs",
         "tests/core_node_processes/engine_steps.rs",
+        "tests/core_node_processes/host_start_cut.rs",
         "tests/core_node_processes/idle_obligations.rs",
         "tests/core_node_processes/process_endstates.rs",
+        "tests/core_node_processes/pruned_prompts.rs",
         "tests/core_node_processes/read_tools.rs",
         "tests/core_node_processes/responses.rs",
         "tests/core_node_processes/session_and_isolated_envs.rs",

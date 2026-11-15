@@ -102,7 +102,7 @@ lash_store_sql::statements! {
         /// one row. The aggregate reads the whole locking subquery before
         /// the projection takes the advisory lock, so one statement keeps
         /// the order. No row, and no lock, when the actor does not exist.
-        lock_session_writes = "SELECT held.locked, pg_advisory_xact_lock(hashtextextended(?2, 1::bigint))
+        lock_session_writes = "SELECT held.locked, lash_advisory_xact_lock(hashtextextended(?2, 1::bigint), false)
              FROM (
                  SELECT count(*) AS locked FROM (
                      SELECT 1 FROM actors WHERE actor_key = ?1 FOR NO KEY UPDATE

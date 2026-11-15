@@ -36,81 +36,59 @@ const FORMATTED_MISS: &str = "let build = fn() { let text = \"old\" set text = t
 thread_local! {
     // PreparedLibrary is an immutable, shareable fixture. Cold reopen still
     // constructs its own library in Embedder::reopen.
-    static CALL_LIBRARIES: std::cell::RefCell<std::collections::BTreeMap<u64, crate::PreparedLibrary>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+    static CALL_LIBRARY: crate::PreparedLibrary = {
+        let fixture = super::super::embedder::library_with(true, Some(helper_probes));
+        crate::PreparedLibrary::new(std::sync::Arc::clone(&fixture.registry))
+    };
 }
-
-use super::ExecutionMode as Mode;
 
 #[derive(Debug, PartialEq)]
 struct Observed {
     end: String,
     printed: Vec<Datum>,
     requests: Vec<Request>,
-    stops: Vec<(&'static str, crate::Meters, [u64; 3])>,
+    stops: Vec<(&'static str, crate::Meters)>,
     checkpoints: Vec<lash_kernel_state::semantic::Checkpoint>,
-    events: Vec<lash_kernel_exec::Weight>,
+    events: Vec<crate::Weight>,
 }
 
-fn observe(source: &str, layout: Layout, slice: u64, bounds: Bounds, taped: bool) -> Observed {
-    observe_reopening(source, layout, slice, bounds, taped, false)
+impl Observed {
+    /// What a run shows its embedder, whatever its slices: result,
+    /// prints, effects and the charge events in order.
+    fn outcome(&self) -> (&str, &[Datum], &[Request], &[crate::Weight]) {
+        (&self.end, &self.printed, &self.requests, &self.events)
+    }
 }
 
+fn observe(source: &str, slice: u64, bounds: Bounds, taped: bool) -> Observed {
+    observe_reopening(source, slice, bounds, taped, false)
+}
+
+/// Runs `source` with every park reopened cold, and every finite slice
+/// too when `cold_slices`.
 fn observe_reopening(
     source: &str,
-    layout: Layout,
     slice: u64,
     bounds: Bounds,
     taped: bool,
     cold_slices: bool,
 ) -> Observed {
-    observe_source_or_region(
-        source,
-        layout,
-        slice,
-        bounds,
-        taped,
-        cold_slices,
-        Mode::Specialized,
-    )
-}
-
-fn observe_source_or_region(
-    source: &str,
-    layout: Layout,
-    slice: u64,
-    bounds: Bounds,
-    taped: bool,
-    cold_slices: bool,
-    mode: Mode,
-) -> Observed {
-    struct Context<'a>(&'a str, Layout, u64, Bounds, bool, Mode);
+    struct Context<'a>(&'a str, u64, Bounds, bool);
     impl Drop for Context<'_> {
         fn drop(&mut self) {
             if std::thread::panicking() {
                 eprintln!(
-                    "call observation: source={}, layout={:?}, slice={}, bounds={:?}, taped={}, mode={:?}",
-                    self.0, self.1, self.2, self.3, self.4, self.5
+                    "call observation: source={}, slice={}, bounds={:?}, taped={}",
+                    self.0, self.1, self.2, self.3
                 );
             }
         }
     }
-    let _context = Context(source, layout, slice, bounds, taped, mode);
-    let prepared = CALL_LIBRARIES.with_borrow_mut(|libraries| {
-        libraries
-            .entry(layout.0)
-            .or_insert_with(|| {
-                let fixture = super::super::embedder::library_with(true, Some(helper_probes));
-                crate::PreparedLibrary::with_layout(
-                    std::sync::Arc::clone(&fixture.registry),
-                    layout,
-                )
-            })
-            .clone()
-    });
+    let _context = Context(source, slice, bounds, taped);
+    let prepared = CALL_LIBRARY.with(Clone::clone);
     let mut embedder = Embedder::try_over(
         source,
         Setup {
-            layout,
             slice,
             bounds,
             probes: Some(helper_probes),
@@ -119,9 +97,6 @@ fn observe_source_or_region(
         Some(prepared),
     )
     .expect("the call fixture starts");
-    if source.contains("helper.element") && layout == Layout(1) {
-        embedder.machine.count_work();
-    }
     let tape = crate::ChargeTape::new();
     if taped {
         embedder.machine.record_charges(tape.clone());
@@ -129,11 +104,6 @@ fn observe_source_or_region(
     let (mut stops, mut checkpoints) = (Vec::new(), Vec::new());
 
     let end = loop {
-        match mode {
-            Mode::Source => embedder.machine.force_source_execution(),
-            Mode::Generic => embedder.machine.force_generic_regions(),
-            Mode::Specialized => {}
-        }
         let step = embedder.run();
         stops.push((
             match &step {
@@ -142,7 +112,6 @@ fn observe_source_or_region(
                 Step::Parked(_) => "parked",
             },
             embedder.machine.meters(),
-            crate::testing::owner_balance(&embedder.machine).unwrap(),
         ));
         match step {
             Step::Ended(End::Finished(finished)) => {
@@ -152,7 +121,7 @@ fn observe_source_or_region(
             Step::Slice => {
                 if cold_slices {
                     checkpoints.push(embedder.machine.semantic_checkpoint());
-                    embedder.reopen(layout, true);
+                    embedder.reopen(true);
                     if taped {
                         embedder.machine.record_charges(tape.clone());
                     }
@@ -160,10 +129,7 @@ fn observe_source_or_region(
             }
             Step::Parked(_) => {
                 checkpoints.push(embedder.machine.semantic_checkpoint());
-                embedder.reopen(layout, true);
-                if source.contains("helper.element") && layout == Layout(1) {
-                    embedder.machine.count_work();
-                }
+                embedder.reopen(true);
                 if taped {
                     embedder.machine.record_charges(tape.clone());
                 }
@@ -177,42 +143,18 @@ fn observe_source_or_region(
         requests: embedder.requests,
         stops,
         checkpoints,
-        events: lash_kernel_exec::Weight::expand(tape.steps()),
+        events: crate::Weight::expand(tape.steps()),
     }
 }
 
 /// K-EVAL-008 / K-CHG-001 / K-MACH-008: pushing a frame inside its call
 /// instruction preserves every completed operand across an admission
 /// refusal or parked callee. Effectful operands keep their source evaluation
-/// order; alternating closures retain their own cells. Values, charge events,
-/// finite stop points, held bytes and parked images agree with the general
-/// layout, including arity, type, depth, memory and missing-binding exits.
+/// order; alternating closures retain their own cells. Values, effects and
+/// charge events agree whole and sealed cold at every finite slice,
+/// including arity, type and missing-binding exits.
 #[test]
-fn direct_call_entry_agrees() {
-    // K-MACH-008: refusal inside a callee loop retains the same source owners
-    // across physical layouts. Keep the original formatting corpus below.
-    let loop_refusal = r#"main { let f = fn() { let text = "" while true { set text = text.concat(text, text.join([num.to_text(0)], "")) break } return text } return apply f() }"#;
-    let refusal_bounds = Bounds {
-        charge_limit: 21,
-        ..super::super::embedder::ROOMY
-    };
-    let refusal = observe_source_or_region(
-        loop_refusal,
-        Layout(0),
-        u64::MAX,
-        refusal_bounds,
-        true,
-        false,
-        Mode::Source,
-    );
-    for layout in [Layout(0), Layout(1)] {
-        assert_eq!(
-            observe(loop_refusal, layout, u64::MAX, refusal_bounds, true),
-            refusal,
-            "a refused callee-loop expression retains its actual source owners: {layout:?}"
-        );
-    }
-
+fn direct_call_entry_agrees_whole_and_cold() {
     let definition = |signature: &str, body: &str| {
         let function = format!(
             "function {signature} -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
@@ -295,9 +237,7 @@ fn direct_call_entry_agrees() {
         let source = format!("{definitions}main {{ {body} }}");
 
         let bounds = super::super::embedder::ROOMY;
-        let reference = observe(&source, Layout(1), u64::MAX, bounds, true);
-        let natural = observe(&source, Layout(0), u64::MAX, bounds, true);
-        assert_eq!(natural, reference, "{body}");
+        let natural = observe(&source, u64::MAX, bounds, true);
         if body == "let f = fn(x) { return 1 } return apply f(7)" {
             assert_eq!(natural.end, format!("finished {:?}", int(1)));
         }
@@ -326,81 +266,19 @@ fn direct_call_entry_agrees() {
             );
             assert_eq!(natural.printed, vec![text("cleanup")]);
         }
-        let plain = observe(&source, Layout(0), u64::MAX, bounds, false);
-        assert_eq!(
-            plain,
-            observe_source_or_region(
-                &source,
-                Layout(0),
-                u64::MAX,
-                bounds,
-                false,
-                false,
-                Mode::Generic,
-            ),
-            "generic region calls: {body}"
-        );
-        if body == SAVED_MEMBER
-            || body == SAVED_MEMBER_PARK
-            || body == SUPERSEDED_RETURN
-            || body == NESTED_RETURN
-            || body == ROOT_CALL_STORAGE
-            || body == NESTED_CALL_STORAGE
-            || body == READ_ADD_WRITE
-            || body == SOURCE_BAD_MEMBER
-            || body == SOURCE_CELL
-            || body == SOURCE_SCOPED_BINDINGS
-            || body == SOURCE_CLOSURE_PREFIX
-            || body == SOURCE_MEMBER
-            || body == SOURCE_CONSTRUCTION
-            || body == SOURCE_SESSION
-            || body == READ_ADD_MISS
-            || body == READ_ADD_FAIL
-            || body == FORMATTED_APPEND
-            || body == FORMATTED_MISS
-            || body.contains("if same(value, ())")
-            || body.contains("let alias = value")
-        {
-            let source_only = observe_source_or_region(
-                &source,
-                Layout(0),
-                u64::MAX,
-                bounds,
-                false,
-                false,
-                Mode::Source,
-            );
-            assert_eq!(plain, source_only, "source oracle: {body}");
-            if body == SOURCE_CONSTRUCTION || body == SOURCE_CELL || body == SOURCE_SCOPED_BINDINGS
-            {
-                assert_eq!(
-                    observe_source_or_region(
-                        &source,
-                        Layout(0),
-                        3,
-                        bounds,
-                        false,
-                        true,
-                        Mode::Source
-                    ),
-                    observe_reopening(&source, Layout(0), 3, bounds, false, true),
-                    "precise source acquisition preserves cold owners and continuation state"
-                );
-            }
-        }
         if body == SOURCE_BAD_MEMBER {
             assert_eq!(
-                reference.end,
+                natural.end,
                 format!("finished {:?}", Datum::List(vec![int(1)]))
             );
             assert_eq!(
-                reference.printed,
+                natural.printed,
                 vec![Datum::Text("index_out_of_range".into()); 2]
             );
         }
         if body == SOURCE_SESSION {
             assert_eq!(
-                reference.end,
+                natural.end,
                 format!(
                     "finished {:?}",
                     Datum::List(vec![Datum::List(vec![int(7)]); 2])
@@ -409,7 +287,7 @@ fn direct_call_entry_agrees() {
         }
         if body == SOURCE_CONSTRUCTION {
             assert_eq!(
-                reference.end,
+                natural.end,
                 format!(
                     "finished {:?}",
                     Datum::List(vec![
@@ -421,166 +299,21 @@ fn direct_call_entry_agrees() {
         }
         if body == SOURCE_SCOPED_BINDINGS {
             assert_eq!(
-                reference.end,
+                natural.end,
                 format!(
                     "finished {:?}",
                     Datum::List(vec![int(7), Datum::List(vec![int(7)])])
                 )
             );
         }
-        assert_eq!(plain.end, reference.end, "untaped result: {body}");
+        // The charge tape only watches: a run without one ends alike.
+        let untaped = observe(&source, u64::MAX, bounds, false);
         assert_eq!(
-            plain,
-            observe(&source, Layout(1), u64::MAX, bounds, false),
+            (&untaped.end, &untaped.printed, &untaped.requests),
+            (&natural.end, &natural.printed, &natural.requests),
             "untaped: {body}"
         );
-        for slice in [1, 2, 3, 5, 11, 31] {
-            assert_eq!(
-                observe(&source, Layout(0), slice, bounds, true),
-                observe(&source, Layout(1), slice, bounds, true),
-                "slice {slice}: {body}"
-            );
-            comparisons += 1;
-        }
-        let charged = reference.stops.last().unwrap().1.charged.unwrap();
-        for limit in 0..charged {
-            let bounds = Bounds {
-                charge_limit: limit,
-                ..bounds
-            };
-            assert_eq!(
-                observe(&source, Layout(0), u64::MAX, bounds, true),
-                observe(&source, Layout(1), u64::MAX, bounds, true),
-                "limit {limit}: {body}"
-            );
-            comparisons += 1;
-        }
-        if [
-            READ_ADD_WRITE,
-            SOURCE_MEMBER,
-            SOURCE_CELL,
-            SOURCE_SCOPED_BINDINGS,
-            SOURCE_CONSTRUCTION,
-            SOURCE_SESSION,
-            SOURCE_UNIT,
-            SOURCE_PENDING_UNIT,
-            FORMATTED_APPEND,
-            FORMATTED_MISS,
-            ROOT_CALL_STORAGE,
-            NESTED_CALL_STORAGE,
-        ]
-        .contains(&body)
-        {
-            let mut refused = false;
-            // Each body must refuse under at least one bound. The smallest
-            // sits below the least logical peak a body reaches: the
-            // read/add/write body holds at most 389 bytes at its verdict
-            // points under logical prices, so 256 refuses it.
-            for memory in [256, 512, 1024, 2048, 4096, 8192] {
-                let limits = Bounds {
-                    memory,
-                    ..super::super::embedder::ROOMY
-                };
-                let source_only = observe_source_or_region(
-                    &source,
-                    Layout(0),
-                    u64::MAX,
-                    limits,
-                    true,
-                    false,
-                    Mode::Source,
-                );
-                refused |= source_only.end.contains("Memory");
-                for mode in [Mode::Generic, Mode::Specialized] {
-                    assert_eq!(
-                        observe_source_or_region(
-                            &source,
-                            Layout(0),
-                            u64::MAX,
-                            limits,
-                            true,
-                            false,
-                            mode
-                        ),
-                        source_only,
-                        "whole path memory {memory}: {body}"
-                    );
-                }
-                comparisons += 1;
-            }
-            assert!(
-                refused,
-                "the checkpoint must exercise an actual source memory refusal"
-            );
-        }
-        if [
-            READ_ADD_WRITE,
-            SOURCE_MEMBER,
-            SOURCE_CELL,
-            SOURCE_SCOPED_BINDINGS,
-            SOURCE_CLOSURE_PREFIX,
-            SOURCE_BAD_MEMBER,
-            SOURCE_CONSTRUCTION,
-            SOURCE_SESSION,
-            SOURCE_UNIT,
-            SOURCE_PENDING_UNIT,
-            FORMATTED_APPEND,
-            ROOT_CALL_STORAGE,
-            NESTED_CALL_STORAGE,
-        ]
-        .contains(&body)
-        {
-            for limit in 0..charged {
-                let limits = Bounds {
-                    charge_limit: limit,
-                    ..super::super::embedder::ROOMY
-                };
-                let source_only = observe_source_or_region(
-                    &source,
-                    Layout(0),
-                    u64::MAX,
-                    limits,
-                    false,
-                    false,
-                    Mode::Source,
-                );
-                for mode in [Mode::Generic, Mode::Specialized] {
-                    assert_eq!(
-                        observe_source_or_region(
-                            &source,
-                            Layout(0),
-                            u64::MAX,
-                            limits,
-                            false,
-                            false,
-                            mode
-                        ),
-                        source_only,
-                        "quiet whole path {mode:?} bound {limit}: {body}"
-                    );
-                }
-                comparisons += 1;
-            }
-        }
-
-        for memory in [8192, 16384] {
-            let bounds = Bounds { memory, ..bounds };
-            assert_eq!(
-                observe(&source, Layout(0), u64::MAX, bounds, true),
-                observe(&source, Layout(1), u64::MAX, bounds, true),
-                "memory {memory}: {body}"
-            );
-            comparisons += 1;
-        }
-        let bounds = Bounds {
-            call_depth: 3,
-            ..bounds
-        };
-        assert_eq!(
-            observe(&source, Layout(0), u64::MAX, bounds, true),
-            observe(&source, Layout(1), u64::MAX, bounds, true),
-            "depth: {body}"
-        );
+        comparisons += 1;
     }
     // K-MACH-008 / K-CHG-001: stop after every charged boundary in a
     // callback/capture/return sequence, then rebuild its source frames cold.
@@ -607,111 +340,188 @@ fn direct_call_entry_agrees() {
         "let n = 0 let f = fn(x) { set n = flat.add(n, 1) let saved = call pause(x) return flat.add(saved, n) } return invoke each.map(f, [1, 3])",
     ] {
         let source = format!("{definitions}main {{ {body} }}");
+        let whole = observe(&source, u64::MAX, super::super::embedder::ROOMY, true);
         for slice in [1, 2, 3, 5, 11, 31] {
-            let natural = observe_reopening(
-                &source,
-                Layout(0),
-                slice,
-                super::super::embedder::ROOMY,
-                true,
-                true,
-            );
             assert_eq!(
-                natural,
-                observe_reopening(
-                    &source,
-                    Layout(1),
-                    slice,
-                    super::super::embedder::ROOMY,
-                    true,
-                    true
-                ),
+                observe_reopening(&source, slice, super::super::embedder::ROOMY, true, true)
+                    .outcome(),
+                whole.outcome(),
                 "cold source frames at slice {slice}: {body}"
             );
-            if body == SAVED_MEMBER
-                || body == SAVED_MEMBER_PARK
-                || body == SUPERSEDED_RETURN
-                || body == NESTED_RETURN
-                || body == ROOT_CALL_STORAGE
-                || body == NESTED_CALL_STORAGE
-                || body == READ_ADD_WRITE
-                || body == SOURCE_BAD_MEMBER
-                || body == SOURCE_CELL
-                || body == SOURCE_SCOPED_BINDINGS
-                || body == SOURCE_MEMBER
-                || body == SOURCE_CONSTRUCTION
-                || body == SOURCE_SESSION
-                || body == SOURCE_UNIT
-                || body == SOURCE_PENDING_UNIT
-                || body == READ_ADD_MISS
-                || body == READ_ADD_FAIL
-                || body == FORMATTED_APPEND
-                || body == FORMATTED_MISS
-            {
-                assert_eq!(
-                    natural,
-                    observe_source_or_region(
-                        &source,
-                        Layout(0),
-                        slice,
-                        super::super::embedder::ROOMY,
-                        true,
-                        true,
-                        Mode::Generic,
-                    ),
-                    "cold generic regions at slice {slice}: {body}"
-                );
-                assert_eq!(
-                    natural,
-                    observe_source_or_region(
-                        &source,
-                        Layout(0),
-                        slice,
-                        super::super::embedder::ROOMY,
-                        true,
-                        true,
-                        Mode::Source,
-                    ),
-                    "cold source oracle at slice {slice}: {body}"
-                );
-            }
             comparisons += 1;
         }
     }
     println!("direct call entry: {comparisons} paired runs");
+}
 
-    // K-CHG-001 / K-BND-003: a refused statement unit retains updated locals.
-    {
-        let source = format!("{definitions}main {{ {FORMATTED_APPEND} }}");
-        let bounds = Bounds {
-            charge_limit: 157,
-            ..super::super::embedder::ROOMY
-        };
-        let reference = observe_source_or_region(
-            &source,
-            Layout(0),
-            u64::MAX,
-            bounds,
+/// K-CLO-001 / K-FN-004: a repeated value-call site resolves a rebound
+/// closure's own body and arity. Closures of one body still use their
+/// distinct cells; a different body must not inherit the memo's entry.
+#[test]
+fn a_direct_memo_resolves_rebound_closures_and_their_captures() {
+    let cases = [
+        (
+            "let cells = [0, 100] let f = fn(x) { set cells[0] = flat.add(cells[0], x) return cells[0] } let other = fn(x) { set cells[1] = flat.add(cells[1], flat.add(x, 10)) return cells[1] } let answers = [] let i = 0 while flat.lt(i, 3) { if same(i, 1) { set f = other } set answers[list.len(answers)] = apply f(1) set i = flat.add(i, 1) } return (answers, cells)",
+            Datum::Tuple(vec![
+                Datum::List(vec![int(1), int(111), int(122)]),
+                Datum::List(vec![int(1), int(122)]),
+            ]),
+        ),
+        (
+            "let make = fn(n) { return fn(x) { set n = flat.add(n, x) return n } } let left = apply make(1) let right = apply make(100) let f = left let answers = [] let i = 0 while flat.lt(i, 4) { if same(i, 1) { set f = right } if same(i, 2) { set f = left } set answers[list.len(answers)] = apply f(1) set i = flat.add(i, 1) } return answers",
+            Datum::List(vec![int(2), int(101), int(3), int(4)]),
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!("main {{ {body} }}");
+        let before = crate::vm::calls::hits();
+        let fast = observe(&source, u64::MAX, super::super::embedder::ROOMY, false);
+        assert!(
+            crate::vm::calls::hits() > before,
+            "a repeated closure was entered"
+        );
+        assert_eq!(fast.end, format!("finished {expected:?}"));
+        let plain = crate::vm::calls::without_memo(|| {
+            observe(&source, u64::MAX, super::super::embedder::ROOMY, false)
+        });
+        assert_eq!(fast.outcome(), plain.outcome());
+        assert_eq!(fast.stops, plain.stops);
+        for limit in 0..=fast.stops.last().unwrap().1.charged.unwrap() {
+            let bounds = Bounds {
+                charge_limit: limit,
+                ..super::super::embedder::ROOMY
+            };
+            let fast = observe(&source, u64::MAX, bounds, false);
+            let plain =
+                crate::vm::calls::without_memo(|| observe(&source, u64::MAX, bounds, false));
+            assert_eq!(
+                fast.outcome(),
+                plain.outcome(),
+                "charge limit {limit}: {body}"
+            );
+            assert_eq!(fast.stops, plain.stops, "charge limit {limit}: {body}");
+        }
+    }
+
+    // The second trip refuses before the new closure's body can write.
+    let source = "main { let cells = [0, 100] let f = fn(x) { set cells[0] = x return x } let other = fn() { set cells[1] = 999 return 999 } let i = 0 while flat.lt(i, 2) { if same(i, 1) { set f = other } print cells print apply f(7) set i = flat.add(i, 1) } return cells }";
+    let fast = observe(source, u64::MAX, super::super::embedder::ROOMY, false);
+    assert_eq!(
+        fast.printed,
+        vec![
+            Datum::List(vec![int(0), int(100)]),
+            int(7),
+            Datum::List(vec![int(7), int(100)])
+        ]
+    );
+    let plain = crate::vm::calls::without_memo(|| {
+        observe(source, u64::MAX, super::super::embedder::ROOMY, false)
+    });
+    assert_eq!(fast.outcome(), plain.outcome());
+    assert_eq!(fast.stops, plain.stops);
+    assert!(fast.end.contains("arity"), "{}", fast.end);
+    assert!(
+        fast.end.contains("Main"),
+        "the caller owns the refusal: {}",
+        fast.end
+    );
+}
+
+/// K-CHG-001 / K-MACH-002: failed prepayment resumes the real callee
+/// before its next unpaid op, preserving captures and the exact refusal.
+#[test]
+fn a_leaf_that_cannot_prepay_keeps_plain_results_refusals_and_charge() {
+    for (body, answers, last, projected, retries) in [
+        (
+            "set last = x return x",
+            Datum::List((0..6).map(int).collect()),
+            5,
             false,
             false,
-            Mode::Source,
-        );
-        let generic = observe_source_or_region(
-            &source,
-            Layout(0),
-            u64::MAX,
-            bounds,
+        ),
+        (
+            "set last = x",
+            Datum::List(vec![Datum::Null; 6]),
+            5,
             false,
             false,
-            Mode::Generic,
+        ),
+        (
+            "let answer = call helper.item(null, x) set last = answer return answer",
+            Datum::List((0..6).map(int).collect()),
+            5,
+            false,
+            true,
+        ),
+        ("return 7", Datum::List(vec![int(7); 6]), 0, true, false),
+        (
+            "return x",
+            Datum::List((0..6).map(int).collect()),
+            0,
+            true,
+            false,
+        ),
+    ] {
+        let source = format!(
+            "main {{ let last = 0 let f = fn(x) {{ {body} }} let answers = [] let i = 0 while flat.lt(i, 6) {{ set answers[list.len(answers)] = apply f(i) set i = flat.add(i, 1) }} return (answers, last) }}"
         );
-        assert_eq!(
-            generic, reference,
-            "a refused statement unit keeps the completed text local"
+        let roomy = super::super::embedder::ROOMY;
+        let before = crate::vm::calls::leaves();
+        let projects = crate::vm::calls::projections();
+        let retried = crate::vm::calls::retries();
+        let fast = observe(&source, u64::MAX, roomy, false);
+        assert!(
+            crate::vm::calls::leaves() > before,
+            "the authored f returned through its real-frame leaf path"
         );
-        println!(
-            "refused statement retains updated source locals: {:?}",
-            generic.stops
-        );
+        if projected {
+            assert!(
+                crate::vm::calls::projections() > projects,
+                "the selected constant/local projection returned through its real frame: {body}"
+            );
+        }
+        let expected = Datum::Tuple(vec![answers, int(last)]);
+        assert_eq!(fast.end, format!("finished {expected:?}"));
+        let plain = crate::vm::calls::without_memo(|| observe(&source, u64::MAX, roomy, false));
+        assert_eq!(fast.outcome(), plain.outcome());
+        assert_eq!(fast.stops, plain.stops);
+        let watched = observe(&source, u64::MAX, roomy, true);
+        let watched_plain =
+            crate::vm::calls::without_memo(|| observe(&source, u64::MAX, roomy, true));
+        assert_eq!(watched.outcome(), watched_plain.outcome());
+        assert_eq!(watched.stops, watched_plain.stops);
+        let charge = plain.stops.last().unwrap().1.charged.unwrap();
+        for limit in 0..=charge {
+            let bounds = Bounds {
+                charge_limit: limit,
+                ..roomy
+            };
+            let fast = observe(&source, u64::MAX, bounds, false);
+            let plain =
+                crate::vm::calls::without_memo(|| observe(&source, u64::MAX, bounds, false));
+            assert_eq!(fast.outcome(), plain.outcome(), "charge limit {limit}");
+            assert_eq!(fast.stops, plain.stops, "charge limit {limit}");
+        }
+        for charge in [crate::Charge::Exact, crate::Charge::Off] {
+            let bounds = Bounds { charge, ..roomy };
+            for slice in [1, 3, 17, 101] {
+                let fast = observe_reopening(&source, slice, bounds, false, true);
+                let plain = crate::vm::calls::without_memo(|| {
+                    observe_reopening(&source, slice, bounds, false, true)
+                });
+                assert_eq!(fast.outcome(), plain.outcome(), "{charge:?} slice {slice}");
+                assert_eq!(fast.stops, plain.stops, "{charge:?} slice {slice}");
+                assert_eq!(
+                    fast.checkpoints, plain.checkpoints,
+                    "{charge:?} slice {slice}"
+                );
+            }
+        }
+        if retries {
+            assert!(
+                crate::vm::calls::retries() > retried,
+                "a counted helper declined before its body and resumed without a second start"
+            );
+        }
     }
 }

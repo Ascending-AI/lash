@@ -851,3 +851,262 @@ fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
     );
     assert_eq!(super::lower("const r = { a: { b: {} } }; for (let i = 0; i < 2; i++) { middle.b; const middle = r.a; }").unwrap_err().code(), crate::DiagnosticCode::TemporalDeadZone);
 }
+
+/// TS-DEFINITE-ASSIGNMENT: a `var`, or a `let` without an initialiser, is
+/// typed from its values only where every read follows a value certainly
+/// given on every path; a read any path reaches first sees `undefined`, so
+/// `undefined + 1` is `NaN` (ECMA-262 ToNumber(undefined)).
+#[test]
+fn reads_before_a_certain_assignment_see_undefined() {
+    let cases = [
+        ("var x; if (c) x = 1; return String(x + 1);", "NaN"),
+        (
+            "var x; for (var i = 0; i < 0; i++) x = 1; return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; while (c) { x = 1; c = false; } return String(x + 1);",
+            "NaN",
+        ),
+        ("for (var e of []) {} return String(e + 1);", "NaN"),
+        (
+            "var x; try { if (!c) throw 0; x = 1; } catch {} return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; switch (c) { case true: x = 1; } return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; l: { if (!c) break l; x = 1; } return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "var x; do { if (!c) continue; x = 1; } while (false); return String(x + 1);",
+            "NaN",
+        ),
+        ("var x; c && (x = 1); return String(x + 1);", "NaN"),
+        ("var x; c ? (x = 1) : 0; return String(x + 1);", "NaN"),
+        (
+            "var x; var [a = (x = 1)] = [5]; return String(x + 1);",
+            "NaN",
+        ),
+        (
+            "function g() { return String(x + 1); } var r = g(); var x = 1; return r;",
+            "NaN",
+        ),
+        ("var x = String(x + 1); return x;", "NaN"),
+        ("var x; x += 1; return String(x);", "NaN"),
+        (
+            "var r = ''; for (var i = 0; i < 2; i++) { let y; if (i === 0) y = 1; r += String(y + 1); } return r;",
+            "2NaN",
+        ),
+    ];
+    let observed: Vec<_> = cases
+        .iter()
+        .map(|(body, _)| {
+            super::machine::end(&format!(
+                "function f(c) {{ {body} }} await control.finish(f(false));"
+            ))
+        })
+        .collect();
+    let expected: Vec<_> = cases
+        .iter()
+        .map(|(_, value)| {
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Text((*value).into()))
+        })
+        .collect();
+    assert_eq!(observed, expected);
+}
+
+/// TS-PLAIN-DEFINITION: an initially undefined local is plain only when
+/// every read follows a definition and every definition is a plain record.
+#[test]
+fn defined_var_records_need_no_brand_admission() {
+    for declaration in ["var r; r = { a: 1 };", "var r = { a: 1 };"] {
+        let source = format!(
+            "function body() {{ {declaration} return r.a; }} await control.finish(body());"
+        );
+        let text = super::main_text_with_effects(&source);
+        assert!(!text.contains("__lash_brand"), "{text}");
+        assert_eq!(
+            super::machine::end(&source),
+            super::machine::Ended::Finished(lash_kernel_doc::Datum::Float(1.0.into()))
+        );
+    }
+    for body in [
+        "var r; const before = r.a; r = { a: 1 }; return before;",
+        "var r; if (flag) r = { a: 1 }; return r.a;",
+        "var r; r = { a: 1 }; if (flag) r = new Date(7); return r.a;",
+        "var r; r = { a: 1 }; function replace() { r = new Date(7); } replace(); return r.a;",
+    ] {
+        let source = format!("function body(flag) {{ {body} }} await control.finish(body(false));");
+        assert!(
+            super::main_text_with_effects(&source).contains("__lash_brand"),
+            "{source}"
+        );
+    }
+}
+
+/// TS-MEMBER-READ: plain, branded, missing and null reads retain their
+/// results when a sliced run saves and reopens.
+#[test]
+fn record_guards_preserve_member_reads_across_sliced_reopen() {
+    let source = "function read(o) { return o.value; } let rejected = false; try { read(null); } catch { rejected = true; } await control.finish([read({value: 7}), read({}), read({__lash_brand: {}, value: 9}), read([]), rejected]);";
+    let plain = super::machine::plain_record_resume(source, u64::MAX, false);
+    assert_eq!(
+        super::machine::end("await control.finish([7, undefined, 9, undefined, true]);"),
+        super::machine::Ended::Finished(plain.0.clone())
+    );
+    let sliced = super::machine::plain_record_resume(source, 1, true);
+    assert_eq!((&plain.0, plain.1), (&sliced.0, sliced.1));
+}
+
+/// TS-CONSTRUCTOR-KIND: a sole construction proves only initialized reads.
+/// Zero trips, early reads, mixed assignments and captured writes keep admission.
+#[test]
+fn a_single_collection_construction_proves_only_initialized_reads() {
+    fn calls_kind(expr: &lash_kernel_doc::Expr, kind: lash_kernel_value::FunctionId) -> bool {
+        match expr {
+            lash_kernel_doc::Expr::Call { function, args } => {
+                *function == kind || args.iter().any(|arg| calls_kind(arg, kind))
+            }
+            _ => false,
+        }
+    }
+    fn kind_guard(block: &[lash_kernel_doc::Stmt], kind: lash_kernel_value::FunctionId) -> bool {
+        block.iter().any(|stmt| match stmt {
+            lash_kernel_doc::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                calls_kind(condition, kind)
+                    || kind_guard(then_block, kind)
+                    || kind_guard(else_block, kind)
+            }
+            lash_kernel_doc::Stmt::While {
+                body, else_block, ..
+            }
+            | lash_kernel_doc::Stmt::For {
+                body, else_block, ..
+            } => kind_guard(body, kind) || kind_guard(else_block, kind),
+            _ => false,
+        })
+    }
+    let source = r#"
+function work(n) { var s, i; for (i = 0; i < n; i++) { s = new Map(); s.set('one', 1); if (!s.has('one')) throw 0; } return s.size; }
+function unique(n) { var s, i; for (i = 0; i < n; i++) { s = new Set(); s.add('one'); s.has('one'); } return s.size; }
+function early() { var s; const value = s.has('one'); s = new Map(); return value; }
+function mixed(flag) { var s; s = new Map(); if (flag) s = {set() { return 9; }}; return s.set('one', 1); }
+function captured() { var s; s = new Map(); function replace() { s = {set() { return 7; }}; } replace(); return s.set('one', 1); }
+let mapEmpty = false, setEmpty = false, readEarly = false;
+try { work(0); } catch { mapEmpty = true; }
+try { unique(0); } catch { setEmpty = true; }
+try { early(); } catch { readEarly = true; }
+await control.finish([work(2), mapEmpty, mixed(true), unique(2), setEmpty, readEarly, captured()]);
+"#;
+    let lowered = super::lower_with_effects(source).expect("collection proof source lowers");
+    let kind = super::library()
+        .iter()
+        .find(|(name, _)| *name == "kind")
+        .expect("kind installed")
+        .1;
+    let mut loops = 0;
+    let mut guarded = std::collections::BTreeSet::new();
+    for definition in lowered.document.functions.values() {
+        let Some(body) = definition.body() else {
+            continue;
+        };
+        match definition.name.as_str() {
+            "work" | "unique" => {
+                for statement in &body.block {
+                    if let lash_kernel_doc::Stmt::While { body, .. } = statement {
+                        loops += 1;
+                        assert!(
+                            !kind_guard(body, kind),
+                            "{} keeps repeated receiver admission",
+                            definition.name
+                        );
+                    }
+                }
+            }
+            "early" | "mixed" | "captured" if kind_guard(&body.block, kind) => {
+                guarded.insert(definition.name.as_str().to_owned());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(loops, 2, "both constructor loops were inspected");
+    assert_eq!(
+        guarded,
+        ["early", "mixed", "captured"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(
+        super::machine::end(source),
+        super::machine::end("await control.finish([1, true, 9, 1, true, true, 7]);")
+    );
+}
+
+/// SOURCE-HELPER-IDENTITY: attaching native implementations to the same
+/// helper declarations cannot change an authored source's document.
+#[test]
+fn lowering_uses_declared_helper_identities_without_native_availability() {
+    use lash_kernel_dialect::{CellEnvironment, Environment, Library, Mode};
+    use lash_kernel_doc::{FunctionCatalog, FunctionDefinition, FunctionHeader};
+    use lash_kernel_value::FunctionId;
+    use std::sync::Arc;
+
+    struct Declarations<'a>(&'a dyn Library);
+    impl FunctionCatalog for Declarations<'_> {
+        fn definition(&self, function: &FunctionId) -> Option<&FunctionDefinition> {
+            self.0.definition(function)
+        }
+        fn header(&self, function: &FunctionId) -> Option<Arc<FunctionHeader>> {
+            self.0.header(function)
+        }
+        fn named_helper(&self, name: &str) -> Option<FunctionId> {
+            self.0.named_helper(name)
+        }
+        fn helper_library(&self) -> Option<&lash_kernel_doc::BuildHelpers> {
+            self.0.helper_library()
+        }
+        fn projection_helper(&self, role: lash_kernel_doc::ProjectionRole) -> Option<FunctionId> {
+            self.0.projection_helper(role)
+        }
+    }
+    impl Library for Declarations<'_> {
+        fn resolve(&self, name: &str) -> Option<FunctionId> {
+            self.0.resolve(name)
+        }
+    }
+    let registered = super::library();
+    let declarations = Declarations(registered);
+    let namespaces =
+        crate::tests::linked::namespaces(&super::machine::effects(), super::controls())
+            .expect("effect namespace");
+    for source in [
+        "function read(o) { return o.value; } read({value: 7});",
+        "const value = JSON.parse('{\"value\":7}'); value.value;",
+        "const value = JSON.stringify({value: 7}); value.length;",
+    ] {
+        let lower = |library: &dyn Library| {
+            crate::lower(
+                source,
+                &Environment::new(library, &namespaces),
+                Mode::Cell(CellEnvironment::first()),
+            )
+            .expect("source lowers under the helper declarations")
+        };
+        let native = lower(registered);
+        let declared = lower(&declarations);
+        assert_eq!(
+            native.document.document(),
+            declared.document.document(),
+            "{source}"
+        );
+    }
+}

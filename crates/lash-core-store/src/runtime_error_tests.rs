@@ -697,3 +697,31 @@ fn worker_exhaustion_exposes_its_host_resource() {
     });
     assert_eq!(corrupt.host_resource(), None);
 }
+
+/// Stored park classification depends on the recorded code, never its prose.
+#[test]
+fn exhausted_park_classification_reads_only_the_recorded_code() {
+    use crate::store::ParkReason;
+
+    let unsettled = RuntimeErrorCode::SessionRedriveUnsettled;
+    for message in [unsettled.as_str().to_string(), format!("{unsettled:?}")] {
+        for code in [
+            None,
+            Some(RuntimeErrorCode::RuntimeStore.as_str().to_string()),
+        ] {
+            let park = ParkReason::engine_retry_exhausted(8, code, message.clone());
+            assert!(
+                !park.stopped_behind_unsettled_redrive(),
+                "message text grants no redrive classification: {park:?}"
+            );
+        }
+    }
+    for message in ["", "an unrelated message", "runtime_store"] {
+        let park = ParkReason::engine_retry_exhausted(
+            8,
+            Some(unsettled.as_str().to_string()),
+            message.to_string(),
+        );
+        assert!(park.stopped_behind_unsettled_redrive(), "{park:?}");
+    }
+}

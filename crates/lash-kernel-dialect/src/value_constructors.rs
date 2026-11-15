@@ -12,6 +12,8 @@ pub enum Constructor {
     Set,
     Record,
     Absent,
+    /// `null`, as an operand no source type describes.
+    Null,
     Index,
     CallToken,
     /// Call a closure with exactly the supplied operands, without a dialect token adapter.
@@ -19,7 +21,7 @@ pub enum Constructor {
     Native(&'static str, usize),
 }
 impl Constructor {
-    const ALL: [(Self, &'static str); 28] = [
+    const ALL: [(Self, &'static str); 29] = [
         (Self::Error, "error.new"),
         (Self::Timestamp, "timestamp.from_nanoseconds"),
         (Self::Integer, "integer.from_decimal"),
@@ -29,6 +31,7 @@ impl Constructor {
         (Self::Set, "set.of"),
         (Self::Record, "record.new"),
         (Self::Absent, "value.absent"),
+        (Self::Null, "value.null"),
         (Self::Index, "tuple.at"),
         (Self::CallToken, "callable.invoke_token"),
         (Self::Call, "callable.invoke"),
@@ -127,6 +130,7 @@ impl Constructor {
             Self::Tuple => Ok(Expr::Tuple(args)),
             Self::Set => Ok(Expr::Set(args)),
             Self::Absent if args.is_empty() => Ok(Expr::Literal(Literal::Absent)),
+            Self::Null if args.is_empty() => Ok(Expr::Literal(Literal::Null)),
             Self::Map => {
                 let mut entries = vec![];
                 for pair in args {

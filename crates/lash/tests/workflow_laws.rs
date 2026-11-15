@@ -23,6 +23,8 @@ use support::*;
 #[cfg(all(feature = "typescript", feature = "python"))]
 #[path = "workflow_laws/callable_source.rs"]
 mod callable_source;
+#[path = "workflow_laws/env_read_conformance.rs"]
+mod env_read_conformance;
 
 /// `guarded(name)`: binds `out` inside a `try`, sleeps once in each turn of
 /// a nested loop, and returns `out`. Written as a kernel document: no
@@ -1839,6 +1841,7 @@ async fn publishing_a_cell_callable_applies_the_hosts_implicit_text_policy() {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash::package::CallableId {
             link: start.link,
             function: closure.function,
@@ -1935,6 +1938,7 @@ async fn materialized_draft_retains_implicit_text_policy() {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash::package::CallableId {
             link: start.link,
             function: closure.function,

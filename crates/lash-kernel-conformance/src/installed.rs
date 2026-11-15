@@ -46,3 +46,35 @@ pub fn installed_bodies() -> Result<FunctionRegistry, LibraryError> {
     }
     Ok(registry)
 }
+
+/// Runs every alternative body through Decline while retaining which functions
+/// have natives in this image (`K-MACH-002`, ruling 7bcba3681b). Plans and native
+/// specializations are disabled; body-only functions keep their own steps.
+///
+/// # Panics
+/// When the registry refuses to install a native its own definition states.
+pub fn declining_bodies(
+    library: &lash_kernel_vm::PreparedLibrary,
+) -> lash_kernel_vm::PreparedLibrary {
+    struct Decline;
+    impl lash_kernel_doc::NativeFunction for Decline {
+        fn call(
+            &self,
+            _: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            Err(lash_kernel_doc::NativeError::Decline)
+        }
+    }
+    let mut registry = library.registry().bodies();
+    for (function, registered) in library.registry().iter() {
+        if registered.has_body() && registered.native().is_some() {
+            registry
+                .implement(*function, std::sync::Arc::new(Decline))
+                .unwrap_or_else(|error| panic!("{function} retains its native: {error}"));
+        }
+    }
+    lash_kernel_vm::PreparedLibrary::with_helpers(
+        std::sync::Arc::new(registry),
+        std::sync::Arc::clone(library.helpers()),
+    )
+}

@@ -62,8 +62,6 @@ pub(crate) fn short(text: &str) -> lash_kernel_doc::Value {
 
 #[cfg(test)]
 mod corpus_tests;
-#[cfg(test)]
-mod prepared_tests;
 
 mod collections;
 pub use collections::{
@@ -79,6 +77,21 @@ pub fn native_version(name: &str) -> u32 {
     } else {
         text_json::native_version(name)
     }
+}
+
+/// The registered definition of `name` that binds its current native
+/// version: a registry that also holds archived definitions of `name`
+/// implements each with the native version it states (ADR 0149).
+pub(crate) fn current_definition(
+    registry: &lash_kernel_doc::FunctionRegistry,
+    name: &str,
+) -> Option<lash_kernel_value::names::FunctionId> {
+    let version = native_version(name);
+    registry.named(name).find(|function| {
+        registry
+            .get(function)
+            .is_some_and(|registered| registered.definition().native_version == version)
+    })
 }
 
 /// A superseded kernel-library native version that archived definitions still

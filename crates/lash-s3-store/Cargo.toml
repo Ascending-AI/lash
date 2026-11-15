@@ -37,5 +37,5 @@ url = "2"
 [dev-dependencies]
 lash-conformance.workspace = true
 lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
-lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt"] }

@@ -305,7 +305,6 @@ fn imported_body_and_callback_keep_their_links_after_cold_restore() {
         &BTreeMap::from([(a, caller_link), (b, imported_link)]),
         PageId([9; 32]),
         prepared,
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let pages = Pages::default();
@@ -422,7 +421,6 @@ fn callable_start_installs_the_captured_environment() {
         &BTreeMap::from([(link_id, link)]),
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(registry)),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     program.functions.insert(function);
@@ -430,6 +428,7 @@ fn callable_start_installs_the_captured_environment() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: link_id,
             function,
@@ -640,7 +639,6 @@ fn imported_args_list_is_settled_under_its_defining_link_after_cold_restore() {
         &BTreeMap::from([(a, caller_link), (b, imported_link)]),
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     let pages = Pages::default();
@@ -829,7 +827,6 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
             &BTreeMap::from([(link_id, link), (child_link_id, child_link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
-            lash_kernel_doc::Selection::Fresh,
         )
         .expect("linked child");
         let mut machine = KernelMachine::start(
@@ -880,7 +877,9 @@ fn spawned_immediate_export_mismatch_keeps_child_identity() {
 }
 
 /// K-HOST and K-CHG: a synchronous native export needs no Main or guest
-/// body, and its declared formula is the charge on that path.
+/// body. A start is an ordinary call of its export: the call pays the
+/// declared formula (7), a `Both` runs its body, and the start copies its
+/// result out (1, `K-CHG-002`, a518577de5), as on origin/main.
 #[test]
 fn native_export_starts_without_main_and_pays_its_formula() {
     struct Answer(bool);
@@ -963,7 +962,6 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             &BTreeMap::from([(link_id, link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
-            lash_kernel_doc::Selection::Fresh,
         )
         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         let mut machine = KernelMachine::start(
@@ -987,13 +985,13 @@ fn native_export_starts_without_main_and_pays_its_formula() {
             {
                 Step::Slice => {}
                 Step::Ended(End::Finished(done)) => {
-                    assert_eq!(done.result, Datum::Bool(true));
+                    assert_eq!(done.result, Datum::Bool(true), "kind {kind}");
                     break;
                 }
                 other => panic!("export did not complete: {other:?}"),
             }
         }
-        assert_eq!(machine.meters().charged, Some(7));
+        assert_eq!(machine.meters().charged, Some(8), "kind {kind}");
     }
 }
 
@@ -1135,7 +1133,6 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
             &BTreeMap::from([(link.identity(), link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(registry)),
-            lash_kernel_doc::Selection::Fresh,
         )
         .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
         for via in 0..3 {
@@ -1218,7 +1215,6 @@ fn native_export_settlement_runs_the_defining_hook_after_cold_restore() {
                         &links,
                         PageId([9; 32]),
                         program.library.clone(),
-                        lash_kernel_doc::Selection::Fresh,
                     )
                     .expect("imported native"),
                     Target::Main,
@@ -1512,7 +1508,6 @@ fn imported_arguments_fit_before_private_abi_adaptation() {
                 &BTreeMap::from([(root, caller_link), (callee_id, callee_link)]),
                 PageId([8; 32]),
                 PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-                lash_kernel_doc::Selection::Fresh,
             )
             .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
             let mut machine = KernelMachine::start(
@@ -1624,7 +1619,6 @@ fn unused_native_declarations_do_not_enlarge_selected_reach() {
         &BTreeMap::from([(id, link)]),
         PageId([8; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
     program.functions = BTreeSet::from([selected_id]);
@@ -1734,7 +1728,6 @@ fn entry_nested_result_mismatch_retains_typed_boundary_facts() {
             &BTreeMap::from([(link_id, link)]),
             PageId([9; 32]),
             PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-            lash_kernel_doc::Selection::Fresh,
         )
         .expect("entry program");
         let pages = Pages::default();
@@ -1836,7 +1829,6 @@ fn entry_wrong_input_is_refused_before_body_execution() {
         &BTreeMap::from([(link_id, link)]),
         PageId([9; 32]),
         PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-        lash_kernel_doc::Selection::Fresh,
     )
     .expect("entry program");
     let started = KernelMachine::start(
@@ -1869,3 +1861,188 @@ fn entry_wrong_input_is_refused_before_body_execution() {
         }))
     );
 }
+
+/// FIG-7143 on the fused path: a call through an import holds its
+/// arguments to the import's signature before a native answers inline. A
+/// two-argument native whose inline answer takes any pair (`Same`), behind
+/// an import typed `(int, int)`, refuses a text argument with
+/// `function_argument` as the unfused call does, never answering it.
+#[test]
+fn a_fused_imported_native_call_holds_to_the_import_signature() {
+    struct Same;
+    impl lash_kernel_doc::NativeFunction for Same {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                    native_version: 1,
+                    operation: lash_kernel_doc::arena::native::InlineOperation::Same,
+                }),
+                ..Default::default()
+            }
+        }
+        fn call(
+            &self,
+            _: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            Err(lash_kernel_doc::NativeError::Decline)
+        }
+    }
+    let any = |name: &str| Param {
+        name: Name::new(name),
+        ty: Type::Any,
+        optional: false,
+    };
+    let int = |name: &str| Param {
+        name: Name::new(name),
+        ty: Type::Int,
+        optional: false,
+    };
+    let definition = FunctionDefinition {
+        projection: Default::default(),
+        kernel: lash_kernel_doc::KERNEL_VERSION,
+        name: FunctionName::new("test.same")
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+        signature: Signature {
+            params: vec![any("a"), any("b")],
+            result: Type::Bool,
+        },
+        errors: BTreeSet::new(),
+        guard: None,
+        native_version: 1,
+        implementation: Implementation::Native {
+            charge: lash_kernel_doc::Formula::Constant(1),
+        },
+    };
+    let id = definition.identity();
+    let public = Signature {
+        params: vec![int("a"), int("b")],
+        result: Type::Bool,
+    };
+    let mut callee = document(
+        BTreeMap::new(),
+        BTreeMap::from([(id, definition.clone())]),
+        None,
+    );
+    callee.requires.natives.insert(id);
+    callee.exports.insert(
+        Name::new("same"),
+        lash_kernel_doc::Export::Function(FunctionExport {
+            function: id,
+            signature: public.clone(),
+            convention: StartConvention::Direct,
+            asynchronous: false,
+            rest: false,
+        }),
+    );
+    let callee_link = Link {
+        helper_fills: Default::default(),
+        document: callee.identity(),
+        fills: BTreeMap::new(),
+    };
+    let callee_id = callee_link.identity();
+    let caller = document(
+        BTreeMap::from([(
+            ImportSlot(0),
+            Import {
+                name: QualifiedName {
+                    package: lash_kernel_value::PackagePath::parse("library")
+                        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+                    member: lash_kernel_value::Segment::new("same")
+                        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}")),
+                    type_member: None,
+                },
+                kind: ImportKind::Code {
+                    signature: public,
+                    convention: Convention::Direct,
+                },
+            },
+        )]),
+        BTreeMap::new(),
+        Some(vec![
+            Stmt::Let {
+                name: Name::new("a"),
+                value: Rhs::Expr(Expr::Literal(Literal::Text("one".into()))),
+            },
+            Stmt::Let {
+                name: Name::new("b"),
+                value: Rhs::Expr(Expr::Literal(Literal::Int(1.into()))),
+            },
+            Stmt::Let {
+                name: Name::new("output"),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Import(ImportSlot(0)),
+                    args: vec![
+                        Atom::Variable(Name::new("a")),
+                        Atom::Variable(Name::new("b")),
+                    ],
+                }),
+            },
+            Stmt::Return {
+                value: Expr::Variable(Name::new("output")),
+            },
+        ]),
+    );
+    let caller_link = Link {
+        helper_fills: Default::default(),
+        document: caller.identity(),
+        fills: BTreeMap::from([(
+            ImportSlot(0),
+            Fill::Export {
+                link: callee_id,
+                export: ExportName {
+                    name: Name::new("same"),
+                    member: None,
+                },
+            },
+        )]),
+    };
+    let root = caller_link.identity();
+    let mut registry = FunctionRegistry::new();
+    registry
+        .register(definition, Some(Arc::new(Same)))
+        .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+    let program = Program::prepare(
+        root,
+        BTreeMap::from([
+            (caller.identity(), Arc::new(caller)),
+            (callee.identity(), Arc::new(callee)),
+        ]),
+        &BTreeMap::from([(root, caller_link), (callee_id, callee_link)]),
+        PageId([8; 32]),
+        PreparedLibrary::new(Arc::new(registry)),
+    )
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+    let mut machine = KernelMachine::start(
+        program,
+        bounds(),
+        CellStart {
+            owner: PageId([9; 32]),
+            target: Target::Main,
+            args: vec![],
+            session: None,
+            modes: BTreeMap::new(),
+            host: vec![],
+        },
+        Box::new(Pages::default()),
+    )
+    .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"));
+    loop {
+        match machine
+            .run(&mut Passive, u64::MAX)
+            .unwrap_or_else(|error| panic!("linked law fixture: {error:?}"))
+        {
+            Step::Slice => {}
+            Step::Ended(End::Error(lash_kernel_vm::RunError::Uncaught {
+                error: Datum::Error(error),
+                ..
+            })) => {
+                assert_eq!(error.kind, "function_argument");
+                break;
+            }
+            other => panic!("a text argument passed an import typed int: {other:?}"),
+        }
+    }
+}
+
+#[path = "linked_dispatch/entries.rs"]
+mod entries;

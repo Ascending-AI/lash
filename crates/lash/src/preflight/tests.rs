@@ -380,6 +380,7 @@ async fn a_22d_function_store_requires_reset_before_decode() {
     use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
     let newest = crate::formats::KERNEL_DOCUMENT_SCHEMA_VERSION;
+    let grammar = lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION;
 
     // 22d7212cc8's FunctionDefinition writer, verbatim field list. This is
     // deliberately independent of the current writer and its field count.
@@ -403,12 +404,19 @@ async fn a_22d_function_store_requires_reset_before_decode() {
     let current_document = lash_kernel_value::tokens::encode_body(&document);
     let mut input = TokenReader::new(&current_document);
     assert_eq!(input.seq().expect("document fields"), 9);
-    assert_eq!(input.unsigned_u32().expect("document grammar"), newest);
+    assert_eq!(input.unsigned_u32().expect("document grammar"), grammar);
     let mut stale_header = TokenWriter::new();
     stale_header.seq(9);
     stale_header.unsigned(2);
     let mut stale_document = stale_header.into_bytes();
     stale_document.extend_from_slice(&current_document[input.position()..]);
+    // The synthetic build declares a successor format without changing the
+    // raw grammar writer. The bounded probe reads its declared witness only.
+    let mut current_header = TokenWriter::new();
+    current_header.seq(9);
+    current_header.unsigned(u64::from(newest));
+    let mut current = current_header.into_bytes();
+    current.extend_from_slice(&current_document[input.position()..]);
     assert!(
         newest > 2,
         "the current document grammar has advanced past 2"
@@ -426,12 +434,7 @@ async fn a_22d_function_store_requires_reset_before_decode() {
             false,
         ),
         (NodeKind::DOCUMENT, stale_document.as_slice(), 2, false),
-        (
-            NodeKind::DOCUMENT,
-            current_document.as_slice(),
-            newest,
-            true,
-        ),
+        (NodeKind::DOCUMENT, current.as_slice(), newest, true),
     ] {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(1_048_576)));
         let root = staging

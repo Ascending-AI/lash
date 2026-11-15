@@ -197,7 +197,6 @@ fn linked(document: lash_kernel_doc::Document) -> lash_kernel_vm::Program {
             .prepared_library()
             .expect("the linked worker fixture is valid")
             .clone(),
-        lash_kernel_doc::Selection::Fresh,
     )
     .expect("the linked worker fixture is valid")
 }
@@ -367,11 +366,7 @@ fn resumed(
         dialect: dialect.into(),
         document: lash_vm_protocol::message::StoredDocument::supplied(document.clone()),
         definitions: Vec::new(),
-        from: StartFrom::Checkpoint(CheckpointStart {
-            root,
-            admissions,
-            selection: None,
-        }),
+        from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
         bounds: bounds(),
         binding: BINDING,
         save: None,
@@ -925,7 +920,6 @@ fn a_worker_runs_code_in_a_dialect_its_host_did_not_name_and_refuses_to_save_it(
             wire::encode(
                 PayloadKind::Start,
                 &wire::SaveWire {
-                    saved_written: Default::default(),
                     controls: std::collections::BTreeMap::new(),
                     written: std::collections::BTreeMap::new(),
                 },

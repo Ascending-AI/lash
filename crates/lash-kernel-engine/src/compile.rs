@@ -152,7 +152,6 @@ impl Engine {
             &content.links,
             PageId([0; 32]),
             self.installed.prepared.clone(),
-            lash_kernel_doc::Selection::Fresh,
         )
         .map_err(kernel_fault)?;
         Ok(Program {

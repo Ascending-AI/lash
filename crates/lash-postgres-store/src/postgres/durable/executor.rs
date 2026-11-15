@@ -205,6 +205,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &tool_calls::COMPLETE,
         &tool_calls::EXPIRE,
         &packages::END_EXECUTION,
+        &packages::END_DEBTS,
         &packages::REGISTER,
         &packages::SAME_REGISTRATION,
         &packages::ADOPTABLE,
@@ -253,6 +254,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &park::SET_PARK,
         // A turn's terminal (FIG-5942).
         &turns::LOCK_KEY,
+        &turns::LOCK_PLAN,
         &turns::END_RUN,
         &turns::MARK_TERMINAL,
         &turns::RETENTION,
@@ -353,7 +355,7 @@ pub(super) fn program(
     match write {
         DomainWrite::Environment(write) => environment::steps(actor, epoch, write).map(Some),
         DomainWrite::EndExecution(execution) => {
-            Ok(Some(vec![packages::end_execution_step(actor, execution)]))
+            Ok(Some(packages::end_execution_steps(actor, execution)))
         }
         DomainWrite::RegisterExecution(_)
         | DomainWrite::AdoptExecution(_)
@@ -463,7 +465,7 @@ pub(super) struct Call {
 }
 
 /// `step` as the function reads it.
-fn step_json(step: &Step) -> serde_json::Value {
+pub(super) fn step_json(step: &Step) -> serde_json::Value {
     let mut json = serde_json::json!({
         "s": step.entry.name(),
         "p": step.values.iter().map(super::steps::Value::json).collect::<Vec<_>>(),
@@ -520,7 +522,7 @@ impl Call {
         // The executions the commit ends are locked next, as publication
         // locks them: referrer, then artifact.
         steps.extend(
-            turns::lock_ending_executions(tx.domain())
+            turns::lock_plan_steps(tx.actor(), tx.domain())
                 .ok()?
                 .iter()
                 .map(step_json),
@@ -749,7 +751,7 @@ pub(super) fn changes_debt(write: &DomainWrite) -> bool {
 
 /// The call's SQL.
 pub(super) static CALL: LazyLock<String> = LazyLock::new(|| {
-    let params: Vec<String> = (1..=25).map(|index| format!("${index}")).collect();
+    let params: Vec<String> = (1..=26).map(|index| format!("${index}")).collect();
     format!("SELECT * FROM {FUNCTION}({})", params.join(", "))
 });
 
@@ -817,7 +819,7 @@ impl PostgresDurableStore {
             lash_durable::ActorKind::Session => Some(tx.actor().id()),
             lash_durable::ActorKind::Process => None,
         };
-        let (lock_timeout, statement_ms) = route.prelude.call_guards();
+        let (lock_timeout, statement_ms, sealed_lock_timeout) = route.prelude.call_guards();
         let query = crate::observed_sql::query(&CALL)
             .bind(REGISTRY.as_str())
             .bind(tx.actor().as_str())
@@ -828,6 +830,7 @@ impl PostgresDurableStore {
             .bind(&token)
             .bind(lock_timeout)
             .bind(statement_ms)
+            .bind(sealed_lock_timeout)
             .bind(&call.body_hashes)
             .bind(&call.bodies)
             .bind(&call.named)

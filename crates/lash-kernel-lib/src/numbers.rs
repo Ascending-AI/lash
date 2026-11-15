@@ -537,6 +537,7 @@ impl NativeFunction for NumericFunction {
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
         use lash_kernel_doc::SymbolicNative;
         lash_kernel_doc::NativeSpecialization {
+            inline: prepared::inline(self.operation, self.domain),
             immediate: self.prepare(),
             immediate_resources: true,
             symbolic: match (self.operation, self.domain) {
@@ -759,7 +760,7 @@ fn plain(
         Operation::ToText => match a {
             // Digits a short text holds are written nowhere; longer ones
             // are reserved before they are written.
-            Value::Int(word) => match short_digits(*word, 10) {
+            Value::Int(word) => match ShortText::digits(*word, 10) {
                 Some(digits) => Value::Text(digits),
                 None => return Ok(None),
             },
@@ -781,7 +782,7 @@ fn plain(
             let Value::Int(word) = a else {
                 return Ok(None);
             };
-            match short_digits(*word, radix(&args[1])?) {
+            match ShortText::digits(*word, radix(&args[1])?) {
                 Some(digits) => Value::Text(digits),
                 None => return Ok(None),
             }
@@ -856,29 +857,6 @@ fn kind_name(kind: ValueKind) -> Value {
     crate::short(KIND_NAMES[kind as usize].1)
 }
 
-/// A word's digits in `radix`, lower-case and signed as
-/// [`integer_text`] spells them, when they fit a short text: one held in
-/// the value, which takes no room.
-pub(crate) fn short_digits(word: i64, radix: u32) -> Option<ShortText> {
-    let mut bytes = [0u8; ShortText::MAX];
-    let mut at = bytes.len();
-    let mut rest = word.unsigned_abs();
-    loop {
-        at = at.checked_sub(1)?;
-        let digit = char::from_digit(u32::try_from(rest % u64::from(radix)).ok()?, radix)?;
-        *bytes.get_mut(at)? = u8::try_from(digit).ok()?;
-        rest /= u64::from(radix);
-        if rest == 0 {
-            break;
-        }
-    }
-    if word < 0 {
-        at = at.checked_sub(1)?;
-        *bytes.get_mut(at)? = b'-';
-    }
-    ShortText::ascii(bytes.get(at..)?)
-}
-
 /// An integer's digits in `radix`, a text that can be eight times the
 /// integer's own bytes (radix 2). The digits are reserved, as the text and
 /// as the buffer they are written in, before they are written.
@@ -896,7 +874,7 @@ pub(crate) fn integer_text(
     let digits = (integer.bits() as f64 / f64::from(radix).log2()) as u64 + 3;
     new.reserve(0, digits.saturating_mul(2))?;
     new.read_whole(integer.bits().div_ceil(8))?;
-    Ok(new.text(&integer.as_bigint().to_str_radix(radix)))
+    Ok(new.text(integer.as_bigint().to_str_radix(radix)))
 }
 
 fn radix(value: &Value) -> Result<u32, NativeError> {

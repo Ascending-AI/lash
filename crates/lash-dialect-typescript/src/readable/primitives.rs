@@ -20,6 +20,52 @@ impl Lifter<'_> {
             || matches!(statement, k::Stmt::If { condition, then_block, else_block } if methods::SLICE_TOO_LARGE.recognize(condition, &|id, name| self.is(id, name)).is_some() && else_block.is_empty() && matches!(then_block.as_slice(), [k::Stmt::Throw { value }] if methods::SLICE_ERROR.recognize(value, &|id, name| self.is(id, name)).is_some()))
     }
 
+    /// The kind check a method on a declared number or boolean receiver
+    /// begins with (`do num.to_float(r)`, `do bool.not(r)`), where the next
+    /// statement calls a built-in's helper on that receiver: the method call
+    /// lowers it again.
+    pub(super) fn typed_receiver_check(&self, block: &[k::Stmt]) -> bool {
+        let [
+            k::Stmt::Do {
+                value: k::Expr::Call { function, args },
+            },
+            next,
+            ..,
+        ] = block
+        else {
+            return false;
+        };
+        let [receiver @ k::Expr::Variable(_)] = args.as_slice() else {
+            return false;
+        };
+        if !self.is(function, "num.to_float") && !self.is(function, "bool.not") {
+            return false;
+        }
+        let table = lash_ext_ts_helpers::builtins::table();
+        let mut nodes = vec![k::Node::Stmt(next)];
+        while let Some(node) = nodes.pop() {
+            let found = match node {
+                k::Node::Action(action @ k::Action::Call { .. }) => {
+                    Some(super::statements::act_of(action))
+                }
+                k::Node::Expr(k::Expr::Act(act)) => Some((**act).clone()),
+                _ => None,
+            };
+            if let Some(act) = found
+                && let k::ActKind::Call(k::Callee::Local(id)) = &act.kind
+                && act.args.first() == Some(receiver)
+                && table
+                    .functions
+                    .iter()
+                    .any(|(_, helper)| self.is(id, helper))
+            {
+                return true;
+            }
+            nodes.extend(node.children());
+        }
+        false
+    }
+
     /// `let start = …; let end = …;` ahead of the `ts.string.slice_units`
     /// call that reads them: the bounds of `receiver.slice(start, end)`,
     /// written where that call reads them.
@@ -109,19 +155,15 @@ impl Lifter<'_> {
                 _ => return Ok(None),
             }
         };
-        let receiver = self.expr(receiver)?;
         let mut args = vec![literal(needle)?];
         args.extend(end);
-        Ok(Some((
-            result.clone(),
-            Expr::Call(
-                Box::new(Expr::Field(
-                    Box::new(receiver),
-                    methods::source_method(Kind::EndsWith).into(),
-                )),
-                args,
-            ),
-        )))
+        let call = self.own_method(
+            receiver,
+            "value.method",
+            methods::source_method(Kind::EndsWith),
+            args,
+        )?;
+        Ok(Some((result.clone(), call)))
     }
 
     /// A method a primitive text region lowered to natives, as its call.
@@ -141,10 +183,9 @@ impl Lifter<'_> {
         {
             let mut args = vec![start];
             args.extend(end);
-            return Ok(Some(Expr::Call(
-                Box::new(Expr::Field(Box::new(self.expr(receiver)?), "slice".into())),
-                args,
-            )));
+            return self
+                .own_method(receiver, "list.method", "slice", args)
+                .map(Some);
         }
         for declaration in methods::METHODS {
             let Some(recipe) = declaration.expression() else {
@@ -183,13 +224,39 @@ impl Lifter<'_> {
                 }
                 _ => continue,
             };
-            let receiver = self.expr(receiver)?;
-            return Ok(Some(Expr::Call(
-                Box::new(Expr::Field(Box::new(receiver), declaration.name.into())),
-                args,
-            )));
+            return self
+                .own_method(receiver, "value.method", declaration.name, args)
+                .map(Some);
         }
         Ok(None)
+    }
+
+    /// `receiver.method(args)`, or under [`super::style::Style::exact`] on a
+    /// receiver binding the kind's own row, `spelling(receiver, "method",
+    /// args)`: a capture cell is of no known kind.
+    fn own_method(
+        &mut self,
+        receiver: &k::Expr,
+        spelling: &str,
+        method: &str,
+        args: Vec<Expr>,
+    ) -> Lift<Expr> {
+        let exact = self.style.exact && self.reads_binding(receiver);
+        let receiver = self.expr(receiver)?;
+        Ok(if exact {
+            super::expressions::constructor(
+                spelling,
+                [receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )
+        } else {
+            Expr::Call(
+                Box::new(Expr::Field(Box::new(receiver), method.to_owned())),
+                args,
+            )
+        })
     }
 
     /// A relative bound (`slice`) of `receiver`, as the source wrote it:

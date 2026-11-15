@@ -690,16 +690,26 @@ fn laws(rows: &[Row]) -> Result<()> {
             row.counts[PAGES_LOADED]
         });
     }
-    // A length read loads no payload: the string's length is its summary.
-    flat("string-length", "pages a length read loads", &|row| {
-        row.counts[PAGES_LOADED]
-    });
-    // A cell that touches nothing loads and seals O(1) pages.
-    flat("next-cell", "pages a no-op cell moves", &|row| {
-        row.counts[PAGES_LOADED]
-            .zip(row.counts[PAGES_SEALED])
-            .map(|(loaded, sealed)| loaded + sealed)
-    });
+    // The session carries a scalar's summary, so a length-only read loads
+    // no pages. A journaled cell that touches nothing loads and seals none.
+    // Require measured zero: an unavailable counter is not evidence.
+    for scenario in ["string-length", "next-cell"] {
+        for row in interval(scenario, 1) {
+            let count = if scenario == "string-length" {
+                row.counts[PAGES_LOADED]
+            } else {
+                row.counts[PAGES_LOADED]
+                    .zip(row.counts[PAGES_SEALED])
+                    .map(|(loaded, sealed)| loaded + sealed)
+            };
+            if count != Some(0) {
+                broken.borrow_mut().push(format!(
+                    "{scenario}/{}: a summary-only or no-op resume moved pages: {count:?}",
+                    row.h
+                ));
+            }
+        }
+    }
     // Publication follows the candidate's changed pages: the SQL engine
     // work of the interval's fenced owner transactions, which a walk of the
     // committed closure (one statement, any rows) would grow with H.
@@ -1011,8 +1021,9 @@ mod tests {
     }
 
     /// HEAP-METER: every released-worker park/resume seam is measured for all
-    /// six retained-state scenarios, at H 100 and 2,000 and objects-update at
-    /// 1,000 and 10,000 (whose park once stalled past the sample limit), and
+    /// six retained-state scenarios. List samples fill the edited chunk index
+    /// at both sizes; objects-update keeps 1,000 and 10,000, whose park
+    /// once stalled past the sample limit. At each size,
     /// the paged heap's counted laws hold over them.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn six_scenarios_obey_the_paged_heaps_counted_laws() {
@@ -1024,10 +1035,12 @@ mod tests {
         let service = super::worker_service(Path::new(&worker));
         let mut rows = Vec::new();
         for scenario in super::SCENARIOS {
-            let sizes = if scenario == "objects-update" {
-                [1000, 10_000]
-            } else {
-                [100, 2000]
+            let sizes = match scenario {
+                "objects-update" => [1000, 10_000],
+                // One full index holds 64 * 96 entries. Keep the edited
+                // index full at both sizes, beyond inline and short-index forms.
+                "list-update" | "worker-resets" => [10_000, 200_000],
+                _ => [100, 2000],
             };
             for h in sizes {
                 rows.extend(

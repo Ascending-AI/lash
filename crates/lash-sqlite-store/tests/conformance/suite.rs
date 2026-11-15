@@ -232,6 +232,7 @@ fn artifact_store_handles(
     let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
         packages: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStore>,
+        package_storage: Arc::clone(&store) as Arc<dyn lash_durable::packages::PackageStorage>,
         artifacts: Arc::clone(&store)
             as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
         process_env: Arc::clone(&store) as Arc<dyn ProcessEnvStore>,
@@ -316,6 +317,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                 keep_reopen.keep(&reopened);
                 artifact_store_handles(&reopened)
             }),
+            interrupt: None,
         }
     })
 });
@@ -327,6 +329,7 @@ lash_conformance::artifact_referrer_tests!({
         lash_conformance::fused_artifact_store::ReopenableArtifactStore {
             open: artifact_store_handles(&backend),
             reopen: Arc::new(move || artifact_store_handles(&backend)),
+            interrupt: None,
         }
     })
 });

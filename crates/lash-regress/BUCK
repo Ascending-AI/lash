@@ -275,6 +275,33 @@ lash_rust_feature_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_feature_test(
+    name = "integration__test__fv_9f4b2b51",
+    crate_features = [],
+    crate_name = "integration",
+    crate_root = "tests/main.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = sized_exec_properties("lash-regress", "integration", "//crates/lash-regress:integration__test__fv_9f4b2b51"),
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_9f4b2b51",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
 lash_rust_feature_library(
     name = "lash-regress__fv_419bd085",
     build_script = None,
@@ -550,6 +577,32 @@ lash_rust_feature_test(
 )
 
 lash_rust_feature_test(
+    name = "lash-regress__unit_test__fv_9f4b2b51",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_regress",
+    crate_root = "src/lib.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = sized_exec_properties("lash-regress", "lash_regress", "//crates/lash-regress:lash-regress__unit_test__fv_9f4b2b51"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-regress:lash-regress": "//crates/lash-regress:lash-regress__fv_9f4b2b51"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
     name = "unicode_property_escapes__test__fv_419bd085",
     crate_features = [
         "backend-pikevm",
@@ -602,6 +655,33 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lash-regress", "unicode_property_escapes", "//crates/lash-regress:unicode_property_escapes__test__fv_7f10c809"),
     extra_compile_data = [],
     library = "//crates/lash-regress:lash-regress__fv_7f10c809",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "unicode_property_escapes__test__fv_9f4b2b51",
+    crate_features = [],
+    crate_name = "unicode_property_escapes",
+    crate_root = "tests/unicode_property_escapes.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = sized_exec_properties("lash-regress", "unicode_property_escapes", "//crates/lash-regress:unicode_property_escapes__test__fv_9f4b2b51"),
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_9f4b2b51",
     library_crate_name = "lash_regress",
     manifest_dir = "crates/lash-regress",
     package_name = "lash-regress",
@@ -667,6 +747,34 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lash-regress", "unicodesets", "//crates/lash-regress:unicodesets__test__fv_7f10c809"),
     extra_compile_data = [],
     library = "//crates/lash-regress:lash-regress__fv_7f10c809",
+    library_crate_name = "lash_regress",
+    manifest_dir = "crates/lash-regress",
+    package_name = "lash-regress",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+        "pr-deferred",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "unicodesets__test__fv_9f4b2b51",
+    crate_features = [],
+    crate_name = "unicodesets",
+    crate_root = "tests/unicodesets.rs",
+    declared_features = [
+        "backend-pikevm",
+        "default",
+        "index-positions",
+        "prohibit-unsafe",
+        "std",
+        "utf16",
+    ],
+    exec_properties = sized_exec_properties("lash-regress", "unicodesets", "//crates/lash-regress:unicodesets__test__fv_9f4b2b51"),
+    extra_compile_data = [],
+    library = "//crates/lash-regress:lash-regress__fv_9f4b2b51",
     library_crate_name = "lash_regress",
     manifest_dir = "crates/lash-regress",
     package_name = "lash-regress",

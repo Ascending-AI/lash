@@ -28,7 +28,6 @@ use lash_kernel_doc::validate_document;
 use lash_kernel_value::names::Name;
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::sites::Unit;
-use lash_kernel_vm::kernel_internals::Layout;
 use lash_kernel_vm::{
     CellStart, DeliverError, Delivered, End, KernelMachine, Machine, Outcome, PreparedLibrary,
     Program, Request, Step,
@@ -507,37 +506,33 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
     );
     let mut observations = Vec::new();
     for native in [false, true] {
-        for layout in [Layout(0), Layout(37)] {
-            let source = crate::pages::Source::default();
-            let program = crate::machine::prepare_document(
-                &(PreparedLibrary::new(Arc::new(same_registry(BOTH, native)))),
-                Arc::new(document.clone()),
-                None,
-            )
-            .expect("prepare linked law document");
-            let mut machine = crate::pages::with_source(
-                program,
-                crate::CaseBounds::default().into(),
-                start(),
-                layout,
-                &source,
-            )
-            .unwrap();
-            let mut host = ProbeHost;
-            let Step::Ended(End::Finished(mut finished)) =
-                machine.run(&mut host, u64::MAX).unwrap()
-            else {
-                panic!("the identity call must finish");
-            };
-            let carry = finished.carry.take().map(|root| {
-                lash_kernel_state::semantic::session(&root, Box::new(source.clone())).unwrap()
-            });
-            observations.push((
-                finished,
-                carry,
-                machine.meters().charged.expect("exact charge"),
-            ));
-        }
+        let source = crate::pages::Source::default();
+        let program = crate::machine::prepare_document(
+            &(PreparedLibrary::new(Arc::new(same_registry(BOTH, native)))),
+            Arc::new(document.clone()),
+            None,
+        )
+        .expect("prepare linked law document");
+        let mut machine = crate::pages::with_source(
+            program,
+            crate::CaseBounds::default().into(),
+            start(),
+            &source,
+        )
+        .unwrap();
+        let mut host = ProbeHost;
+        let Step::Ended(End::Finished(mut finished)) = machine.run(&mut host, u64::MAX).unwrap()
+        else {
+            panic!("the identity call must finish");
+        };
+        let carry = finished.carry.take().map(|root| {
+            lash_kernel_state::semantic::session(&root, Box::new(source.clone())).unwrap()
+        });
+        observations.push((
+            finished,
+            carry,
+            machine.meters().charged.expect("exact charge"),
+        ));
     }
     assert!(
         observations.iter().all(|item| item == &observations[0]),

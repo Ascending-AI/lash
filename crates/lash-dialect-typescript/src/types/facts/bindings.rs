@@ -328,7 +328,7 @@ impl Facts {
                 )
                 .with_rest(shape.rest.map(|r| *r))
             }
-            Source::Opaque => Shape::new(Ty::Unknown),
+            Source::Opaque | Source::Unassigned => Shape::new(Ty::Unknown),
             Source::Is(ty) => Shape::new(ty.clone()),
             Source::Step => Shape::new(unary_result(UnaryOp::Minus, &self.shapes[binding].ty)),
             Source::Returns(return_ty) => Shape::new(self.function(*return_ty)),

@@ -1,14 +1,11 @@
-//! Continuation and pressure laws over the real persistent heap and S7 census.
+//! Continuation and pressure laws over the real persistent heap.
 use super::embedder::{Embedder, Setup, int, result};
 use crate::{Machine, Request, Step};
-use lash_kernel_doc::heap::PageValue;
-use lash_kernel_state::kernel_internals::census_impl::Census;
-use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
 use lash_kernel_value::tokens::encode_body;
 
 fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
-    embedder.reopen(crate::compile::Layout::default(), true)
+    embedder.reopen(true)
 }
 
 /// K-MACH-001/007: refusing publication must retain the page port's typed
@@ -68,61 +65,27 @@ fn a_projection_refusal_preserves_the_typed_heap_cause() {
     assert_eq!(error, crate::SealError::Heap(HeapFault::LeaseLost));
 }
 
-/// S4/K-SES-001: Main retains session function pins, Entry starts without
-/// a session, and both retain their target kind through a cold continuation.
+/// S4/K-SES-001: Main adopts the session it is started with and carries it
+/// on, Entry starts without a session and carries none, and both retain
+/// their target kind through a cold continuation.
 #[test]
 fn main_and_entry_keep_their_distinct_checkpoint_roots() {
     use crate::{CellStart, EffectModes, Target};
     use lash_kernel_doc::Datum;
     use lash_kernel_value::Name;
-    use tree::{SealWork, Tree};
+    let mut first = Embedder::new("main { let kept = [3] return null }");
+    let crate::End::Finished(finished) = first.run_to_end(&[]) else {
+        panic!("the first cell finishes")
+    };
+    let session = finished.carry.expect("a main cell carries its session");
     for entry in [false, true] {
         let mut embedder = Embedder::new(
             r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let v = perform 0(x) as Any return v }"
-main { let v = perform 0(7) as Any return v }"#,
+main { let v = perform 0(kept[0]) as Any return v }"#,
         );
-        let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
-        heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
-            .unwrap();
-        // The VM preserves host-validated immutable pins without interpreting
-        // their payload. Use a real frozen page and the canonical function table.
-        let pin = lash_kernel_state::paged::FunctionRecord {
-            environment: heap.allocate_object(ObjectInit::Record(vec![])).unwrap(),
-            callable: lash_kernel_value::CallableId {
-                link: lash_kernel_value::LinkId::from_bytes([4; 32]),
-                function: *embedder.document.functions.keys().next().unwrap(),
-            },
-            name: lash_kernel_state::paged::NameRef::new(&Name::new("host pin"), heap.pages())
-                .unwrap(),
-            meta: lash_kernel_doc::heap::PageValue::Null,
-            closure: heap.freeze_datum(&Datum::Null).unwrap().root,
-            captures: Default::default(),
-            before: Default::default(),
-            after: Default::default(),
-        };
-        let mut functions = Tree::new(false);
-        functions
-            .write(b"host pin".to_vec(), pin, heap.pages())
-            .unwrap();
-        functions
-            .seal(
-                heap.pages(),
-                &mut SealWork::new(SealBudget {
-                    pages: u64::MAX,
-                    bytes: u64::MAX,
-                }),
-            )
-            .unwrap();
-        let functions = functions.keyed_root().unwrap();
-        let session = heap
-            .carry(CarryRoots {
-                bindings: KeyedRoot::Empty,
-                functions,
-            })
-            .unwrap();
-        let certificate = heap.certificate();
+        embedder.source = first.source.clone();
         let (program, _) = embedder.program(true);
-        embedder.machine = crate::KernelMachine::start_with_census(
+        embedder.machine = crate::KernelMachine::start(
             program,
             Setup::default().bounds,
             CellStart {
@@ -133,7 +96,7 @@ main { let v = perform 0(7) as Any return v }"#,
                     Target::Main
                 },
                 args: if entry {
-                    vec![Datum::Int(7.into())]
+                    vec![Datum::Int(3.into())]
                 } else {
                     Vec::new()
                 },
@@ -141,24 +104,11 @@ main { let v = perform 0(7) as Any return v }"#,
                 modes: EffectModes::new(),
                 host: Vec::new(),
             },
-            crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
-            Box::new(
-                Census::restore(if entry {
-                    AccountingCertificate::FRESH
-                } else {
-                    certificate
-                })
-                .unwrap(),
-            ),
         )
         .unwrap();
         assert!(matches!(embedder.run(), Step::Parked(_)));
         let root = reopen(&mut embedder);
-        assert_eq!(
-            root.functions,
-            if entry { KeyedRoot::Empty } else { functions }
-        );
         assert_eq!(
             root.target,
             if entry {
@@ -171,15 +121,12 @@ main { let v = perform 0(7) as Any return v }"#,
         let crate::End::Finished(finished) = embedder.run_to_end(&[]) else {
             panic!("finish")
         };
-        assert_eq!(finished.result, int(7));
-        if entry {
-            assert!(finished.carry.is_none());
-        } else {
-            assert_eq!(
-                lash_kernel_state::kernel_internals::session_functions(&finished.carry.unwrap()),
-                functions
-            );
-        }
+        assert_eq!(finished.result, int(3));
+        assert_eq!(
+            finished.carry.is_some(),
+            !entry,
+            "only main carries a session"
+        );
     }
 }
 
@@ -203,16 +150,11 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
     );
     assert_eq!(encode_body(&prior), bytes);
     let (program, _) = embedder.program(true);
-    let old_heap =
-        PagedHeap::open_header(prior.heap, Box::new(embedder.source.clone()), EditEpoch(2))
-            .unwrap();
-    let mut old = crate::KernelMachine::open_with_census(
+    let mut old = crate::KernelMachine::open_in(
         program,
         Setup::default().bounds,
         &prior,
         Box::new(embedder.source.clone()),
-        Box::new(Census::restore(old_heap.certificate()).unwrap()),
-        crate::compile::Layout::default(),
     )
     .unwrap();
     assert!(
@@ -240,8 +182,8 @@ fn an_issued_request_survives_a_slice_and_is_reported_once() {
         }
         assert!(matches!(step, Step::Slice));
     }
-    let root = reopen(&mut embedder);
-    assert_eq!(root.waits.len(), 1);
+    reopen(&mut embedder);
+    assert_eq!(embedder.run_record().waits.len(), 1);
     assert!(embedder.requests.is_empty());
     loop {
         match embedder.run() {
@@ -268,8 +210,8 @@ fn a_committed_outcome_survives_seal_before_semantic_resume() {
         Embedder::new("main { let xs = [1, 2] let v = perform 0(xs) as Any return v }");
     assert!(matches!(embedder.run(), Step::Parked(_)));
     embedder.deliver("echo");
-    let root = reopen(&mut embedder);
-    assert_eq!(root.waits.len(), 1);
+    reopen(&mut embedder);
+    assert_eq!(embedder.run_record().waits.len(), 1);
     assert_eq!(
         result(embedder.run_to_end(&[])),
         lash_kernel_doc::Datum::List(vec![int(1), int(2)])
@@ -292,31 +234,12 @@ fn a_committed_delivery_waits_behind_other_ready_work() {
             embedder.machine.run(&mut embedder.world, 1).unwrap(),
             Step::Slice
         ));
-        let sealed = embedder
-            .machine
-            .seal(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            })
-            .unwrap()
-            .unwrap();
-        assert_eq!(sealed.root.waits.len(), 1);
-        let heap = PagedHeap::open_header(
-            sealed.root.heap,
-            Box::new(embedder.source.clone()),
-            EditEpoch(2),
-        )
-        .unwrap();
-        let waits = tree::Tree::<WaitRecord>::of_keyed(&sealed.root.waits);
-        waits
-            .visit(heap.pages(), &mut |_, wait| {
-                assert!(matches!(
-                    wait.phase,
-                    WaitPhase::Committed(CommittedOutcomeRecord::Completed(_))
-                ));
-                true
-            })
-            .unwrap();
+        let waits = embedder.run_record().waits;
+        assert_eq!(waits.len(), 1);
+        assert!(matches!(
+            waits[0].phase,
+            lash_kernel_state::paged::run::continuation::WaitPhase::Completed(_)
+        ));
         if cold {
             reopen(&mut embedder);
         }
@@ -347,6 +270,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
                 panic!("must park");
             };
             let Request::Effect(request) = &park.requests[0];
+            let wait = request.wait;
             let before = embedder.machine.meters().charged.expect("exact charge");
             let outcome = if rejected {
                 Outcome::Completed(Datum::Text("not an integer".into()))
@@ -373,16 +297,23 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
                 expected,
                 "cold={cold}, rejected={rejected}"
             );
+            assert_eq!(
+                embedder.machine.take_caught(),
+                vec![wait],
+                "cold={cold}, rejected={rejected}"
+            );
+            assert!(embedder.machine.take_caught().is_empty());
         }
     }
 }
 
-/// K-MACH infrastructure causes stay typed when inbound argument freezing
-/// fails; a page-port loss is never an argument/type refusal.
+/// K-MACH infrastructure causes stay typed: a page port lost under a run
+/// started with a long argument surfaces as the port's fault where the
+/// run first reaches the port, never as an argument or type refusal. The
+/// core holds an entry's arguments resident, so the start itself succeeds.
 #[test]
 fn argument_freezing_preserves_a_page_ports_typed_failure() {
-    use super::embedder::{ROOMY, census};
-    use crate::{CellStart, EffectModes, StartError, Target};
+    use crate::{CellStart, EffectModes, Target};
     use lash_kernel_doc::Datum;
     use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
     struct Lost;
@@ -395,7 +326,7 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
         }
     }
     let (program, _) = Embedder::new(
-        r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return x }"
+        r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let y = perform 0(x) as Any return y }"
 main {}"#,
     )
     .program(true);
@@ -407,17 +338,26 @@ main {}"#,
         modes: EffectModes::new(),
         host: Vec::new(),
     };
-    assert!(matches!(
-        crate::KernelMachine::start_with_census(
-            program,
-            ROOMY,
-            start,
-            crate::compile::Layout::default(),
-            Box::new(Lost),
-            census()
+    let mut machine =
+        crate::KernelMachine::start(program, super::embedder::ROOMY, start, Box::new(Lost))
+            .expect("the start reaches no page");
+    let fault = match machine.run(&mut super::embedder::World::default(), u64::MAX) {
+        Ok(Step::Parked(_)) => format!(
+            "{:?}",
+            machine
+                .seal(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                })
+                .expect_err("a seal through a lost port fails")
         ),
-        Err(StartError::Heap(HeapFault::LeaseLost))
-    ));
+        Ok(step) => panic!("the entry never parked: {step:?}"),
+        Err(error) => format!("{error:?}"),
+    };
+    assert!(
+        fault.contains("Heap(LeaseLost)") || fault.contains("Host(LeaseLost)"),
+        "{fault}"
+    );
 }
 
 /// D-IMM/S4: a native error remains a bounded descriptor while finally
@@ -456,45 +396,38 @@ fn a_megabyte_native_error_survives_a_parked_finally() {
 /// document derives, with every binding it carried and their aliases, a
 /// closure dropped with its typed diagnostic, and that cell's root pins
 /// its own closure.
+///
+/// The run's one held total (`K-MEM`) holds a carried alias once, so
+/// carrying `ys = xs` holds less than carrying a copy. A cold session body
+/// counts once read (contract §2), so no cold-start hold is pinned here.
 #[test]
 fn a_session_carried_under_one_closure_is_adopted_under_another() {
-    let mut first = Embedder::new(
-        "main { let xs = [1, 2] let ys = xs let n = num.add(40, 2) let f = fn(k) { return num.add(k, 1) } return null }",
-    );
-    let crate::End::Finished(finished) = first.run_to_end(&[]) else {
-        panic!("the first cell finishes")
+    let carried = |ys: &str| {
+        let mut first = Embedder::new(&format!(
+            "main {{ let xs = [1, 2] let ys = {ys} let n = num.add(40, 2) let f = fn(k) {{ return num.add(k, 1) }} return null }}"
+        ));
+        let crate::End::Finished(finished) = first.run_to_end(&[]) else {
+            panic!("the first cell finishes")
+        };
+        (first.machine.meters().memory, finished, first.source)
     };
-    let held = first.machine.logical_balance().unwrap();
-    assert_eq!(held.entities, 1, "carried aliases share one ledger entity");
-    assert_eq!(held.entity_local_bytes, 66);
-    assert_eq!(
-        held.root_and_control_bytes, 65,
-        "two aliases, computed n and the terminal null own their occurrences"
-    );
+    let (aliased, finished, first_source) = carried("xs");
+    let (copied, _, _) = carried("[1, 2]");
+    assert!(aliased < copied, "carried aliases share one object");
     let dropped: Vec<&str> = finished
         .not_carried
         .iter()
         .map(|(name, _)| name.as_str())
         .collect();
     assert_eq!(dropped, ["f"], "a closure ends with its cell");
-    let session = finished.carry.expect("a main cell carries its session");
-    let mut source = first.source.clone();
-    let certificate = heap_accounting(
-        &mut source,
-        lash_kernel_state::kernel_internals::session_heap(&session),
-    )
-    .unwrap();
-    for closure in [
-        lash_kernel_doc::heap::PageId([8; 32]),
-        lash_kernel_doc::heap::PageId([7; 32]),
-    ] {
+    let start = |session: SessionRoot, source: &super::embedder::Source, closure| {
         let mut next = Embedder::new(
             "main { set ys[0] = 5 let got = num.add(num.add(n, xs[1]), xs[0]) let r = perform 0(1) as Any return got }",
         );
         let (mut program, _) = next.program(true);
         program.closure = closure;
-        next.source = first.source.clone();
-        next.machine = crate::KernelMachine::start_with_census(
+        next.source = source.clone();
+        next.machine = crate::KernelMachine::start(
             program,
             Setup::default().bounds,
             crate::CellStart {
@@ -505,20 +438,17 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
                 modes: crate::EffectModes::new(),
                 host: Vec::new(),
             },
-            crate::compile::Layout::default(),
             Box::new(next.source.clone()),
-            Box::new(Census::restore(certificate).unwrap()),
         )
         .unwrap();
-        let cold = next.machine.logical_balance().unwrap();
-        assert_eq!(
-            cold.entity_local_bytes, 66,
-            "unread cold session bodies have their complete cost"
-        );
-        assert_eq!(
-            cold.root_and_control_bytes, 113,
-            "the old result retires and the new frame enters without rereading session values"
-        );
+        next
+    };
+    let session = finished.carry.expect("a main cell carries its session");
+    for closure in [
+        lash_kernel_doc::heap::PageId([8; 32]),
+        lash_kernel_doc::heap::PageId([7; 32]),
+    ] {
+        let mut next = start(session, &first_source, closure);
         assert!(matches!(next.run(), Step::Parked(_)));
         let sealed = next
             .machine
@@ -541,16 +471,19 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
 }
 
 /// FIG-7455: a dead cell-local closure must not make carrying a resident
-/// data graph reconstruct every object from its stored directory.
+/// data graph read its objects back from pages: the pages the run reads
+/// after its last park do not grow with the graph it carries.
 #[test]
 fn carrying_resident_records_does_not_read_them_back_from_pages() {
     let source = r#"
-definition "function build(callback: Any) -> Any\nkernel 1\nmetering statements\nbody { let rows = [] let i = 0 while num.lt(i, 500) { set rows[list.len(rows)] = {key: i} set i = num.add(i, 1) } let temporary = callback do perform 0(0) as Any return rows }"
+definition "function build(callback: Any) -> Any\nkernel 1\nmetering statements\nbody { let rows = [] let i = 0 while num.lt(i, ROWS) { set rows[list.len(rows)] = {key: i} set i = num.add(i, 1) } let temporary = callback do perform 0(0) as Any return rows }"
 main { let host_callback = fn() { return 1 } let records = call build(fn() { return 1 }) do perform 0(0) as Any return list.len(records) }
 "#;
-    for ending in ["return list.len(records)", "finish list.len(records)"] {
+    let reads = |rows: i64, ending: &str| {
         let mut run = Embedder::with(
-            &source.replace("return list.len(records)", ending),
+            &source
+                .replace("ROWS", &rows.to_string())
+                .replace("return list.len(records)", ending),
             Setup {
                 start: crate::CellStart {
                     host: vec![(
@@ -566,16 +499,13 @@ main { let host_callback = fn() { return 1 } let records = call build(fn() { ret
         run.deliver_next();
         assert!(matches!(run.run(), Step::Parked(_)));
         run.deliver_next();
-        crate::perf_witness::enable_work();
+        let before = super::embedder::PAGE_READS.get();
         let ended = run.run_to_end(&[]);
-        let work = crate::perf_witness::take_work().unwrap();
-        crate::perf_witness::disable_work();
-        assert!(matches!(ended, crate::End::Finished(ref end) if end.result == int(500)));
-        assert!(
-            work.heap.object_head_lookups < 100,
-            "carry rebuilt the resident graph: {} stored object lookups",
-            work.heap.object_head_lookups
-        );
+        assert!(matches!(ended, crate::End::Finished(ref end) if end.result == int(rows)));
+        super::embedder::PAGE_READS.get() - before
+    };
+    for ending in ["return list.len(records)", "finish list.len(records)"] {
+        assert_eq!(reads(500, ending), reads(50, ending), "{ending}");
     }
 }
 
@@ -615,7 +545,7 @@ fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
 /// publish an oversized checkpoint. Count token framing and UTF-8 bytes.
 #[test]
 fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
-    use super::embedder::{ROOMY, census};
+    use super::embedder::ROOMY;
     use crate::{CellStart, EffectModes, StartError, Target};
     use lash_kernel_doc::Datum;
     use lash_kernel_value::Name;
@@ -635,7 +565,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
         ),
     ] {
         let (program, _) = embedder.program(false);
-        let result = crate::KernelMachine::start_with_census(
+        let result = <crate::KernelMachine as crate::Machine>::start(
             program,
             ROOMY,
             CellStart {
@@ -646,9 +576,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
                 modes: EffectModes::new(),
                 host: names.into_iter().map(|name| (name, Datum::Null)).collect(),
             },
-            crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
-            census(),
         );
         if let Some(actual) = refused_size {
             assert!(
@@ -678,7 +606,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
 #[test]
 fn a_cold_resume_allocates_after_the_existing_list_join() {
     use super::embedder::{Embedder, result, text};
-    use crate::{Layout, Step};
+    use crate::Step;
     use lash_kernel_doc::Datum::List;
     let mut embedder = Embedder::new(
         r#"
@@ -698,15 +626,15 @@ main {
 }"#,
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, certificate) = embedder.checkpoint();
-    assert_eq!(root.meters.next_join, 1);
-    assert_eq!(root.joins.len(), 1);
-    embedder.open_at(&root, certificate, Layout::default(), true);
+    let record = embedder.run_record();
+    assert_eq!(record.next_join, 1);
+    assert_eq!(record.joins.len(), 1);
+    embedder.reopen(true);
     embedder.deliver("gate");
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, _) = embedder.checkpoint();
-    assert_eq!(root.meters.next_join, 2);
-    assert_eq!(root.joins.len(), 2, "both live join identities survive");
+    let record = embedder.run_record();
+    assert_eq!(record.next_join, 2);
+    assert_eq!(record.joins.len(), 2, "both live join identities survive");
     assert_eq!(
         result(embedder.run_to_end(&["b", "a"])),
         List(vec![List(vec![text("a")]), List(vec![text("b")])])
@@ -717,92 +645,48 @@ main {
 /// identities and sharing reachable from a continuation remain observable.
 #[test]
 fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
-    // Record edits are required to vary allocator history and pc independently of execution.
-    use super::embedder::Embedder;
-    use lash_kernel_state::kernel_internals::tree::Tree;
-    use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
-    let mut run = Embedder::new("main { let a = [1] let b = a do perform 0(1) as Any return b }");
-    assert!(matches!(run.run(), crate::Step::Parked(_)));
-    let (root, _) = run.checkpoint();
-    let snapshot = |root: &CheckpointRoot| {
+    use lash_kernel_state::paged::run::continuation;
+    // `b` aliases `a` when the first delivery is 1, and is an equal list of
+    // its own otherwise; nothing else of the delivery is kept.
+    const SOURCE: &str = "main { let a = [1] let b = if(num.lt(perform 0(1) as Any, 2), a, [1]) do perform 0(2) as Any return b }";
+    let parked = |first: i64| {
+        let mut run = Embedder::new(SOURCE);
+        assert!(matches!(run.run(), Step::Parked(_)));
+        let request = run.pending.remove(0);
+        run.machine
+            .deliver(
+                super::embedder::wait_of(&request),
+                crate::Outcome::Completed(super::embedder::int(first)),
+            )
+            .unwrap();
+        assert!(matches!(run.run(), Step::Parked(_)));
+        run
+    };
+    let snapshot = |run: &Embedder, root: &CheckpointRoot| {
         lash_kernel_state::semantic::checkpoint(root, Box::new(run.source.clone())).unwrap()
     };
-    let original = snapshot(&root);
-    let mut heap =
-        PagedHeap::open_header(root.heap, Box::new(run.source.clone()), EditEpoch(20)).unwrap();
-    heap.restore_execution_roots(&root);
-    heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
-        .unwrap();
-    heap.allocate_object(ObjectInit::List(vec![PageValue::Bool(false)]))
-        .unwrap();
-    heap.seal(SealBudget {
-        pages: u64::MAX,
-        bytes: u64::MAX,
-    })
-    .unwrap()
-    .unwrap();
-    let mut garbage = root.clone();
-    garbage.heap = heap.sealed_root().unwrap();
+    let mut run = parked(1);
+    let root = run.checkpoint();
+    let original = snapshot(&run, &root);
+    // A cold reopen and a second seal give every object a new history.
+    run.open_at(&root, true);
+    let resealed = run.checkpoint();
     assert_eq!(
-        snapshot(&garbage),
+        snapshot(&run, &resealed),
         original,
-        "allocator and unreachable garbage are outside equality"
+        "allocator history is outside equality"
     );
-    let mut tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
-    let key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
-    let mut task = tasks.get(&key, heap.pages()).unwrap().unwrap();
-    let frame_key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
-    let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
-    frame
-        .pending
-        .as_mut()
-        .expect("the canonical region continuation")
-        .site = vec![0, 0];
-    task.frames.write(frame_key, frame, heap.pages()).unwrap();
-    tasks.write(key, task, heap.pages()).unwrap();
-    tasks
-        .seal(
-            heap.pages(),
-            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            }),
-        )
-        .unwrap();
-    let mut moved = root;
-    moved.tasks = tasks.keyed_root().unwrap();
-    assert_ne!(snapshot(&moved), original, "a frame pc is exact");
-    let mut bindings = Tree::<BindingRecord>::of_keyed(&garbage.session);
-    let key = lash_kernel_state::kernel_internals::metadata::metadata_key(
-        &lash_kernel_value::names::Name::new("b"),
-    );
-    let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
-    let independent = heap
-        .allocate_object(ObjectInit::List(vec![PageValue::Int(
-            lash_kernel_doc::heap::IntRef::Inline(1.into()),
-        )]))
-        .unwrap();
-    binding.value = BoundRecord::Value(PageValue::List(independent));
-    bindings.write(key, binding, heap.pages()).unwrap();
-    bindings
-        .seal(
-            heap.pages(),
-            &mut lash_kernel_state::kernel_internals::tree::SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            }),
-        )
-        .unwrap();
-    heap.seal(SealBudget {
-        pages: u64::MAX,
-        bytes: u64::MAX,
-    })
-    .unwrap()
-    .unwrap();
-    garbage.heap = heap.sealed_root().unwrap();
-    garbage.session = bindings.keyed_root().unwrap();
+    let access =
+        lash_kernel_state::kernel_internals::tree::Access::new(Box::new(run.source.clone()));
+    let mut record = continuation::read(&access, root.heap).unwrap();
+    record.tasks[0].frames[0].site = super::embedder::main_site([0, 0]);
+    let mut moved = root.clone();
+    moved.heap = continuation::write(&access, &record).unwrap();
+    assert_ne!(snapshot(&run, &moved), original, "a frame's point is exact");
+    let mut unshared = parked(2);
+    let root = unshared.checkpoint();
     assert_ne!(
-        snapshot(&garbage),
+        snapshot(&unshared, &root),
         original,
         "equal lists with broken sharing are different graphs"
     );
@@ -850,338 +734,46 @@ main {
     assert_eq!(result(end), lash_kernel_doc::Datum::List(order));
 }
 
-/// FIG-7169: a genuine helper/callback continuation, including an escaped
-/// callable which has not yet run. The build image owns helper definitions;
-/// the authored document contains only exact library references.
-fn helper_restore_fixture(
-    text: &str,
-    roots: &[&str],
-    native_twice: bool,
-) -> (
-    Embedder,
-    crate::Program,
-    std::sync::Arc<lash_kernel_doc::BuildHelpers>,
-) {
-    use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
-    use std::sync::Arc;
-    let mut embedder = Embedder::with(
-        text,
-        Setup {
-            native_twice,
-            ..Setup::default()
-        },
-    );
-    let roots = roots.iter().map(|name| embedder.library.ids[*name]);
-    let helpers =
-        Arc::new(BuildHelpers::new(embedder.library.registry.as_ref().clone(), roots).unwrap());
-    let mut document = embedder.document.as_ref().clone();
-    document.functions.retain(|id, _| !helpers.contains(id));
-    document.library = LibraryDependencies(helpers.members().copied().collect());
-    let document = Arc::new(document);
-    let program = super::embedder::program(
-        Arc::clone(&document),
-        crate::PreparedLibrary::with_helpers(
-            Arc::clone(&embedder.library.registry),
-            Arc::clone(&helpers),
-        ),
-    );
-    embedder.machine = crate::KernelMachine::start(
-        program.clone(),
-        Setup::default().bounds,
-        Setup::default().start,
-        Box::new(embedder.source.clone()),
-    )
-    .unwrap();
-    embedder.document = document;
-    assert!(matches!(embedder.run(), Step::Parked(_)));
-    (embedder, program, helpers)
-}
-
-/// FIG-7169: unrelated build members do not pin a root, and the first park
-/// after a successful cross-image resume records the reader's identity.
+/// Contract §2 and R10: a program constant counts once, when it is
+/// materialized, and a reopened run holds no more than the run it
+/// continues. A run parked after placing a long text constant, bound to a
+/// local, holds the same bytes cold as warm, through two opens.
 #[test]
-fn an_unchanged_pinned_helper_survives_an_unrelated_library_change() {
-    use lash_kernel_doc::{BuildHelpers, Selection};
-    use lash_kernel_state::paged::helper_compatibility_work as probe;
-    use std::sync::Arc;
-    let (mut embedder, mut program, writer) = helper_restore_fixture(
-        "main { let kept = &each.map let callback = fn(x) { let answer = perform 0(x) as Any return answer } let answer = invoke each.twice(callback, 7) let retain = kept return answer }",
-        &["each.twice", "each.map"],
-        true,
-    );
-    let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
-    let reader = Arc::new(
-        BuildHelpers::new(
-            embedder.library.registry.as_ref().clone(),
-            [
-                embedder.library.ids["each.twice"],
-                embedder.library.ids["each.map"],
-                embedder.library.ids["pair.twice"],
-            ],
-        )
-        .unwrap(),
-    );
-    assert_ne!(writer.identity(), reader.identity());
-    let documents = program
-        .instances
-        .iter()
-        .map(|(link, instance)| {
-            (
-                *link,
-                program.documents[&instance.document].as_ref().clone(),
-            )
-        })
-        .collect();
-    probe::enable();
-    let (source, selection) = checkpoint
-        .check_helper_compatibility(
-            Box::new(embedder.source.clone()),
-            &documents,
-            &Default::default(),
-            &reader,
-        )
-        .unwrap();
-    let work = probe::take().unwrap();
-    let Selection::Restored(restored) = &selection else {
-        panic!("different images need a live selection")
-    };
-    assert_eq!(work.live_code_walks, 1);
-    assert_eq!(work.membership_probes as usize, restored.pins.len());
-    assert!(!restored.pins.contains(&embedder.library.ids["pair.twice"]));
-    program.library = crate::PreparedLibrary::with_helpers(
-        Arc::clone(&embedder.library.registry),
-        Arc::clone(&reader),
-    );
-    program.selection = selection;
-    embedder.machine =
-        crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
-    embedder.deliver("echo");
-    assert!(matches!(embedder.run(), Step::Parked(_)));
-    assert_eq!(
-        embedder
-            .machine
-            .checkpoint()
-            .unwrap()
-            .checkpoint()
-            .header()
-            .helper_library,
-        reader.identity()
-    );
-    embedder.deliver("echo");
-    assert_eq!(result(embedder.run_to_end(&[])), int(7));
-}
-
-/// FIG-7673: a policy owed by a suspended return remains reachable while
-/// Main parks in finally, even though the return precedes its saved suffix.
-#[test]
-fn a_return_policy_suspended_in_finally_stays_pinned_across_a_library_change() {
-    use lash_kernel_doc::{BuildHelpers, Selection};
-    use lash_kernel_state::paged::HelperCompatibilityError;
-    use std::sync::Arc;
-    let (mut embedder, mut program, writer) = helper_restore_fixture(
-        "main { try { return 7 via pair.twice } finally { do perform 0(0) as Any } }",
-        &["pair.twice"],
-        false,
-    );
-    let helper = embedder.library.ids["pair.twice"];
-    let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
-    let documents = program
-        .instances
-        .iter()
-        .map(|(link, instance)| {
-            (
-                *link,
-                program.documents[&instance.document].as_ref().clone(),
-            )
-        })
-        .collect();
-    assert!(matches!(
-        checkpoint.check_helper_compatibility(
-            Box::new(embedder.source.clone()),
-            &documents,
-            &Default::default(),
-            &BuildHelpers::empty(),
-        ),
-        Err(HelperCompatibilityError::HelperUnavailable { function, .. }) if function == helper
+fn a_parked_constant_holds_the_same_cold_as_warm() {
+    let mut run = Embedder::new(&format!(
+        "main {{ let t = \"{}\" let r = perform 0(0) as Any let s = perform 0(1) as Any return 1 }}",
+        "c".repeat(1000)
     ));
-    let reader = Arc::new(
-        BuildHelpers::new(
-            embedder.library.registry.as_ref().clone(),
-            [helper, embedder.library.ids["each.twice"]],
-        )
-        .unwrap(),
-    );
-    assert_ne!(writer.identity(), reader.identity());
-    let (source, selection) = checkpoint
-        .check_helper_compatibility(
-            Box::new(embedder.source.clone()),
-            &documents,
-            &Default::default(),
-            &reader,
-        )
-        .unwrap();
-    let Selection::Restored(restored) = &selection else {
-        panic!("different images need a live selection")
-    };
-    assert!(restored.pins.contains(&helper));
-    assert!(!restored.pins.contains(&embedder.library.ids["each.twice"]));
-    program.library =
-        crate::PreparedLibrary::with_helpers(Arc::clone(&embedder.library.registry), reader);
-    program.selection = selection;
-    embedder.machine =
-        crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
-    embedder.deliver("echo");
-    assert_eq!(result(embedder.run_to_end(&[])), int(14));
-}
-
-/// FIG-7169: executed helper calls die with their continuation, while a
-/// surrounding loop can still run its earlier helper call again.
-#[test]
-fn a_completed_helper_call_does_not_pin_but_an_enclosing_loop_does() {
-    use lash_kernel_doc::{BuildHelpers, LibraryDependencies};
-    use lash_kernel_state::paged::HelperCompatibilityError;
-    use std::sync::Arc;
-    for looping in [false, true] {
-        let body =
-            "let value = invoke each.twice(fn(x) { return x }, 7) let tail = perform 0(7) as Any";
-        let text = if looping {
-            format!("main {{ while true {{ {body} }} return 7 }}")
-        } else {
-            format!("main {{ {body} return tail }}")
-        };
-        let mut embedder = Embedder::new(&text);
-        let helper = embedder.library.ids["each.twice"];
-        let writer = Arc::new(
-            BuildHelpers::new(embedder.library.registry.as_ref().clone(), [helper]).unwrap(),
-        );
-        let mut document = embedder.document.as_ref().clone();
-        document.functions.retain(|id, _| !writer.contains(id));
-        document.library = LibraryDependencies([helper].into_iter().collect());
-        let mut program = super::embedder::program(
-            Arc::new(document),
-            crate::PreparedLibrary::with_helpers(Arc::clone(&embedder.library.registry), writer),
-        );
-        embedder.machine = crate::KernelMachine::start(
-            program.clone(),
-            embedder.bounds,
-            Setup::default().start,
-            Box::new(embedder.source.clone()),
-        )
-        .unwrap();
-        assert!(matches!(embedder.run(), Step::Parked(_)));
-        let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
-        let reader = BuildHelpers::empty();
-        let documents = program
-            .instances
-            .iter()
-            .map(|(link, instance)| {
-                (
-                    *link,
-                    program.documents[&instance.document].as_ref().clone(),
-                )
-            })
-            .collect();
-        let checked = checkpoint.check_helper_compatibility(
-            Box::new(embedder.source.clone()),
-            &documents,
-            &Default::default(),
-            &reader,
-        );
-        if looping {
-            assert!(
-                matches!(checked, Err(HelperCompatibilityError::HelperUnavailable { reason: lash_kernel_value::HelperUnavailableReason::Unknown, function }) if function == helper)
-            );
-        } else {
-            let (source, selection) = checked.expect("a completed call outside a loop is dead");
-            program.library = crate::PreparedLibrary::with_helpers(
-                Arc::clone(&embedder.library.registry),
-                reader,
-            );
-            program.selection = selection;
-            embedder.machine =
-                crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
-            embedder.deliver("echo");
-            assert_eq!(result(embedder.run_to_end(&[])), int(7));
+    assert!(matches!(run.run(), Step::Parked(_)));
+    let warm = run.machine.meters().memory;
+    for open in 1..=2 {
+        reopen(&mut run);
+        assert_eq!(run.machine.meters().memory, warm, "open {open}");
+        run.deliver_next();
+        if open == 1 {
+            assert!(matches!(run.run(), Step::Parked(_)));
         }
     }
+    let end = run.run_to_end(&[]);
+    assert!(matches!(end, crate::End::Finished(ref end) if end.result == int(1)));
 }
 
-/// FIG-7169: narrowing executable reach does not erase historical authored
-/// spawn counters. Only keys absent from the original ordinary code refuse.
+/// `K-FORM-003` across a seal: a name of `main` no host or session binding
+/// provides stays unbound in a run reopened cold, so reading or writing it
+/// raises `unbound_variable`.
 #[test]
-fn a_dead_authored_spawn_occurrence_survives_a_helper_library_change() {
-    use lash_kernel_doc::{BuildHelpers, LibraryDependencies, Selection};
-    use std::sync::Arc;
-    let leaf = lash_kernel_doc::parse_definition(
-        "function historical.leaf() -> Any\nkernel 1\nmetering statements\nbody { return 7 }",
-    )
-    .unwrap();
-    let parent = lash_kernel_doc::parse_definition(&format!(
-        "function historical.parent() -> Any\nkernel 1\nmetering statements\nuse historical.leaf = @{}\nbody {{ let child = spawn call historical.leaf() let value = join child return value }}", leaf.identity(),
-    )).unwrap();
-    let mut embedder = Embedder::new("main { let tail = perform 0(7) as Any return tail }");
-    let authored = lash_kernel_doc::parse_document(&format!(
-        "kernel 1\nnumbers by_spelling\nimport 0 operation host.echo(x?: Any) -> Any\ndefinition {}\ndefinition {}\nmain {{ let done = invoke historical.parent() let tail = perform 0(7) as Any return tail }}",
-        serde_json::to_string(&lash_kernel_doc::print_definition(&leaf)).unwrap(),
-        serde_json::to_string(&lash_kernel_doc::print_definition(&parent)).unwrap(),
-    )).unwrap();
-    let helper = embedder.library.ids["each.twice"];
-    let writer =
-        Arc::new(BuildHelpers::new(embedder.library.registry.as_ref().clone(), [helper]).unwrap());
-    let mut document = embedder.document.as_ref().clone();
-    document.functions.extend(authored.functions);
-    document.main = authored.main;
-    document.functions.retain(|id, _| !writer.contains(id));
-    document.library = LibraryDependencies([helper].into());
-    let mut program = super::embedder::program(
-        Arc::new(document),
-        crate::PreparedLibrary::with_helpers(Arc::clone(&embedder.library.registry), writer),
-    );
-    embedder.machine = crate::KernelMachine::start(
-        program.clone(),
-        embedder.bounds,
-        Setup::default().start,
-        Box::new(embedder.source.clone()),
-    )
-    .unwrap();
-    assert!(matches!(embedder.run(), Step::Parked(_)));
-    let checkpoint = embedder.machine.checkpoint().unwrap().checkpoint();
-    let reader = BuildHelpers::empty();
-    let documents = program
-        .instances
-        .iter()
-        .map(|(link, instance)| {
-            (
-                *link,
-                program.documents[&instance.document].as_ref().clone(),
-            )
-        })
-        .collect();
-    let (source, selection) = checkpoint
-        .check_helper_compatibility(
-            Box::new(embedder.source.clone()),
-            &documents,
-            &Default::default(),
-            &reader,
-        )
-        .unwrap();
-    let Selection::Restored(restored) = &selection else {
-        panic!("changed image")
-    };
-    assert!(
-        !restored
-            .live
-            .iter()
-            .any(|callable| callable.function == parent.identity())
-    );
-    // A cold registry contains no dead authored parent. The original document
-    // still authenticates its historical occurrence census.
-    let mut registry = lash_kernel_doc::FunctionRegistry::new();
-    crate::register_machine_functions(&mut registry).unwrap();
-    program.library = crate::PreparedLibrary::with_helpers(Arc::new(registry), reader);
-    program.selection = selection;
-    embedder.machine =
-        crate::KernelMachine::open(program, embedder.bounds, &checkpoint, source).unwrap();
-    embedder.deliver("echo");
-    assert_eq!(result(embedder.run_to_end(&[])), int(7));
+fn a_never_bound_name_raises_unbound_variable_after_a_cold_reopen() {
+    for body in ["return nowhere", "set nowhere = 1 return 1"] {
+        let mut run = Embedder::new(&format!("main {{ let r = perform 0(0) as Any {body} }}"));
+        assert!(matches!(run.run(), Step::Parked(_)));
+        reopen(&mut run);
+        run.deliver_next();
+        match run.run_to_end(&[]) {
+            crate::End::Error(crate::RunError::Uncaught {
+                error: lash_kernel_doc::Datum::Error(error),
+                ..
+            }) => assert_eq!(error.kind, "unbound_variable", "{body}"),
+            other => panic!("{body}: {other:?}"),
+        }
+    }
 }

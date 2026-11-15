@@ -42,6 +42,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(2).as_deref() == Some("--charges") {
         return charges(std::path::Path::new(&root), registry);
     }
+    if std::env::args().nth(2).as_deref() == Some("--core-census") {
+        return core_census(std::path::Path::new(&root), registry);
+    }
+    if std::env::args().nth(2).as_deref() == Some("--core-probes") {
+        return probes::<lash_kernel_vm::CoreMachine>(std::path::Path::new(&root));
+    }
+    if std::env::args().nth(2).as_deref() == Some("--base-probes") {
+        return probes::<lash_kernel_vm::KernelMachine>(std::path::Path::new(&root));
+    }
     let path = std::path::PathBuf::from(root)
         .join("crates/lash-kernel-conformance/corpus/val/K-VAL-033.json");
     let original = std::fs::read_to_string(&path)?;
@@ -65,6 +74,208 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1,
     );
     std::fs::write(path, updated)?;
+    Ok(())
+}
+
+/// Runs every corpus case on the bytecode core and prints one line per
+/// case: `PASS` or `FAIL`, the shard file, the case and why. A dev census
+/// until the production switch (handoff H1) makes the core the machine.
+fn core_census(
+    root: &std::path::Path,
+    registry: FunctionRegistry,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut runner = lash_kernel_conformance::MachineRunner::<lash_kernel_vm::CoreMachine>::new(
+        Arc::new(registry),
+    );
+    let mut paths = Vec::new();
+    corpus_files(
+        &root.join("crates/lash-kernel-conformance/corpus"),
+        &mut paths,
+    )?;
+    paths.sort();
+    let (mut passed, mut failed) = (0u32, 0u32);
+    for path in paths {
+        let Ok(shard) = serde_json::from_str::<lash_kernel_conformance::Shard>(
+            &std::fs::read_to_string(&path)?,
+        ) else {
+            continue;
+        };
+        let file = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let filter = std::env::args().nth(3);
+        for case in &shard.cases {
+            if filter
+                .as_deref()
+                .is_some_and(|filter| !case.name.contains(filter))
+            {
+                continue;
+            }
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                lash_kernel_conformance::check_case(&mut runner, case)
+            }));
+            let verdict = match outcome {
+                Ok(Ok(_)) => None,
+                Ok(Err(error)) => Some(error.to_string()),
+                Err(_) => Some("panicked".to_owned()),
+            };
+            match verdict {
+                None => {
+                    passed += 1;
+                    println!("PASS\t{file}\t{}", case.name);
+                }
+                Some(why) => {
+                    failed += 1;
+                    let why = why.replace('\n', " ");
+                    println!("FAIL\t{file}\t{}\t{why}", case.name);
+                }
+            }
+        }
+    }
+    println!("TOTAL\tpassed {passed}\tfailed {failed}");
+    Ok(())
+}
+
+/// Runs every r56 probe's literal cases (`probes/<shard>/r56-<probe>.json`)
+/// on machine `M`, each document linked with the shipped helper library,
+/// and prints a verdict per case like the census.
+fn probes<M: lash_kernel_vm::Machine>(
+    root: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let release = lash_kernel_releases::helper_release()?;
+    let library = lash_kernel_vm::PreparedLibrary::with_helpers(
+        Arc::new(lash_kernel_conformance::installed_functions()?),
+        Arc::clone(&release.helpers),
+    );
+    let mut paths = Vec::new();
+    corpus_files(
+        &root.join("crates/lash-kernel-conformance/probes"),
+        &mut paths,
+    )?;
+    paths.sort();
+    let (mut passed, mut failed) = (0u32, 0u32);
+    for path in paths {
+        let shard: lash_kernel_conformance::Shard =
+            serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+        let file = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let filter = std::env::args().nth(3);
+        for case in &shard.cases {
+            if filter
+                .as_deref()
+                .is_some_and(|filter| !case.name.contains(filter))
+            {
+                continue;
+            }
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let program = linked_program(&library, &case.document)?;
+                lash_kernel_conformance::check_program::<M>(
+                    program,
+                    case,
+                    lash_kernel_vm::Charge::Exact,
+                )
+                .map_err(|error| error.to_string())
+            }));
+            match outcome {
+                Ok(Ok(_)) => {
+                    passed += 1;
+                    println!("PASS\t{file}\t{}", case.name);
+                }
+                Ok(Err(why)) => {
+                    failed += 1;
+                    println!("FAIL\t{file}\t{}\t{}", case.name, why.replace('\n', " "));
+                }
+                Err(_) => {
+                    failed += 1;
+                    println!("FAIL\t{file}\t{}\tpanicked", case.name);
+                }
+            }
+        }
+    }
+    println!("TOTAL\tpassed {passed}\tfailed {failed}");
+    Ok(())
+}
+
+/// A lowered document's program: its helper imports and operations filled
+/// from the shipped Python and TypeScript services.
+fn linked_program(
+    library: &lash_kernel_vm::PreparedLibrary,
+    text: &str,
+) -> Result<lash_kernel_vm::Program, String> {
+    use lash_kernel_value::package::{Fill, Link};
+    let document = Arc::new(parse_document(text).map_err(|error| format!("{error:?}"))?);
+    let services = || {
+        lash_kernel_services::TYPESCRIPT
+            .iter()
+            .chain(lash_kernel_services::PYTHON.iter())
+    };
+    let helper_fills = lash_kernel_doc::helper_imports(&document, library.helpers().as_ref())
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|(id, import)| {
+            let operation = services()
+                .find(|operation| operation.name == import.name)
+                .ok_or_else(|| format!("unknown helper operation {}", import.name))?;
+            Ok((
+                id,
+                lash_kernel_value::HelperFill {
+                    import,
+                    fill: Fill::Operation(operation.requirement.clone()),
+                },
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    let fills = document
+        .imports
+        .iter()
+        .map(|(slot, import)| {
+            let lash_kernel_value::ImportKind::Operation { signature } = &import.kind else {
+                return Err("a probe imports only operations".to_owned());
+            };
+            let requirement = services()
+                .find(|operation| operation.name == import.name)
+                .map(|operation| operation.requirement.clone())
+                .unwrap_or_else(|| {
+                    lash_kernel_value::OperationRequirement::new(
+                        signature.clone(),
+                        lash_kernel_value::ContractId::new("conformance"),
+                    )
+                });
+            Ok((*slot, Fill::Operation(requirement)))
+        })
+        .collect::<Result<_, String>>()?;
+    let link = Link {
+        helper_fills,
+        document: document.identity(),
+        fills,
+    };
+    lash_kernel_vm::Program::prepare(
+        link.identity(),
+        std::collections::BTreeMap::from([(document.identity(), document)]),
+        &std::collections::BTreeMap::from([(link.identity(), link)]),
+        lash_kernel_doc::heap::PageId([7; 32]),
+        library.clone(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn corpus_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            corpus_files(&path, out)?;
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
+            out.push(path);
+        }
+    }
     Ok(())
 }
 

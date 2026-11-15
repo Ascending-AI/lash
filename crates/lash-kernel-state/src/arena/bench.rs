@@ -148,14 +148,13 @@ impl Bench {
     fn object(&mut self, object: NewObject) -> Result<Value, NativeError> {
         let mut nursery = Nursery::new(self.arena.objects(), LogicalBytes(u64::MAX));
         let value = nursery.allocate(object);
-        let new = nursery.into_new();
-        self.install(new)?;
+        self.install(nursery.into_new())?;
         Ok(value)
     }
 
-    fn install(&mut self, new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
+    fn install(&mut self, mut new: Vec<(ArenaHandle, NewObject)>) -> Result<u64, NativeError> {
         let grown = self.arena.install_bound(&new);
-        self.arena.install(new)?;
+        self.arena.install(&mut new)?;
         Ok(grown)
     }
 

@@ -138,7 +138,7 @@ fn state(machine: &TurnMachine) -> serde_json::Value {
 }
 
 /// Drive a turn through every host input kind: a sync, an admitted model
-/// call answered, a tool round, a checkpoint that delivers steering input,
+/// call answered, a tool round whose call ids the host binds, a checkpoint that delivers steering input,
 /// usage the host settles, a second call, and a host-decided finish. After
 /// every host action the state and the journal's length are taken.
 fn live_run() -> (Vec<MachineInput<()>>, Vec<(usize, serde_json::Value)>) {
@@ -192,7 +192,26 @@ fn live_run() -> (Vec<MachineInput<()>>, Vec<(usize, serde_json::Value)>) {
                     })
                     .expect("usage");
             }
-            Effect::ToolCalls { id, calls, .. } => {
+            Effect::ToolCalls { id, mut calls, .. } => {
+                // The host binds a read's model id to its own before the
+                // round's first commit, as a model round's reads do.
+                let bound: std::collections::BTreeMap<_, _> = calls
+                    .iter()
+                    .take(1)
+                    .map(|call| {
+                        (
+                            call.call_id.clone(),
+                            lash_protocol_types::ToolCallId::fixture("bound-read"),
+                        )
+                    })
+                    .collect();
+                machine.bind_tool_call_ids(&bound);
+                for call in &mut calls {
+                    if let Some(id) = bound.get(&call.call_id) {
+                        call.call_id = id.clone();
+                    }
+                }
+                cut(&mut machine, &mut cuts);
                 let results = calls
                     .iter()
                     .map(|call| CompletedToolCall {

@@ -6,7 +6,15 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
+
+
+def source_hash(path: Path) -> str:
+    """Content identity of a workload source; a check never resolves a commit."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def replay_source(root: Path, workload: str) -> Path:
+    return root / "crates/lash-perf/workloads/replay" / f"{workload}.json"
 
 
 def kernel_workloads(root: Path) -> dict:
@@ -35,7 +43,7 @@ def kernel_geometry(root: Path) -> dict:
         trips = [low, low * (10 if low >= 10000 else 100)]
         for dialect, path in sources.items():
             geometry[f"kernel/{dialect}/{name}"] = {
-                "source_hash": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "source_hash": source_hash(path),
                 "trips": trips, "operations": [n * ops for n in trips],
                 "runs": 1 if low >= 20000 else 5, "warmups": 1,
             }
@@ -56,15 +64,16 @@ def source_drift(root: Path, baseline: dict) -> list[str]:
     replay = {f"replay/{spec['workload']}": spec for spec in subset}
     previous = {k for k in baseline["geometry"] if k.startswith("replay/")}
     drift.extend(sorted(replay.keys() ^ previous))
+    unhashed = sorted(key for key in previous if not baseline["geometry"][key].get("source_hash"))
+    if unhashed:
+        raise ValueError("replay rows without a workload source_hash: " + ", ".join(unhashed))
     for key in sorted(replay.keys() & previous):
         spec = replay[key]
-        path = directory / f"{spec['workload']}.json"
+        path = replay_source(root, spec["workload"])
         source = json.loads(path.read_text())
-        provenance = baseline.get("row_provenance", {}).get(key, baseline["provenance"])
-        old = subprocess.check_output(["git", "show", f"{provenance['commit']}:{path.relative_to(root)}"], cwd=root)
         geometry = baseline["geometry"][key]
         turns = spec.get("turns", sum(group.get("repeat", 1) for group in source["turns"]))
-        if (old != path.read_bytes() or turns != geometry["turns"]
+        if (source_hash(path) != geometry["source_hash"] or turns != geometry["turns"]
                 or source.get("sessions", 1) != geometry["sessions"]):
             drift.append(key)
     expected_rows = set(current)

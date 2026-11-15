@@ -72,6 +72,7 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function,
@@ -85,18 +86,10 @@ fn incomplete_entry_requires_signature_without_restricting_ordinary_functions() 
         token: None,
     };
     captured
-        .check_definition(
-            &document,
-            &lash_kernel_doc::BuildHelpers::empty(),
-            &lash_kernel_doc::Selection::Fresh,
-        )
+        .check_definition(&document, &lash_kernel_doc::BuildHelpers::empty())
         .expect("an ordinary captured kernel closure needs no dialect presentation");
     assert!(matches!(
-        captured.entry_export(
-            &document,
-            &lash_kernel_doc::BuildHelpers::empty(),
-            &lash_kernel_doc::Selection::Fresh
-        ),
+        captured.entry_export(&document, &lash_kernel_doc::BuildHelpers::empty(),),
         Err(lash_kernel_doc::FunctionValueRefusal::SignatureRequired { .. })
     ));
     let refusal = crate::startable_export(&document, &Name::new("entry")).unwrap_err();
@@ -172,6 +165,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: id,
@@ -189,11 +183,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
     };
     assert_eq!(
         value
-            .entry_export(
-                &document,
-                &lash_kernel_doc::BuildHelpers::empty(),
-                &lash_kernel_doc::Selection::Fresh
-            )
+            .entry_export(&document, &lash_kernel_doc::BuildHelpers::empty(),)
             .unwrap()
             .signature,
         value.signature
@@ -201,11 +191,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
     value.signature.result = lash_kernel_value::Type::Text;
     assert_eq!(
         value
-            .entry_export(
-                &document,
-                &lash_kernel_doc::BuildHelpers::empty(),
-                &lash_kernel_doc::Selection::Fresh
-            )
+            .entry_export(&document, &lash_kernel_doc::BuildHelpers::empty(),)
             .unwrap_err(),
         lash_kernel_doc::FunctionValueRefusal::Identity
     );
@@ -216,7 +202,7 @@ fn entry_promotion_verifies_the_defining_callable_contract() {
 fn a_captured_view_does_not_grant_retired_helper_authority() {
     use lash_kernel_doc::{
         BuildHelpers, Captions, FunctionRegistry, FunctionRepresentation, FunctionValue,
-        Implementation, Selection,
+        Implementation,
     };
     let helper = lash_kernel_doc::parse_definition(
         "function law.helper(x: Int) -> Int\nkernel 1\ncharge 1\nbody {return x}",
@@ -249,6 +235,7 @@ fn a_captured_view_does_not_grant_retired_helper_authority() {
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: vec![],
+        declared_locals: Vec::new(),
         callable: lash_kernel_value::CallableId {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             function: root_id,
@@ -272,12 +259,5 @@ fn a_captured_view_does_not_grant_retired_helper_authority() {
         )
         .is_err()
     );
-    assert!(!Selection::Fresh.admits_helper(
-        &lash_kernel_value::CallableId {
-            link: function.callable.link,
-            function: helper_id
-        },
-        &document.library,
-        &BuildHelpers::empty()
-    ));
+    assert!(!BuildHelpers::empty().admits(&document.library, &helper_id));
 }

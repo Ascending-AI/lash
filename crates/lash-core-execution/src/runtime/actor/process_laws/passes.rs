@@ -748,3 +748,141 @@ pub async fn lo_process_receipt_is_exact(backend: &Backend) -> LawOutcome {
     );
     Ok(())
 }
+
+/// What changes a process's row between its owner's open and its terminal
+/// commit, from outside the owner.
+#[derive(Clone, Copy, Debug)]
+enum ExternalChange {
+    /// An operator requests its cancel.
+    Cancel,
+    /// A session starts observing it.
+    Observer,
+    /// A workflow-key substrate completes it first.
+    Terminal,
+}
+
+/// LO-SETTLE: an owner's terminal commit settles against its process row as
+/// the commit's lock finds it, not as the owner's earlier open read it. A
+/// cancel request, an observer or another terminal committed in between
+/// survives the commit: the cancel stays requested, the observer's event
+/// stays and the terminal event follows it, the first terminal is kept,
+/// and the commit's receipt is the row it left (FIG-7701).
+///
+/// # Errors
+/// The first rule broken.
+pub async fn lo_process_terminal_settles_on_its_locked_row(backend: &Backend) -> LawOutcome {
+    let backend = law_backend(backend)?;
+    for change in [
+        ExternalChange::Cancel,
+        ExternalChange::Observer,
+        ExternalChange::Terminal,
+    ] {
+        settle_after(&backend, change)
+            .await
+            .map_err(|LawBroken(broken)| LawBroken(format!("{change:?}: {broken}")))?;
+    }
+    Ok(())
+}
+
+async fn settle_after(backend: &Backend, change: ExternalChange) -> LawOutcome {
+    let process = root(backend, json!({"tag": tag("settle"), "act": "hold"})).await?;
+    let key = actor(&process)?;
+    let store = backend.durable();
+    let formats = store
+        .actor(&key)
+        .await?
+        .ok_or_else(|| LawBroken("missing actor".into()))?
+        .formats;
+    let node = store
+        .register_node(&NodeSpec {
+            node: lash_durable::NodeId::new(tag("process-settle")),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: TTL_MILLIS,
+        })
+        .await?;
+    let claimed = store.claim(&node, 16).await?;
+    let claim = claimed
+        .iter()
+        .find(|claim| claim.actor == key)
+        .ok_or_else(|| LawBroken("the process was not claimed".into()))?;
+    let (mut tx, view) = store.open_process(&key, claim.epoch, u64::MAX).await?;
+    tx.retain_process(view);
+    let before = record(backend, &process).await?;
+    let observer = lash_kernel_value::identity::SessionId::fixture("settle-observer");
+    let first = ProcessOutcome::from_tool_output(ToolCallOutput::success(json!({"first": true})));
+    match change {
+        ExternalChange::Cancel => cancel(backend, &process).await?,
+        ExternalChange::Observer => backend
+            .process_registry()
+            .add_observer(
+                &observer,
+                &process,
+                lash_execution_contracts::process::ProcessObserverBy::host("settle-law"),
+            )
+            .await
+            .map_err(|error| LawBroken(error.to_string()))?,
+        ExternalChange::Terminal => backend
+            .process_registry()
+            .complete_process(
+                &process,
+                first.clone(),
+                lash_execution_contracts::process::ProcessCompletionAuthority::workflow_key(
+                    process.as_str(),
+                ),
+            )
+            .await
+            .map(drop)
+            .map_err(|error| LawBroken(error.to_string()))?,
+    }
+    let changed = record(backend, &process).await?;
+    ensure!(
+        changed.last_event_sequence > before.last_event_sequence,
+        "the external change appended no event"
+    );
+    let output = ProcessOutcome::from_tool_output(ToolCallOutput::success(json!({"owner": true})));
+    super::super::process::record_terminal(&mut tx, &process, &output)?;
+    let receipt = store.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
+    let after = record(backend, &process).await?;
+    let ended = after
+        .terminal()
+        .ok_or_else(|| LawBroken("the process did not end".into()))?
+        .clone()
+        .into_await_output();
+    match change {
+        ExternalChange::Cancel => ensure!(
+            after.cancel_request.is_some(),
+            "the owner's terminal dropped the cancel request"
+        ),
+        ExternalChange::Observer => ensure!(
+            backend
+                .process_registry()
+                .observers_for_process(&process)
+                .await
+                .map_err(|error| LawBroken(error.to_string()))?
+                .contains(&observer),
+            "the owner's terminal dropped the observer"
+        ),
+        ExternalChange::Terminal => {}
+    }
+    let (expected, sequence) = match change {
+        ExternalChange::Terminal => (first, changed.last_event_sequence),
+        _ => (output, changed.last_event_sequence + 1),
+    };
+    ensure!(
+        ended == expected,
+        "the process ended with {ended:?}, not its first terminal"
+    );
+    ensure!(
+        after.last_event_sequence == sequence,
+        "the terminal is event {}, not {sequence}: the commit appended over a stale record",
+        after.last_event_sequence
+    );
+    let (_, actual) = store.open_process(&key, claim.epoch, u64::MAX).await?;
+    ensure!(
+        receipt.process_views == vec![actual.clone()],
+        "the terminal receipt differs from the stored postimage: {receipt:?} vs {actual:?}"
+    );
+    Ok(())
+}

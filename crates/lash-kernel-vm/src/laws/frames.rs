@@ -11,8 +11,7 @@ use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
-use crate::machine::Boundary;
-use crate::{Bound, BoundExceeded, Bounds, End, Layout, Machine, RunError, Step};
+use crate::{Bound, BoundExceeded, Bounds, End, Machine, RunError, Step};
 
 /// The probes: `probe.long(tag)` prints `[tag, i]` for `i` from 0 to 3 and
 /// gives `tag`; `probe.hold(n)` keeps `n` texts of 1 MiB, printing the
@@ -254,8 +253,16 @@ fn setup(bounds: Bounds, slice: u64) -> Setup {
 }
 
 /// What a law compares of a run: its end, what it printed, the labels of
-/// what it requested, and its charge.
-type Observed = (End, Vec<Datum>, Vec<String>, u64);
+/// what it requested, its charge, and the session it carried as its
+/// object graph: ids depend on seal history and are not compared
+/// (contract §6, ObjectIds).
+type Observed = (
+    End,
+    Vec<Datum>,
+    Vec<String>,
+    u64,
+    Option<lash_kernel_state::semantic::Checkpoint>,
+);
 
 /// Runs `program` in slices of `slice`, answering each request oldest
 /// first, with `at_slice` called at each slice return. Gives what the run
@@ -281,7 +288,18 @@ fn observe(
         .charged
         .expect("exact charge");
     let asked = embedder.asked();
-    ((end, embedder.world.printed, asked, charged), slices)
+    let mut end = end;
+    let carried = match &mut end {
+        End::Finished(finished) => finished.carry.take().map(|root| {
+            lash_kernel_state::semantic::session(&root, Box::new(embedder.source.clone()))
+                .expect("the carry reads back")
+        }),
+        _ => None,
+    };
+    (
+        (end, embedder.world.printed, asked, charged, carried),
+        slices,
+    )
 }
 
 fn pair(tag: &str, i: i64) -> Datum {
@@ -316,7 +334,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
     assert_eq!(result(run("main { return deep.hold([7]) }", 102)), int(107));
 
-    let scoped_observation = |name: &str, source_only: bool| {
+    let scoped = |name: &str| {
         let bounds = Bounds {
             call_depth: 2,
             ..ROOMY
@@ -330,21 +348,15 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
             &format!("main {{ return {name}({args}) }}"),
             setup(bounds, u64::MAX),
         );
-        if source_only {
-            embedder.machine.force_source_execution();
-        }
-        let tape = crate::ChargeTape::new();
-        embedder.machine.record_charges(tape.clone());
-        let value = result(embedder.run_to_end(&[]));
         assert_eq!(
-            value,
+            result(embedder.run_to_end(&[])),
             Datum::List(if matches!(name, "deep.walk" | "deep.next") {
                 vec![int(7), int(8)]
             } else {
                 vec![int(7)]
-            })
+            }),
+            "{name} under a call depth of 2"
         );
-        (value, embedder.machine.meters(), tape.steps())
     };
     for name in [
         "deep.branch",
@@ -365,19 +377,13 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         "deep.loop",
         "deep.walk",
     ] {
-        let observation = scoped_observation(name, false);
-        assert_eq!(
-            observation,
-            scoped_observation(name, true),
-            "the accepted block suffix must preserve the source result, charge tape and terminal holdings: {name}"
-        );
+        scoped(name);
     }
     // A call inside a cleanup that holds a pending return publishes its
     // Enter at its source occurrence, like the call that reached the cleanup.
     let unwind = "definition \"function f(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let saved = n return saved } finally { let kept = [call g(n)] } return 0  }\"\ndefinition \"function g(n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return n  }\"\n main { let r = call f([7]) return r }";
 
     let mut embedder = Embedder::with(unwind, setup(ROOMY, u64::MAX));
-    embedder.machine.force_source_execution();
     assert_eq!(result(embedder.run_to_end(&[])), Datum::List(vec![int(7)]));
 }
 
@@ -447,7 +453,7 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
     for slice in [0, 1, 17, 129] {
         let mut inside = 0;
         let (sliced, _) = observe(&straight, slice, |embedder| {
-            inside += usize::from(embedder.machine.pending_phases().len() >= 2);
+            inside += usize::from(embedder.run_record().tasks[0].frames.len() >= 2);
         });
         assert_eq!(sliced, whole, "straight-line slice {slice}");
         assert!(inside > 0, "a finite slice must reach the nested callee");
@@ -491,7 +497,7 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
         };
         let mut embedder = Embedder::with(held, setup(bounds, slice));
         if collect {
-            embedder.machine.boundary = Some(Box::new(|_| Boundary::Collect));
+            embedder.machine.collect_at_steps();
         }
         let end = match embedder.run_to_end(&[]) {
             End::Error(RunError::Bound(exceeded)) => End::Error(RunError::Bound(BoundExceeded {
@@ -593,19 +599,13 @@ fn entering_and_slicing_an_expression_callee_changes_no_ready_order() {
 
 /// `K-MACH-007`, `K-EVAL-008`: a run is at a safe point at every slice,
 /// one inside a callee called inside an expression included: sealed there
-/// and opened cold under alternating layouts at every slice, it ends as
+/// and opened cold at every slice, it ends as
 /// the run never sealed.
 #[test]
 fn a_seal_inside_an_expression_callee_is_exact() {
     let straight = straight_line_calls();
     let mut active = Embedder::with(&straight, setup(ROOMY, 17));
-    let mut reference = Embedder::with(
-        &straight,
-        Setup {
-            layout: Layout(0),
-            ..setup(ROOMY, 17)
-        },
-    );
+    let mut reference = Embedder::with(&straight, setup(ROOMY, 17));
     let tape = crate::ChargeTape::new();
     let reference_tape = crate::ChargeTape::new();
     active.machine.record_charges(tape.clone());
@@ -616,8 +616,8 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         let step = active.run();
         assert_eq!(format!("{step:?}"), format!("{:?}", reference.run()));
         assert_eq!(
-            lash_kernel_exec::Weight::expand(tape.steps()),
-            lash_kernel_exec::Weight::expand(reference_tape.steps()),
+            crate::Weight::expand(tape.steps()),
+            crate::Weight::expand(reference_tape.steps()),
             "ordered committed charge events under different region splits"
         );
         if matches!(step, Step::Ended(_)) {
@@ -627,8 +627,8 @@ fn a_seal_inside_an_expression_callee_is_exact() {
             active.machine.semantic_checkpoint(),
             reference.machine.semantic_checkpoint()
         );
-        let (root, certificate) = active.checkpoint();
-        let (expected, _) = reference.checkpoint();
+        let root = active.checkpoint();
+        let expected = reference.checkpoint();
         // Compare the canonical frame/task/ready roots themselves, not
         // merely the values read back from them.
         assert_eq!(root.tasks, expected.tasks);
@@ -636,7 +636,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
         assert_eq!(root.waits, expected.waits);
 
         checkpoints += 1;
-        active.open_at(&root, certificate, Layout(1 + checkpoints * 2), true);
+        active.open_at(&root, true);
         active.machine.record_charges(tape.clone());
         assert_eq!(
             active.machine.semantic_checkpoint(),
@@ -663,13 +663,12 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     );
     let mut embedder = Embedder::with(&program, setup(ROOMY, 0));
     let mut sealed = 0;
-    let mut layouts = [Layout(1), Layout::default()].into_iter().cycle();
     let mut end = loop {
         let step = embedder.run();
         if !matches!(step, Step::Ended(_)) {
-            let (root, certificate) = embedder.checkpoint();
+            let root = embedder.checkpoint();
             sealed += 1;
-            embedder.open_at(&root, certificate, layouts.next().unwrap(), true);
+            embedder.open_at(&root, true);
         }
         match step {
             Step::Ended(end) => break end,
@@ -704,12 +703,13 @@ fn a_seal_inside_an_expression_callee_is_exact() {
 /// task's top frame. A run 40 calls deep, every frame holding bindings,
 /// projects at every slice return and every resume into a nested action,
 /// and no projection visits more than the top frame and the caller it
-/// pushed or returned into, however deep the stack grows.
+/// pushed or returned into, however deep the stack grows. The frozen
+/// engine's frames-visited counter went with it (FIG-7688); the run's
+/// answer and slicing stand.
 #[test]
 fn a_projection_visits_the_changed_frames_and_the_top_however_deep_the_stack() {
     let program = "definition \"function down(self: Any, i: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { \\n  if num.lt(i, n) { let a = i let b = [i, n] let r = num.add(apply self(self, num.add(i, 1), n), 0) return r }\\n  let j = 0 while num.lt(j, 6) { set j = num.add(j, 1) } return j\\n }\"\n\nmain { let r = call down(&down, 0, 40) return r }";
     let mut embedder = Embedder::with(program, setup(ROOMY, 1));
-    crate::machine::take_most_visited_frames();
     let mut slices = 0;
     let end = loop {
         match embedder.run() {
@@ -720,8 +720,6 @@ fn a_projection_visits_the_changed_frames_and_the_top_however_deep_the_stack() {
     };
     assert_eq!(result(end), int(6));
     assert!(slices > 80, "{slices} slices");
-    let most = crate::machine::take_most_visited_frames();
-    assert!(most <= 2, "a projection visited {most} frames");
 }
 
 /// K-EVAL-008 / K-FORM-004: a cold branch may create a locally shared
@@ -747,20 +745,14 @@ fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
     let expected = Datum::Tuple(vec![int(1), int(2), int(2)]);
     for slice in [u64::MAX, 17] {
         let mut active = Embedder::with(program, setup(ROOMY, slice));
-        let mut reference = Embedder::with(
-            program,
-            Setup {
-                layout: Layout(0),
-                ..setup(ROOMY, slice)
-            },
-        );
+        let mut reference = Embedder::with(program, setup(ROOMY, slice));
         assert_eq!(result(reference.run_to_end(&[])), expected);
         let end = loop {
             match active.run() {
                 Step::Ended(end) => break end,
                 Step::Slice => {
-                    let (root, certificate) = active.checkpoint();
-                    active.open_at(&root, certificate, Layout(0), true);
+                    let root = active.checkpoint();
+                    active.open_at(&root, true);
                 }
                 Step::Parked(_) => panic!("this cell-sharing fixture has no effects"),
             }
@@ -771,4 +763,31 @@ fn a_cold_branch_keeps_its_locally_shared_cell_when_the_loop_reenters() {
             reference.machine.meters().charged
         );
     }
+}
+
+/// Seam D: a seal after a park deep in a call stack writes what changed
+/// since the last seal, not every frame. Each of `n` frames holds a list
+/// of its own; between two seals only the deepest frame moves, so the
+/// second seal's projection visits as much at depth 80 as at depth 40.
+#[test]
+fn a_seal_deep_in_a_stack_visits_no_more_for_a_deeper_stack() {
+    let visits = |depth: u64| {
+        let program = format!(
+            "definition \"function down(self: Any, i: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{ \\n  if num.lt(i, n) {{ let b = [i, n] let r = num.add(apply self(self, num.add(i, 1), n), 0) return r }}\\n  let x = perform 0(\\\"first\\\") as Any let y = perform 0(\\\"second\\\") as Any return 6\\n }}\"\n\nmain {{ let r = call down(&down, 0, {depth}) return r }}"
+        );
+        let mut embedder = Embedder::new(&program);
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        embedder.checkpoint();
+        embedder.deliver("first");
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        crate::perf_witness::enable_work();
+        embedder.checkpoint();
+        let work = crate::perf_witness::take_work().unwrap();
+        crate::perf_witness::disable_work();
+        embedder.deliver("second");
+        assert_eq!(result(embedder.run_to_end(&[])), int(6));
+        work.heap.projection_visits
+    };
+    let shallow = visits(40);
+    assert_eq!(visits(80), shallow, "the seal walked unchanged frames");
 }

@@ -263,16 +263,18 @@ impl ParkReason {
     /// Whether the engine stopped retrying work whose last attempt admission
     /// refused only because the session's park named a redrive that had not
     /// settled (D15): the work waited behind that redrive, and once it
-    /// settles nothing of the work's own stops it. The engine records the
-    /// refusal as it rendered it, which names the typed code either way it
-    /// renders: its wire form or its variant.
+    /// settles nothing of the work's own stops it. Only the recorded failure
+    /// code identifies that refusal; the message is diagnostic text. This
+    /// intentionally corrects the former message search: hosts constructing
+    /// this park must supply the failure's wire code in `last_failure_code`.
+    /// A missing or different code answers false regardless of the message.
     #[must_use]
     pub fn stopped_behind_unsettled_redrive(&self) -> bool {
         let code = crate::runtime_error::RuntimeErrorCode::SessionRedriveUnsettled;
         matches!(
             self,
-            Self::EngineRetryExhausted { message, .. }
-                if message.contains(code.as_str()) || message.contains(&format!("{code:?}"))
+            Self::EngineRetryExhausted { last_failure_code: Some(recorded), .. }
+                if recorded == code.as_str()
         )
     }
 

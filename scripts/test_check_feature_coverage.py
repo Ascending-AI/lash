@@ -801,6 +801,11 @@ class FeatureCoverageContractTests(unittest.TestCase):
                 '#[cfg_attr(feature = "testing", allow(dead_code),)]\n'
                 'pub fn support() {}\n'
             ),
+            "serde-metadata": (
+                '#[derive(serde::Deserialize)]\n'
+                '#[cfg_attr(feature = "testing", serde(deny_unknown_fields))]\n'
+                'struct Support;\n'
+            ),
             "nested-arguments": (
                 '#[cfg_attr(feature = "testing", derive(Clone, Debug))]\n'
                 'struct Support;\n'
@@ -833,6 +838,44 @@ class FeatureCoverageContractTests(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("lacks an exact OFF command for member/testing", result.stdout)
+
+    def test_build_script_predicate_uses_its_own_artifact(self) -> None:
+        (self.root / "member" / "build.rs").write_text(
+            '#[path = "build_support.rs"] mod support;\nfn main() { support::support(); }\n'
+        )
+        (self.root / "member" / "build_support.rs").write_text(
+            '#[cfg_attr(not(feature = "testing"), allow(dead_code))]\n'
+            'pub fn support() {}\n'
+        )
+        result = self.run_lane()
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_integration_predicates_respect_mandatory_self_dev_features(self) -> None:
+        manifest = self.root / "member" / "Cargo.toml"
+        manifest.write_text(manifest.read_text() + '\n[dev-dependencies]\nmember = { path = ".", features = ["testing"] }\n')
+        tests = self.root / "member" / "tests"
+        tests.mkdir()
+        (tests / "law.rs").write_text(
+            '#[cfg_attr(not(feature = "testing"), allow(dead_code))]\n'
+            'fn support() {}\n#[test] fn law() { support(); }\n'
+        )
+        plan = self.root / "scripts" / "feature-coverage.toml"
+        contents = plan.read_text().replace(
+            'commands = [',
+            'commands = [["cargo", "check", "-p", "member", "--tests", "--no-default-features", "--locked"], ',
+            1,
+        )
+        plan.write_text(contents)
+        result = self.run_lane()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        # The library OFF proof is still mandatory even though tests force ON.
+        plan.write_text(contents.replace(
+            '["cargo", "check", "-p", "member", "--lib", "--no-default-features", "--locked"], ',
+            '',
+        ))
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("lacks an exact OFF command", result.stdout)
 
     def test_target_optional_dependency_feature_is_inventoried(self) -> None:
         manifest = self.root / "member" / "Cargo.toml"

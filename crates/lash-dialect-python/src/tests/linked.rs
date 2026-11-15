@@ -126,7 +126,6 @@ pub(super) fn program(
         &content.links,
         super::pages::CLOSURE,
         library,
-        lash_kernel_doc::Selection::Fresh,
     )
     .expect("linked fixture");
     OPERATIONS.with(|operations| {

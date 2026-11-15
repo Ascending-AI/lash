@@ -11,12 +11,12 @@ use lash_kernel_doc::{
     FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, Value, parse_definition,
 };
 
-use lash_kernel_state::paged::{AllocationCensus as _, PageAnswer, PageBody, PageSource};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_value::names::FunctionId;
 use std::sync::Arc;
 
 use super::embedder::{Embedder, ROOMY, Setup, Source, int, result};
-use crate::{Layout, Step};
+use crate::Step;
 
 /// The page work a source saw.
 #[derive(Clone, Default)]
@@ -97,23 +97,14 @@ fn point_write(build: &str, length: u64) -> (u64, u64, u64) {
         },
     );
     park(&mut embedder);
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     let counting = Counting {
         inner: embedder.source.clone(),
         ..Counting::default()
     };
     let (program, library) = embedder.program(true);
-    embedder.machine = crate::KernelMachine::open_with_census(
-        program,
-        ROOMY,
-        &root,
-        Box::new(counting.clone()),
-        Box::new(
-            lash_kernel_state::kernel_internals::census_impl::Census::restore(certificate).unwrap(),
-        ),
-        Layout::default(),
-    )
-    .unwrap();
+    embedder.machine =
+        crate::KernelMachine::open_in(program, ROOMY, &root, Box::new(counting.clone())).unwrap();
     embedder.library = library;
     embedder.deliver_next();
     park(&mut embedder);
@@ -220,35 +211,49 @@ fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
     }
 }
 
-/// Ordered page faults: a later index's missing page must not outrank a
-/// corrupt leaf in the earlier subtree, even when the indexes share a read.
+/// Ordered page faults on a host crossing: copying a retained text to the
+/// host reports the fault of the earliest content it cannot read. A
+/// corrupt page holding the text's first chunk outranks a missing page
+/// holding its last, though the copy may ask for both in one round trip.
 #[test]
-fn a_host_text_copy_keeps_the_first_subtrees_fault_ahead_of_a_later_batch_fault() {
-    use lash_kernel_doc::heap::{PageValue, TextPayload};
-    use lash_kernel_state::kernel_internals::{PagedHeap, stored_pages, tree::Access};
-    use lash_kernel_state::paged::{EditEpoch, PageKind, SemanticHeap};
+fn a_host_text_copy_reports_the_earliest_chunks_fault_ahead_of_a_later_one() {
+    use lash_kernel_doc::Datum;
+    use lash_kernel_value::Name;
 
     let source = Source::default();
-    let access = Access::new(Box::new(source.clone()));
+    let name = Name::new("big");
     let text: String = (0..65)
         .map(|i| format!("{i:04}{}", "x".repeat(4092)))
         .collect();
-    let text = stored_pages::text(&access, &text).unwrap();
-    let TextPayload::Paged(root) = &text.body else {
-        panic!("paged text")
+    let mut editor = crate::SessionEditor::open(None, Box::new(source.clone())).unwrap();
+    editor.set(&name, &Datum::Text(text)).unwrap();
+    let root = editor.seal().unwrap();
+    let holding = |chunk: &[u8]| {
+        let stored = source.0.borrow();
+        let found: Vec<_> = stored
+            .iter()
+            .filter(|(_, page)| page.tokens.windows(chunk.len()).any(|at| at == chunk))
+            .map(|(id, _)| *id)
+            .collect();
+        let [id] = found[..] else {
+            panic!(
+                "one page holds {:?}: {found:?}",
+                String::from_utf8_lossy(chunk)
+            );
+        };
+        id
     };
-    let mut stored = source.0.borrow_mut();
-    let indexes = stored[&root.id].children.clone();
-    assert!(indexes.len() >= 2);
-    assert_eq!(stored[&indexes[0].id].kind, PageKind::PAYLOAD_INDEX);
-    let first_leaf = stored[&indexes[0].id].children[0];
-    stored.get_mut(&first_leaf.id).unwrap().tokens = Arc::from([]);
-    stored.remove(&indexes[1].id);
-    drop(stored);
-
-    let heap = PagedHeap::fresh(Box::new(source), EditEpoch(1));
-    let result = crate::data::copy_page_out(&heap, &PageValue::Text(text));
+    let first = holding(b"0000xxxxxxxx");
+    let last = holding(b"0064xxxxxxxx");
+    {
+        let mut stored = source.0.borrow_mut();
+        stored.get_mut(&first).unwrap().tokens = Arc::from([]);
+        stored.remove(&last);
+    }
+    let mut cold = crate::SessionEditor::open(Some(&root), Box::new(source.clone())).unwrap();
+    let result = cold.get(&name);
     assert!(
-        matches!(result, Err(crate::data::CopyError::Heap(HeapFault::Corrupt { page, .. })) if page == first_leaf.id)
+        matches!(result, Err(HeapFault::Corrupt { page, .. }) if page == first),
+        "{result:?}"
     );
 }

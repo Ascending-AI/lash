@@ -3,6 +3,7 @@ numbers by_spelling
 import 0 operation control.finish(input: Any) -> Any
 import 1 operation corpus.echo(input?: Json) -> Json
 library @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7
+private t1
 main {
   finish let(t1 = perform 0("done") as Any, null)
   do invoke @f008e1c20721d666c75e2933c3798405dcf3547eccb78b0263073758ef25ade7(perform 1("unreachable") as Json)

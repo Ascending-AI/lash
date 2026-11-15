@@ -205,12 +205,25 @@ impl<'call> Args<'call> {
     /// The map, set or record `value` is.
     #[inline]
     pub fn table(&self, value: &Value) -> Result<Option<TableView<'call>>, NativeError> {
+        let table = self.point_table(value)?;
+        if let Some(table) = table {
+            warm(table.object, &table.table.chunks)?;
+        }
+        Ok(table)
+    }
+
+    /// A map, set or record view for keyed lookup. Opens a cold head,
+    /// leaving payload chunks to the table's existing lookup index.
+    #[inline]
+    pub fn point_table(&self, value: &Value) -> Result<Option<TableView<'call>>, NativeError> {
         let (Value::Map(object) | Value::Set(object) | Value::Record(object)) = *value else {
             return Ok(None);
         };
         match self.body(object)? {
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
-                warm(object, &table.chunks)?;
+                if table.len == 0 && matches!(table.chunks.get(0), Some(Chunk::Cold { .. })) {
+                    return Err(Retry::Cold { object, chunk: 0 }.into());
+                }
                 Ok(Some(TableView { object, table }))
             }
             _ => Err(NativeError::Malformed("a table handle names another body")),
@@ -222,17 +235,18 @@ impl<'call> Args<'call> {
     pub fn text(&self, value: &'call Value) -> Result<Option<TextView<'call>>, NativeError> {
         match value {
             Value::Text(short) => Ok(Some(TextView::Short(short))),
-            Value::LongText(object) => match self.body(*object)? {
-                Body::LongText(text) if text.moved() => Err(NativeError::Malformed(
-                    "a text whose storage moved was read",
-                )),
-                Body::LongText(text) => Ok(Some(TextView::Long {
-                    object: *object,
-                    text,
-                })),
-                _ => Err(NativeError::Malformed("a text handle names another body")),
-            },
+            Value::LongText(object) => self.long_text(*object).map(Some),
             _ => Ok(None),
+        }
+    }
+
+    /// The long text `object` names, borrowed for the whole call however
+    /// briefly the value naming it is held.
+    #[inline]
+    pub fn long_text(&self, object: ArenaHandle) -> Result<TextView<'call>, NativeError> {
+        match self.body(object)? {
+            Body::LongText(text) => Ok(TextView::Long { object, text }),
+            _ => Err(NativeError::Malformed("a text handle names another body")),
         }
     }
 
@@ -260,6 +274,11 @@ impl<'call> Args<'call> {
             Value::Int(word) => Ok(Some(Cow::Owned(Integer::from(*word)))),
             Value::BigInt(object) => match self.body(*object)? {
                 Body::BigInt(int) => Ok(Some(Cow::Borrowed(int))),
+                Body::Cold(_) => Err(Retry::Cold {
+                    object: *object,
+                    chunk: 0,
+                }
+                .into()),
                 _ => Err(NativeError::Malformed(
                     "an integer handle names another body",
                 )),
@@ -274,6 +293,11 @@ impl<'call> Args<'call> {
             Value::Timestamp(word) => Ok(Some(Cow::Owned(Integer::from(*word)))),
             Value::BigTimestamp(object) => match self.body(*object)? {
                 Body::Timestamp(int) => Ok(Some(Cow::Borrowed(int))),
+                Body::Cold(_) => Err(Retry::Cold {
+                    object: *object,
+                    chunk: 0,
+                }
+                .into()),
                 _ => Err(NativeError::Malformed(
                     "a timestamp handle names another body",
                 )),
@@ -301,6 +325,7 @@ impl<'call> Args<'call> {
         };
         match self.body(object)? {
             Body::Error(error) => Ok(Some(error)),
+            Body::Cold(_) => Err(Retry::Cold { object, chunk: 0 }.into()),
             _ => Err(NativeError::Malformed("an error handle names another body")),
         }
     }
@@ -505,6 +530,51 @@ impl<'call> BytesView<'call> {
             .map(move |(at, chunk)| resident(object, at as u32, chunk))
     }
 
+    /// Bytes `range` of the value, which is within it, borrowed when one
+    /// resident chunk holds them. Only the chunks the range overlaps are
+    /// read: a cold chunk before it is skipped by its length, so a read
+    /// faults the payload path to the bytes it addresses (FIG-6193).
+    pub fn range(self, range: std::ops::Range<u64>) -> Result<Cow<'call, [u8]>, NativeError> {
+        if let Some(bytes) = self.as_slice() {
+            return bytes
+                .get(range.start as usize..range.end as usize)
+                .map(Cow::Borrowed)
+                .ok_or(NativeError::Malformed("a bytes range is outside its value"));
+        }
+        if range.start >= range.end {
+            return Ok(Cow::Borrowed(&[]));
+        }
+        let mut out: Option<Cow<'call, [u8]>> = None;
+        let mut offset = 0u64;
+        for (at, chunk) in self.bytes.chunks.iter().enumerate() {
+            if offset >= range.end {
+                break;
+            }
+            let len = match chunk {
+                // A length past `u32` saturates: such a chunk is decoded
+                // before anything after it is placed.
+                Chunk::Cold { len, .. } if *len != u32::MAX => u64::from(*len),
+                _ => resident(self.object, at as u32, chunk)?.len() as u64,
+            };
+            let end = offset + len;
+            if end > range.start && offset < range.end {
+                let held = resident(self.object, at as u32, chunk)?;
+                let part = &held[range.start.saturating_sub(offset) as usize
+                    ..(range.end.min(end) - offset) as usize];
+                out = Some(match out {
+                    None => Cow::Borrowed(part),
+                    Some(previous) => {
+                        let mut joined = previous.into_owned();
+                        joined.extend_from_slice(part);
+                        Cow::Owned(joined)
+                    }
+                });
+            }
+            offset = end;
+        }
+        Ok(out.unwrap_or(Cow::Borrowed(&[])))
+    }
+
     /// The bytes whole, borrowed when they are one resident piece.
     pub fn whole(self) -> Result<Cow<'call, [u8]>, NativeError> {
         if let Some(bytes) = self.as_slice() {
@@ -548,6 +618,16 @@ impl<'call> TextView<'call> {
         match self {
             Self::Short(short) => crate::heap_values::text_summary(short.as_str()),
             Self::Long { text, .. } => text.summary,
+        }
+    }
+
+    /// The text's bytes on a shared append buffer, when it is one
+    /// resident chunk on one.
+    #[inline]
+    pub fn shared(&self) -> Option<&'call super::SharedText> {
+        match self {
+            Self::Short(_) => None,
+            Self::Long { text, .. } => text.shared(),
         }
     }
 
@@ -628,7 +708,11 @@ pub enum NewObject {
     Map(Vec<(Value, Value)>),
     Set(Vec<Value>),
     Record(Vec<(Value, Value)>),
-    LongText(Arc<str>),
+    /// A long text and its lengths.
+    LongText {
+        text: super::TextBytes,
+        summary: crate::heap::TextSummary,
+    },
     /// A function reference by a name past [`ShortText::MAX`] bytes.
     Function(lash_kernel_value::names::CallableId),
     Bytes(Arc<[u8]>),
@@ -643,6 +727,15 @@ pub enum NewObject {
 }
 
 impl NewObject {
+    /// The long text `text`, its lengths counted.
+    pub fn long_text(text: String) -> Self {
+        let summary = crate::heap_values::text_summary(&text);
+        Self::LongText {
+            text: text.into(),
+            summary,
+        }
+    }
+
     /// The value that names the object, by the slot it takes.
     pub fn naming(&self) -> fn(ArenaHandle) -> Value {
         match self {
@@ -651,7 +744,7 @@ impl NewObject {
             Self::Map(_) => Value::Map,
             Self::Set(_) => Value::Set,
             Self::Record(_) => Value::Record,
-            Self::LongText(_) => Value::LongText,
+            Self::LongText { .. } => Value::LongText,
             Self::Function(_) => Value::Function,
             Self::Bytes(_) => Value::Bytes,
             Self::BigInt(_) => Value::BigInt,
@@ -697,6 +790,21 @@ impl<'call> Nursery<'call> {
         }
     }
 
+    /// A nursery that may hold `room`, listing what it builds in `built`,
+    /// which is empty: storage a caller keeps between calls.
+    #[inline]
+    pub fn reusing(
+        objects: &'call Objects,
+        room: LogicalBytes,
+        built: Vec<(ArenaHandle, NewObject)>,
+    ) -> Self {
+        debug_assert!(built.is_empty());
+        Self {
+            new: built,
+            ..Self::new(objects, room)
+        }
+    }
+
     /// A nursery without memory reservation accounting or a memory bound.
     pub fn unaccounted(objects: &'call Objects) -> Self {
         Self {
@@ -717,6 +825,17 @@ impl<'call> Nursery<'call> {
     /// The reservations asked for, in order, when the nursery records.
     pub fn reservations(&self) -> &[Reservation] {
         self.log.as_deref().unwrap_or(&[])
+    }
+
+    /// The bytes a reservation may still ask for and be held: a single
+    /// [`Self::reserve`] of at most this many bytes and no values holds.
+    /// Unbounded when the nursery does not account.
+    pub fn left(&self) -> u64 {
+        if self.unaccounted {
+            u64::MAX
+        } else {
+            self.room.0.saturating_sub(self.held.0)
+        }
     }
 
     /// Holds room for `values` values and `bytes` bytes the call is about
@@ -792,10 +911,25 @@ impl<'call> Nursery<'call> {
     }
 
     /// A text: inline when it is short, otherwise built.
-    pub fn text(&mut self, text: &str) -> Value {
-        match ShortText::new(text) {
+    pub fn text<T: AsRef<str> + Into<String>>(&mut self, text: T) -> Value {
+        match ShortText::new(text.as_ref()) {
             Some(short) => Value::Text(short),
-            None => self.allocate(NewObject::LongText(Arc::from(text))),
+            None => self.allocate(NewObject::long_text(text.into())),
+        }
+    }
+
+    /// A text whose lengths `summary` gives, as [`Self::text`] makes it:
+    /// what a native that joins texts of known lengths builds without
+    /// counting its bytes again.
+    pub fn text_of(
+        &mut self,
+        text: impl Into<super::TextBytes>,
+        summary: crate::heap::TextSummary,
+    ) -> Value {
+        let text = text.into();
+        match ShortText::new(&text) {
+            Some(short) => Value::Text(short),
+            None => self.allocate(NewObject::LongText { text, summary }),
         }
     }
 
@@ -910,6 +1044,10 @@ pub trait NativeFunction: Send + Sync {
 /// rather than claims inferred from a library function's name.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeSpecialization {
+    /// R8 operation and argument-kind domain, certified by this exact native
+    /// implementation. Resolve it against the registered native version;
+    /// neither a function name nor another version authorizes an inline path.
+    pub inline: Option<InlineNative>,
     pub immediate: Option<PreparedNative>,
     /// Every successful answer from `immediate` has exactly its immutable
     /// output occurrence as its logical resource obligation, with no scratch
@@ -927,6 +1065,373 @@ pub struct NativeSpecialization {
     pub text_join: bool,
     /// A semantic projection used by the helper compiler's symbolic proof.
     pub symbolic: Option<SymbolicNative>,
+}
+
+/// A native's version-bound inline semantics (`K-LIB-011`, R8).
+///
+/// Inside the declared domain an implementation must preserve the ordinary
+/// native's answer, raise or Decline, work-counter increments, allocation
+/// admission, charge and call depth. This is not a totality certificate.
+/// Overflow, cold input and allocation still take the ordinary call whenever
+/// the inline implementation cannot preserve those obligations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineNative {
+    pub native_version: u32,
+    pub operation: InlineOperation,
+}
+
+impl InlineNative {
+    /// Select only the version whose implementation made the declaration.
+    pub fn for_version(self, native_version: u32) -> Option<InlineOperation> {
+        (self.native_version == native_version).then_some(self.operation)
+    }
+
+    /// A graph-free scalar kernel answer. `None` runs the ordinary call;
+    /// it does not mean the native itself Declines. The caller still admits
+    /// the output and retains the call's charge and depth obligations.
+    #[inline]
+    pub fn scalar_answer(self, native_version: u32, args: &[Value]) -> Option<Value> {
+        self.for_version(native_version)?.answer(args)
+    }
+
+    /// Answers through the native's borrowed views, under the version that
+    /// made the declaration. Cold or malformed views retain the native error.
+    pub fn answer_read(
+        self,
+        native_version: u32,
+        args: Args<'_>,
+    ) -> Result<Option<Value>, NativeError> {
+        match self.for_version(native_version) {
+            Some(operation) => operation.answer_read(args),
+            None => Ok(None),
+        }
+    }
+}
+
+/// The operation and its exact argument-kind domain. Unlisted kinds and
+/// arities use the ordinary call. Numeric kernels take the pairs their
+/// [`ScalarDomain`] names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InlineOperation {
+    /// One value of any kind. Reads its tag only and returns its inline name.
+    Kind,
+    /// Shallow identity: inline values, differing kinds, and mutable-object
+    /// identities. Immutable bodies needing structural reads run normally.
+    Same,
+    /// One boolean, with no coercion.
+    Not,
+    /// One float, which answers itself: a numeric conversion of a number.
+    FloatIdentity,
+    /// One float, through the declared IEEE 754 function. A word or any
+    /// other operand runs normally.
+    FloatUnary(FloatUnary),
+    /// One word integer, rounded to the nearest float with ties to even, or
+    /// one float, which answers itself. Any other operand runs normally.
+    ToFloat,
+    /// One collection of the declared kind, read through the native views.
+    /// Cold reads and lengths that cannot be answered inline run normally.
+    Length(crate::plan::Collection),
+    /// One table of the declared kind and an inline key, read through the
+    /// native views: whether the table holds the key. Other keys, record
+    /// fields and cold reads run normally.
+    Membership(crate::plan::Table),
+    Scalar {
+        operation: crate::scalar::ScalarOp,
+        domain: ScalarDomain,
+    },
+    IntegerText(IntegerTextDomain),
+    /// Two texts, inline or heap-backed. The result is freshly allocated
+    /// after admission unless it fits an inline text. No mutation is allowed.
+    TextConcat,
+}
+
+/// Each kind's name as an inline text, in [`crate::ValueKind::NAMES`]
+/// order.
+const KIND_TEXTS: [Option<ShortText>; crate::ValueKind::NAMES.len()] = {
+    let mut texts = [None; crate::ValueKind::NAMES.len()];
+    let mut at = 0;
+    while at < texts.len() {
+        texts[at] = ShortText::new(crate::ValueKind::NAMES[at].1);
+        at += 1;
+    }
+    texts
+};
+
+impl InlineOperation {
+    /// The kind whose [`Self::Kind`] answer is the inline text `name`.
+    pub fn kind_named(name: &ShortText) -> Option<crate::ValueKind> {
+        KIND_TEXTS
+            .iter()
+            .position(|text| text.is_some_and(|text| text.as_bytes() == name.as_bytes()))
+            .map(|at| crate::ValueKind::NAMES[at].0)
+    }
+
+    /// What [`Self::Same`] answers over [`Self::Kind`]'s answer for
+    /// `value` and the name of `kind` (see [`Self::kind_named`]), read
+    /// from the tag alone: `None` where the kind answer declines.
+    #[inline(always)]
+    pub fn kind_is(value: &Value, kind: crate::ValueKind) -> Option<bool> {
+        let found = value.kind();
+        KIND_TEXTS[found as usize].map(|_| found == kind)
+    }
+}
+
+impl InlineOperation {
+    /// Kind and arity eligibility only. This does not admit resources or
+    /// authorize an answer when the native would raise or Decline.
+    #[inline]
+    pub fn accepts(self, args: &[Value]) -> bool {
+        match (self, args) {
+            (Self::Kind, [_]) => true,
+            (Self::Same, [left, right]) => shallow_same(left, right).is_some(),
+            (Self::Not, [Value::Bool(_)]) => true,
+            (Self::FloatIdentity | Self::FloatUnary(_), [Value::Float(_)]) => true,
+            (Self::ToFloat, [Value::Int(_) | Value::Float(_)]) => true,
+            (Self::Length(kind), [value]) => matches!(
+                (kind, value),
+                (crate::plan::Collection::List, Value::List(_))
+                    | (crate::plan::Collection::Tuple, Value::Tuple(_))
+                    | (crate::plan::Collection::Map, Value::Map(_))
+                    | (crate::plan::Collection::Set, Value::Set(_))
+                    | (crate::plan::Collection::Record, Value::Record(_))
+            ),
+            (Self::Membership(table), [target, key]) => match (table, target) {
+                (crate::plan::Table::Map, Value::Map(_))
+                | (crate::plan::Table::Set, Value::Set(_)) => inline_key(key),
+                // A record's key is a text; any other key is the native's refusal.
+                (crate::plan::Table::Record, Value::Record(_)) => matches!(key, Value::Text(_)),
+                _ => false,
+            },
+            (Self::Scalar { domain, .. }, [Value::Int(_), Value::Int(_)]) => domain.words(),
+            (Self::Scalar { domain, .. }, [Value::Float(_), Value::Float(_)]) => domain.floats(),
+            (Self::Scalar { operation, domain }, [Value::Text(_), Value::Text(_)]) => {
+                domain == ScalarDomain::WordsFloatsOrTexts && operation.compares()
+            }
+            (
+                Self::Scalar { operation, domain },
+                [left @ (Value::Int(_) | Value::Float(_)), right],
+            ) if domain.mixed() => crate::scalar::mixed(operation, *left, *right).is_some(),
+            (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(_)]) => true,
+            (Self::IntegerText(IntegerTextDomain::WholeFloat), [Value::Float(number)]) => {
+                whole_float(number.get()).is_some()
+            }
+            (
+                Self::IntegerText(IntegerTextDomain::RadixArgument),
+                [Value::Int(_), Value::Int(radix)],
+            ) => (2..=36).contains(radix),
+            (Self::TextConcat, [left, right]) => {
+                matches!(left, Value::Text(_) | Value::LongText(_))
+                    && matches!(right, Value::Text(_) | Value::LongText(_))
+            }
+            _ => false,
+        }
+    }
+
+    /// The allocation-free answer within this operation's immediate domain.
+    /// `None` retains the ordinary call, including any allocation admission.
+    #[inline]
+    pub fn answer(self, args: &[Value]) -> Option<Value> {
+        match (self, args) {
+            (Self::Kind, [value]) => KIND_TEXTS[value.kind() as usize].map(Value::Text),
+            (Self::Same, [left, right]) => shallow_same(left, right).map(Value::Bool),
+            (Self::Not, [Value::Bool(value)]) => Some(Value::Bool(!value)),
+            (Self::FloatIdentity | Self::ToFloat, [value @ Value::Float(_)]) => Some(*value),
+            (Self::FloatUnary(operation), [Value::Float(number)]) => Some(Value::Float(
+                crate::Float::new(operation.apply(number.get())),
+            )),
+            // Every word is finite as a binary64, and `as` rounds to nearest
+            // with ties to even.
+            (Self::ToFloat, [Value::Int(word)]) => {
+                Some(Value::Float(crate::Float::new(*word as f64)))
+            }
+            (Self::IntegerText(IntegerTextDomain::Decimal), [Value::Int(word)]) => {
+                ShortText::digits(*word, 10).map(Value::Text)
+            }
+            (Self::IntegerText(IntegerTextDomain::WholeFloat), [Value::Float(number)]) => {
+                ShortText::digits(whole_float(number.get())?, 10).map(Value::Text)
+            }
+            (
+                Self::IntegerText(IntegerTextDomain::RadixArgument),
+                [Value::Int(word), Value::Int(radix)],
+            ) if self.accepts(args) => {
+                ShortText::digits(*word, u32::try_from(*radix).ok()?).map(Value::Text)
+            }
+            (Self::Scalar { operation, .. }, [Value::Int(a), Value::Int(b)])
+                if self.accepts(args) =>
+            {
+                crate::scalar::ints(operation, *a, *b)
+            }
+            (Self::Scalar { operation, .. }, [Value::Float(a), Value::Float(b)])
+                if self.accepts(args) =>
+            {
+                crate::scalar::floats(operation, *a, *b)
+            }
+            (Self::Scalar { operation, .. }, [Value::Text(a), Value::Text(b)])
+                if self.accepts(args) =>
+            {
+                crate::scalar::byte_texts(operation, a, b)
+            }
+            (Self::Scalar { operation, domain }, [left, right]) if domain.mixed() => {
+                crate::scalar::mixed(operation, *left, *right)
+            }
+            _ => None,
+        }
+    }
+
+    /// Allocation-free answers using the same zero-copy views as the native.
+    pub fn answer_read(self, args: Args<'_>) -> Result<Option<Value>, NativeError> {
+        if !self.accepts(args.values()) {
+            return Ok(None);
+        }
+        if let Self::Length(kind) = self {
+            let [value] = args.values() else {
+                return Ok(None);
+            };
+            let length = match kind {
+                crate::plan::Collection::List | crate::plan::Collection::Tuple => {
+                    args.sequence(value)?.map(|view| view.len())
+                }
+                crate::plan::Collection::Map
+                | crate::plan::Collection::Set
+                | crate::plan::Collection::Record => args.table(value)?.map(|view| view.len()),
+            };
+            return Ok(length
+                .and_then(|length| usize::try_from(length).ok())
+                .and_then(|length| i64::try_from(length).ok())
+                .map(Value::Int));
+        }
+        if let Self::Membership(_) = self {
+            let [target, key] = args.values() else {
+                return Ok(None);
+            };
+            return match args.point_table(target)? {
+                Some(table) => Ok(Some(Value::Bool(args.lookup(table, key)?.is_some()))),
+                None => Ok(None),
+            };
+        }
+        Ok(self.answer(args.values()))
+    }
+}
+
+/// A key legal by its kind alone, with no normal form to build: the keys
+/// a table's membership answers inline.
+fn inline_key(key: &Value) -> bool {
+    matches!(
+        key,
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::Text(_)
+            | Value::Timestamp(_)
+            | Value::Function(_)
+            | Value::TaskRef(_)
+    )
+}
+
+fn shallow_same(left: &Value, right: &Value) -> Option<bool> {
+    if left.kind() != right.kind() {
+        return Some(false);
+    }
+    match (left, right) {
+        (Value::Null, Value::Null)
+        | (Value::Absent, Value::Absent)
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::Text(_), Value::Text(_))
+        | (Value::Timestamp(_), Value::Timestamp(_))
+        | (Value::Task(_), Value::Task(_))
+        | (Value::TaskRef(_), Value::TaskRef(_))
+        | (Value::ObjectRef(_), Value::ObjectRef(_))
+        | (Value::List(_), Value::List(_))
+        | (Value::Map(_), Value::Map(_))
+        | (Value::Set(_), Value::Set(_))
+        | (Value::Record(_), Value::Record(_))
+        | (Value::Closure(_), Value::Closure(_)) => Some(left.same(right)),
+        _ => None,
+    }
+}
+
+/// Immediate pairs a numeric kernel answers. Big integers run normally.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScalarDomain {
+    /// Two word integers.
+    Words,
+    /// Two floats.
+    Floats,
+    /// Two word integers, two floats, or a word and a float in either
+    /// order where the word is exactly a binary64 ([`crate::scalar::mixed`]).
+    /// Other mixed pairs run normally.
+    WordsOrFloats,
+    /// As [`Self::WordsOrFloats`]; a comparison also takes two inline
+    /// texts, ordered and equal by their UTF-8 bytes. Heap texts run
+    /// normally.
+    WordsFloatsOrTexts,
+}
+
+impl ScalarDomain {
+    /// Whether two word integers are in the domain.
+    #[inline(always)]
+    pub fn words(self) -> bool {
+        self != Self::Floats
+    }
+
+    /// Whether two floats are in the domain.
+    #[inline(always)]
+    pub fn floats(self) -> bool {
+        self != Self::Words
+    }
+
+    /// Whether a word and a float, in either order, are in the domain
+    /// where the word is exactly a binary64 ([`crate::scalar::mixed`]).
+    #[inline(always)]
+    pub fn mixed(self) -> bool {
+        matches!(self, Self::WordsOrFloats | Self::WordsFloatsOrTexts)
+    }
+}
+
+/// Integer formatting's word-only domains. Longer answers still need the
+/// native's allocation admission; an immediate entry may answer only the
+/// short outputs it certifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntegerTextDomain {
+    Decimal,
+    RadixArgument,
+    /// A whole float below 2^53 in magnitude, spelled as its integer's
+    /// decimal digits; either zero is "0".
+    WholeFloat,
+}
+
+/// The integer a whole float below 2^53 in magnitude is exactly; either
+/// zero is 0. Kept out of line so the inline answers' tests stay small.
+#[inline(never)]
+fn whole_float(number: f64) -> Option<i64> {
+    (number.abs() < 9_007_199_254_740_992.0 && number.floor() == number).then_some(number as i64)
+}
+
+/// A one-float function whose answer is a float: negation, magnitude and
+/// rounding toward negative infinity, positive infinity or zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloatUnary {
+    Neg,
+    Abs,
+    Floor,
+    Ceil,
+    Trunc,
+}
+
+impl FloatUnary {
+    #[inline]
+    pub fn apply(self, value: f64) -> f64 {
+        match self {
+            Self::Neg => -value,
+            Self::Abs => value.abs(),
+            Self::Floor => value.floor(),
+            Self::Ceil => value.ceil(),
+            Self::Trunc => value.trunc(),
+        }
+    }
 }
 
 /// A read that neither allocates nor mutates its resident operands.

@@ -1,0 +1,927 @@
+//! A block head's trace (`bytecode::trace`), run on the prepaid path.
+//!
+//! Each micro-op does what the dispatcher does at its op on a prepaid,
+//! unobserved block, where the exact step is skipped. A micro-op that
+//! cannot gives the dispatcher its op before any effect, and the
+//! dispatcher runs it under every rule. Only a head's micro-op enters a
+//! block; a call ends its block, so the op after an inline call is a
+//! head, and every other micro-op runs on the reservation its trace's
+//! last head made.
+//!
+//! Each kind of micro-op is its own handler function, called from a
+//! table by the step's kind, so that each is register-allocated alone:
+//! the runner keeps only the machine, the line and the cursor live
+//! between them. A handler gives the next micro-op's index, the op the
+//! dispatcher runs next ([`EXIT`]), or [`LEAVE`] with the trace's result
+//! in [`Line::out`]. A path a handler takes
+//! rarely (a miss, an error, a cold read) is its own function, called
+//! last with the handler's own arguments.
+
+use lash_kernel_doc::Value;
+
+use super::{Flow, Run, Vm, fused};
+use crate::bytecode::program::{Fused, Program, Then, Unit};
+use crate::bytecode::trace::{
+    BRANCH, GENERIC_BUNDLE, KINDS, Kind, NO_PASS, NONE, OPERATIONS, OTHER, PLAIN_KINDS, POP, PUSH,
+    SET_LOCAL, SMALL_BUNDLE, SMALL_PREFIXES, SMALL_STRIDE, Step, WORD_PREFIXES, word_kind,
+};
+use crate::heap::Heap;
+
+#[cfg(test)]
+thread_local! {
+    /// The micro-ops run on this thread, for the laws: proof that a law's
+    /// run took a trace.
+    static RAN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The micro-ops run on this thread so far.
+#[cfg(test)]
+pub(crate) fn ran() -> u64 {
+    RAN.with(std::cell::Cell::get)
+}
+
+/// What a trace's handlers share besides the machine: the running
+/// frame's program, unit and index (`top`), and where the trace's result
+/// goes when it leaves.
+pub(super) struct Line<'a> {
+    program: &'a Program,
+    unit: &'a Unit,
+    top: usize,
+    out: Run<Option<usize>>,
+}
+
+/// A handler's answer where the trace leaves with its result in
+/// [`Line::out`]: an error, or a frame entered.
+const LEAVE: usize = usize::MAX;
+
+/// Set in a handler's answer where the trace leaves at the dispatcher's
+/// op that the rest of the answer names.
+const EXIT: usize = 1 << 63;
+
+/// Leaves the trace with `out`. Out of line, so that a handler that
+/// leaves only at an op keeps its registers.
+#[cold]
+#[inline(never)]
+fn leave(line: &mut Line<'_>, out: Run<Option<usize>>) -> usize {
+    line.out = out;
+    LEAVE
+}
+
+/// Leaves the trace at the dispatcher's op `pc`.
+#[inline(always)]
+fn exit_at(pc: usize) -> usize {
+    EXIT | pc
+}
+
+/// Leaves the trace with an internal fault.
+#[cold]
+#[inline(never)]
+fn fault_out(line: &mut Line<'_>, message: &'static str) -> usize {
+    leave(line, Err(super::fault(message)))
+}
+
+/// A micro-op's handler: the machine, the line, the step, its index and
+/// the frame's base, giving the next step's index, [`EXIT`] with the op
+/// the dispatcher runs next, or [`LEAVE`].
+type Handler<H> = fn(&mut Vm<H>, &mut Line<'_>, Step, usize, usize) -> usize;
+
+// One table per heap and counting mode, shared by every bundled handler.
+struct Handlers<H, const COUNT: bool>(std::marker::PhantomData<H>);
+
+impl<H: Heap, const COUNT: bool> Handlers<H, COUNT> {
+    const TABLE: [Handler<H>; KINDS] = {
+        let mut table: [Handler<H>; KINDS] = [Vm::<H>::step_none::<COUNT>; KINDS];
+        table[Kind::Block as usize] = Vm::<H>::step_block::<COUNT>;
+        table[Kind::Trip as usize] = Vm::<H>::step_trip::<COUNT>;
+        table[Kind::Then as usize] = Vm::<H>::step_then::<COUNT>;
+        table[Kind::Pass as usize] = Vm::<H>::step_pass::<COUNT>;
+        table[Kind::Local as usize] = Vm::<H>::step_local::<COUNT>;
+        table[Kind::Const as usize] = Vm::<H>::step_konst::<COUNT>;
+        table[Kind::SetLocal as usize] = Vm::<H>::step_set_local::<COUNT>;
+        table[Kind::Copy as usize] = Vm::<H>::step_copy::<COUNT>;
+        table[Kind::Pop as usize] = Vm::<H>::step_pop::<COUNT>;
+        table[Kind::CaptureGet as usize] = Vm::<H>::step_capture_get::<COUNT>;
+        table[Kind::CellGet as usize] = Vm::<H>::step_cell_get::<COUNT>;
+        table[Kind::Fused as usize] = Vm::<H>::step_fused::<COUNT>;
+        table[Kind::Inline as usize] = Vm::<H>::step_inline::<COUNT>;
+        table[Kind::Branch as usize] = Vm::<H>::step_branch::<COUNT>;
+        table[Kind::Jump as usize] = Vm::<H>::step_jump::<COUNT>;
+        table[Kind::Exit as usize] = Vm::<H>::step_exit::<COUNT>;
+        macro_rules! word_prefixes {
+            ($op:literal $shape:literal; $($prefix:literal)*) => {$(
+                word_prefixes!(@ $op $shape $prefix PUSH);
+                word_prefixes!(@ $op $shape $prefix SET_LOCAL);
+                word_prefixes!(@ $op $shape $prefix POP);
+                word_prefixes!(@ $op $shape $prefix BRANCH);
+            )*};
+            (@ $op:literal $shape:literal $prefix:literal $then:ident) => {
+                table[PLAIN_KINDS * ($prefix + 1) + word_kind($op, $shape, $then)] =
+                    Vm::<H>::step_bundle::<COUNT, {word_kind($op, $shape, $then)}, {WORD_PREFIXES[$prefix]}>;
+            };
+        }
+        macro_rules! words {
+            ($($op:literal)*) => {$(
+                words!(@ $op 0 2); words!(@ $op 1 2); words!(@ $op 2 2); words!(@ $op 3 2);
+                words!(@ $op 4 1); words!(@ $op 5 1); words!(@ $op 6 0);
+            )*};
+            (@ $op:literal $shape:literal $pushes:literal) => {
+                word_prefixes!($op $shape; 0 1 2 3 4 5 6 7 8 9 10 11 12);
+                words!(@@ $op $shape $pushes PUSH);
+                words!(@@ $op $shape $pushes SET_LOCAL);
+                words!(@@ $op $shape $pushes POP);
+                words!(@@ $op $shape $pushes BRANCH);
+            };
+            (@@ $op:literal $shape:literal $pushes:literal $then:ident) => {
+                table[GENERIC_BUNDLE + word_kind($op, $shape, $then)] =
+                    Vm::<H>::step_bundle::<COUNT, {word_kind($op, $shape, $then)}, {u64::MAX}>;
+                table[word_kind($op, $shape, $then)] = Vm::<H>::step_words::<COUNT, $op, $pushes, $then, $shape>;
+            };
+        }
+        words!(0 1 2 3 4 5 6 7 8 9 10 11);
+        macro_rules! other {
+            ($($shape:literal $pushes:literal;)*) => {$(
+                table[OTHER + $shape] = Vm::<H>::step_other_shape::<COUNT, $pushes, $shape>;
+                table[GENERIC_BUNDLE + OTHER + $shape] =
+                    Vm::<H>::step_bundle::<COUNT, {OTHER + $shape}, {u64::MAX}>;
+            )*};
+        }
+        other!(0 2; 1 2; 2 2; 3 2; 4 1; 5 1; 6 0;);
+        macro_rules! bundle { ($($kind:ident)*) => {$(
+            table[GENERIC_BUNDLE + Kind::$kind as usize] = Vm::<H>::step_bundle::<COUNT, {Kind::$kind as usize}, {u64::MAX}>;
+        )*}; }
+        bundle!(Block Trip Then Pass Local Const SetLocal Copy Pop CaptureGet CellGet Fused Inline Branch Jump Exit);
+        macro_rules! small_prefixes {
+            ($($prefix:literal)*) => {$( small_prefixes!(@ $prefix; 11 12 13 14 15 16 17 18 19 20 21 22); )*};
+            (@ $prefix:literal; $($kind:literal)*) => {$(
+                table[SMALL_BUNDLE + $prefix * SMALL_STRIDE + $kind] = Vm::<H>::step_bundle::<COUNT, $kind, {SMALL_PREFIXES[$prefix]}>;
+            )*};
+        }
+        small_prefixes!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57);
+        table
+    };
+}
+
+impl<H: Heap> Vm<H> {
+    /// Runs trace `n` of `unit`, the running frame's (`top`), whose locals
+    /// start at `base`. Gives the op the dispatcher runs next, or `None`
+    /// where a frame was entered. An error leaves the frame where the dispatcher's
+    /// would.
+    #[inline(never)]
+    pub(super) fn trace<const COUNT: bool>(
+        &mut self,
+        program: &Program,
+        unit: &Unit,
+        top: usize,
+        n: u32,
+        base: usize,
+    ) -> Run<Option<usize>> {
+        let handlers = &Handlers::<H, COUNT>::TABLE;
+        let micros = &unit.micros[..];
+        let mut line = Line {
+            program,
+            unit,
+            top,
+            out: Ok(None),
+        };
+        let mut at = unit.traces[n as usize].start as usize;
+        loop {
+            let step = micros[at];
+            debug_assert!(
+                [Kind::Block, Kind::Trip, Kind::Exit]
+                    .iter()
+                    .any(|&kind| step.kind() == kind as usize)
+                    || step.kind() >= PLAIN_KINDS
+                    || !self.exact,
+                "a trace runs on the prepaid path"
+            );
+            at = handlers[step.kind()](self, &mut line, step, at, base);
+            if at >= EXIT {
+                return if at == LEAVE {
+                    line.out
+                } else {
+                    Ok(Some(at & !EXIT))
+                };
+            }
+        }
+    }
+
+    /// Runs the small leading ops, the primary handler, and its jump
+    /// without returning to the runner between them.
+    fn step_bundle<const COUNT: bool, const KIND: usize, const CODE: u64>(
+        &mut self,
+        line: &mut Line<'_>,
+        group: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        let steps = &line.unit.trace_steps;
+        if CODE == u64::MAX {
+            let next = self.bundle_prefix::<COUNT>(line, group, at, base);
+            if next != at + 1 {
+                return next;
+            }
+        } else {
+            macro_rules! leading {
+                ($($n:literal)*) => {$(
+                    if (CODE >> ($n * 4)) & 15 != 0 {
+                        let prefix = steps[group.a() as usize + $n];
+                        debug_assert_eq!(prefix.kind(), (((CODE >> ($n * 4)) & 15) - 1) as usize);
+                        let next = Handlers::<H, COUNT>::TABLE[(((CODE >> ($n * 4)) & 15) - 1) as usize](
+                            self, line, prefix, at, base);
+                        if next != at + 1 { return next; }
+                    }
+                )*};
+            }
+            leading!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15);
+        }
+        let next =
+            Handlers::<H, COUNT>::TABLE[KIND](self, line, steps[group.b() as usize], at, base);
+        if next != at + 1 {
+            return next;
+        }
+        if group.small() != 0 {
+            return self.step_jump::<COUNT>(line, steps[group.b() as usize + 1], at, base);
+        }
+        at + 1
+    }
+
+    /// Rare leading sequences keep their decoding outside the primary
+    /// handler's register allocation.
+    #[inline(never)]
+    fn bundle_prefix<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        group: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        for prefix in group.a()..group.b() {
+            let next =
+                self.small_step::<COUNT>(line, line.unit.trace_steps[prefix as usize], at, base);
+            if next != at + 1 {
+                return next;
+            }
+        }
+        at + 1
+    }
+
+    #[inline(always)]
+    fn small_step<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        match step.kind() {
+            k if k == Kind::Block as usize => self.step_block::<COUNT>(line, step, at, base),
+            k if k == Kind::Trip as usize => self.step_trip::<COUNT>(line, step, at, base),
+            k if k == Kind::Then as usize => self.step_then::<COUNT>(line, step, at, base),
+            k if k == Kind::Pass as usize => self.step_pass::<COUNT>(line, step, at, base),
+            k if k == Kind::Local as usize => self.step_local::<COUNT>(line, step, at, base),
+            k if k == Kind::Const as usize => self.step_konst::<COUNT>(line, step, at, base),
+            k if k == Kind::SetLocal as usize => self.step_set_local::<COUNT>(line, step, at, base),
+            k if k == Kind::Copy as usize => self.step_copy::<COUNT>(line, step, at, base),
+            k if k == Kind::Pop as usize => self.step_pop::<COUNT>(line, step, at, base),
+            k if k == Kind::CaptureGet as usize => {
+                self.step_capture_get::<COUNT>(line, step, at, base)
+            }
+            k if k == Kind::CellGet as usize => self.step_cell_get::<COUNT>(line, step, at, base),
+            k if k == Kind::Jump as usize => self.step_jump::<COUNT>(line, step, at, base),
+            _ => fault_out(line, "a bundled prefix of no small kind"),
+        }
+    }
+
+    /// A block head: the block before ended, what it reserved is spent,
+    /// and this one is entered.
+    #[inline(always)]
+    fn step_block<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(line.unit, step);
+        self.meter.leave();
+        let block = &line.unit.blocks[step.a() as usize];
+        self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
+        if self.exact {
+            return exit_at(step.pc() as usize + 1);
+        }
+        at + 1
+    }
+
+    /// A loop's head, entered with the block its condition falls into.
+    #[inline(always)]
+    fn step_trip<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(line.unit, step);
+        self.meter.leave();
+        let blocks = &line.unit.blocks;
+        let charge = blocks[step.a() as usize].charge;
+        let ahead = blocks[step.b() as usize].charge;
+        self.exact = self.watch.is_some() || !self.meter.enter_two(charge, ahead);
+        if self.exact {
+            return exit_at(step.pc() as usize + 1);
+        }
+        at + 1
+    }
+
+    /// The head of the block a trip prepaid ahead, entered with the trip
+    /// where the pair fit, else here as a head is; then the loop's pass.
+    #[inline(always)]
+    fn step_then<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        if !self.meter.then() {
+            self.meter.leave();
+            let block = &line.unit.blocks[step.a() as usize];
+            self.exact = self.watch.is_some() || !self.meter.enter(block.charge);
+            if self.exact {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness::<COUNT>(line.unit, step.with(Kind::Block, NO_PASS));
+                return exit_at(step.pc() as usize + 1);
+            }
+        }
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(line.unit, step);
+        if step.small() != NO_PASS {
+            self.count_pass(base + usize::from(step.small()));
+        }
+        at + 1
+    }
+
+    /// A loop's pass counts one more trip.
+    #[inline(always)]
+    fn count_pass(&mut self, at: usize) {
+        let local = &mut self.cx.stack[at];
+        if let Value::Int(count) = *local {
+            *local = Value::Int(count.saturating_add(1));
+        }
+    }
+
+    #[inline(always)]
+    fn step_pass<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        self.count_pass(base + usize::from(step.small()));
+        at + 1
+    }
+
+    #[inline(always)]
+    fn step_local<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        self.push(self.cx.stack[base + usize::from(step.small())]);
+        at + 1
+    }
+
+    #[inline(always)]
+    fn step_konst<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        self.push(self.konst(step.a()));
+        at + 1
+    }
+
+    #[inline(always)]
+    fn step_set_local<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        let value = self.pop();
+        self.cx.stack[base + usize::from(step.small())] = value;
+        at + 1
+    }
+
+    /// `Local(from)` then `SetLocal(to)`.
+    #[inline(always)]
+    fn step_copy<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        self.cx.stack[base + step.a() as usize] = self.cx.stack[base + usize::from(step.small())];
+        at + 1
+    }
+
+    #[inline(always)]
+    fn step_pop<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        _step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, _step);
+        self.pop();
+        at + 1
+    }
+
+    /// A capture's value, where the arena holds it; else the dispatcher
+    /// runs the op.
+    #[inline(always)]
+    fn step_capture_get<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        let Some(value) = self
+            .capture(step.small())
+            .ok()
+            .and_then(|cell| self.heap.cell_get(cell).ok())
+        else {
+            return exit_at(step.pc() as usize);
+        };
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        self.push(value);
+        at + 1
+    }
+
+    /// A cell's value, where the arena holds it; else the dispatcher runs
+    /// the op.
+    #[inline(always)]
+    fn step_cell_get<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        let Some(value) = self
+            .cell_at(step.small())
+            .ok()
+            .and_then(|cell| self.heap.cell_get(cell).ok())
+        else {
+            return exit_at(step.pc() as usize);
+        };
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        self.push(value);
+        at + 1
+    }
+
+    /// Fused run `step.a()` over two word ints, answered in place; any other
+    /// pair goes on in [`Self::fused_miss`].
+    #[inline(always)]
+    fn step_fused<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        let fused = &line.unit.fused[step.a() as usize];
+        debug_assert!(fused.entry.is_none(), "a traced run counts no entry");
+        let len = self.cx.stack.len();
+        let args = self.fused_args(fused, base, len);
+        match self.fused_words(fused, args) {
+            Some(value) => self.fused_take::<COUNT, 3>(line, fused, step, value, len, at, base),
+            None => self.fused_miss::<COUNT>(line, step, at, base),
+        }
+    }
+
+    /// A step of no kind: the builder makes none.
+    fn step_none<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        _: Step,
+        _: usize,
+        _: usize,
+    ) -> usize {
+        fault_out(line, "a trace step of no kind")
+    }
+
+    /// Fused run `step.a()` of operation `OP` (by [`OPERATIONS`]), which
+    /// pushes `PUSHES` operands and whose answer `THEN` takes: answered in
+    /// place over two word ints by its words form, or over two numbers by
+    /// its numbers form, each fee prepaid; any other pair goes on in
+    /// [`Self::fused_miss`].
+    #[inline(always)]
+    fn step_words<
+        const COUNT: bool,
+        const OP: u8,
+        const PUSHES: u8,
+        const THEN: u8,
+        const SHAPE: u8,
+    >(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        let operation = OPERATIONS[OP as usize];
+        let fused = &line.unit.fused[step.a() as usize];
+        debug_assert!(fused.entry.is_none(), "a traced run counts no entry");
+        debug_assert_eq!(fused.pushes, PUSHES);
+        let len = self.cx.stack.len();
+        let args = self.trace_args::<PUSHES, SHAPE>(line.unit, step.a(), base, len);
+        if let (Some(form), [Value::Int(a), Value::Int(b)]) = (&fused.words, args)
+            && let Some(value) = lash_kernel_doc::scalar::ints(operation, a, b)
+        {
+            let paid = match &form.fee {
+                Some(table) if !self.off => {
+                    let large = matches!(value, Value::Int(word) if word != 0);
+                    let mut index = step.fee_base() | usize::from(large) << 2;
+                    if SHAPE != 2 && SHAPE != 3 {
+                        index |= usize::from(a != 0);
+                    }
+                    if SHAPE != 1 && SHAPE != 3 && SHAPE != 5 {
+                        index |= usize::from(b != 0) << 1;
+                    }
+                    self.meter.prepay(table[index])
+                }
+                _ => true,
+            };
+            if paid {
+                return self
+                    .word_take::<COUNT, PUSHES, THEN>(line, fused, step, value, len, at, base);
+            }
+        } else if let Some(form) = &fused.numbers
+            && let Some((value, fee)) = form.numbers_of(operation, args)
+            && (self.off || fee.is_none_or(|units| self.meter.prepay(units)))
+        {
+            return self.word_take::<COUNT, PUSHES, THEN>(line, fused, step, value, len, at, base);
+        }
+        self.fused_miss::<COUNT>(line, step, at, base)
+    }
+
+    /// The shape fixes both operand count and where each operand lives.
+    #[inline(always)]
+    fn trace_args<const PUSHES: u8, const SHAPE: u8>(
+        &self,
+        unit: &Unit,
+        n: u32,
+        base: usize,
+        len: usize,
+    ) -> [Value; 2] {
+        if PUSHES == 0 {
+            return [self.cx.stack[len - 2], self.cx.stack[len - 1]];
+        }
+        let inputs = &unit.trace_operands[n as usize];
+        let first = if SHAPE == 2 || SHAPE == 3 || SHAPE == 5 {
+            inputs.values[0]
+        } else {
+            self.cx.stack[base + usize::from(inputs.locals[0])]
+        };
+        if PUSHES == 1 {
+            return [self.cx.stack[len - 1], first];
+        }
+        let second = if SHAPE == 1 || SHAPE == 3 {
+            inputs.values[1]
+        } else {
+            self.cx.stack[base + usize::from(inputs.locals[1])]
+        };
+        [first, second]
+    }
+
+    /// Other fused answers retain their original native/body guard path,
+    /// with the operands already read by their build-time shape.
+    #[inline(always)]
+    fn step_other_shape<const COUNT: bool, const PUSHES: u8, const SHAPE: u8>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        debug_assert!(line.unit.fused[step.a() as usize].words.is_none());
+        let len = self.cx.stack.len();
+        let args = self.trace_args::<PUSHES, SHAPE>(line.unit, step.a(), base, len);
+        self.fused_loaded::<COUNT, PUSHES>(line, step, at, base, args, len)
+    }
+
+    /// The op after fused run `fused`, which pushed `PUSHES` operands,
+    /// takes its answer `value` as `THEN`; `len` is the stack's height
+    /// before the run.
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn word_take<const COUNT: bool, const PUSHES: u8, const THEN: u8>(
+        &mut self,
+        line: &mut Line<'_>,
+        fused: &Fused,
+        step: Step,
+        value: Value,
+        len: usize,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(line.unit, step);
+        if PUSHES < 2 {
+            self.cx.stack.truncate(len + usize::from(PUSHES) - 2);
+        }
+        match THEN {
+            PUSH => self.push(value),
+            SET_LOCAL => self.cx.stack[base + usize::from(step.small())] = value,
+            POP => {}
+            _ => match value {
+                Value::Bool(true) => {}
+                Value::Bool(false) => {
+                    self.meter.unfold();
+                    if step.b() == NONE {
+                        let Then::Branch { to, .. } = fused.then else {
+                            return fault_out(line, "a fused branch of no target");
+                        };
+                        return exit_at(to as usize);
+                    }
+                    return step.b() as usize;
+                }
+                _ => {
+                    let Then::Branch { looping, .. } = fused.then else {
+                        return fault_out(line, "a fused branch of no target");
+                    };
+                    return self.fused_raise(line, fused, looping);
+                }
+            },
+        }
+        at + 1
+    }
+
+    /// Fused run `step.a()`'s other inline answer; or the native's ordinary
+    /// answer, or its call, from the run's call on, as the dispatcher runs
+    /// it. A block prepaid ahead is given back first: the dispatcher
+    /// enters it as its head.
+    #[inline(never)]
+    fn fused_miss<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        let fused = &line.unit.fused[step.a() as usize];
+        let len = self.cx.stack.len();
+        let args = self.fused_args(fused, base, len);
+        self.fused_loaded::<COUNT, 3>(line, step, at, base, args, len)
+    }
+
+    /// Runs the unchanged miss/answer handling with already-read operands.
+    /// PUSHES=3 retains the original dynamic reader's stack count.
+    #[inline(always)]
+    fn fused_loaded<const COUNT: bool, const PUSHES: u8>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+        args: [Value; 2],
+        len: usize,
+    ) -> usize {
+        let (program, unit, top) = (line.program, line.unit, line.top);
+        let n = step.a();
+        let fused = &unit.fused[n as usize];
+        match self.fused_other(program, unit, fused, args) {
+            Ok(Some(value)) => {
+                self.fused_take::<COUNT, PUSHES>(line, fused, step, value, len, at, base)
+            }
+            Ok(None) => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness::<COUNT>(unit, step);
+                self.meter.unfold();
+                let out = self.fused_slow(program, unit, n, base, args, len, top);
+                leave(line, out)
+            }
+            Err(flow) => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness::<COUNT>(unit, step);
+                self.meter.unfold();
+                self.cx.frames[top].pc = match flow {
+                    Flow::Cold { .. } => fused::rerun_from(fused),
+                    _ => fused.call + 1,
+                };
+                leave(line, Err(flow))
+            }
+        }
+    }
+
+    /// The op after fused run `fused` takes its answer `value`; `len` is
+    /// the stack's height before the run.
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn fused_take<const COUNT: bool, const PUSHES: u8>(
+        &mut self,
+        line: &mut Line<'_>,
+        fused: &Fused,
+        step: Step,
+        value: Value,
+        len: usize,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(line.unit, step);
+        let pushes = if PUSHES < 3 { PUSHES } else { fused.pushes };
+        self.cx.stack.truncate(len + usize::from(pushes) - 2);
+        match fused.then {
+            Then::Push => self.push(value),
+            Then::SetLocal(k) => self.cx.stack[base + usize::from(k)] = value,
+            Then::Pop => {}
+            Then::NegatedBranch(n) => {
+                let branch = &line.unit.negated_branches[n as usize];
+                if let Value::Bool(taken) = value
+                    && (self.off || self.meter.prepay(branch.fee))
+                {
+                    if taken {
+                        self.meter.unfold();
+                        return if step.b() == NONE {
+                            exit_at(branch.to as usize)
+                        } else {
+                            step.b() as usize
+                        };
+                    }
+                } else {
+                    self.push(value);
+                    self.meter.unfold();
+                    return exit_at(branch.not as usize);
+                }
+            }
+
+            Then::Branch { to, looping } => match value {
+                Value::Bool(true) => {}
+                Value::Bool(false) => {
+                    self.meter.unfold();
+                    if step.b() == NONE {
+                        return exit_at(to as usize);
+                    }
+                    return step.b() as usize;
+                }
+                // The answer and its fee are the run's: the branch
+                // raises after them, as its op does.
+                _ => return self.fused_raise(line, fused, looping),
+            },
+        }
+        at + 1
+    }
+
+    /// A fused branch's answer is no bool.
+    #[cold]
+    #[inline(never)]
+    fn fused_raise(&mut self, line: &mut Line<'_>, fused: &Fused, looping: bool) -> usize {
+        self.meter.unfold();
+        self.cx.frames[line.top].pc = fused.call + 2;
+        let error = self.condition_error(looping);
+        leave(line, Err(error))
+    }
+
+    /// Inline call `step.a()` of the unit at `step.pc()`, in the running
+    /// frame, where a fold holds and is billed whole. Any other call the
+    /// dispatcher runs whole, from its checks on, so a region or a fold's
+    /// general path is entered in its loop alone.
+    #[inline(always)]
+    fn step_inline<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        let unit = line.unit;
+        let site = &unit.inlines[step.a() as usize];
+        let call = &unit.calls[site.call as usize];
+        debug_assert!(call.entry.is_none(), "a traced call counts no entry");
+        if site.steps && self.meter.spent() {
+            return exit_at(step.pc() as usize);
+        }
+        self.cx.frames[line.top].pc = step.pc() + 1;
+        if let Some(checked) = &call.checked
+            && let Err(flow) = self.check_arguments(checked, usize::from(call.argc))
+        {
+            return leave(line, Err(flow));
+        }
+        let (start, end) = site.folds;
+        match self.inline_fast(unit, step.a(), &unit.folds[start as usize..end as usize]) {
+            Ok(true) => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness::<COUNT>(unit, step);
+                at + 1
+            }
+            Ok(false) => exit_at(step.pc() as usize),
+            Err(flow) => leave(line, Err(flow)),
+        }
+    }
+
+    /// A `JumpIfFalse` or, when `step.small()`, a `WhileFalse`.
+    #[inline(always)]
+    fn step_branch<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        _: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(line.unit, step);
+        match self.pop() {
+            Value::Bool(true) => at + 1,
+            Value::Bool(false) if step.b() == NONE => exit_at(step.a() as usize),
+            Value::Bool(false) => step.b() as usize,
+            _ => self.branch_raise(line, step),
+        }
+    }
+
+    /// A branch's condition is no bool.
+    #[cold]
+    #[inline(never)]
+    fn branch_raise(&mut self, line: &mut Line<'_>, step: Step) -> usize {
+        self.cx.frames[line.top].pc = step.pc() + 1;
+        let error = self.condition_error(step.small() != 0);
+        leave(line, Err(error))
+    }
+
+    #[inline(always)]
+    fn step_jump<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        _: usize,
+        _: usize,
+    ) -> usize {
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(_line.unit, step);
+        if step.b() == NONE {
+            return exit_at(step.a() as usize);
+        }
+        step.b() as usize
+    }
+
+    /// The dispatcher runs the op at `step.pc()`.
+    #[inline(always)]
+    fn step_exit<const COUNT: bool>(
+        &mut self,
+        _line: &mut Line<'_>,
+        step: Step,
+        _: usize,
+        _: usize,
+    ) -> usize {
+        exit_at(step.pc() as usize)
+    }
+
+    /// Counts a micro-op for the laws, and the steps its ops start as the
+    /// dispatcher counts them.
+    #[cfg(any(test, feature = "perf-witness"))]
+    fn witness<const COUNT: bool>(&self, unit: &Unit, step: Step) {
+        if !COUNT {
+            return;
+        }
+        #[cfg(test)]
+        RAN.with(|ran| ran.set(ran.get() + 1));
+        let pc = step.pc() as usize;
+        let ops = if step.kind() == Kind::Copy as usize
+            || step.kind() == Kind::Then as usize && step.small() != NO_PASS
+        {
+            2
+        } else {
+            1
+        };
+        for pc in pc..pc + ops {
+            if unit.steps && unit.step[pc] {
+                crate::perf_witness::record(|work| work.vm_steps += 1);
+            }
+        }
+    }
+}

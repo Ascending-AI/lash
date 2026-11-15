@@ -114,7 +114,9 @@ SUPPORTED_CFG_VALUES = {
     "target_pointer_width",
     "target_vendor",
 }
-SUPPORTED_CFG_ATTRS = {"allow", "derive", "expect", "no_std"}
+# Serde metadata changes behavior, not source inclusion; its feature predicate
+# still needs the same ON/OFF artifact witnesses as the existing actions.
+SUPPORTED_CFG_ATTRS = {"allow", "derive", "expect", "no_std", "serde"}
 
 
 def load_toml(path: Path) -> dict[str, Any]:
@@ -1317,6 +1319,12 @@ def dep_info_paths(
         if stem.startswith("lib"):
             stem = stem[3:]
         dep_infos.add(artifact.parent / f"{stem}.d")
+        if stem == "build-script-build":
+            # Cargo renames the executable, but rustc's dep-info retains the
+            # crate name and the enclosing build directory's artifact hash.
+            suffix = artifact.parent.name.rsplit("-", 1)[-1]
+            if re.fullmatch(r"[0-9a-f]+", suffix):
+                dep_infos.add(artifact.parent / f"build_script_build-{suffix}.d")
     for dep_info in dep_infos:
         if not dep_info.is_file():
             continue
@@ -1510,6 +1518,36 @@ def artifact_context_matches(
     return True
 
 
+def integration_truths(package: Package, requirement: CfgPredicateRequirement) -> frozenset[bool]:
+    """Restrict integration predicates to Cargo's mandatory self-dev features.
+
+    Library predicates retain their normal OFF requirements. An integration
+    artifact cannot turn off a feature the package's own dev edge enables.
+    """
+    if (not requirement.source.is_relative_to(package.path / "tests")
+            or not package.dev_self_features):
+        return requirement.truths
+    fixed = set(package.dev_self_features)
+    while True:
+        expanded = fixed | {edge for feature in fixed
+                            for edge in package.features.get(feature, [])
+                            if edge in package.features}
+        if expanded == fixed:
+            break
+        fixed = expanded
+    features = sorted(requirement.features - fixed)
+    atoms = sorted(cfg_atoms(requirement.expr) - {("flag", "test")})
+    possible = set()
+    for bits in itertools.product((False, True), repeat=len(features) + len(atoms)):
+        enabled = fixed | {name for name, active in zip(features, bits[:len(features)]) if active}
+        selected_atoms = {atom for atom, active in zip(atoms, bits[len(features):]) if active}
+        flags = {"test"} | {name for kind, name in selected_atoms if kind == "flag"}
+        values = frozenset(atom for atom in selected_atoms if atom[0] != "flag")
+        possible.add(evaluate_cfg(requirement.expr, enabled_features=frozenset(enabled),
+                                  flags=frozenset(flags), values=values))
+    return requirement.truths & possible
+
+
 def validate_lane_artifacts(
     root: Path,
     packages: dict[str, Package],
@@ -1563,13 +1601,20 @@ def validate_lane_artifacts(
         for requirement in scan.predicates:
             if requirement.features.isdisjoint(owned_features):
                 continue
-            for expected in sorted(requirement.truths):
+            for expected in sorted(integration_truths(package, requirement)):
                 witnessed = False
                 for execution in executions:
                     if command_package(list(execution.command)) != package_name:
                         continue
                     base_flags, values = rustc_cfg(execution.command, root, cfg_cache)
-                    for artifact in package_artifacts(execution, package):
+                    artifacts = package_artifacts(execution, package)
+                    # Build-script cfg belongs to its compiler artifact, whose
+                    # source set is separate from the package's library/tests.
+                    artifacts += [artifact for artifact in execution.artifacts
+                                  if artifact.manifest_path == (package.path / "Cargo.toml").resolve()
+                                  and "custom-build" in artifact.target_kinds
+                                  and requirement.source in artifact.sources]
+                    for artifact in artifacts:
                         if not artifact_context_matches(requirement, artifact):
                             continue
                         if expected and requirement.source not in artifact.sources:
@@ -1713,6 +1758,24 @@ def resolver_proxy_witness(
         )
 
 
+def prepare_lane_worker(root: Path, features: list[str]) -> Path:
+    command = ["cargo", "build", "--message-format=json", "-p", "lash-internal-vm-worker",
+               "--bin", "lash-vm-worker", "--no-default-features", "--features", ",".join(features), "--locked"]
+    output = run_command(command, root)
+    for line in output.splitlines():
+        try:
+            artifact = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (artifact.get("reason") == "compiler-artifact"
+                and artifact.get("target", {}).get("name") == "lash-vm-worker"
+                and artifact.get("executable")):
+            executable = Path(artifact["executable"])
+            if executable.is_file():
+                return executable
+    raise SystemExit("Cargo did not produce the declared feature lane worker executable")
+
+
 def run_lane(root: Path, lane_name: str) -> None:
     packages, plan = validate(root)
     lanes = {lane["name"]: lane for lane in plan["lane"]}
@@ -1726,15 +1789,25 @@ def run_lane(root: Path, lane_name: str) -> None:
     for witness in plan.get("proxy_witness", []):
         if witness["feature"] in owned_features:
             resolver_proxy_witness(root, packages, witness)
-    executions = [
-        run_cargo_with_artifacts(
-            command,
-            root,
-            packages[command_package(command)],
-        )
-        for command in lane["commands"]
-    ]
-    validate_lane_artifacts(root, packages, lane, executions)
+    worker_features = lane.get("worker_features")
+    previous_worker = os.environ.get("LASH_VM_WORKER")
+    if worker_features:
+        os.environ["LASH_VM_WORKER"] = str(prepare_lane_worker(root, worker_features))
+    try:
+        executions = [
+            run_cargo_with_artifacts(
+                command,
+                root,
+                packages[command_package(command)],
+            )
+            for command in lane["commands"]
+        ]
+        validate_lane_artifacts(root, packages, lane, executions)
+    finally:
+        if previous_worker is None:
+            os.environ.pop("LASH_VM_WORKER", None)
+        else:
+            os.environ["LASH_VM_WORKER"] = previous_worker
     print(f"feature coverage lane passed: {lane_name}")
 
 

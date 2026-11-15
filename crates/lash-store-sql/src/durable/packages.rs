@@ -16,8 +16,6 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4) ON CONFLICT (namespace, package_ref, label_digest) DO NOTHING";
         labels = "SELECT labels_json FROM package_labels
              WHERE namespace = ?1 AND package_ref = ?2 ORDER BY label_digest";
-        labels_held = "SELECT artifact_ref FROM artifact_referrer_edges
-             WHERE namespace = ?1 AND artifact_ref = ?2 AND referrer_kind = ?3 AND referrer_id = ?4";
         /// Every node whose lease is live at `?1`, with its decoded format
         /// sets as a JSON array and its capabilities as JSON, by node.
         live_nodes = "SELECT n.node_id, n.formats_json, n.capabilities_json
@@ -48,6 +46,16 @@ crate::statements! {
              WHERE execution = ?1 AND actor_key = ?2 AND ended = 0";
         end_execution = "UPDATE package_executions SET ended = 1 WHERE execution = ?1 AND actor_key = ?2";
         end_actor_executions = "UPDATE package_executions SET ended = 1 WHERE actor_key = ?1 AND ended = 0";
+        /// Execution `?1`'s debt, when it is actor `?2`'s, deleted as the
+        /// execution ends: every debt reader requires a live execution.
+        end_debts = "DELETE FROM execution_debts
+             WHERE execution = ?1
+               AND EXISTS (SELECT 1 FROM package_executions
+                           WHERE execution = ?1 AND actor_key = ?2)";
+        /// The debt of actor `?1`'s live executions, deleted as they end.
+        end_actor_debts = "DELETE FROM execution_debts
+             WHERE execution IN (SELECT execution FROM package_executions
+                                 WHERE actor_key = ?1 AND ended = 0)";
         /// Execution `?1`'s stable and discovery debt, which an adoption
         /// replaces; the target debt of its winners stays with them.
         clear_debts = "DELETE FROM execution_debts

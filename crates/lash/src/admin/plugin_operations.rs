@@ -185,6 +185,7 @@ impl PluginOperations {
                     name: name.to_string(),
                     args,
                 };
+                self.context.refuse_retired().await?;
                 Box::pin(runtime.submit_session_command(command, idempotency_key, parent))
                     .await
                     .map_err(EmbedError::Runtime)

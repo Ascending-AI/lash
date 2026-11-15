@@ -20,6 +20,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("check_version_bumps.py")
@@ -585,6 +586,74 @@ record_codec!(Record, 7);
             self.assertFalse(result.errors, result)
 
 
+    def test_primitive_codec_errors_are_not_bytes_but_its_encoding_is(self) -> None:
+        # A primitive codec file binds every guarded shape that reaches a
+        # codec. A refusal variant changes no stored byte and must not move
+        # the witness (FIG-7695: a new TokenError variant moved both store
+        # schema stamps); a tag, writer or container codec change must.
+        primitives = """
+pub const TAG_SEQ: u8 = 7;
+pub trait TokenCodec: Sized {
+    fn encode(&self, out: &mut TokenWriter);
+    fn decode(input: &mut TokenReader) -> Result<Self, TokenError>;
+}
+#[derive(Debug, thiserror::Error)]
+pub enum TokenError {
+    #[error("truncated")]
+    Truncated,
+}
+impl From<std::fmt::Error> for TokenError {
+    fn from(_: std::fmt::Error) -> Self { Self::Truncated }
+}
+pub struct TokenWriter { out: Vec<u8> }
+impl TokenWriter {
+    pub fn seq(&mut self, count: u64) { self.out.push(TAG_SEQ); self.out.push(count as u8); }
+}
+impl<T: TokenCodec> TokenCodec for Vec<T> {
+    fn encode(&self, out: &mut TokenWriter) { out.seq(self.len() as u64); }
+    fn decode(input: &mut TokenReader) -> Result<Self, TokenError> { input.seq() }
+}
+"""
+        self.write("crates/demo/src/tokens.rs", primitives)
+        self.write("crates/demo/src/codec.rs", """
+impl TokenCodec for Record {
+    fn encode(&self, out: &mut TokenWriter) { out.seq(1); }
+}
+""")
+        base = self.commit("a primitive codec file")
+        key = "crates/demo/src/lib.rs:WIRE_VERSION"
+
+        def moves(text: str) -> bool:
+            self.write("crates/demo/src/tokens.rs", text)
+            result = gate.check_views(gate.RevisionView(self.repo, base), gate.WorktreeView(self.repo),
+                                      only=frozenset({key}), strict=False)
+            self.assertFalse(result.errors, result)
+            return bool(result.failures)
+
+        refusal = primitives.replace("    Truncated,\n}", """    Truncated,
+    #[error("{0} was retired")]
+    Retired(RetiredState),
+}
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum RetiredState {
+    #[error("the session")]
+    Session,
+}
+impl RetiredState {
+    pub const fn format(self) -> &'static str { "session" }
+}""")
+        self.assertNotEqual(refusal, primitives)
+        self.assertFalse(moves(refusal))
+        for old, new in [("TAG_SEQ: u8 = 7", "TAG_SEQ: u8 = 8"),
+                         ("self.out.push(count as u8)", "self.out.push(count as u8); self.out.push(0)"),
+                         ("out.seq(self.len() as u64)", "out.seq(self.len() as u64 + 1)")]:
+            with self.subTest(change=new):
+                self.assertTrue(moves(primitives.replace(old, new)))
+        encoded = primitives.replace("impl TokenWriter {", "impl TokenCodec for TokenError {}\nimpl TokenWriter {")
+        self.write("crates/demo/src/tokens.rs", encoded)
+        base = self.commit("an encoded error type")
+        self.assertTrue(moves(encoded.replace("    Truncated,\n}", "    Truncated,\n    Retired,\n}")))
+
 class CutVerdicts(Harness):
     """The four machine verdicts FIG-4494 records."""
 
@@ -663,6 +732,63 @@ class BumpAndEvidence(Harness):
         code, output = self.verdict(self.commit("synthetic arm only"))
         self.assertEqual(code, 1, output)
         self.assertIn("WIRE_VERSION is 3 on both sides", output)
+
+
+class ExchangeVersionRelation(Harness):
+    EXCHANGE = '''
+    /// version_surface = "coexist"
+    /// version_guard(roots(Manifest))
+    const VERSION: u32 = 2;
+    #[derive(Serialize, Deserialize)]
+    pub struct Manifest {
+        pub version: u32,
+        pub cases: Vec<String>,
+    }
+    '''
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.path = "crates/lash-kernel-conformance/src/compat.rs"
+        self.write("crates/lash-kernel-conformance/Cargo.toml",
+                   '[package]\nname = "lash-kernel-conformance"\n')
+        self.write(self.path, self.EXCHANGE)
+        self.base = self.commit("named exchange version and shape")
+
+    def assert_move(self, source: str, *, strict: bool, expected: int, diagnostic: str) -> None:
+        self.write(self.path, source)
+        result = self.run_command(self.base, self.commit("exchange move"), strict=strict)
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        self.assertIn(diagnostic, result.stdout + result.stderr)
+
+    def test_default_exchange_version_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("u32 = 2", "u32 = 3"), strict=False,
+                         expected=1, diagnostic="without a changed guarded shape")
+
+    def test_default_exchange_shape_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("Vec<String>", "Vec<u64>"), strict=False,
+                         expected=1, diagnostic="VERSION is 2 on both sides")
+
+    def test_strict_exchange_version_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("u32 = 2", "u32 = 3"), strict=True,
+                         expected=1, diagnostic="without a changed guarded shape")
+
+    def test_strict_exchange_shape_only_move_is_refused(self) -> None:
+        self.assert_move(self.EXCHANGE.replace("Vec<String>", "Vec<u64>"), strict=True,
+                         expected=1, diagnostic="VERSION is 2 on both sides")
+
+    def test_exchange_shape_and_version_can_move_together(self) -> None:
+        for strict in [False, True]:
+            with self.subTest(strict=strict):
+                self.assert_move(self.EXCHANGE.replace("Vec<String>", "Vec<u64>")
+                                 .replace("u32 = 2", "u32 = 3"), strict=strict,
+                                 expected=0, diagnostic="VERSION 2 to 3")
+
+    def test_allocator_reports_exchange_version_only_move_without_retrying(self) -> None:
+        import apply_format_witnesses as automatic
+
+        self.write(self.path, self.EXCHANGE.replace("u32 = 2", "u32 = 3"))
+        with self.assertRaisesRegex(gate.CheckError, "without a changed guarded shape"):
+            automatic.apply(self.repo, self.base)
 
 
 class DdlCatalogEvidence(Harness):
@@ -882,6 +1008,101 @@ class Projection(Harness):
         self.assertEqual(code, 1, output)
 
 
+class ErrorDisplayProjection(Harness):
+    """Display wording cannot move a witness; the same type's wire edits must."""
+
+    SHAPE = '''
+    #[derive(Serialize, Deserialize, thiserror::Error)]
+    #[serde(tag = "refusal", rename_all = "snake_case")]
+    pub enum CompatRefusal {
+        #[error("old wording: {message}")]
+        TooOld { message: String },
+        #[error(r#"another message"#)]
+        Missing,
+    }
+    '''
+
+    def source(self, guard: str, shape: str) -> str:
+        return (f'/// version_surface = "coexist"\n'
+                f'/// version_guard({guard})\n'
+                'pub const PEER_PROTOCOL_VERSION: u32 = 1;\n' + textwrap.dedent(shape))
+
+    def test_only_error_display_text_is_neutral(self) -> None:
+        for guard in ["items(CompatRefusal)", "shapes(cover(CompatRefusal))", "roots(CompatRefusal)"]:
+            with self.subTest(guard=guard):
+                self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE))
+                base = self.commit("error shape")
+                changed = self.SHAPE.replace("old wording: {message}", "new wording: {message}")
+                changed = changed.replace('r#"another message"#', '"new second message"')
+                self.write("crates/demo/src/peer.rs", self.source(guard, changed))
+                code, output = self.verdict(self.commit("display wording only"), base)
+                self.assertEqual(code, 0, output)
+
+    def test_error_types_still_require_witnesses_for_wire_changes(self) -> None:
+        mutations = {
+            "field": ("message: String", "detail: String"),
+            "field type": ("message: String", "message: Vec<String>"),
+            "serde attribute": ('rename_all = "snake_case"', 'rename_all = "camelCase"'),
+            "variant name": ("TooOld {", "Retired {"),
+            "variant order": (
+                '        TooOld { message: String },\n        #[error(r#"another message"#)]\n        Missing,',
+                '        Missing,\n        #[error(r#"another message"#)]\n        TooOld { message: String },',
+            ),
+        }
+        for guard in ["items(CompatRefusal)", "shapes(cover(CompatRefusal))", "roots(CompatRefusal)"]:
+            self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE))
+            base = self.commit("error shape")
+            for label, (old, new) in mutations.items():
+                with self.subTest(guard=guard, mutation=label):
+                    self.assertIn(old, self.SHAPE)
+                    self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE.replace(old, new)))
+                    code, output = self.verdict(self.commit(label), base)
+                    self.assertEqual(code, 1, output)
+                    self.assertIn("PEER_PROTOCOL_VERSION is 1 on both sides", output)
+
+    def test_error_lookalikes_and_format_arguments_remain_guarded(self) -> None:
+        for old, new in [
+            ('#[error("old wording: {message}")]', '#[custom::error("new wording")]'),
+            ('#[error("old wording: {message}")]', '#[serde(rename = "wire")]'),
+            ('#[error("old wording: {message}")]', '#[error("old wording: {message}", helper(.message))]'),
+        ]:
+            with self.subTest(new=new):
+                before = gate.serde_shapes(textwrap.dedent(self.SHAPE))
+                after = gate.serde_shapes(textwrap.dedent(self.SHAPE.replace(old, new)))
+                self.assertNotEqual(before, after)
+
+
+    def test_named_protocol_attribute_stays_guarded_while_other_wording_is_neutral(self) -> None:
+        # The production audit currently has no entries. Plant a protocol
+        # producer to pin the exception's semantics before one is added.
+        with patch.dict(gate.ERROR_ATTRIBUTE_DATA_READERS,
+                        {("CompatRefusal", "TooOld"): ("fixture::parse_refusal_token",)}):
+            for guard in ["items(CompatRefusal)", "shapes(cover(CompatRefusal))", "roots(CompatRefusal)"]:
+                self.write("crates/demo/src/peer.rs", self.source(guard, self.SHAPE))
+                base = self.commit("named protocol attribute")
+                for old, new, expected in [
+                    ("old wording: {message}", "changed protocol token", 1),
+                    ("another message", "changed display text", 0),
+                ]:
+                    with self.subTest(guard=guard, old=old):
+                        self.write("crates/demo/src/peer.rs",
+                                   self.source(guard, self.SHAPE.replace(old, new)))
+                        code, output = self.verdict(self.commit(new), base)
+                        self.assertEqual(code, expected, output)
+
+    def test_namespaced_attributes_and_attribute_spellings_in_data_are_not_elided(self) -> None:
+        for attribute in [
+            '#[custom::error("old")]',
+            '#[serde(rename = "old")]',
+            '#[custom(r##"#[error("old")]"##)]',
+        ]:
+            with self.subTest(attribute=attribute):
+                before = attribute + "\npub struct Record { id: String }"
+                after = before.replace("old", "new")
+                self.assertNotEqual(gate.serde_shapes("#[derive(Serialize)]\n" + before),
+                                    gate.serde_shapes("#[derive(Serialize)]\n" + after))
+
+
 class GuardSet(Harness):
     def test_dropping_a_shape_from_the_marker_does_not_excuse_changing_it(self) -> None:
         self.write(
@@ -947,6 +1168,194 @@ class GuardSet(Harness):
         code, output = self.verdict(self.commit("unknown kind"))
         self.assertEqual(code, 2, output)
         self.assertIn("unknown entry 'serde'", output)
+
+
+class DocumentProjection(Harness):
+    """Only the audited predecessor's document sweep gets corrected."""
+
+    document_path = "crates/lash-kernel-doc/src/document.rs"
+    bytes_path = "crates/lash-kernel-doc/src/document_bytes.rs"
+    runtime_path = "crates/lash-vm-runtime/src/formats.rs"
+    document = """
+        #[derive(Serialize, Deserialize)]
+        pub struct Document { pub function: FunctionDefinition }
+        #[derive(Serialize, Deserialize)]
+        pub struct FunctionDefinition { pub body: String }
+    """
+    ephemeral = """
+        #[derive(Serialize, Deserialize)]
+        pub struct Selection { pub live: bool }
+    """
+    codec = """
+        impl TokenCodec for FunctionDefinition {
+            fn encode(&self, out: &mut TokenWriter) { out.text(&self.body); }
+        }
+    """
+
+    def marker(self, kind: str) -> str:
+        root = 'cover(Document)' if kind == 'shapes' else 'Document'
+        return textwrap.dedent(f"""
+            /// version_guard(
+            ///     {kind}(path = "{self.document_path}", {root}),
+            ///     items(path = "{self.bytes_path}", decode),
+            /// )
+        """).lstrip("\n")
+
+    def declarations(self, kind: str) -> None:
+        self.write(self.bytes_path, self.marker(kind) + textwrap.dedent("""
+            /// version_surface = "coexist"
+            pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
+            pub fn decode(body: &[u8]) -> usize { body.len() }
+        """).lstrip("\n"))
+        self.write(self.runtime_path, self.marker(kind) + textwrap.dedent("""
+            /// version_surface = "migrate"
+            /// version_unguarded = "pre-1.0 reset"
+            pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 7;
+        """).lstrip("\n"))
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("crates/lash-kernel-doc/Cargo.toml", '[package]\nname = "lash-kernel-doc"\n')
+        self.write(self.document_path, self.document + self.ephemeral)
+        self.write("crates/lash-kernel-doc/src/codec.rs", self.codec)
+        self.declarations("shapes")
+        self.base = self.commit("predecessor sweeps ephemeral admission types")
+        self.declarations("roots")
+        self.write(self.document_path, self.document)
+
+    def corrected_verdict(self) -> tuple[int, str]:
+        # Fixture commits cannot have the production predecessor's SHA.
+        with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.base, create=True):
+            return self.verdict(self.commit("correct document projection"))
+
+    def test_removing_unreachable_admission_types_is_neutral(self) -> None:
+        code, output = self.corrected_verdict()
+        self.assertEqual(code, 0, output)
+
+    def test_executable_changes_still_require_both_document_bumps(self) -> None:
+        mutations = (
+            (self.document_path, "pub function:", "pub renamed:"),
+            (self.document_path, "pub body: String", "pub body: Vec<String>"),
+            ("crates/lash-kernel-doc/src/codec.rs", "out.text(&self.body)", "out.text(\"changed\")"),
+            (self.bytes_path, "body.len()", "body.len() + 1"),
+        )
+        for path, old, new in mutations:
+            with self.subTest(path=path, old=old):
+                original = (self.repo / path).read_text()
+                self.write(path, original.replace(old, new))
+                code, output = self.corrected_verdict()
+                self.assertEqual(code, 1, output)
+                for constant in ("DOCUMENT_GRAMMAR_VERSION", "KERNEL_DOCUMENT_SCHEMA_VERSION"):
+                    self.assertIn(f"{constant} is 7 on both sides", output)
+                self.write(path, original)
+
+    def test_an_unreviewed_predecessor_keeps_the_old_guard(self) -> None:
+        code, output = self.verdict(self.commit("unreviewed base"))
+        self.assertEqual(code, 1, output)
+        self.assertIn("Selection", output)
+
+    def test_other_guards_and_surfaces_keep_their_obligations(self) -> None:
+        # The same known sweep is not corrected for another surface.
+        self.write("crates/lash-kernel-doc/src/other.rs", self.marker("shapes") + textwrap.dedent("""
+            /// version_surface = "coexist"
+            pub const OTHER_DOCUMENT_VERSION: u32 = 7;
+        """).lstrip("\n"))
+        self.write(self.document_path, self.document + self.ephemeral)
+        self.base = self.commit("another surface guards selection")
+        self.write(self.document_path, self.document)
+        code, output = self.corrected_verdict()
+        self.assertEqual(code, 1, output)
+        self.assertIn("OTHER_DOCUMENT_VERSION is 7 on both sides", output)
+        self.assertIn("Selection", output)
+
+    def test_a_different_historical_guard_is_not_corrected(self) -> None:
+        self.declarations("shapes")
+        for path in (self.bytes_path, self.runtime_path):
+            self.write(path, (self.repo / path).read_text().replace(
+                "cover(Document)", "cover(Document, Selection)"))
+        self.write(self.document_path, self.document + self.ephemeral)
+        self.base = self.commit("different sweep identity")
+        self.declarations("roots")
+        self.write(self.document_path, self.document)
+        code, output = self.corrected_verdict()
+        self.assertEqual(code, 1, output)
+        self.assertIn("Selection", output)
+
+
+class DocumentConstruction(Harness):
+    """Document construction mutations must move both document witnesses."""
+
+    identified_path = "crates/lash-kernel-doc/src/identified.rs"
+    document_path = DocumentProjection.document_path
+    bytes_path = DocumentProjection.bytes_path
+
+    def declare(self, marker: str) -> None:
+        self.write(DocumentProjection.bytes_path, marker + textwrap.dedent("""
+            /// version_surface = "coexist"
+            pub const DOCUMENT_GRAMMAR_VERSION: u32 = 7;
+            pub fn decode(body: &[u8]) -> usize { body.len() }
+        """).lstrip("\n"))
+        self.write(DocumentProjection.runtime_path, marker + textwrap.dedent("""
+            /// version_surface = "migrate"
+            /// version_unguarded = "pre-1.0 reset"
+            pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 7;
+        """).lstrip("\n"))
+
+    def assert_mutation_requires_both_bumps(self, old: str, new: str) -> None:
+        source_root = SCRIPT.parent.parent
+        markers = []
+        for path in (DocumentProjection.bytes_path, DocumentProjection.runtime_path):
+            source = (source_root / path).read_text()
+            marker = next(
+                source[start:end] for start, end, _ in gate.marker_blocks(source)
+                if 'roots(path = "crates/lash-kernel-doc/src/document.rs", Document)'
+                in source[start:end]
+            )
+            markers.append(marker)
+        self.assertEqual(markers[0], markers[1], "both document guards must cover construction")
+        identified = (source_root / self.identified_path).read_text()
+        self.assertEqual(identified.count(old), 1, "mutate exactly the reviewed construction path")
+        for kind in ("shapes", "roots"):
+            with self.subTest(predecessor=kind):
+                self.write("crates/lash-kernel-doc/Cargo.toml",
+                           '[package]\nname = "lash-kernel-doc"\n')
+                self.write(DocumentProjection.document_path, DocumentProjection.document + """
+                    impl Document {
+                        pub fn identity(&self) -> DocumentId {
+                            DocumentId::from_bytes(logical_digest(&self.canonical_bytes()))
+                        }
+                        pub fn canonical_bytes(&self) -> Vec<u8> { encode_body(self) }
+                    }
+                """)
+                self.write("crates/lash-kernel-doc/src/codec.rs", DocumentProjection.codec)
+                self.write(self.identified_path, identified)
+                self.declare(DocumentProjection.marker(self, kind))
+                self.base = self.commit("predecessor before construction guards")
+                self.declare(markers[0])
+                with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.base):
+                    code, output = self.verdict(self.commit("guard unchanged document construction"))
+                    self.assertEqual(code, 0, output)
+                    self.write(self.identified_path, identified.replace(old, new, 1))
+                    code, output = self.verdict(self.commit("mutate document construction"))
+                self.assertEqual(code, 1, output)
+                for constant in ("DOCUMENT_GRAMMAR_VERSION", "KERNEL_DOCUMENT_SCHEMA_VERSION"):
+                    self.assertIn(f"{constant} is 7 on both sides", output)
+
+    def test_prepending_a_token_to_the_canonical_body_requires_both_bumps(self) -> None:
+        self.assert_mutation_requires_both_bumps(
+            "document.encode(&mut out);",
+            "out.unsigned(42);\n        document.encode(&mut out);",
+        )
+
+    def test_hashing_a_different_body_slice_requires_both_bumps(self) -> None:
+        self.assert_mutation_requires_both_bumps(
+            "logical_digest(&body)", "logical_digest(&body[1..])",
+        )
+
+    def test_dropping_the_trailing_token_refusal_requires_both_bumps(self) -> None:
+        self.assert_mutation_requires_both_bumps(
+            "input.finish()?;", "let _ = input.finish();",
+        )
 
 
 class Reachable(Harness):
@@ -1401,6 +1810,34 @@ class RealRepository(unittest.TestCase):
         self.assertFalse(result.errors, result)
         self.assertEqual(len(result.failures), 1, result)
         self.assertIn("MachineInput", result.failures[0].detail)
+
+    def test_paged_run_codecs_owe_the_page_and_parked_witnesses(self) -> None:
+        # FIG-7694: a saved unit kind tag changed (dc07f6f163) and an entry
+        # gained its export name, and neither moved a witness because no
+        # guard named these codecs. Each edit below changes stored bytes.
+        page = "crates/lash-kernel-state/src/paged/source.rs:PAGE_FORMAT"
+        parked = "crates/lash-vm-runtime/src/formats.rs:KERNEL_PARKED_STATE_VERSION"
+        for path, before, after, owed in [
+            ("crates/lash-kernel-state/src/paged/run/continuation.rs",
+             "one(out, 5, export)", "one(out, 6, export)", {page, parked}),
+            ("crates/lash-kernel-value/src/package.rs",
+             "record_codec!(ExportName { name, member });",
+             "record_codec!(ExportName { member, name });", {page, parked}),
+            ("crates/lash-kernel-state/src/paged/run/chunked.rs",
+             "out.unsigned(self.len);\n        out.unsigned(self.next);",
+             "out.unsigned(self.next);\n        out.unsigned(self.len);", {page}),
+            ("crates/lash-kernel-state/src/paged/session.rs",
+             "self.not_carried.encode(out);\n        self.saved.encode(out);",
+             "self.saved.encode(out);\n        self.not_carried.encode(out);", {page}),
+        ]:
+            with self.subTest(path=path):
+                source = self.view.content(path)
+                self.assertEqual(source.count(before), 1, before)
+                planted = PlantedView(self.view, {path: source.replace(before, after)})
+                result = gate.check_views(self.view, planted, only=frozenset({page, parked}),
+                                          strict=False)
+                self.assertFalse(result.errors, result)
+                self.assertTrue(owed <= {f.surface.key for f in result.failures}, result)
 
 if __name__ == "__main__":
     unittest.main()

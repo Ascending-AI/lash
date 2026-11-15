@@ -3,15 +3,21 @@ use crate::guarded_tx::{FleetMoved, GuardedTx};
 use crate::session_sql::session_sql;
 
 /// The facts of the frames in `left` (the frames the commit leaves), read
-/// under the locks the commit keeps (ADR 0113 §3.1): the referrer locks of
-/// every ended frame, the session and a transition's successor, in key
-/// order (§2.3); each ended frame's cleanup decision; and the artifacts a
-/// transition carries out of its `ended` frame, one of `left`, into the
-/// successor, each locked and held by the ended frame.
+/// under the locks the commit keeps (ADR 0113 §3.1): each ended frame's
+/// cleanup decision, and the artifacts a transition carries out of its
+/// `ended` frame, one of `left`, into the successor, each held by the ended
+/// frame. Every lock they need (the referrers of every ended frame, the
+/// session and a transition's successor, then every artifact lock of the
+/// ends and carries in one sorted acquisition) is the transaction's
+/// artifact lock plan's (FIG-7700): `planned`, which an owner commit took
+/// from its whole write before its first artifact lock, else taken here
+/// for this head alone. A frame or carry the plan missed would lock out of
+/// its order: the commit retries as contended.
 pub(crate) async fn frames_left_facts_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     commit: &RuntimeCommit,
     left: &[lash_core_store::session_identity::FrameNodeId],
+    planned: Option<&crate::artifact_store::Planned>,
 ) -> Result<FramesLeft, StoreError> {
     use lash_core_store::artifact_referrer::ArtifactReferrer;
     use lash_core_store::artifact_referrer::FrameEnvironmentId;
@@ -29,36 +35,40 @@ pub(crate) async fn frames_left_facts_tx(
             ))
         })
         .collect::<Vec<_>>();
-    let mut referrers = ended_frames.clone();
-    referrers.push(ArtifactReferrer::Session(session_id.clone()));
-    referrers.extend(
-        transition
-            .map(|transition| ArtifactReferrer::FrameEnvironment(transition.successor.clone())),
-    );
-    let mut keys = referrers
-        .iter()
-        .map(|referrer| {
-            (
-                format!(
-                    "lash-artifact-referrer:{}:{}",
-                    referrer.kind().as_str(),
-                    referrer.canonical_id()
-                ),
-                referrer,
-            )
-        })
-        .collect::<Vec<_>>();
-    keys.sort_by(|left, right| left.0.cmp(&right.0));
-    keys.dedup_by(|left, right| left.0 == right.0);
-    for (_, referrer) in keys {
-        crate::artifact_store::lock_referrer_tx(tx, referrer)
-            .await
-            .map_err(store_sqlx_error)?;
+    let own;
+    let planned = match planned {
+        Some(planned) => planned,
+        None => {
+            let mut plan = crate::artifact_store::LockPlan {
+                ended: ended_frames.clone(),
+                held: std::iter::once(ArtifactReferrer::Session(session_id.clone()))
+                    .chain(transition.map(|transition| {
+                        ArtifactReferrer::FrameEnvironment(transition.successor.clone())
+                    }))
+                    .collect(),
+                ..Default::default()
+            };
+            plan_carries_tx(tx, &mut plan, transition.into_iter()).await?;
+            own = crate::artifact_store::lock_plan_tx(tx, &plan).await?;
+            &own
+        }
+    };
+    if !ended_frames.iter().all(|frame| planned.ends(frame)) {
+        return Err(StoreError::Contended);
     }
     let carries = match transition {
         Some(transition) => carries_into_successor_tx(tx, transition).await?,
         None => Vec::new(),
     };
+    if !carries
+        .iter()
+        .all(|(namespace, artifact_ref)| planned.carries(namespace, artifact_ref))
+    {
+        return Err(StoreError::Contended);
+    }
+    if let Some(transition) = transition {
+        carried_from_ended_tx(tx, transition, &carries).await?;
+    }
     let mut ended = Vec::with_capacity(ended_frames.len());
     for frame in ended_frames {
         let decision = crate::obligation_ledger::cleanup_decision_tx(
@@ -85,15 +95,33 @@ pub(crate) type FramesLeft = (
     Vec<(&'static str, String)>,
 );
 
+/// Add to `plan` what each of `transitions` carries, read before any of
+/// the plan's locks. A carry that does not read adds nothing: the head
+/// refuses it under its locks, in the caller's order.
+pub(crate) async fn plan_carries_tx<'t>(
+    tx: &mut sqlx::PgConnection,
+    plan: &mut crate::artifact_store::LockPlan,
+    transitions: impl Iterator<Item = &'t lash_core_store::store::FrameTransition>,
+) -> Result<(), StoreError> {
+    for transition in transitions {
+        match transition_carries_tx(tx, transition).await {
+            Ok(carries) => plan.carries.extend(carries),
+            Err(StoreError::Contended) => return Err(StoreError::Contended),
+            Err(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// The artifacts the transition carries out of its `ended` frame into the
-/// successor, under referrer locks the caller already holds: each locked,
-/// and held by the ended frame. A fenced successor refuses the transition.
+/// successor, under referrer locks the caller already holds. A fenced
+/// successor refuses the transition. The caller's plan locked them with
+/// the commit's ends; it then checks [`carried_from_ended_tx`].
 async fn carries_into_successor_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     transition: &lash_core_store::store::FrameTransition,
 ) -> Result<Vec<(&'static str, String)>, StoreError> {
     use lash_core_store::artifact_referrer::ArtifactReferrer;
-    let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
     let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
     let sql = crate::artifact_store::artifact_sql();
     let successor_fenced: bool =
@@ -108,6 +136,16 @@ async fn carries_into_successor_tx(
             referrer: successor,
         });
     }
+    transition_carries_tx(&mut *tx, transition).await
+}
+
+/// What `transition` carries, a process definition with the artifacts its
+/// manifest names, as sorted `(namespace, artifact_ref)` pairs.
+async fn transition_carries_tx(
+    tx: &mut sqlx::PgConnection,
+    transition: &lash_core_store::store::FrameTransition,
+) -> Result<Vec<(&'static str, String)>, StoreError> {
+    let sql = crate::artifact_store::artifact_sql();
     let mut closure = transition.carries.clone();
     for carry in &transition.carries {
         if carry.store != lash_core_store::artifact_referrer::ArtifactStoreId::ProcessDefinition {
@@ -119,7 +157,7 @@ async fn carries_into_successor_tx(
             crate::observed_sql::query_scalar(sql.lash_vm_artifacts.select_bytes.sql())
                 .bind("process_definition")
                 .bind(&carry.artifact_ref)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?;
         let draft = lash_execution_contracts::process::ProcessDefinitionDraft::from_store_bytes(
@@ -146,19 +184,21 @@ async fn carries_into_successor_tx(
         .collect::<Result<Vec<_>, StoreError>>()?;
     carries.sort_unstable();
     carries.dedup();
-    for (namespace, artifact_ref) in &carries {
-        let key = format!("lash-artifact:{namespace}:{artifact_ref}");
-        crate::observed_sql::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_text
-                .sql(),
-        )
-        .bind(key)
-        .execute(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
-    }
-    for (namespace, artifact_ref) in &carries {
+    Ok(carries)
+}
+
+/// Whether the transition's `ended` frame holds each of `carries`, under
+/// their locks: one it does not refuses the transition.
+async fn carried_from_ended_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transition: &lash_core_store::store::FrameTransition,
+    carries: &[(&'static str, String)],
+) -> Result<(), StoreError> {
+    use lash_core_store::artifact_referrer::ArtifactReferrer;
+    let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
+    let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
+    let sql = crate::artifact_store::artifact_sql();
+    for (namespace, artifact_ref) in carries {
         let source_edge: bool =
             crate::observed_sql::query_scalar(sql.edges.select_edge_exists.sql())
                 .bind(namespace)
@@ -175,7 +215,7 @@ async fn carries_into_successor_tx(
             });
         }
     }
-    Ok(carries)
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -360,25 +400,31 @@ impl PostgresStore {
         planner: &lash_core_store::store::RuntimeCommitPlanner,
         encoded_under: lash_core_store::store::FleetFormat,
     ) -> Result<Result<RuntimeCommitReceipt, FleetMoved>, StoreError> {
-        let now = self.clock.timestamp_ms();
-        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = begin_guarded(connection, &self.fence).await?;
-        if let Err(moved) = tx.require_encoded_under(encoded_under) {
-            return Ok(Err(moved));
-        }
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
+        // The head's left frames take artifact locks, which seal the
+        // transaction: contention runs the identical commit again, and a
+        // replay is adjudicated by its receipt (FIG-7700).
+        crate::guarded_tx::retry_contended(&self.fence, || async {
+            let now = self.clock.timestamp_ms();
+            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+            let mut tx = begin_guarded(connection, &self.fence).await?;
+            if let Err(moved) = tx.require_encoded_under(encoded_under) {
+                return Ok(Err(moved));
+            }
+            #[cfg(any(test, feature = "testing"))]
+            self.set_transaction_lease_clock_for_testing(&mut tx)
+                .await?;
+            let result = crate::durable::apply_store_commit(
+                &mut tx,
+                planner,
+                now,
+                self.pools.maintenance.checkpoint_ref_chunk as usize,
+                &self.pools.configs,
+            )
             .await?;
-        let result = crate::durable::apply_store_commit(
-            &mut tx,
-            planner,
-            now,
-            self.pools.maintenance.checkpoint_ref_chunk as usize,
-            &self.pools.configs,
-        )
-        .await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Ok(result))
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(Ok(result))
+        })
+        .await
     }
 }
 

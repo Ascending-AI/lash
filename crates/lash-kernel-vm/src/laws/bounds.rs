@@ -1,6 +1,8 @@
 //! The bound laws (`K-BND-001`): each bound ends the run with its typed
 //! error, and no `catch` or `finally` sees it (`K-ERR-004`).
 
+mod fused_numbers;
+
 use std::sync::Arc;
 
 use lash_kernel_doc::parse_document;
@@ -306,18 +308,12 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
         charge_limit: 10_000,
         ..ROOMY
     };
-    for source in [true, false] {
-        let mut machine =
-            super::embedder::start_machine(program.clone(), bounds, start.clone()).unwrap();
-        if source {
-            machine.force_source_execution();
+    let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
+    match machine.run(&mut World::default(), u64::MAX).unwrap() {
+        Step::Ended(End::Error(RunError::Bound(exceeded))) => {
+            assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
         }
-        match machine.run(&mut World::default(), u64::MAX).unwrap() {
-            Step::Ended(End::Error(RunError::Bound(exceeded))) => {
-                assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
-            }
-            other => panic!("the escaped closure's loop was not charged: {other:?}"),
-        }
+        other => panic!("the escaped closure's loop was not charged: {other:?}"),
     }
 }
 
@@ -396,49 +392,38 @@ main {
             vec![],
         ),
     ] {
-        for mode in [
-            super::layout::ExecutionMode::Source,
-            super::layout::ExecutionMode::Generic,
-            super::layout::ExecutionMode::Specialized,
-        ] {
-            let mut run = Embedder::with(
-                &format!("main {{ {body} }}"),
-                Setup {
-                    bounds: match bound {
-                        Bound::Memory => Bounds {
-                            memory: limit,
-                            ..ROOMY
-                        },
-                        _ => Bounds {
-                            charge_limit: limit,
-                            ..ROOMY
-                        },
+        let mut run = Embedder::with(
+            &format!("main {{ {body} }}"),
+            Setup {
+                bounds: match bound {
+                    Bound::Memory => Bounds {
+                        memory: limit,
+                        ..ROOMY
                     },
-                    ..Setup::default()
+                    _ => Bounds {
+                        charge_limit: limit,
+                        ..ROOMY
+                    },
                 },
-            );
-            match mode {
-                super::layout::ExecutionMode::Source => run.machine.force_source_execution(),
-                super::layout::ExecutionMode::Generic => run.machine.force_generic_regions(),
-                super::layout::ExecutionMode::Specialized => {}
-            }
-            let end = run.run_to_end(&[]);
+                ..Setup::default()
+            },
+        );
+        let end = run.run_to_end(&[]);
 
-            assert_eq!(
-                end,
-                End::Error(RunError::Bound(BoundExceeded {
-                    bound: bound.clone(),
-                    limit,
-                    function: Some(lash_kernel_value::FunctionName::new("main").unwrap()),
-                    site: Some(Box::new(lash_kernel_value::sites::Site::new(
-                        lash_kernel_value::sites::Unit::Main,
-                        path.clone()
-                    ))),
-                })),
-                "refused source head: {body}, {bound:?}, {mode:?}"
-            );
-            assert_eq!(run.world.printed, printed);
-        }
+        assert_eq!(
+            end,
+            End::Error(RunError::Bound(BoundExceeded {
+                bound: bound.clone(),
+                limit,
+                function: Some(lash_kernel_value::FunctionName::new("main").unwrap()),
+                site: Some(Box::new(lash_kernel_value::sites::Site::new(
+                    lash_kernel_value::sites::Unit::Main,
+                    path.clone()
+                ))),
+            })),
+            "refused source head: {body}, {bound:?}"
+        );
+        assert_eq!(run.world.printed, printed);
     }
 }
 
@@ -473,7 +458,10 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
 }
 
 /// FIG-6732: opting out removes charge work, including completion formulas,
-/// rather than merely making the bound unbounded.
+/// rather than merely making the bound unbounded. The witness counts the
+/// core's charge work (formulas evaluated, fees sized and billed, charge
+/// tape writes, fixed events billed against the limit): none under Off,
+/// some under Exact for the same program, and Off still runs its steps.
 #[test]
 fn charge_off_performs_no_charge_work() {
     crate::perf_witness::enable_work();
@@ -490,21 +478,9 @@ fn charge_off_performs_no_charge_work() {
             ..Setup::default()
         },
     );
-    run.machine.count_work();
     assert_eq!(run.run(), Step::Slice, "Off must still yield slices");
     assert_eq!(result(run.run_to_end(&[])), int(7));
     assert_eq!(run.machine.meters().charged, None);
-    let report = run.machine.work().unwrap();
-    assert_eq!(report.charged, None);
-    assert_eq!(report.residual(), None);
-    assert!(report.codes.iter().all(|code| code.counts.self_charge.is_none() && code.counts.inclusive_charge.is_none()));
-    assert!(
-        report
-            .natives
-            .iter()
-            .all(|native| native.counts.self_charge.is_none()
-                && native.counts.zero_charge_calls.is_none())
-    );
     let work = crate::perf_witness::take_work().unwrap();
     assert_eq!(work.charge_work, 0, "Off must remove charge work");
     assert!(
@@ -536,9 +512,9 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
         },
     );
     assert!(matches!(run.run(), Step::Parked(_)));
-    let (root, _) = run.checkpoint();
+    let root = run.checkpoint();
     assert_eq!(root.meters.charge(), crate::Charge::Off);
-    // New preparation, another layout and deliberately opposite worker defaults.
+    // New preparation and deliberately opposite worker defaults.
     let (program, _) = run.program(false);
     let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root);
     run.machine = KernelMachine::open(
@@ -582,9 +558,9 @@ fn memory_off_removes_accounting_and_survives_a_cold_resume() {
         },
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     assert_eq!(root.limits.memory, None);
-    embedder.open_at(&root, certificate, crate::Layout::default(), true);
+    embedder.open_at(&root, true);
     embedder.deliver("park");
     crate::perf_witness::enable_work();
     let end = embedder.run_to_end(&[]);
@@ -965,12 +941,12 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
             .steps()
             .iter()
             .filter_map(|weight| match weight {
-                lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                crate::Weight::Atomic(n) if *n >= 10000 => Some(*n),
                 _ => None,
             })
             .collect();
         if cold {
-            embedder.reopen(crate::Layout::default(), true);
+            embedder.reopen(true);
             let rest = crate::ChargeTape::new();
             embedder.machine.record_charges(rest.clone());
             embedder.deliver_next();
@@ -979,7 +955,7 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
                 lash_kernel_doc::Datum::Null
             );
             actual.extend(rest.steps().iter().filter_map(|weight| match weight {
-                lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                crate::Weight::Atomic(n) if *n >= 10000 => Some(*n),
                 _ => None,
             }));
         } else {
@@ -992,7 +968,7 @@ fn flat_charge_summaries_preserve_exact_graph_sizes() {
                 .steps()
                 .iter()
                 .filter_map(|weight| match weight {
-                    lash_kernel_exec::Weight::Atomic(n) if *n >= 10000 => Some(*n),
+                    crate::Weight::Atomic(n) if *n >= 10000 => Some(*n),
                     _ => None,
                 })
                 .collect();
@@ -1060,4 +1036,646 @@ main { do call descend(&descend) }"#;
         "descend"
     );
     assert!(limited.document.node(&site).is_some());
+}
+
+/// K-BND-002: the call depth test reads a fixed number of frames per call,
+/// so recursion through a function value up to the bound does work linear
+/// in the bound. Four times the bound may read at most about four times the
+/// frames; a recount of the stack at each call near the bound reads sixteen
+/// times as many.
+#[test]
+fn recursion_to_the_depth_bound_tests_depth_in_linear_work() {
+    let source = r#"definition "function descend(self: Any) -> Any\nkernel 1\nmetering statements\nbody { do apply self(self) }"
+main { do call descend(&descend) }"#;
+    let reads = |call_depth: u32| {
+        let mut embedder = Embedder::with(
+            source,
+            Setup {
+                bounds: Bounds {
+                    call_depth,
+                    ..ROOMY
+                },
+                ..Setup::default()
+            },
+        );
+        let before = crate::vm::depth_reads();
+        let End::Error(RunError::Bound(exceeded)) = embedder.run_to_end(&[]) else {
+            panic!("the recursion is refused at depth {call_depth}");
+        };
+        assert_eq!(exceeded.bound, Bound::CallDepth);
+        crate::vm::depth_reads() - before
+    };
+    let (small, large) = (reads(1000), reads(4000));
+    assert!(
+        large <= 5 * small,
+        "depth reads grow faster than the bound: {small} at 1000, {large} at 4000"
+    );
+}
+
+/// How a bytecode-core run of `body` under memory bound `memory` ended,
+/// with what it held when it ended.
+fn core_end(body: &str, memory: u64) -> (End, u64) {
+    let (end, memory, _) = core_in(
+        &format!("main {{\n{body}\n}}"),
+        Bounds { memory, ..ROOMY },
+        None,
+    );
+    (end, memory)
+}
+
+/// How a bytecode-core run of `body` under memory bound `memory` ended,
+/// with the memory it reports and the bytes its heap holds when it ended.
+fn core_refused(body: &str, memory: u64) -> (End, u64, u64) {
+    let mut machine = super::embedder::core_machine(
+        &format!("main {{\n{body}\n}}"),
+        Bounds { memory, ..ROOMY },
+        None,
+    )
+    .expect("the law's document starts");
+    let mut world = World::default();
+    loop {
+        match machine.run(&mut world, u64::MAX).expect("the core runs") {
+            Step::Ended(end) => return (end, machine.meters().memory, machine.held()),
+            Step::Slice => {}
+            Step::Parked(_) => panic!("the memory laws perform nothing"),
+        }
+    }
+}
+
+/// How a bytecode-core run of document `text` with `probes` under
+/// `bounds` ended, with what it held and had charged when it ended.
+fn core_in(
+    text: &str,
+    bounds: Bounds,
+    probes: Option<super::embedder::Probes>,
+) -> (End, u64, Option<u64>) {
+    let mut machine =
+        super::embedder::core_machine(text, bounds, probes).expect("the law's document starts");
+    let mut world = World::default();
+    loop {
+        match machine.run(&mut world, u64::MAX).expect("the core runs") {
+            Step::Ended(end) => {
+                let meters = machine.meters();
+                return (end, meters.memory, meters.charged);
+            }
+            Step::Slice => {}
+            Step::Parked(_) => panic!("the memory laws perform nothing"),
+        }
+    }
+}
+
+/// The least memory bound a core run of `body` finishes under.
+fn threshold(body: &str) -> u64 {
+    threshold_in(&format!("main {{\n{body}\n}}"), None)
+}
+
+/// The least memory bound a core run of document `text` with `probes`
+/// finishes under.
+fn threshold_in(text: &str, probes: Option<super::embedder::Probes>) -> u64 {
+    let finishes = |memory| {
+        matches!(
+            core_in(text, Bounds { memory, ..ROOMY }, probes).0,
+            End::Finished(_)
+        )
+    };
+    assert!(finishes(ROOMY.memory), "{text}");
+    let (mut refused, mut passed) = (0u64, ROOMY.memory);
+    while passed - refused > 1 {
+        let mid = refused + (passed - refused) / 2;
+        if finishes(mid) {
+            passed = mid;
+        } else {
+            refused = mid;
+        }
+    }
+    passed
+}
+
+/// `K-BND-003`, contract §2: the core's memory schedule is a fixed function
+/// of what a run holds. Holding `k` more list members raises the least
+/// bound the run finishes under by exactly 16 bytes a member, and `k` more
+/// bytes of long text by exactly `k`. One byte under that bound the run ends
+/// with the memory bound, at the native that would have exceeded it.
+#[test]
+fn the_core_memory_threshold_moves_by_exactly_the_schedule() {
+    let fill = |n: u64| format!("  let big = work.fill({n})\n  return 0");
+    let repeat = |n: u64| format!("  let big = work.repeat({n})\n  return 0");
+    let base_fill = threshold(&fill(1000));
+    let base_repeat = threshold(&repeat(1000));
+    for k in [1u64, 7, 100] {
+        assert_eq!(threshold(&fill(1000 + k)), base_fill + 16 * k, "fill +{k}");
+        assert_eq!(threshold(&repeat(1000 + k)), base_repeat + k, "repeat +{k}");
+    }
+    for (body, name) in [(fill(1000), "work.fill"), (repeat(1000), "work.repeat")] {
+        let limit = threshold(&body) - 1;
+        let (end, _) = core_end(&body, limit);
+        let End::Error(RunError::Bound(exceeded)) = end else {
+            panic!("{name} under {limit}: {end:?}");
+        };
+        assert_eq!(
+            (exceeded.bound, exceeded.limit, exceeded.function),
+            (
+                Bound::Memory,
+                limit,
+                Some(lash_kernel_value::names::FunctionName::new(name).unwrap())
+            )
+        );
+    }
+}
+
+/// `K-BND-001`: a run whose program, constants or first frame do not fit
+/// its memory bound starts, and its first step ends with the memory bound.
+/// One refusal has one shape on both sides of the bound at which the
+/// program and its constants fit but the first frame does not.
+#[test]
+fn a_run_that_does_not_fit_its_memory_bound_starts_and_refuses_at_its_first_step() {
+    let body = "  let xs = [\"held\", \"text\"]\n  return xs";
+    for memory in 0..threshold(body) {
+        let (end, _) = core_end(body, memory);
+        let End::Error(RunError::Bound(exceeded)) = end else {
+            panic!("under {memory}: {end:?}");
+        };
+        assert_eq!(
+            (exceeded.bound, exceeded.limit),
+            (Bound::Memory, memory),
+            "under {memory}"
+        );
+    }
+}
+
+/// `K-MACH-001`, `K-BND-003`: a run holds its own code as a fixed unit
+/// per node of its document, whatever the compiler makes of it. A branch
+/// that never runs, `if false { return 1 }`, is six nodes (the `if`, its
+/// test, its block, its empty `else` block, the `return` and its value)
+/// that need no local and no deeper stack, so the least bound a start
+/// finishes under moves by six nodes exactly, though the folder drops the
+/// branch's ops.
+#[test]
+fn a_start_holds_its_document_by_its_nodes() {
+    assert_eq!(
+        threshold("  if false { return 1 }\n  return 0"),
+        threshold("  return 0") + 6 * crate::heap::meter::CODE_NODE
+    );
+}
+
+/// G012, contract §2: a native's inputs stay held while it builds, so its
+/// construction is admitted at the held inputs plus its peak, and at
+/// exactly that. Each byte of a concatenated input is held twice at the
+/// peak, in the still-live input and in the text built from it, so the
+/// least finishing bound moves by two bytes a byte where the final balance
+/// alone would move it by one. One byte under, the concatenation is
+/// refused and the holding stays as it stood before the call: the bound
+/// exceeds it by exactly the text's object part (a 16-byte slot header and
+/// an 8-byte mark word) and its 1,999 bytes. The run reports the total the
+/// refused text would have reached, as a refused charge reports its total
+/// (FIG-7694): exactly the least bound that admits it. The two lengths stay distinct
+/// constants throughout, so the program's constant pool holds the same.
+#[test]
+fn the_core_admits_a_native_at_its_live_inputs_plus_its_peak() {
+    let concat = |a: u64, b: u64| {
+        format!("  let c = text.concat(work.repeat({a}), work.repeat({b}))\n  return 0")
+    };
+    let base = threshold(&concat(1000, 999));
+    for k in [1u64, 7, 100] {
+        assert_eq!(threshold(&concat(1000 + k, 999)), base + 2 * k, "+{k}");
+    }
+    let (end, reported, held) = core_refused(&concat(1000, 999), base - 1);
+    let End::Error(RunError::Bound(exceeded)) = end else {
+        panic!("under {}: {end:?}", base - 1);
+    };
+    assert_eq!(
+        (exceeded.bound, exceeded.function),
+        (
+            Bound::Memory,
+            Some(lash_kernel_value::names::FunctionName::new("text.concat").unwrap())
+        )
+    );
+    assert_eq!(held + 16 + 8 + 1999, base);
+    assert_eq!(reported, base);
+}
+
+/// G011, contract §2, K-CLO-001/002: a captured cell edge is one value in
+/// its closure. A closure over one cell holds a 24-byte object part (a
+/// 16-byte slot header and an 8-byte mark word) and the 16-byte edge; a
+/// cell holds the same object part and its 16-byte value. Each further
+/// closure kept in a list of `n` members therefore raises the least
+/// finishing bound by its member (16) and its closure (40) when every
+/// closure shares one cell, and by a fresh cell (40) besides when each
+/// iteration binds its own. The program is the same for every `n`.
+#[test]
+fn the_core_prices_a_captured_cell_edge_as_one_value() {
+    let kept = |n: u64, fresh: bool| {
+        let (outer, inner) = if fresh {
+            ("", "    let x = i\n")
+        } else {
+            ("  let x = 0\n", "")
+        };
+        format!(
+            "  let fs = work.fill({n})\n{outer}  let i = 0\n  while num.lt(i, {n}) {{\n{inner}    \
+             set fs[i] = fn() {{ return x }}\n    set i = num.add(i, 1)\n  }}\n  return 0"
+        )
+    };
+    for (fresh, each) in [(false, 16 + 40), (true, 16 + 40 + 40)] {
+        let base = threshold(&kept(100, fresh));
+        for k in [1u64, 10] {
+            assert_eq!(
+                threshold(&kept(100 + k, fresh)),
+                base + each * k,
+                "fresh {fresh} +{k}"
+            );
+        }
+    }
+}
+
+/// `K-BND-003`, G011/G013: a shared object counts once, by its slot: a list
+/// that holds the same 1,000-member list twice needs no more room than one
+/// that holds it beside an integer; and a rootless cycle stays charged only
+/// until collection, so two hundred of them fit in room for a few.
+#[test]
+fn the_core_counts_a_shared_object_once_and_collects_rootless_cycles() {
+    let twice = threshold("  let a = work.fill(1000)\n  let z = 0\n  let b = [a, a]\n  return 0");
+    let once = threshold("  let a = work.fill(1000)\n  let z = 0\n  let b = [a, z]\n  return 0");
+    assert_eq!(twice, once);
+    // Each cycle holds a 1,000-member list (16,024 bytes) and the pair
+    // that closes it: 200 of them are over 3 MB, in a 64 KiB bound.
+    let (end, _) = core_end(
+        "  let i = 0
+  while num.lt(i, 200) {
+    let c = [work.fill(1000)]
+    set c[1] = c
+    set i = num.add(i, 1)
+  }
+  return i",
+        64 << 10,
+    );
+    assert_eq!(result(end), int(200));
+}
+
+/// `law.step`, a covered body adding one to its argument, and `law.pack`,
+/// one returning its argument twice in a new list: bodies the inline pass
+/// expands into their callers.
+fn inline_probes(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+    let uses = format!("use num.add = @{}\n", ids["num.add"]);
+    [
+        (
+            "law.step",
+            "function law.step(n: Any) -> Any\nkernel 1\ncharge 1\n{uses}body { return num.add(n, 1) }",
+        ),
+        (
+            "law.pack",
+            "function law.pack(x: Any) -> Any\nkernel 1\ncharge sum(2, size(x))\nbody { return [x, x] }",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, source)| {
+        let definition =
+            lash_kernel_doc::parse_definition(&source.replace("{uses}", &uses)).unwrap();
+        (name, registry.register(definition, None).unwrap())
+    })
+    .collect()
+}
+
+/// A core run of `text` with [`inline_probes`], asserting that the inline
+/// pass expanded a body of it: how it ended, what it held and charged,
+/// and how many ops the expansion added to its program.
+fn inline_in(text: &str, bounds: Bounds) -> ((End, u64, Option<u64>), u64) {
+    let before = crate::bytecode::inline::added();
+    let ran = core_in(text, bounds, Some(inline_probes));
+    let added = crate::bytecode::inline::added() - before;
+    assert!(added > 0, "no body of the law's document was expanded");
+    (ran, added)
+}
+
+/// Contract §2, astra inlining item 2: a body run inline checks the call
+/// depth where its frame would have been entered, after its arguments and
+/// with its caller's attribution. Each `descend` frame calls `law.step`
+/// first, so at every bound reached it is `law.step`'s entry that passes
+/// it: the run refuses where, and with what charged, the run entering the
+/// body's frame does, and not at the next `descend`.
+#[test]
+fn inline_depth_refuses_at_original_entry() {
+    const TEXT: &str = r#"definition "function descend(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody { let m = invoke law.step(n) if num.lt(m, 6) { let r = apply self(self, m) return r } return m }"
+main { let r = call descend(&descend, 0) return r }"#;
+    let mut refused = 0;
+    for call_depth in 1..=9 {
+        let bounds = Bounds {
+            call_depth,
+            ..ROOMY
+        };
+        let (inline, _) = inline_in(TEXT, bounds);
+        let framed =
+            crate::bytecode::inline::disabled(|| core_in(TEXT, bounds, Some(inline_probes)));
+        assert_eq!(
+            (format!("{:?}", inline.0), inline.2),
+            (format!("{:?}", framed.0), framed.2),
+            "call depth {call_depth}"
+        );
+        if let End::Error(RunError::Bound(exceeded)) = &inline.0 {
+            assert_eq!(exceeded.bound, Bound::CallDepth, "call depth {call_depth}");
+            refused += 1;
+        }
+    }
+    assert!(refused >= 6, "the depth bound refused {refused} runs");
+    // An operation is one unit of depth whichever implementation answers
+    // (K-BND-002), and `main`'s body is not a call: a bound of 0 refuses
+    // `pair.twice` before its native answers, and it runs under 1.
+    const OPERATION: &str = "main { let r = invoke pair.twice(1) return r }";
+    for (call_depth, refuses) in [(0, true), (1, false)] {
+        let bounds = Bounds {
+            call_depth,
+            ..ROOMY
+        };
+        for ran in [
+            core_in(OPERATION, bounds, None),
+            crate::bytecode::inline::disabled(|| core_in(OPERATION, bounds, None)),
+        ] {
+            match ran.0 {
+                End::Error(RunError::Bound(exceeded)) if refuses => {
+                    assert_eq!(exceeded.bound, Bound::CallDepth);
+                }
+                end => {
+                    assert!(!refuses, "call depth {call_depth}: {end:?}");
+                    assert_eq!(result(end), int(2));
+                }
+            }
+        }
+    }
+}
+
+/// Contract §2, astra inlining item 2: a body run inline admits its
+/// frame's memory at its entry and releases it when it leaves, as its
+/// frame would. `law.pack` builds its list while its frame is admitted,
+/// three times, and `law.step`'s fold completes its activation sixty
+/// times, so the least bound each run finishes under is the framed run's:
+/// the code the expansion added is the library's, which the run never
+/// holds (K-MACH-001, K-BND-003).
+#[test]
+fn inline_frame_memory_is_admitted_at_entry() {
+    const TEXT: &str = "main {\n  let xs = work.fill(100)\n  let p = 0\n  let i = 0\n  while num.lt(i, 3) {\n    set p = invoke law.pack(xs)\n    set i = num.add(i, 1)\n  }\n  return 0\n}";
+    // `law.step`'s fold holds at each call, and completes the activation
+    // there: it releases what its entry admitted, sixty times.
+    const FOLDED: &str = "main {\n  let xs = work.fill(100)\n  let i = 0\n  while num.lt(i, 60) {\n    set i = invoke law.step(i)\n  }\n  return xs\n}";
+    for text in [TEXT, FOLDED] {
+        inline_in(text, ROOMY);
+        let inline = threshold_in(text, Some(inline_probes));
+        let framed = crate::bytecode::inline::disabled(|| threshold_in(text, Some(inline_probes)));
+        assert_eq!(inline, framed, "{text}");
+    }
+}
+
+/// Contract §2, `K-BND-003`: a delivered outcome is held raw, at its deep
+/// size, until its consumption decodes it, and a run sealed after the
+/// delivery and opened cold holds it again. A text of `k` bytes is one
+/// value and its `k` bytes, `16 + k`, whatever else the run holds.
+#[test]
+fn a_delivered_outcome_is_held_at_its_deep_size_until_it_is_consumed() {
+    use lash_kernel_doc::Datum;
+    use lash_kernel_state::paged::SealBudget;
+
+    use super::embedder::{Source, core_program, wait_of};
+    use crate::{CoreMachine, Outcome};
+
+    let text = "main {\n  let v = perform 0(1) as Any\n  return 0\n}";
+    let source = Source::default();
+    let mut machine = <CoreMachine as Machine>::start(
+        core_program(text, None),
+        ROOMY,
+        Setup::default().start,
+        Box::new(source.clone()),
+    )
+    .unwrap();
+    let Step::Parked(park) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
+        panic!("the run parks at its perform");
+    };
+    let seal = |machine: &mut CoreMachine| {
+        let budget = SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        };
+        crate::kernel_internals::sealed_root(&machine.seal(budget).unwrap().unwrap()).clone()
+    };
+    let opened = |root| {
+        <CoreMachine as Machine>::open(
+            core_program(text, None),
+            ROOMY,
+            &lash_kernel_state::kernel_internals::checkpoint(root),
+            Box::new(source.clone()),
+        )
+        .unwrap()
+        .meters()
+        .memory
+    };
+    let undelivered = seal(&mut machine);
+    for k in [0u64, 1000] {
+        let mut machine = <CoreMachine as Machine>::open(
+            core_program(text, None),
+            ROOMY,
+            &lash_kernel_state::kernel_internals::checkpoint(undelivered.clone()),
+            Box::new(source.clone()),
+        )
+        .unwrap();
+        let before = machine.meters().memory;
+        let outcome = Outcome::Completed(Datum::Text("x".repeat(k as usize)));
+        machine
+            .deliver(wait_of(&park.requests[0]), outcome)
+            .unwrap();
+        assert_eq!(machine.meters().memory - before, 16 + k, "delivered, k {k}");
+        let delivered = seal(&mut machine);
+        assert_eq!(
+            opened(delivered) - opened(undelivered.clone()),
+            16 + k,
+            "opened cold, k {k}"
+        );
+    }
+}
+
+/// `K-BND-003`, contract §2: a constructor is admitted at exactly what
+/// the run held before it plus its object's schedule, and its operands
+/// are held once, by the values they already were. Under that bound by
+/// one byte the constructor is refused with the memory bound and the run
+/// holds what it held before it: the operands still live, nothing of the
+/// refused object. It reports the total the refusal would have reached,
+/// as a refused charge reports its total (FIG-7694): exactly the least
+/// bound that admits it. At the
+/// bound and above it the run finishes. A list or
+/// tuple of two holds an object part and a value a member; a record of
+/// two fields holds an object part and two values a field.
+#[test]
+fn a_constructor_is_admitted_at_exactly_its_schedule_and_a_refusal_keeps_its_operands() {
+    use crate::heap::meter::{OBJECT, VALUE};
+    for (constructor, schedule) in [
+        ("[a, a]", OBJECT + 2 * VALUE),
+        ("(a, a)", OBJECT + 2 * VALUE),
+        ("{x: a, y: a}", OBJECT + 4 * VALUE),
+    ] {
+        let body = format!("  let a = work.fill(1000)\n  let c = {constructor}\n  return 7");
+        let base = threshold(&body);
+        let (end, reported, held) = core_refused(&body, base - 1);
+        let End::Error(RunError::Bound(exceeded)) = end else {
+            panic!("{constructor} under {}: {end:?}", base - 1);
+        };
+        assert_eq!(
+            (exceeded.bound, exceeded.limit),
+            (Bound::Memory, base - 1),
+            "{constructor}"
+        );
+        assert_eq!(held + schedule, base, "{constructor}");
+        assert_eq!(reported, base, "{constructor}");
+        for memory in [base, base + 1] {
+            assert_eq!(result(core_end(&body, memory).0), int(7), "{constructor}");
+        }
+    }
+}
+
+/// `K-BND-003`, G013: a run's peak is what is live at its fullest point,
+/// counted by slot. Every value overwritten while another name still
+/// holds it stays held: rebinding `a` and then `b`, the last alias of the
+/// first list, holds three `n`-member lists at the second rebinding, so
+/// each further member raises the least finishing bound by three values;
+/// releasing `b` first leaves two. Graphs that reach one list from a
+/// tuple, a record and a list hold its members once, so each further
+/// member raises the bound by one value.
+#[test]
+fn the_core_peak_holds_every_live_alias_and_counts_a_shared_member_once() {
+    use crate::heap::meter::VALUE;
+    let overwrite = |n: u64, release: bool| {
+        let release = if release { "  set b = null\n" } else { "" };
+        format!(
+            "  let a = work.fill({n})\n  let b = a\n  set a = work.fill({n})\n{release}  \
+             set b = work.fill({n})\n  return 0"
+        )
+    };
+    let shared = |n: u64| {
+        format!(
+            "  let a = work.fill({n})\n  let t = (a, a)\n  let r = {{x: a, y: t}}\n  \
+             let l = [t, r, a]\n  return 0"
+        )
+    };
+    for (name, body, each) in [
+        (
+            "both aliases live",
+            &(|n| overwrite(n, false)) as &dyn Fn(u64) -> String,
+            3,
+        ),
+        ("last alias released", &|n| overwrite(n, true), 2),
+        ("shared member", &shared, 1),
+    ] {
+        let base = threshold(&body(1000));
+        for k in [1u64, 7, 100] {
+            assert_eq!(
+                threshold(&body(1000 + k)),
+                base + each * VALUE * k,
+                "{name} +{k}"
+            );
+        }
+    }
+}
+
+/// The least memory bound a core run of `body` finishes under, each park's
+/// requests answered from the laws' table as it parks.
+fn threshold_answering(body: &str) -> u64 {
+    use super::embedder::{answer, wait_of};
+    let text = format!("main {{\n{body}\n}}");
+    let finishes = |memory| {
+        let bounds = Bounds { memory, ..ROOMY };
+        let mut machine =
+            super::embedder::core_machine(&text, bounds, None).expect("the law's document starts");
+        let mut world = World::default();
+        loop {
+            match machine.run(&mut world, u64::MAX).expect("the core runs") {
+                Step::Ended(end) => return matches!(end, End::Finished(_)),
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    for request in &park.requests {
+                        machine.deliver(wait_of(request), answer(request)).unwrap();
+                    }
+                }
+            }
+        }
+    };
+    assert!(finishes(ROOMY.memory), "{text}");
+    let (mut refused, mut passed) = (0u64, ROOMY.memory);
+    while passed - refused > 1 {
+        let mid = refused + (passed - refused) / 2;
+        if finishes(mid) {
+            passed = mid;
+        } else {
+            refused = mid;
+        }
+    }
+    passed
+}
+
+/// Seam E, `K-BND-003`: a statement's temporaries are not held past its
+/// exit, however it exits: normally, by `print`, by a raise its `catch`
+/// handles, or through a park its delivery resumes. The next statement's
+/// `n`-member list fits in the room the temporary list took, so each
+/// further member raises the least finishing bound by one value; a
+/// temporary still held would make it two.
+#[test]
+fn a_statement_holds_none_of_its_temporaries_past_any_exit() {
+    use crate::heap::meter::VALUE;
+    type Exit = (&'static str, fn(u64) -> String);
+    let exits: [Exit; 4] = [
+        ("normal", |n| {
+            format!("  let m = list.len([work.fill({n})])")
+        }),
+        ("print", |n| format!("  print list.len([work.fill({n})])")),
+        ("raise", |n| {
+            format!("  try {{ let x = [work.fill({n})][false] }} catch e {{ let caught = 1 }}")
+        }),
+        ("park", |n| {
+            format!("  let m = list.len([work.fill({n}), perform 0(1) as Any])")
+        }),
+    ];
+    for (exit, statement) in exits {
+        let body = |n: u64| format!("{}\n  let b = work.fill({n})\n  return 0", statement(n));
+        let base = threshold_answering(&body(1000));
+        for k in [1u64, 7, 100] {
+            assert_eq!(
+                threshold_answering(&body(1000 + k)),
+                base + VALUE * k,
+                "{exit} +{k}"
+            );
+        }
+    }
+}
+
+/// `K-VAL-034`, `K-BND-003`: an immutable value's depth is checked where
+/// it is constructed, whether or not anything keeps it. After `i` rounds
+/// of `set t = (t,)` from `()`, `t` nests `1 + i` levels, and a tuple
+/// holding it `2 + i`: at 128 levels the throwaway tuple is built and
+/// counted, at 129 it raises `too_deep` though its value would be dropped
+/// at once, and the run goes on to the statement after its `catch`.
+#[test]
+fn an_immutable_allocation_is_checked_where_it_is_built_even_when_dropped() {
+    use super::embedder::{text, value};
+    let dropped = |rounds: u64| {
+        format!(
+            "let t = () let i = 0 while num.lt(i, {rounds}) {{ set t = (t,) set i = num.add(i, 1) }} \
+             let kind = \"built\" try {{ let n = list.len([(t,)]) }} catch e {{ set kind = e.kind }} \
+             return kind"
+        )
+    };
+    assert_eq!(value(&dropped(126)), text("built"));
+    assert_eq!(value(&dropped(127)), text("too_deep"));
+}
+
+/// `K-BND-003`, `K-VAL-034`: a tuple graph doubled 64 times over one
+/// member names 2^64 leaves but is 64 objects, 65 levels deep: it is
+/// built, counted by its slots and dropped under a 64 KiB bound, in work
+/// that follows its objects, not its leaves.
+#[test]
+fn a_tuple_graph_with_two_to_the_sixty_four_leaves_is_built_by_its_objects() {
+    // Building and keying 64 shared pairs is 64 objects of work: each
+    // pair's key embeds its member's, computed once. Work by leaves would
+    // never finish.
+    let (end, _) = core_end(
+        "  let s = 1\n  let i = 0\n  while num.lt(i, 64) {\n    set s = (s, s)\n    set i = num.add(i, 1)\n  }\n  let n = list.len([s])\n  return n",
+        64 << 10,
+    );
+    assert_eq!(result(end), int(1));
 }

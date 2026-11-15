@@ -7,6 +7,7 @@
 
 pub mod captions;
 mod case;
+pub mod compat;
 mod coverage;
 mod machine;
 mod native;
@@ -21,7 +22,7 @@ pub use case::{
     PerformAnswer, ScriptOutcome, Shard, Trace,
 };
 pub use coverage::{CoverageError, PendingRule, check_coverage, load_corpus, rule_ids};
-pub use machine::MachineRunner;
+pub use machine::{MachineRunner, check_program};
 pub use native::check_native;
 
 /// A reader, interpreter or front end capable of running a kernel document.
@@ -64,4 +65,4 @@ mod document_fixture;
 #[cfg(feature = "shipped-library")]
 mod installed;
 #[cfg(feature = "shipped-library")]
-pub use installed::{installed_bodies, installed_functions};
+pub use installed::{declining_bodies, installed_bodies, installed_functions};

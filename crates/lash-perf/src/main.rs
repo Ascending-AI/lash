@@ -27,10 +27,14 @@ static GLOBAL_ALLOCATOR: lash_perf::latency::history_allocator::HistoryAllocator
     target_arch = "x86_64"
 ))]
 #[global_allocator]
-static GLOBAL_ALLOCATOR: lash_vm_worker::core_support::cell_profile::CountingAllocator<
-    lash_perf::latency::history_allocator::HistoryAllocator<&StatsAlloc<System>>,
-> = lash_vm_worker::core_support::cell_profile::CountingAllocator(
-    lash_perf::latency::history_allocator::HistoryAllocator(&INSTRUMENTED_SYSTEM),
+static GLOBAL_ALLOCATOR: lash_perf::latency::history_allocator::Diagnosed<
+    lash_vm_worker::core_support::cell_profile::CountingAllocator<
+        lash_perf::latency::history_allocator::HistoryAllocator<&StatsAlloc<System>>,
+    >,
+> = lash_perf::latency::history_allocator::Diagnosed(
+    lash_vm_worker::core_support::cell_profile::CountingAllocator(
+        lash_perf::latency::history_allocator::HistoryAllocator(&INSTRUMENTED_SYSTEM),
+    ),
 );
 
 #[cfg(all(
@@ -355,6 +359,18 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    // A comparison reads no allocator counter, and its references run on a
+    // plain allocator: its instruction counts carry no diagnostic layer.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|command| command == "compare")
+    {
+        #[expect(unsafe_code, reason = "allocator mode set before any thread starts")]
+        // SAFETY: nothing has started a thread yet.
+        unsafe {
+            lash_perf::latency::history_allocator::plain_allocation();
+        }
+    }
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     if std::env::args().nth(1).as_deref() == Some("--profile-cell") {
         let args: Vec<_> = std::env::args_os().skip(2).collect();

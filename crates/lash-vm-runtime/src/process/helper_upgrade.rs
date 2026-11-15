@@ -26,29 +26,62 @@ fn invalid(message: impl std::fmt::Display) -> HelperUpgradeRefusal {
 pub(super) fn plan(
     content: &LinkedContent,
     root: LinkId,
-    archive: &lash_kernel_releases::archive::Archive,
+    candidate: &Candidate,
 ) -> Result<PlannedHelperUpgrade, HelperUpgradeRefusal> {
-    let release = archive
+    let release = candidate
+        .archive
         .releases
         .last()
         .ok_or_else(|| invalid("empty helper ledger"))?
         .library
         .identity;
-    plan_at(content, root, archive, release)
+    plan_at(content, root, candidate, release)
+}
+
+/// The build's helper archive and, once authenticated, its definitions,
+/// which [`plan_at`] plans over.
+pub(super) struct Candidate {
+    pub archive: lash_kernel_releases::archive::Archive,
+    pub definitions: Result<lash_kernel_releases::archive::Definitions, HelperUpgradeRefusal>,
+}
+
+/// The build's candidate, parsed and authenticated once per process: it is
+/// compiled in, so every upgrade and succession search reads one history.
+/// `Err` carries why the candidate could not be read.
+pub(super) fn candidate() -> Result<&'static Candidate, String> {
+    static CANDIDATE: std::sync::OnceLock<Result<Candidate, String>> = std::sync::OnceLock::new();
+    CANDIDATE
+        .get_or_init(|| {
+            let archive = lash_kernel_releases::archive_candidate().map_err(|e| e.to_string())?;
+            let definitions = archive
+                .validate()
+                .map_err(|error| HelperUpgradeRefusal::Archive {
+                    message: error.to_string(),
+                });
+            Ok(Candidate {
+                archive,
+                definitions,
+            })
+        })
+        .as_ref()
+        .map_err(Clone::clone)
 }
 
 pub(super) fn plan_at(
     content: &LinkedContent,
     root: LinkId,
-    archive: &lash_kernel_releases::archive::Archive,
+    candidate: &Candidate,
     release: lash_kernel_value::HelperLibraryId,
 ) -> Result<PlannedHelperUpgrade, HelperUpgradeRefusal> {
+    let definitions = candidate.definitions.as_ref().map_err(Clone::clone)?;
     let reached = content
         .documents
         .values()
         .flat_map(|doc| doc.library.iter().copied())
         .collect();
-    let upgrade = archive.upgrade_to(&reached, release)?;
+    let upgrade = candidate
+        .archive
+        .upgrade_within(definitions, &reached, release)?;
     let mut planned = PlannedHelperUpgrade {
         content: LinkedContent::default(),
         links: BTreeMap::new(),
@@ -100,27 +133,18 @@ pub(super) fn check_frozen(
     retain_root: bool,
 ) -> Result<(), HelperUpgradeRefusal> {
     lash_kernel_migrate::check_upgrade_captures(value, upgrade)?;
-    let mut live = lash_kernel_state::paged::RetainedCode::default();
+    let mut reached = BTreeSet::new();
     for node in value.nodes().into_iter().skip(usize::from(!retain_root)) {
-        live.callables.insert(node.callable);
-        for target in node.convention.targets() {
-            match target {
-                lash_kernel_doc::FunctionTarget::Local(function) => {
-                    live.callables.insert(lash_kernel_value::CallableId {
-                        link: node.callable.link,
-                        function: *function,
-                    });
-                }
-                lash_kernel_doc::FunctionTarget::Import(slot) => {
-                    live.imports.insert((node.callable.link, *slot));
-                }
-            }
-        }
+        let reach = content
+            .inspect(
+                node.callable.link,
+                &lash_kernel_package::ReachSelection::Callable(node.callable.function),
+                helpers,
+            )
+            .map_err(invalid)?;
+        reached.extend(reach.functions.into_values().flatten());
     }
-    let (documents, imports) = super::pages::helper_code(content).map_err(invalid)?;
-    let retained = lash_kernel_state::paged::restore_selection(live, &documents, &imports, helpers)
-        .map_err(invalid)?;
-    if let Some(function) = retained.pins.intersection(&upgrade.changed).next() {
+    if let Some(function) = reached.intersection(&upgrade.changed).next() {
         return Err(HelperUpgradeRefusal::RetainedCallable {
             function: *function,
         });
@@ -181,8 +205,7 @@ pub(super) fn check_arguments(
     let document = content
         .document(content.link(link).map_err(invalid)?.document)
         .map_err(invalid)?;
-    let args = super::run::entry_args(document, input, helpers, &lash_kernel_doc::Selection::Fresh)
-        .map_err(invalid)?;
+    let args = super::run::entry_args(document, input, helpers).map_err(invalid)?;
     for value in &args {
         lash_kernel_migrate::check_upgrade_data(value, upgrade)?;
     }
@@ -259,13 +282,9 @@ impl super::KernelDocuments {
             Err(refusal) => return Ok(Err(refusal)),
         };
         let source = self.authoring_content(code).await?;
-        let archive = lash_kernel_releases::archive_candidate().map_err(|error| {
-            EnginePortError::Unavailable {
-                message: error.to_string(),
-            }
-        })?;
+        let candidate = candidate().map_err(|message| EnginePortError::Unavailable { message })?;
         let prepared = (|| {
-            let planned = plan(&source, from.link(), &archive)?;
+            let planned = plan(&source, from.link(), candidate)?;
             if let Some(input) = input {
                 check_arguments(input, &source, self.helpers(), &planned.upgrade)?;
             }

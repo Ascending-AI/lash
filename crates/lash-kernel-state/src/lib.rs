@@ -7,50 +7,19 @@ pub(crate) mod perf_witness;
 /// Semantic state readers for carry and continuation equality.
 pub mod semantic;
 
-/// The paged heap's implementation, for the other kernel crates only: the
-/// machine executes on it and kernel laws inspect it. Nothing outside
+/// Page-level internals, for the other kernel crates only: the machine
+/// seals and reads through them and kernel laws inspect them. Nothing outside
 /// `crates/lash-kernel-*` names this module (`scripts/check-kernel-boundary.py`,
 /// FIG-6688); hosts use [`paged`]'s records, page port and session readers.
 #[doc(hidden)]
 pub mod kernel_internals {
-    pub fn session_heap(session: &crate::paged::SessionRoot) -> lash_kernel_doc::heap::PageRef {
-        session.heap
-    }
-    pub fn session_bindings(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
-        session.bindings
-    }
-    pub fn session_functions(session: &crate::paged::SessionRoot) -> crate::paged::KeyedRoot {
-        session.functions
-    }
-
     pub fn checkpoint(root: crate::paged::CheckpointRoot) -> crate::paged::Checkpoint {
-        crate::paged::checkpoint::Checkpoint(root)
+        crate::paged::checkpoint::Checkpoint(root, None)
     }
     pub fn checkpoint_root(checkpoint: &crate::paged::Checkpoint) -> &crate::paged::CheckpointRoot {
         &checkpoint.0
     }
 
-    pub mod logical {
-        pub use crate::paged::logical::*;
-    }
-    pub mod census_impl {
-        pub use crate::paged::census_impl::*;
-    }
-    pub mod directory {
-        pub use crate::paged::directory::*;
-    }
-    pub mod family_impl {
-        pub use crate::paged::family_impl::*;
-    }
-    pub mod heap_impl {
-        pub use crate::paged::heap_impl::*;
-    }
-    pub mod metadata {
-        pub use crate::paged::metadata::*;
-    }
-    pub mod payload {
-        pub use crate::paged::payload::*;
-    }
     #[cfg(any(test, feature = "perf-witness"))]
     pub mod perf_witness {
         pub use crate::perf_witness::*;
@@ -58,15 +27,6 @@ pub mod kernel_internals {
     pub mod tree {
         pub use crate::paged::tree::*;
     }
-    pub mod resident {
-        pub use crate::paged::resident::{
-            ResidentRoots, Walked, frame_values, incoming_bytes, state_values,
-        };
-    }
-    pub use crate::paged::heap_impl::PagedHeap;
-    pub use crate::paged::stored::{
-        CARD, StoredCards, StoredHead, StoredObject, pages as stored_pages, reads as page_reads,
-    };
 }
 use lash_kernel_doc::Datum;
 use lash_kernel_value::names::OperationUse;

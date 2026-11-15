@@ -338,10 +338,6 @@ fn assert_pair(value: &Stored, before: &Stored, old: &Pair, new: &Pair) -> bool 
     assert_eq!(value.page.header().owner, before.page.header().owner);
     assert_eq!(value.page.header().charged, before.page.header().charged);
     assert_eq!(value.page.header().limits, before.page.header().limits);
-    assert!(
-        value.page.same_pending_waits(&before.page),
-        "parked waits keep their identities"
-    );
     assert_eq!(
         value.calls, before.calls,
         "admitted calls keep their identities"
@@ -471,7 +467,6 @@ async fn cell(tier: dialect::Dialect, cut: Option<(usize, Fault)>, upgrade_race:
     assert!(before.state["progress"].get("parked").is_some());
     assert_eq!(before.state["waits"].as_object().unwrap().len(), 1);
     assert_eq!(before.state["admissions"].as_object().unwrap().len(), 1);
-    assert_eq!(before.page.header().pending_waits, 1);
     assert_eq!(
         before.calls.len(),
         1,

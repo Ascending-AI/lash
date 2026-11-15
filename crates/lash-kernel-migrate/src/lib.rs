@@ -20,11 +20,10 @@
 //! ADR 0149 reserves their upgrade pairing for the permanent HelperId ledger.
 //! A helper release alone never rewrites an existing publication or run.
 //!
-//! [`carry_checkpoint`] rewrites parked page records copy-on-write over a
-//! correspondence. The embedding validates the foreign continuation and
-//! commits its pages, requirements and roots in one fenced transaction.
-//! A genuinely unmapped coordinate or unavailable pinned code refuses;
-//! the original root remains readable.
+//! [`carry_run`] rewrites a parked bytecode-core run onto its successor's
+//! code. The embedding validates the foreign continuation and commits its
+//! pages, requirements and roots in one fenced transaction. An unmapped id
+//! refuses; the original root remains readable.
 //!
 //! The crate depends on `lash-kernel-doc`, `lash-kernel-check` (an
 //! adopted document's requirements are derived, not copied),
@@ -34,8 +33,10 @@
 mod adopt;
 mod migration;
 mod parked;
-pub use parked::{CarryContext, CarryFault, carry_checkpoint, carry_effect};
+pub use parked::{CarryContext, CarryFault};
 mod rewrite;
+mod run;
+pub use run::{Successor, carry_effect, carry_run, run_code};
 mod saved;
 #[cfg(feature = "synthetic-next")]
 mod synthetic;
@@ -50,5 +51,6 @@ pub use saved::{function_value, saved_function};
 
 mod helper_upgrade;
 pub use helper_upgrade::{
-    check_upgrade_captures, check_upgrade_data, upgrade_callable, upgrade_helpers,
+    check_run_upgrade, check_upgrade_captures, check_upgrade_data, upgrade_callable,
+    upgrade_helpers,
 };

@@ -90,7 +90,7 @@ pub struct CompatDescriptor {
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const POSTGRES_SCHEMA_VERSION: u32 = 37;
+pub const POSTGRES_SCHEMA_VERSION: u32 = 51;
 
 /// The SQLite database's version: its `lash_compat` row and its entry in the
 /// release stamp. A SQLite deployment is one database file (ADR 0132 §12),
@@ -132,7 +132,7 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 37;
 /// version_surface = "migrate"
 /// format_outside_manifest = "store schema version: declared in compat.rs for the component's descriptor and read from the deployment through StorePreflight::schema_status, not reported in the durable-format manifest"
 /// version_unguarded = "store schema version: a catalog step moves it, and admission reads it through the component's compat descriptor at open (ADR 0115 §1.3), never through a record decoder"
-pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 24;
+pub const SQLITE_CORE_SCHEMA_VERSION: u32 = 28;
 
 /// What this build declares about a store component whose provisioning DDL
 /// is at `version`: it reads and writes exactly that version.
@@ -217,9 +217,10 @@ pub enum CompatAdmission {
 #[non_exhaustive]
 pub enum CompatRefusal {
     #[error(
-        "{component} holds lash data but carries no compatibility stamp; a stamp is never \
-         assumed, so the store is refused unchanged. Restore it from a backup or recreate it; \
-         `lashctl preflight` reports what it found{}",
+        "{component} has no store at this location, or has data without a compatibility stamp; \
+         the store is refused unchanged. Check the location and use `lashctl preflight` for \
+         PostgreSQL or the host's `verify_schema_at` for SQLite. This refusal alone authorizes \
+         no deletion{}",
         release_suffix(.writing_release)
     )]
     Unstamped {
@@ -239,9 +240,10 @@ pub enum CompatRefusal {
         writing_release: Option<String>,
     },
     #[error(
-        "{component} is at version {found}, older than this build reads ({reads}): an older or \
-         skipped release wrote it. Run `lashctl migrate` from the intermediate release first, \
-         then from this build{}",
+        "{component} is at version {found}, older than this build reads ({reads}). This format \
+         is retired by this build and cannot be migrated here. Follow the host upgrade reset \
+         procedure: stop admission, settle outstanding calls on the old build, drain and stop \
+         all old writers, then reset the store before starting this build{}",
         release_suffix(.writing_release)
     )]
     TooOld {
@@ -555,6 +557,107 @@ mod tests {
             version,
             min_reader,
         })
+    }
+
+    /// L57 D2: a retired format requires reset; a supported SQLite migration
+    /// must still direct the host to the whole-store migration entry point.
+    #[test]
+    fn retired_formats_request_reset_instead_of_an_invented_intermediate_release() {
+        let retired = CompatRefusal::TooOld {
+            component: "sqlite-core".into(),
+            found: 24,
+            reads: VersionRange::new(28, 28).expect("range"),
+            writing_release: None,
+        }
+        .to_string();
+        assert!(retired.contains("reset"), "{retired}");
+        assert!(!retired.contains("intermediate release"), "{retired}");
+        let supported = CompatRefusal::MigrationPending {
+            component: "sqlite-core".into(),
+            found: 28,
+            target: 29,
+            writing_release: None,
+        }
+        .to_string();
+        assert!(supported.contains("SqliteStoreSet::open"), "{supported}");
+        assert!(!supported.contains("reset"), "{supported}");
+    }
+
+    /// Missing storage and unstamped data share a refusal, so its remedy
+    /// must ask for backend-specific inspection without authorizing deletion.
+    #[test]
+    fn unstamped_refusals_require_backend_inspection_without_destructive_remedy() {
+        for component in ["postgres", "sqlite-core"] {
+            let text = CompatRefusal::Unstamped {
+                component: component.into(),
+                writing_release: None,
+            }
+            .to_string();
+            assert!(text.contains("no store at this location"), "{text}");
+            assert!(
+                text.contains("data without a compatibility stamp"),
+                "{text}"
+            );
+            assert!(
+                text.contains("`lashctl preflight` for PostgreSQL"),
+                "{text}"
+            );
+            assert!(text.contains("`verify_schema_at` for SQLite"), "{text}");
+            for directive in ["holds lash data", "reset", "recreate", "Restore"] {
+                assert!(!text.contains(directive), "{text}");
+            }
+        }
+    }
+
+    /// A replay reconstructs the stored refusal, including the old writer's
+    /// wording, even when this build renders the same typed cause differently.
+    #[test]
+    fn recorded_refusal_replays_old_display_wording_verbatim() {
+        use crate::runtime_error::RecordedRefusal;
+        use crate::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
+
+        const OLD_MESSAGE: &str = "sqlite-core is at version 24, older than this build reads \
+            ([28,28]): an older or skipped release wrote it. Run `lashctl migrate` from the \
+            intermediate release first, then from this build";
+        let stored = serde_json::json!({
+            "code": "engine_object_state_format_unsupported",
+            "message": OLD_MESSAGE,
+            "cause": {
+                "kind": "compat",
+                "refusal": {
+                    "refusal": "too_old",
+                    "component": "sqlite-core",
+                    "found": 24,
+                    "reads": {"min": 28, "max": 28}
+                }
+            }
+        });
+        let decoded: RecordedRefusal = serde_json::from_value(stored.clone())
+            .expect("decode a refusal written with the old remedy");
+        // Session-command replay uses this same conversion from its record.
+        let replayed = RuntimeError::from(decoded);
+        let cause = CompatRefusal::TooOld {
+            component: "sqlite-core".into(),
+            found: 24,
+            reads: VersionRange::exactly(28),
+            writing_release: None,
+        };
+        assert_ne!(OLD_MESSAGE, cause.to_string());
+        assert_eq!(replayed.message, OLD_MESSAGE);
+        assert_eq!(
+            replayed.code,
+            RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+        assert_eq!(
+            replayed.cause,
+            Some(RuntimeErrorCause::Compat {
+                refusal: Box::new(cause)
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(RecordedRefusal::from(replayed)).expect("record replay"),
+            stored
+        );
     }
 
     #[test]

@@ -261,6 +261,12 @@ pub(super) static TERMINAL_STATE: Entry = Entry::new(
 .collecting(Collect::PhaseEnd("checkpoint_ref"))
 .collecting(Collect::Closure("working_execution_ref"))
 .collecting(Collect::Closures("closure_roots"));
+/// A transaction's lock plan, in the class order it states (FIG-7700).
+pub(super) static LOCK_PLAN: Entry = Entry::new(
+    super::lock_plan::plan_statement,
+    &[Ty::Texts; 15],
+    Shape::Select,
+);
 /// A referrer's or an artifact's advisory lock, by its key.
 pub(super) static LOCK_KEY: Entry = Entry::new(
     || &crate::connection_sql::connection_sql().lock_xact_by_text,
@@ -291,23 +297,32 @@ pub(super) fn end_local_step(
     ))
 }
 
-/// The locks of the executions `writes` end, as steps, in key order:
-/// taken before a head commit takes frame and artifact locks, as
-/// publication takes them referrer first.
-pub(super) fn lock_ending_executions(
+/// The transaction's lock plan, read off the whole of `writes` committed
+/// by `actor` (FIG-7700), as steps: each affected session's write
+/// authority, then the plan, which takes the ended executions' referrers
+/// with every other referrer. A one-call commit carries nothing and
+/// acquires no environment, so the plan never asks for an environment's
+/// modules.
+pub(super) fn lock_plan_steps(
+    actor: &lash_durable::ActorKey,
     writes: &[lash_durable::DomainWrite],
 ) -> Result<Vec<Step>, lash_core_store::store::StoreError> {
-    Ok(crate::obligation_ledger::ending_executions(writes)?
-        .iter()
-        .map(|referrer| {
-            Step::any(
-                &LOCK_KEY,
-                vec![Value::text(crate::artifact_store::referrer_lock_key(
-                    referrer,
-                ))],
-            )
-        })
-        .collect())
+    let journals = crate::obligation_ledger::ending_journals(writes)?;
+    let (plan, _) = super::lock_plan::of_writes(actor, writes, &journals);
+    let mut steps = Vec::new();
+    if !plan.is_empty() {
+        for (actor, session) in super::lock_plan::session_writes(&plan)? {
+            steps.push(Step::any(
+                &super::head_commit::LOCK_SESSION,
+                vec![Value::text(actor.as_str()), Value::text(session.as_str())],
+            ));
+        }
+        steps.push(Step::any(
+            &LOCK_PLAN,
+            plan.arguments().into_iter().map(Value::texts).collect(),
+        ));
+    }
+    Ok(steps)
 }
 
 /// A terminal's program: run `run` of `session` ends with `cause` at head
@@ -692,6 +707,7 @@ pub(super) async fn apply_session_commit(
         &commit.steps(),
         commit.checkpoint_ref_chunk,
         commit.configs,
+        Some(&commit.planned),
     )
     .await
     .map_err(|error| refused(&error))

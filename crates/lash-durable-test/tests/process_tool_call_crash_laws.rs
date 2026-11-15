@@ -20,6 +20,14 @@
 //! - The turn committed once and ended, and a zombie's writes after its
 //!   reap are refused.
 //!
+//! - **Effect identity (K-EFF-008):** each traced step body start stands
+//!   at the probe's `perform` in its library function, one call keeps one
+//!   effect across nodes and attempts, and the raced calls are two tasks'.
+//!
+//! A started `Once` call a kill cut mid-body never runs again: on recovery
+//! it settles interrupted and the body raises `effect_interrupted` (ADR
+//! 0132 NR-2).
+//!
 //! An aggregate's sleep is a durable wait, not a step body (FIG-5441): a
 //! process that awaits `Promise.all([call, sleep(5 min)])`, longer than any
 //! step bound, parks on the sleep's deadline once its call settles, its
@@ -79,6 +87,8 @@ const SESSION: &str = "process-holding-session";
 const INPUT: &str = "process-holding-turn";
 const PROBE: &str = "holding_probe";
 const PROBE_OPERATION: &str = "tools.holding_probe";
+const ONCE: &str = "holding_once";
+const ONCE_OPERATION: &str = "tools.holding_once";
 
 /// The `max_tool_calls` the session records: the race's width.
 const LIMIT: usize = 2;
@@ -96,6 +106,34 @@ fn actor() -> ActorKey {
 #[derive(Default)]
 struct World {
     entries: Mutex<BTreeMap<String, Vec<lash_core::ToolCallId>>>,
+    /// Every step body start the core traced, across every node: its
+    /// effect, call and attempt.
+    started: Mutex<
+        Vec<(
+            lash_kernel_value::sites::EffectId,
+            lash_core::ToolCallId,
+            u32,
+        )>,
+    >,
+}
+
+/// The step body starts a core traces, into the world.
+struct StepStarts(Arc<World>);
+
+impl lash_core::facade_support::TraceSink for StepStarts {
+    fn append(
+        &self,
+        record: &lash_core::facade_support::TraceRecord,
+    ) -> Result<(), lash_core::facade_support::TraceSinkError> {
+        if let lash_core::TraceEvent::StepBodyStarted { step } = &record.event {
+            self.0.started.lock_recover().push((
+                step.at.clone(),
+                step.call_id.clone(),
+                step.attempt,
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
@@ -119,6 +157,22 @@ fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     ))
 }
 
+/// The probe's body under `Once`: a started call that never answered runs
+/// no more (ADR 0132 NR-2).
+fn once_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
+        format!("tool:{ONCE}"),
+        ONCE_OPERATION,
+        "Records each body entry's call id, once; a held call never answers.",
+        object.clone(),
+        object,
+    )
+    .expect("the once probe's schemas")
+    .with_execution(std::time::Duration::from_secs(30))
+    .with_execution_policy(lash_kernel_value::tool_contract::ExecutionPolicy::Once)
+}
+
 struct Probe {
     world: Arc<World>,
 }
@@ -132,7 +186,10 @@ impl lash_core::ToolProvider for Probe {
         Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
-        Ok(vec![probe_definition().manifest()])
+        Ok(vec![
+            probe_definition().manifest(),
+            once_definition().manifest(),
+        ])
     }
 
     fn resolve_contract(
@@ -140,7 +197,11 @@ impl lash_core::ToolProvider for Probe {
         name: &str,
         _config: &lash_core::OwnerConfigView,
     ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-        (name == PROBE_OPERATION).then(|| Arc::new(probe_definition().contract()))
+        match name {
+            PROBE_OPERATION => Some(Arc::new(probe_definition().contract())),
+            ONCE_OPERATION => Some(Arc::new(once_definition().contract())),
+            _ => None,
+        }
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -176,7 +237,7 @@ fn probe_plugin(
                 lash::tool_provider_key!("packages"),
                 Arc::new(operations::Packages {
                     provider,
-                    definitions: vec![probe_definition()],
+                    definitions: vec![probe_definition(), once_definition()],
                 }),
             ),
     )
@@ -195,6 +256,7 @@ async fn holding_definition(
 ) -> (
     lash::process::ProcessDefinition,
     lash::process::EngineLaunch,
+    lash_kernel_doc::Document,
 ) {
     let definition = probe_definition();
     let signature = lash_kernel_value::json_schema::tool_signature(
@@ -251,7 +313,12 @@ async fn holding_definition(
             &serde_json::Value::Null,
         )
         .unwrap();
-    (definition, lash::process::EngineLaunch::new(env, settings))
+    let document = lash_kernel_doc::parse_document(&source).unwrap();
+    (
+        definition,
+        lash::process::EngineLaunch::new(env, settings),
+        document,
+    )
 }
 
 struct HoldingLaunch(Arc<Mutex<Option<lash::process::EngineLaunch>>>);
@@ -290,6 +357,9 @@ struct Holding {
     core: Mutex<Option<lash::LashCore>>,
     processes: Mutex<BTreeSet<lash_vocabulary::identity::ProcessId>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
+    /// The process's main document, its probe function included: the
+    /// oracle each traced effect's identity is checked against.
+    document: Mutex<Option<lash_kernel_doc::Document>>,
 }
 
 impl Holding {
@@ -318,6 +388,7 @@ impl Holding {
             core: Mutex::default(),
             processes: Mutex::default(),
             keep: Mutex::default(),
+            document: Mutex::default(),
         }
     }
 
@@ -348,6 +419,7 @@ impl Holding {
                         .process_component(Arc::new(aggregate_services()), AGGREGATE_SERVICES)
                         .process_component(Arc::new(probe_plugin(Arc::clone(&self.world), lash_vocabulary::claims::RegistryKind::Process)
                             .as_component(PROBE_COMPONENT.format()).unwrap()), PROBE_COMPONENT)
+                        .trace_sink(Arc::new(StepStarts(Arc::clone(&self.world))))
                         .serve_sessions(false)
                         .commit_budget(lash::CommitBudget { nodes: lash::CommitBudgetLimit::bounded(4096), ..lash::CommitBudget::default() })
                         .data_retention(lash::DataRetention::standard())
@@ -381,7 +453,7 @@ impl Holding {
                     ))
                     .process_component(Arc::new(probe_plugin(Arc::clone(&self.world),lash_vocabulary::claims::RegistryKind::Process)
                         .as_component(PROBE_COMPONENT.format()).unwrap()),PROBE_COMPONENT)
-
+                    .trace_sink(Arc::new(StepStarts(Arc::clone(&self.world))))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("process-holding-deployment"), lash::persistence::LeaseIncarnationId::new("process-holding-boot")))
                     .expect("the core builds")
             })
@@ -442,6 +514,7 @@ impl Holding {
         if let Some(seen) = entries.get("refused") {
             violations.push(format!("the call past the limit ran {} times", seen.len()));
         }
+        violations.extend(self.identity_laws(&entries));
 
         // The process failed with the refusal, the race counted once.
         let exceeded = lash_core::ToolCallLimitExceeded {
@@ -494,6 +567,78 @@ impl Holding {
     }
 }
 
+impl Holding {
+    /// `K-EFF-008`, read through the host's semantic readers (the literal
+    /// identity is the kernel's own law, `laws/identity.rs`): every traced
+    /// body start of a raced call stands at the probe's `perform`, every
+    /// start of one call names one effect whatever node or attempt ran it,
+    /// and the two raced calls are two tasks' effects.
+    fn identity_laws(&self, entries: &BTreeMap<String, Vec<lash_core::ToolCallId>>) -> Vec<String> {
+        let document = self.document.lock_recover().clone();
+        let Some(document) = document else {
+            return vec!["the process document was never published".to_owned()];
+        };
+        use lash_kernel_doc::{Action, Expr, Node};
+        // An action is written as a statement or nested in an expression.
+        let performs = |site: &lash_kernel_value::sites::Site| match document.node(site) {
+            Some(Node::Action(action)) => matches!(action, Action::Perform { .. }),
+            Some(Node::Expr(Expr::Act(act))) => {
+                matches!(act.as_action(), Some(Action::Perform { .. }))
+            }
+            _ => false,
+        };
+        let mut violations = Vec::new();
+        let started = self.world.started.lock_recover().clone();
+        let mut effects: BTreeMap<lash_core::ToolCallId, lash_kernel_value::sites::EffectId> =
+            BTreeMap::new();
+        let mut tasks = BTreeMap::new();
+        for (at, call, attempt) in &started {
+            let Some(label) = entries
+                .iter()
+                .find(|(_, ids)| ids.contains(call))
+                .map(|(label, _)| label.clone())
+            else {
+                violations.push(format!(
+                    "a traced body start of {call:?} entered no probe body"
+                ));
+                continue;
+            };
+            if let Some(first) = effects.insert(call.clone(), at.clone())
+                && first != *at
+            {
+                violations.push(format!(
+                    "call `{label}` attempt {attempt} ran under another effect than its first"
+                ));
+            }
+            let position = at.position();
+            if !matches!(
+                position.site().unit,
+                lash_kernel_value::sites::Unit::Library(_)
+            ) || !performs(position.site())
+            {
+                violations.push(format!(
+                    "call `{label}`'s effect stands at {position}, not the probe's perform"
+                ));
+            }
+            tasks.insert(label, at.task());
+        }
+        for label in ["winner", "loser"] {
+            if !entries
+                .get(label)
+                .is_some_and(|ids| ids.iter().all(|id| effects.contains_key(id)))
+            {
+                violations.push(format!("a body entry of `{label}` was never traced"));
+            }
+        }
+        if let (Some(winner), Some(loser)) = (tasks.get("winner"), tasks.get("loser"))
+            && winner == loser
+        {
+            violations.push(format!("both raced calls ran in one task: {winner}"));
+        }
+        violations
+    }
+}
+
 #[async_trait::async_trait]
 impl Scenario for Holding {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
@@ -535,8 +680,9 @@ impl Scenario for Holding {
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         // The host is outside the deployment under test: its send is uncut.
         let core = self.core();
-        let (definition, launch) = holding_definition(&core).await;
+        let (definition, launch, document) = holding_definition(&core).await;
         *self.launch.lock_recover() = Some(launch);
+        *self.document.lock_recover() = Some(document);
         self.scripts.register(
             INPUT,
             vec![served::response(vec![served::call(
@@ -900,6 +1046,121 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
     assert!(
         violations.is_empty(),
         "aggregate sleep across a crash on {dialect:?}:\n  {}\n{}",
+        violations.join("\n  "),
+        nodes.script().rendered_trace()
+    );
+}
+
+/// A process whose body performs a `Once` call: node A is killed while the
+/// call's body runs, so the call started and has no outcome. B recovers the
+/// process; the call settles interrupted without running again (ADR 0132
+/// NR-2), so the body raises `effect_interrupted` and the process ends on
+/// that uncaught error rather than an answer.
+async fn a_started_once_call_without_an_outcome_settles_interrupted_across_a_kill(tier: Tier) {
+    let (dialect, postgres_url) = match tier {
+        Tier::SqliteMemory => (Dialect::SqliteMemory, None),
+        Tier::SqliteFile => (Dialect::SqliteFile, None),
+        Tier::Postgres => {
+            let Some(url) = dialect::postgres_url() else {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                return;
+            };
+            (Dialect::Postgres, Some(url))
+        }
+    };
+    let mut deployment = Holding::new(dialect, postgres_url);
+    deployment.process_only = true;
+    let clock = SimClock::new();
+    let database = deployment.database(Arc::clone(&clock)).await;
+    let source = format!(
+        "kernel 1\nnumbers float\nimport 0 operation {ONCE_OPERATION}(input: Json) -> Json\nmain {{ let v = perform 0({{label: \"once\", hold: true}}) as Json return \"answered\" }}"
+    );
+    let environment = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
+        .component(PROBE_COMPONENT, &())
+        .build()
+        .unwrap();
+    let core = deployment.core();
+    let (payload, environment) = kernel_process::publish(&core, &source, &environment).await;
+    let environment = core
+        .host_artifacts()
+        .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment)
+        .await
+        .unwrap();
+    let kind = lash_vm_runtime::LASH_VM_ENGINE_KIND;
+    let settings = core.processes().engine_defaults(kind, &payload).unwrap();
+    core.processes()
+        .start(
+            lash::OperationId::mint(),
+            lash::process::ProcessStartRequest::engine(
+                kind.to_owned(),
+                payload,
+                lash::process::EngineLaunch::new(environment, settings),
+                lash::process::ProcessOriginator::host(),
+                lash::process::LifetimeDecision::Detached,
+            ),
+        )
+        .await
+        .unwrap();
+    let nodes = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        Script::new(),
+        deployment.config(),
+        deployment.activation(),
+    );
+    nodes.start("a");
+    let entered = |world: &World| world.entries.lock_recover().get("once").map_or(0, Vec::len);
+    while entered(&deployment.world) == 0 {
+        assert!(
+            nodes.step().await.is_some() && clock.logical_ms() < 60_000,
+            "the once body never ran on A:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.kill("a");
+    nodes.quiesce().await;
+    nodes.start("b");
+    let ended = loop {
+        if let [process] = deployment.registered().await.as_slice()
+            && process.is_terminal()
+        {
+            break process.clone();
+        }
+        assert!(
+            clock.logical_ms() < 300_000 && nodes.step().await.is_some(),
+            "the process never ended on B:\n{}",
+            nodes.script().rendered_trace()
+        );
+    };
+    nodes.quiesce().await;
+    let mut violations = Vec::new();
+    let entries = deployment.world.entries.lock_recover().clone();
+    if entries.get("once").map_or(0, Vec::len) != 1 {
+        violations.push(format!("the once body ran {:?}", entries.get("once")));
+    }
+    let started = deployment.world.started.lock_recover().clone();
+    if started.len() != 1 {
+        violations.push(format!(
+            "{} step body starts were traced: {started:?}",
+            started.len()
+        ));
+    }
+    match ended.outcome() {
+        Some(lash_execution_contracts::process::ProcessAwaitOutput::Settled { output })
+            if matches!(
+                &output.outcome,
+                lash_core::ToolCallOutcome::Failure(failure)
+                    if matches!(
+                        failure.cause.as_deref(),
+                        Some(lash_core::ToolFailureCause::UncaughtError { error_kind: Some(kind), .. })
+                            if kind == lash_vm_broker::kernel::store::EFFECT_INTERRUPTED
+                    )
+            ) => {}
+        other => violations.push(format!("the process ended {other:?}, not interrupted")),
+    }
+    assert!(
+        violations.is_empty(),
+        "a started Once across a kill on {dialect:?}:\n  {}\n{}",
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );
@@ -1898,6 +2159,7 @@ tiered_laws!(
     current_thread:
     tool_call_limit_counts_what_a_process_holds_across_a_worker_kill,
     an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash,
+    a_started_once_call_without_an_outcome_settles_interrupted_across_a_kill,
     a_granted_resolution_retains_its_host_policy_across_takeover,
     a_granted_call_resumes_its_matched_target_and_never_resolves_again,
     a_refused_or_unavailable_granted_call_is_decided_once_and_caught_typed,

@@ -22,7 +22,7 @@ doctest = false
 # Independent itemized state observations for VM qualification laws.
 testing = []
 # Unsupported transient-work diagnostics; absent from ordinary builds.
-perf-witness = []
+perf-witness = ["lash-kernel-doc/perf-witness"]
 # A parked run may state the synthetic successor of kernel version 1.
 synthetic-next = ["lash-kernel-doc/synthetic-next"]
 

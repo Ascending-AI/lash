@@ -360,6 +360,7 @@ lash_conformance::artifact_store_reopenable_tests!(@catalogue {
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 packages: Arc::new(open_storage.lash_vm_artifact_store()),
+                package_storage: Arc::new(open_storage.lash_vm_artifact_store()),
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
@@ -378,6 +379,7 @@ lash_conformance::artifact_store_reopenable_tests!(@catalogue {
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                         packages: Arc::new(reopened.lash_vm_artifact_store()),
+                        package_storage: Arc::new(reopened.lash_vm_artifact_store()),
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<
                                 dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,
@@ -388,6 +390,7 @@ lash_conformance::artifact_store_reopenable_tests!(@catalogue {
                             as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
                     }
                 }),
+                interrupt: None,
             }
         })
     })
@@ -738,6 +741,7 @@ lash_conformance::__process_registry_register! {
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
+                (the_terminal_event_reads_releases_and_prunes_like_any_event, "terminal-event-reads"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (an_unstamped_cancelled_terminal_replay_coalesces, "unstamped-cancelled-terminal-replay"),
 

@@ -206,6 +206,11 @@ def f(a, /, b=2, *tail, c, **extra):
 g = [f][0]
 print(g(*mark('args', [1, 3, 4]), c=mark('c', 5), **mark('kw', {'x': 6})))
 print(events)
+def collect(**extra):
+    return extra
+collector = [collect][0]
+print(collector(x=6))
+print(collector())
 try:
     g(1, **{'c': 2}, **{'c': 3})
 except TypeError:
@@ -231,6 +236,8 @@ except ValueError:
         &[
             "[1, 3, (4,), 5, {'x': 6}]",
             "['args', 'c', 'kw', 'body']",
+            "{'x': 6}",
+            "{}",
             "duplicate",
             "[1, [2, 3], 4]",
             "[0, 1, 2, 3] (1, 2) {1, 2} {'x': 1}",

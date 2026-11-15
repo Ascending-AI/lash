@@ -16,7 +16,8 @@ import tempfile
 import uuid
 
 from perf_gate_baseline import (calibrate_changed, check_sources, geometry_key,
-                                kernel_geometry, kernel_workloads, references)
+                                kernel_geometry, kernel_workloads, references,
+                                replay_source, source_hash)
 
 ROOT = Path(__file__).resolve().parents[1]
 ROW_CAP_SECONDS = 1200
@@ -144,6 +145,7 @@ def instructions(binary: str, directory: Path, env: dict[str, str]) -> dict:
                     counts[f"replay/{name}/{metric}"] = {"median": workload["summary"][metric]["per_turn_median"],
                         "unit": workload["summary"][metric]["unit"]}
             geometry[f"replay/{name}"] = {k: workload[k] for k in ("script_digest", "backend", "turns", "sessions")}
+            geometry[f"replay/{name}"]["source_hash"] = source_hash(replay_source(ROOT, name))
             # CPU per operation is the median over steady rounds, each round's
             # host and worker counts retained separately. Setup is excluded.
             steady = [r for r in workload["rounds"] if not r.get("setup", False)]

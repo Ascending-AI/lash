@@ -67,10 +67,10 @@ fn rechunk(
                 text.chunks = if split {
                     chars
                         .chunks(64)
-                        .map(|chunk| Chunk::Resident(chunk.iter().collect()))
+                        .map(|chunk| Chunk::Resident(chunk.iter().collect::<String>().into()))
                         .collect()
                 } else {
-                    vec![Chunk::Resident(whole)].into_boxed_slice()
+                    vec![Chunk::Resident(whole.into())].into_boxed_slice()
                 };
             }
             Body::Bytes(bytes) => {

@@ -505,7 +505,14 @@ impl NativeFunction for Aux {
         self.1
     }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
         lash_kernel_doc::NativeSpecialization {
+            inline: matches!(self.2, Some(lash_kernel_doc::SymbolicNative::Not)).then_some(
+                InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::Not,
+                },
+            ),
             immediate: self.prepare(),
             symbolic: self.2,
             ..Default::default()
@@ -763,20 +770,35 @@ impl NativeFunction for Native {
         resources::collection(self, args)
     }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
         use lash_kernel_doc::{
             ResidentRead,
             plan::{Collection, Table},
         };
+        let collection = match self.kind {
+            Kind::List => Collection::List,
+            Kind::Tuple => Collection::Tuple,
+            Kind::Map => Collection::Map,
+            Kind::Set => Collection::Set,
+            Kind::Record => Collection::Record,
+        };
         lash_kernel_doc::NativeSpecialization {
+            inline: match (self.kind, self.op) {
+                (Kind::List | Kind::Tuple | Kind::Map, Op::Len) => {
+                    Some(InlineOperation::Length(collection))
+                }
+                (Kind::Map, Op::Contains) => Some(InlineOperation::Membership(Table::Map)),
+                (Kind::Set, Op::Contains) => Some(InlineOperation::Membership(Table::Set)),
+                (Kind::Record, Op::Contains) => Some(InlineOperation::Membership(Table::Record)),
+                _ => None,
+            }
+            .map(|operation| InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation,
+            }),
             immediate: self.prepare(),
             resident: match (self.kind, self.op) {
-                (kind, Op::Len) => Some(ResidentRead::Length(match kind {
-                    Kind::List => Collection::List,
-                    Kind::Tuple => Collection::Tuple,
-                    Kind::Map => Collection::Map,
-                    Kind::Set => Collection::Set,
-                    Kind::Record => Collection::Record,
-                })),
+                (_, Op::Len) => Some(ResidentRead::Length(collection)),
                 (Kind::List, Op::Get) => Some(ResidentRead::Item(lash_kernel_doc::ValueKind::List)),
                 (Kind::Tuple, Op::Get) => {
                     Some(ResidentRead::Item(lash_kernel_doc::ValueKind::Tuple))
@@ -953,7 +975,15 @@ impl Native {
         let values = args.values();
         let xs = nth(values, 0)?;
         object(self.kind, xs)?;
-        let length = length(args, xs)?;
+        let table = if matches!(self.op, Op::Get | Op::Contains) {
+            args.point_table(xs)?
+        } else {
+            args.table(xs)?
+        };
+        let length = match table {
+            Some(table) => table.len() as usize,
+            None => length(args, xs)?,
+        };
         match self.op {
             Op::Len => Ok(int(length)),
             Op::Check => Ok(*xs),
@@ -1001,10 +1031,11 @@ impl Native {
                 Value::Map(_) => {
                     let k = nth(values, 1)?;
                     key(k, args)?;
-                    lookup(args, xs, k)?.ok_or_else(|| raise("key_missing", "map has no such key"))
+                    lookup(args, table, k)?
+                        .ok_or_else(|| raise("key_missing", "map has no such key"))
                 }
                 Value::Record(_) => {
-                    Ok(lookup(args, xs, field(nth(values, 1)?)?)?.unwrap_or(Value::Absent))
+                    Ok(lookup(args, table, field(nth(values, 1)?)?)?.unwrap_or(Value::Absent))
                 }
                 _ => Err(raise("type_error", "collection has no get")),
             },
@@ -1013,9 +1044,9 @@ impl Native {
                 let found = match xs {
                     Value::Map(_) | Value::Set(_) => {
                         key(value, args)?;
-                        Some(lookup(args, xs, value)?.is_some())
+                        Some(lookup(args, table, value)?.is_some())
                     }
-                    Value::Record(_) => Some(lookup(args, xs, field(value)?)?.is_some()),
+                    Value::Record(_) => Some(lookup(args, table, field(value)?)?.is_some()),
                     _ => None,
                 };
                 if let Some(found) = found {
@@ -1045,9 +1076,13 @@ impl Native {
     }
 }
 
-/// The value the table `xs` holds under `key`.
-fn lookup(args: &Args<'_>, xs: &Value, key: &Value) -> Result<Option<Value>, NativeError> {
-    let Some(table) = args.table(xs)? else {
+/// The value `table` holds under `key`.
+fn lookup<'call>(
+    args: &Args<'call>,
+    table: Option<lash_kernel_doc::arena::native::TableView<'call>>,
+    key: &Value,
+) -> Result<Option<Value>, NativeError> {
+    let Some(table) = table else {
         return Err(NativeError::Malformed("a table names another body"));
     };
     Ok(args.lookup(table, key)?.copied())

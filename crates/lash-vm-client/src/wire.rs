@@ -364,9 +364,6 @@ pub struct StartWire {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveWire {
-    #[serde(default, with = "saved_written")]
-    pub saved_written:
-        std::collections::BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
     #[serde(with = "lash_vocabulary::ordered_pairs")]
     pub controls: std::collections::BTreeMap<
         lash_kernel_value::names::OperationUse,
@@ -377,46 +374,6 @@ pub struct SaveWire {
     #[serde(with = "lash_kernel_dialect::written_table")]
     pub written:
         std::collections::BTreeMap<lash_kernel_value::sites::Site, lash_kernel_dialect::Written>,
-}
-
-/// Heap identities use their family and ordinal on the worker wire. They
-/// remain internal kernel types rather than acquiring a general serde form.
-mod saved_written {
-    use std::collections::BTreeMap;
-
-    use lash_kernel_dialect::Written;
-    use lash_kernel_doc::heap::{EntityId, FamilyId};
-    use serde::{Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(
-        origins: &BTreeMap<EntityId, Written>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        origins
-            .iter()
-            .map(|(id, origin)| ((id.family.0, id.ordinal), origin))
-            .collect::<Vec<_>>()
-            .serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<EntityId, Written>, D::Error> {
-        let rows: BTreeMap<(u64, u64), Written> =
-            lash_vocabulary::ordered_pairs::deserialize(deserializer)?;
-        Ok(rows
-            .into_iter()
-            .map(|((family, ordinal), origin)| {
-                (
-                    EntityId {
-                        family: FamilyId(family),
-                        ordinal,
-                    },
-                    origin,
-                )
-            })
-            .collect())
-    }
 }
 
 impl StartWire {

@@ -9,18 +9,57 @@ use {
 
 /// An authenticated checkpoint opened from its root page. Execution records
 /// remain owned by the kernel; hosts retain and transport the page identity.
+///
+/// A host that has not matched the root's envelope against its own format
+/// states the format the envelope names ([`Checkpoint::stated`]); an open
+/// refuses a root stated under another format before it reads a page
+/// (contract §9).
 #[derive(Clone, Debug)]
-pub struct Checkpoint(pub(crate) CheckpointRoot);
+pub struct Checkpoint(pub(crate) CheckpointRoot, pub(crate) Option<StatedFormat>);
+
+/// The parked-state format a root's envelope names (`observed`) against the
+/// format the opening build reads (`expected`), on the witness `surface`.
+/// The witnesses live with the embedding, outside the kernel, so the host
+/// states both.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatedFormat {
+    pub surface: &'static str,
+    pub expected: FormatValue,
+    pub observed: FormatValue,
+}
+
+/// A format witness's value: a version number, or a domain string such as
+/// a page digest domain, which changes every page's identity.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum FormatValue {
+    Number(u32),
+    Text(std::sync::Arc<str>),
+}
+
+impl std::fmt::Display for FormatValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(number) => write!(f, "{number}"),
+            Self::Text(text) => write!(f, "{text:?}"),
+        }
+    }
+}
 
 impl Checkpoint {
     /// Opens the opaque state and authorizes its references from a page answer.
     pub fn of_answer(page: &PageAnswer) -> Result<Self, HeapFault> {
-        CheckpointRoot::of_answer(page).map(Self)
+        CheckpointRoot::of_answer(page).map(|root| Self(root, None))
     }
-    /// Whether both checkpoints retain the same authenticated pending-wait set.
-    /// This compares the saved set without exposing its storage coordinates.
-    pub fn same_pending_waits(&self, other: &Self) -> bool {
-        self.0.waits == other.0.waits
+    /// This checkpoint, its envelope stating `format`.
+    pub fn stated(self, format: StatedFormat) -> Self {
+        Self(self.0, Some(format))
+    }
+    /// The stated format, when it is not the one the opening build reads.
+    pub fn foreign_format(&self) -> Option<&StatedFormat> {
+        self.1
+            .as_ref()
+            .filter(|format| format.observed != format.expected)
     }
     pub fn header(&self) -> CheckpointHeader {
         header(&self.0)
@@ -42,7 +81,6 @@ pub struct CheckpointHeader {
     pub parked: bool,
     pub charged: Option<u64>,
     pub live_tasks: u32,
-    pub pending_waits: u64,
 }
 
 fn header(root: &CheckpointRoot) -> CheckpointHeader {
@@ -57,7 +95,6 @@ fn header(root: &CheckpointRoot) -> CheckpointHeader {
         parked: matches!(root.status, RootStatus::Parked),
         charged: root.meters.charged,
         live_tasks: root.meters.live_tasks,
-        pending_waits: root.waits.len(),
     }
 }
 
@@ -72,202 +109,6 @@ impl TokenCodec for Checkpoint {
         self.0.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        CheckpointRoot::decode(input).map(Self)
-    }
-}
-
-/// Exact helper identities owed by the retained continuation and callable values.
-/// Produced only on a library change; never stored as executable definitions.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HelperPins(pub std::collections::BTreeSet<lash_kernel_value::FunctionId>);
-
-/// A helper refusal stays typed until the embedding maps its protocol surface.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum HelperCompatibilityError {
-    #[error(transparent)]
-    Heap(#[from] HeapFault),
-    #[error("build helper {function} is unavailable: {reason}")]
-    HelperUnavailable {
-        reason: lash_kernel_value::HelperUnavailableReason,
-        function: lash_kernel_value::FunctionId,
-    },
-}
-
-/// Compare before asking for any live-code facts. Equal images require no
-/// heap reads, helper preparation, dependency discovery or membership probes.
-pub fn check_helper_compatibility(
-    parked_id: lash_kernel_value::HelperLibraryId,
-    pins: impl FnOnce() -> Result<HelperPins, HeapFault>,
-    build: &lash_kernel_doc::BuildHelpers,
-) -> Result<(), HelperCompatibilityError> {
-    #[cfg(any(test, feature = "perf-witness"))]
-    helper_compatibility_work::update(|work| work.comparisons += 1);
-    if parked_id == build.identity() {
-        return Ok(());
-    }
-    check_pins(pins()?.0, build)
-}
-
-fn check_pins(
-    pins: impl IntoIterator<Item = lash_kernel_value::FunctionId>,
-    build: &lash_kernel_doc::BuildHelpers,
-) -> Result<(), HelperCompatibilityError> {
-    for function in pins {
-        #[cfg(any(test, feature = "perf-witness"))]
-        helper_compatibility_work::update(|work| work.membership_probes += 1);
-        if !build.contains(&function) {
-            return Err(HelperCompatibilityError::HelperUnavailable {
-                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
-                function,
-            });
-        }
-    }
-    Ok(())
-}
-
-impl Checkpoint {
-    /// Establish compatibility before assembling an executable or rewriting
-    /// carried state. On a library change only, walk authenticated live roots
-    /// once and expand their static reach using the immutable installed index.
-    /// The original page port is returned for subsequent execution.
-    pub fn check_helper_compatibility(
-        &self,
-        source: Box<dyn super::PageSource>,
-        documents: &std::collections::BTreeMap<
-            lash_kernel_value::LinkId,
-            lash_kernel_doc::Document,
-        >,
-        code_imports: &std::collections::BTreeMap<
-            (lash_kernel_value::LinkId, lash_kernel_value::ImportSlot),
-            lash_kernel_value::CallableId,
-        >,
-        build: &lash_kernel_doc::BuildHelpers,
-    ) -> Result<(Box<dyn super::PageSource>, lash_kernel_doc::Selection), HelperCompatibilityError>
-    {
-        use std::{cell::RefCell, rc::Rc};
-        #[cfg(any(test, feature = "perf-witness"))]
-        helper_compatibility_work::update(|work| work.comparisons += 1);
-        if self.0.helper_library == build.identity() {
-            return Ok((source, lash_kernel_doc::Selection::Fresh));
-        }
-        // The shared owner exists before the walk starts and is dropped with
-        // it on every refusal. No page-port clone or fabricated grant is needed.
-        let source = Rc::new(RefCell::new(source));
-        #[cfg(any(test, feature = "perf-witness"))]
-        helper_compatibility_work::update(|work| work.live_code_walks += 1);
-        let live = super::checkpoint_code(self, Box::new(SharedSource(Rc::clone(&source))))?;
-        let restored = super::code::restore_selection(live, documents, code_imports, build)?;
-        check_pins(restored.pins.iter().copied(), build)?;
-        Rc::try_unwrap(source)
-            .map(|source| {
-                (
-                    source.into_inner(),
-                    lash_kernel_doc::Selection::Restored(restored),
-                )
-            })
-            .map_err(|_| {
-                HeapFault::Malformed("helper compatibility retained its page port".into()).into()
-            })
-    }
-}
-
-struct SharedSource(std::rc::Rc<std::cell::RefCell<Box<dyn super::PageSource>>>);
-impl super::PageSource for SharedSource {
-    fn read(
-        &mut self,
-        pages: &[lash_kernel_doc::heap::PageRef],
-    ) -> Result<Vec<Result<super::PageAnswer, HeapFault>>, HeapFault> {
-        self.0.borrow_mut().read(pages)
-    }
-    fn seal(&mut self, page: super::PageBody) -> Result<lash_kernel_doc::heap::PageRef, HeapFault> {
-        self.0.borrow_mut().seal(page)
-    }
-}
-
-/// Calling-thread counters for compatibility only; execution preparation has
-/// its own probes and is never counted as a compatibility decode or hash.
-#[cfg(any(test, feature = "perf-witness"))]
-pub mod helper_compatibility_work {
-    use std::cell::Cell;
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    pub struct Work {
-        pub comparisons: u64,
-        pub live_code_walks: u64,
-        pub membership_probes: u64,
-        pub dependency_steps: u64,
-    }
-    thread_local! {
-        static WORK: Cell<Option<Work>> = const { Cell::new(None) };
-    }
-    pub fn enable() {
-        WORK.set(Some(Work::default()));
-    }
-    pub fn take() -> Option<Work> {
-        WORK.replace(WORK.get().map(|_| Work::default()))
-    }
-    pub(crate) fn update(change: impl FnOnce(&mut Work)) {
-        if let Some(mut work) = WORK.get() {
-            change(&mut work);
-            WORK.set(Some(work));
-        }
-    }
-}
-
-/// An upgrade uses the authenticated retained-state walk even when library identities match.
-#[derive(Debug, thiserror::Error)]
-pub enum HelperUpgradeCheckError {
-    #[error(transparent)]
-    Heap(#[from] HeapFault),
-    #[error(transparent)]
-    Refused(#[from] lash_kernel_doc::HelperUpgradeRefusal),
-}
-impl Checkpoint {
-    pub fn check_helper_upgrade(
-        &self,
-        source: Box<dyn super::PageSource>,
-        documents: &std::collections::BTreeMap<
-            lash_kernel_value::LinkId,
-            lash_kernel_doc::Document,
-        >,
-        imports: &std::collections::BTreeMap<
-            (lash_kernel_value::LinkId, lash_kernel_value::ImportSlot),
-            lash_kernel_value::CallableId,
-        >,
-        build: &lash_kernel_doc::BuildHelpers,
-        upgrade: &lash_kernel_doc::HelperUpgrade,
-    ) -> Result<lash_kernel_doc::HelperUpgradeSafety, HelperUpgradeCheckError> {
-        let live = super::code::scan_checkpoint(self, source, true)?;
-        if let Some(function) = live.constructors.intersection(&upgrade.changed).next() {
-            return Err(lash_kernel_doc::HelperUpgradeRefusal::BrandedData {
-                function: *function,
-            }
-            .into());
-        }
-        let fixed = super::code::restore_selection(
-            super::RetainedCode {
-                callables: live.fixed_callables.clone(),
-                ..Default::default()
-            },
-            documents,
-            imports,
-            build,
-        )?;
-        if let Some(function) = fixed.pins.intersection(&upgrade.changed).next() {
-            return Err(lash_kernel_doc::HelperUpgradeRefusal::RetainedCallable {
-                function: *function,
-            }
-            .into());
-        }
-        let retained = super::code::restore_selection(live, documents, imports, build)?;
-        let functions: std::collections::BTreeSet<_> = retained
-            .pins
-            .intersection(&upgrade.changed)
-            .copied()
-            .collect();
-        Ok(if functions.is_empty() {
-            lash_kernel_doc::HelperUpgradeSafety::Safe
-        } else {
-            lash_kernel_doc::HelperUpgradeSafety::Deferred { functions }
-        })
+        CheckpointRoot::decode(input).map(|root| Self(root, None))
     }
 }

@@ -5,6 +5,69 @@ use lash_kernel_doc::scalar::{ScalarOp, size_bit, word_size_bit};
 
 use super::{Binary, Domain, Math, Operation, PreparedNative, Unary, Value, plain};
 
+/// The operations with a shared word/binary64 kernel answer inline
+/// ([`kernel_of`]); kind, identity and integer text are the other inline
+/// operations. This declaration belongs to the native, independently of
+/// its catalogue name and of any helper that calls it.
+pub(super) fn inline(
+    operation: Operation,
+    domain: Domain,
+) -> Option<lash_kernel_doc::arena::native::InlineNative> {
+    use lash_kernel_doc::arena::native::{
+        FloatUnary, InlineNative, InlineOperation, IntegerTextDomain, ScalarDomain,
+    };
+    // A float operand answers by `arithmetic::scalar_unary`'s own float
+    // function wherever the domain admits a float.
+    let float_unary = |unary| match unary {
+        Unary::Neg => Some(FloatUnary::Neg),
+        Unary::Abs => Some(FloatUnary::Abs),
+        Unary::Floor => Some(FloatUnary::Floor),
+        Unary::Ceil => Some(FloatUnary::Ceil),
+        Unary::Trunc => Some(FloatUnary::Trunc),
+        _ => None,
+    };
+    let operation = match operation {
+        Operation::Kind if matches!(domain, Domain::Any) => InlineOperation::Kind,
+        Operation::Unary(unary) if !matches!(domain, Domain::Int) => {
+            InlineOperation::FloatUnary(float_unary(unary)?)
+        }
+        Operation::ToFloat if matches!(domain, Domain::Any | Domain::Number) => {
+            InlineOperation::ToFloat
+        }
+        Operation::Same if matches!(domain, Domain::Any) => InlineOperation::Same,
+        Operation::ToText if matches!(domain, Domain::Number) => {
+            InlineOperation::IntegerText(IntegerTextDomain::Decimal)
+        }
+        Operation::IntText => InlineOperation::IntegerText(IntegerTextDomain::RadixArgument),
+        operation => InlineOperation::Scalar {
+            operation: kernel_of(operation)?,
+            domain: match domain {
+                // Two inline texts compare as the native's scalar ordering
+                // and equality read them, with nothing to admit.
+                Domain::Any
+                    if matches!(
+                        operation,
+                        Operation::Eq
+                            | Operation::Lt
+                            | Operation::Le
+                            | Operation::Gt
+                            | Operation::Ge
+                    ) =>
+                {
+                    ScalarDomain::WordsFloatsOrTexts
+                }
+                Domain::Any | Domain::Number => ScalarDomain::WordsOrFloats,
+                Domain::Int => ScalarDomain::Words,
+                Domain::Float => ScalarDomain::Floats,
+            },
+        },
+    };
+    Some(InlineNative {
+        native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+        operation,
+    })
+}
+
 trait Scalar {
     const OPERATION: Operation;
     const ARITY: usize;
@@ -130,8 +193,14 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
 /// The shared kernel of `S`'s operation ([`lash_kernel_doc::scalar`]):
 /// `run`'s own first answer on two floats and on two word integers.
 const fn kernel<S: Scalar>() -> Option<ScalarOp> {
+    kernel_of(S::OPERATION)
+}
+
+/// The shared kernel of `operation`, which its inline answer and its
+/// prepared entry both answer by.
+const fn kernel_of(operation: Operation) -> Option<ScalarOp> {
     use lash_kernel_doc::scalar::ScalarOp as K;
-    match S::OPERATION {
+    match operation {
         Operation::Binary(Binary::Add) => Some(K::Add),
         Operation::Binary(Binary::Sub) => Some(K::Sub),
         Operation::Binary(Binary::Mul) => Some(K::Mul),

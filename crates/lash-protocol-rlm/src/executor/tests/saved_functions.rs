@@ -750,11 +750,10 @@ async fn a_saved_function_and_its_aliases_relink_to_the_next_cells_operation_con
     let functions = state.lowering_functions();
     let next = functions
         .values()
-        .find(|function| function.environment == old.environment)
-        .expect("the same saved environment");
+        .find(|function| function.name == old.name)
+        .expect("the same saved function");
     assert_ne!(next.link, old.link);
     assert_eq!(next.document, old.document);
-    assert_eq!(next.environment, old.environment);
     assert_eq!(next.callable.function, old.callable.function);
 }
 

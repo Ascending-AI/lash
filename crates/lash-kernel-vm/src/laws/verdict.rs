@@ -6,7 +6,6 @@ use lash_kernel_doc::Datum;
 use lash_kernel_value::names::FunctionName;
 
 use super::embedder::{Embedder, ROOMY, Setup, document, library, text};
-use crate::machine::Boundary;
 use crate::{Bound, BoundExceeded, Bounds, End, RunError};
 
 /// What a run ends with and prints under `bounds`, in slices of `slice`,
@@ -21,7 +20,7 @@ fn verdict(text: &str, bounds: Bounds, slice: u64, collect: bool) -> (End, Vec<D
         },
     );
     if collect {
-        embedder.machine.boundary = Some(Box::new(|_| Boundary::Collect));
+        embedder.machine.collect_at_steps();
     }
     let end = embedder.run_to_end(&[]);
     (end, embedder.world.printed)

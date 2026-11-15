@@ -447,25 +447,24 @@ impl Lowerer<'_> {
                 let variable = self.written(id, name.range)?;
                 let annotated = self
                     .variable(id)
-                    .and_then(|found| found.scope)
-                    .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied());
-                let value = if annotated.is_some_and(|ty| {
-                    ty != Ty::Unknown && value.ty != Ty::Unknown && ty != value.ty
-                }) {
-                    // A trusted annotation chooses an operation, but does not
-                    // make the actual value satisfy its type before execution.
-                    self.invoke(
-                        "py.name_check",
-                        &[
-                            value,
-                            Operand::text(id),
-                            Operand::literal(Literal::Bool(!self.in_module()), Ty::Bool),
-                        ],
-                        Ty::Unknown,
-                    )?
-                } else {
-                    value
-                };
+                    .map_or(Ty::Unknown, |found| self.annotated(&found, id));
+                let value =
+                    if annotated != Ty::Unknown && value.ty != Ty::Unknown && annotated != value.ty
+                    {
+                        // A trusted annotation chooses an operation, but does not
+                        // make the actual value satisfy its type before execution.
+                        self.invoke(
+                            "py.name_check",
+                            &[
+                                value,
+                                Operand::text(id),
+                                Operand::literal(Literal::Bool(!self.in_module()), Ty::Bool),
+                            ],
+                            Ty::Unknown,
+                        )?
+                    } else {
+                        value
+                    };
                 self.store(Place::Variable(variable), value);
                 self.mark_bound(id);
                 Ok(())
@@ -1455,6 +1454,7 @@ impl Lowerer<'_> {
             })
             .chain(active.clone())
             .collect();
+        self.declared.push(std::collections::BTreeMap::new());
         self.scopes.push(Scope {
             direct_defs: Default::default(),
             packed_defs: Default::default(),
@@ -1506,6 +1506,13 @@ impl Lowerer<'_> {
         });
         self.span = span;
         self.scopes.pop();
+        self.declared_locals = self
+            .declared
+            .pop()
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, ty)| Some(lash_kernel_doc::DeclaredLocal { name, ty: ty? }))
+            .collect();
         self.typed_dicts = outer_types;
         self.renames = kept;
         Ok((kernel_params, self.finish_declarations(block?, None)))

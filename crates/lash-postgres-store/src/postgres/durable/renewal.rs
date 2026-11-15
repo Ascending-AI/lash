@@ -92,7 +92,7 @@ impl PostgresDurableStore {
                 crate::observed_sql::transaction_started();
                 let writable = self.fence.writable();
                 let bound = |version: u32| i32::try_from(version).unwrap_or(i32::MAX);
-                let (lock_timeout, statement_ms) = route.prelude.call_guards();
+                let (lock_timeout, statement_ms, _) = route.prelude.call_guards();
                 let injected = self.injected_instant().transpose()?;
                 let (recorded, expires_at): (Option<i32>, Option<i64>) =
                     crate::observed_sql::query_as(&CALL)

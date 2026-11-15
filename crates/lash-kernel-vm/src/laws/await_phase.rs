@@ -3,7 +3,7 @@
 //! `K-TASK-026`).
 //!
 //! - A run sealed while a task stands delivered, its outcome in and its
-//!   turn not yet taken, and opened cold under another layout, ends as the
+//!   turn not yet taken, and opened cold, ends as the
 //!   uninterrupted run does, at every slice.
 //! - A `cancel` delivered to such a wait reaches `catch` only
 //!   after the turn.
@@ -12,13 +12,13 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
+use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 
-use lash_kernel_state::paged::{ContinuationPhase, IncomingRecord, TaskStateRecord};
+use lash_kernel_state::paged::run::continuation::PointPhase;
 use lash_kernel_value::names::FunctionId;
 
 use super::embedder::{Embedder, Setup, answer, label, wait_of};
-use crate::{End, Layout, Machine, Step};
+use crate::{End, Machine, Step};
 
 /// `policy.join(t)`: awaits a task by joining it, a body with no native.
 fn policies(
@@ -88,8 +88,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<usize>) {
     let mut hops = 0u64;
     let mut reopen = |embedder: &mut Embedder| {
         hops += 1;
-        let layout = Layout(hops.wrapping_mul(0x9e37_79b9) | (hops & 1));
-        embedder.reopen(layout, hops.is_multiple_of(2));
+        embedder.reopen(hops.is_multiple_of(2));
     };
     let end = loop {
         match embedder.run() {
@@ -192,28 +191,19 @@ fn a_delivered_state_at_a_wait_without_its_turn_is_refused() {
             .machine
             .deliver(wait_of(&request), answer(&request))
             .unwrap();
-        let wait = wait_of(&request);
-        embedder
-            .machine
-            .tamper_task_state(
-                TaskId::MAIN,
-                TaskStateRecord::Resuming {
-                    incoming: IncomingRecord::Outcome(wait),
-                    requeue: true,
-                },
-            )
-            .unwrap();
-        let refused = match embedder.try_reopen(Layout(0x9e37_79b9 | 1), true) {
-            Err(refused) => refused,
-            Ok(()) => format!(
-                "{:?}",
-                embedder
-                    .machine
-                    .run(&mut embedder.world, u64::MAX)
-                    .expect_err("a delivered state at a plain wait is refused")
-            ),
-        };
-        assert!(refused.contains("disagrees"), "{text}: {refused}");
+        let refused = embedder
+            .reopen_edited(|record| record.tasks[0].turn = true)
+            .err()
+            .unwrap_or_else(|| {
+                format!(
+                    "{:?}",
+                    embedder
+                        .machine
+                        .run(&mut embedder.world, u64::MAX)
+                        .expect_err("a delivered state at a plain wait is refused")
+                )
+            });
+        assert!(refused.contains("Turn"), "{text}: {refused}");
     }
 }
 
@@ -234,16 +224,11 @@ fn an_await_waits_where_its_policy_waits() {
     );
     let mut embedder = Embedder::with(AWAITED, setup(u64::MAX));
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let phases: Vec<ContinuationPhase> = embedder
-        .machine
-        .pending_phases()
-        .into_iter()
-        .filter_map(|(task, frame, phase)| (task == TaskId::MAIN && frame == 0).then_some(phase))
-        .collect();
-    assert_eq!(
-        phases,
-        [ContinuationPhase::Call {
-            phase: crate::compile::room::Phase::Enter.code()
-        }]
+    // `main` stands called at the policy, the policy's frame above.
+    let record = embedder.run_record();
+    let main = &record.tasks[0].frames;
+    assert!(
+        main.len() >= 2 && main[0].phase == PointPhase::Call,
+        "{main:?}"
     );
 }

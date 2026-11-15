@@ -1,6 +1,7 @@
 //! Helper schedules obey PLAN-INDEP through the kernel-owned equality seam.
-//! Layouts 0 and 1 answer closed helpers by their generated plans and the
-//! rest by their natives; layout 3 runs every body (FIG-6678).
+//! The installed arm answers each helper by its native; the cold arm runs a
+//! library holding every body without its native, so the two compare native
+//! and body (`K-LIB-006`, FIG-6678).
 #![allow(
     clippy::unwrap_used,
     reason = "malformed fixtures and failed machine operations are law failures"
@@ -8,11 +9,12 @@
 
 mod conversions;
 mod numeric;
+#[cfg(feature = "shipped-library")]
+mod numeric_slices;
 
-use crate::projection::{Plan, Projector};
+use crate::projection::{Projector, Recorded};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 
-use lash_kernel_vm::kernel_internals::{Layout, in_layout};
 use lash_kernel_vm::{Bounds, CellStart, Host, Machine, Outcome, Program, Request, Step, Target};
 
 /// PLAN-INDEX: a build emits each plan index in strict function identity
@@ -64,6 +66,13 @@ fn generated_plan_indexes_are_in_function_identity_order() {
             );
         }
     }
+}
+
+/// The installed definitions with every body registered without its native,
+/// so the core runs the body wherever the installed library calls the native
+/// (`K-LIB-006`).
+pub(crate) fn bodies(library: &lash_kernel_vm::PreparedLibrary) -> lash_kernel_vm::PreparedLibrary {
+    lash_kernel_vm::testing::bodies(library)
 }
 
 #[allow(
@@ -122,24 +131,20 @@ struct Observed {
     prints: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
-    tape: Vec<lash_kernel_exec::Weight>,
+    tape: Vec<lash_kernel_vm::Weight>,
 }
 
-fn run<const L: u64>(
-    case: &runner::Case,
-    program: &Program,
-    projector: &mut Projector<'_>,
-) -> Observed {
-    run_bounded::<L>(case, program, projector, 50_000_000)
+fn run(case: &runner::Case, program: &Program, projector: &mut Projector<'_>) -> Observed {
+    run_bounded(case, program, projector, 50_000_000)
 }
 
-fn run_bounded<const L: u64>(
+fn run_bounded(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
 ) -> Observed {
-    run_with_memory::<L>(
+    run_with_memory(
         case,
         program,
         projector,
@@ -148,14 +153,14 @@ fn run_bounded<const L: u64>(
     )
 }
 
-fn run_at_depth<const L: u64>(
+fn run_at_depth(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
     call_depth: u32,
 ) -> Observed {
-    run_with_options::<L>(
+    run_with_options(
         case,
         program,
         projector,
@@ -166,17 +171,17 @@ fn run_at_depth<const L: u64>(
     )
 }
 
-fn run_with_memory<const L: u64>(
+fn run_with_memory(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
     charge: u64,
     memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
-    run_with_options::<L>(case, program, projector, charge, 200, memory_meter, true)
+    run_with_options(case, program, projector, charge, 200, memory_meter, true)
 }
 
-fn run_with_options<const L: u64>(
+fn run_with_options(
     case: &runner::Case,
     program: &Program,
     projector: &mut Projector<'_>,
@@ -200,7 +205,7 @@ fn run_with_options<const L: u64>(
         .and_then(|images| images.first())
         .map(|image| image.source.clone())
         .unwrap_or_default();
-    let mut machine = Plan::<L>::start(
+    let mut machine = Recorded::start(
         program.clone(),
         bounds,
         CellStart {
@@ -234,7 +239,7 @@ fn run_with_options<const L: u64>(
     let end = loop {
         match machine
             .run(&mut world, u64::MAX)
-            .unwrap_or_else(|error| panic!("{} in layout {L}: {error}", case.id))
+            .unwrap_or_else(|error| panic!("{}: {error}", case.id))
         {
             Step::Slice => panic!("an unbounded helper run yielded"),
             Step::Parked(park) => {
@@ -306,8 +311,8 @@ fn run_with_options<const L: u64>(
             .steps()
             .into_iter()
             .flat_map(|weight| match weight {
-                lash_kernel_exec::Weight::Units(units) => {
-                    vec![lash_kernel_exec::Weight::Units(1); units as usize]
+                lash_kernel_vm::Weight::Units(units) => {
+                    vec![lash_kernel_vm::Weight::Units(1); units as usize]
                 }
                 atomic => vec![atomic],
             })
@@ -346,7 +351,6 @@ fn compare(dialect: &str, shard: Option<usize>) {
     cases.extend(depth_cases(dialect));
     let runner = runner::Runner::new(dialect).unwrap();
     let mut body = None;
-    let mut general = None;
     let mut compared = 0;
     for (index, case) in cases
         .iter()
@@ -361,46 +365,16 @@ fn compare(dialect: &str, shard: Option<usize>) {
             continue;
         };
         let mut reference = Projector::default();
-        let expected = run::<0>(case, &program, &mut reference);
+        let expected = run(case, &program, &mut reference);
         reference.check_memory().unwrap();
-        let prepared = general.get_or_insert_with(|| in_layout(&program.library, Layout(1)));
-        program.library = prepared.clone();
-        let mut warm = Projector {
-            layout: Layout(1),
-            ..Projector::default()
-        };
-        assert_eq!(
-            run::<1>(case, &program, &mut warm),
-            expected,
-            "{} general native",
-            case.id
-        );
-        assert_eq!(
-            warm.states, reference.states,
-            "{} native checkpoints",
-            case.id
-        );
-        assert_eq!(
-            crate::projection::ids(&warm.states),
-            crate::projection::ids(&reference.states),
-            "{} native ids",
-            case.id
-        );
-        assert_eq!(
-            warm.terminal, reference.terminal,
-            "{} native carry",
-            case.id
-        );
-        let prepared = body.get_or_insert_with(|| in_layout(&program.library, Layout(3)));
+        let prepared = body.get_or_insert_with(|| bodies(&program.library));
         program.library = prepared.clone();
         let mut cold = Projector {
             imports: Some(&reference.images),
-            cold: true,
-            layout: Layout(3),
             ..Projector::default()
         };
         assert_eq!(
-            run::<3>(case, &program, &mut cold),
+            run(case, &program, &mut cold),
             expected,
             "{} cold fallback",
             case.id
@@ -598,13 +572,13 @@ fn compare_control(source: &str, charge: u64) -> Observed {
         stride: 0,
         nanoseconds: 0,
     };
-    let expected = run_bounded::<3>(&case, &program, &mut Projector::default(), charge);
+    let reference = Program {
+        library: bodies(&program.library),
+        ..program.clone()
+    };
+    let expected = run_bounded(&case, &reference, &mut Projector::default(), charge);
     assert_eq!(
-        run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
-        expected
-    );
-    assert_eq!(
-        run_bounded::<1>(&case, &program, &mut Projector::default(), charge),
+        run_bounded(&case, &program, &mut Projector::default(), charge),
         expected
     );
     expected
@@ -801,121 +775,6 @@ fn generated_callees_run_a_declined_body_once() {
     );
 }
 
-/// K-URI-WORK (FIG-6720): one completion price bounds the synchronous
-/// delegated calls, including work before a URI raises. The decoder
-/// traverses percent-delimited chunks: its 64 units per input unit cover
-/// calls; 32 cover fixed work.
-#[test]
-fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
-    use lash_kernel_vm::perf_witness::Profiling as _;
-    use std::sync::Arc;
-
-    let runner = runner::Runner::new("typescript").unwrap();
-    let case = runner::Case {
-        id: "uri-work".into(),
-        dialect: "typescript".into(),
-        source: "decodeURI('');".into(),
-        bits: 0,
-        stride: 0,
-        nanoseconds: 0,
-    };
-    let runner::Lowered::Program(base) = runner.lower(&case).unwrap() else {
-        panic!("the URI operation lowers");
-    };
-    for name in ["ts.uri.decodeURI", "ts.uri.decodeURIComponent"] {
-        let function = base
-            .library
-            .registry()
-            .iter()
-            .find_map(|(id, registered)| {
-                (registered.definition().name.as_str() == name).then_some(*id)
-            })
-            .unwrap();
-        for repeats in [0, 1, 16, 256] {
-            let prefix = "%E0%A0%80".repeat(repeats);
-            for (suffix, raised) in [
-                ("", false),
-                ("literal😀%2f", false),
-                ("%", true),
-                ("%+1", true),
-                ("%ED%A0%80", true),
-            ] {
-                let input = format!("{prefix}{suffix}");
-                let source = format!(
-                    "kernel 1\nnumbers by_spelling\n# local definition decode @{function}\nmain {{ let answer = invoke @{function}(null, [{input:?}]) return answer }}"
-                );
-                let document = crate::document_fixture::authored(&source, base.library.registry());
-                let program =
-                    crate::machine::prepare_document(&base.library, Arc::new(document), None)
-                        .unwrap();
-                let mut machine = crate::pages::start(
-                    program,
-                    Bounds {
-                        memory_meter: lash_kernel_vm::MemoryMeter::On,
-                        charge: lash_kernel_vm::Charge::Exact,
-                        charge_limit: 50_000_000,
-                        memory: 64 << 20,
-                        call_depth: lash_kernel_vm::Bounds::DEFAULT_CALL_DEPTH,
-                        live_tasks: 100,
-                        requests_per_park: 100,
-                        join_members: 100,
-                    },
-                    CellStart {
-                        target: Target::Main,
-                        args: Vec::new(),
-                        session: None,
-                        owner: crate::pages::OWNER,
-                        modes: Default::default(),
-                        host: Vec::new(),
-                    },
-                )
-                .unwrap();
-                let mut world = World::default();
-                machine.count_work();
-                let step = machine.run(&mut world, u64::MAX).unwrap();
-                let Step::Ended(end) = step else {
-                    panic!("a synchronous decoder ends");
-                };
-                if raised {
-                    assert!(
-                        matches!(
-                            end,
-                            lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Uncaught { .. })
-                        ),
-                        "{end:?}"
-                    );
-                } else {
-                    assert!(matches!(end, lash_kernel_vm::End::Finished(_)), "{end:?}");
-                }
-                let work = machine.work().unwrap();
-                // A body owns its completion charge in the code row; a
-                // native or generated plan owns it in the native row. Match
-                // the exact helper, excluding any closures inside its body.
-                let price: u64 = work
-                    .natives
-                    .iter()
-                    .filter(|native| native.symbol.function == function)
-                    .map(|native| native.counts.self_charge.expect("exact charge"))
-                    .chain(
-                        work.codes
-                            .iter()
-                            .filter(|code| {
-                                code.symbol.function == Some(function)
-                                    && code.symbol.site.path.is_empty()
-                            })
-                            .map(|code| code.counts.self_charge.expect("exact charge")),
-                    )
-                    .sum();
-                let calls: u64 = work.natives.iter().map(|native| native.counts.calls).sum();
-                assert!(
-                    calls <= price,
-                    "{name}, repeats={repeats}, suffix={suffix:?}: {calls} calls exceed completion price {price}"
-                );
-            }
-        }
-    }
-}
-
 /// FIG-6732: compiled helper plans retain results and errors under Off, in
 /// both dialects, using the differential corpus rather than a second set of cases.
 fn charge_off_corpus_partition(shard: usize, shards: usize) {
@@ -1002,12 +861,12 @@ fn memory_off_helper_plans_keep_the_corpus_without_census_work(shard: usize) {
             let runner::Lowered::Program(program) = runner.lower(case).unwrap() else {
                 continue;
             };
-            let expected = run::<0>(case, &program, &mut Projector::default());
+            let expected = run(case, &program, &mut Projector::default());
             if matches!(&expected.end, crate::ExpectedEnd::Bound { name, .. } if name == "memory") {
                 continue;
             }
             lash_kernel_vm::perf_witness::enable_work();
-            let observed = run_with_memory::<0>(
+            let observed = run_with_memory(
                 case,
                 &program,
                 &mut Projector::default(),
@@ -1497,20 +1356,19 @@ fn lowered(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     programs
 }
 
-/// PLAN-INDEP: the lowered dialect loops observe under the natural layout
-/// what they observe where every native beside a body declines, so the
-/// body runs.
+/// K-LIB-006: the lowered dialect loops observe installed what they observe
+/// where every native beside a body is replaced by that body.
 #[test]
 fn lowered_dialect_loops_observe_what_their_bodies_observe() {
     for (case, program) in dialect_loop_programs() {
         let bodies = Program {
-            library: in_layout(&program.library, Layout(3)),
+            library: bodies(&program.library),
             ..program.clone()
         };
-        let planned = run::<0>(&case, &program, &mut Projector::default());
-        let mut reference = run::<3>(&case, &bodies, &mut Projector::default());
+        let planned = run(&case, &program, &mut Projector::default());
+        let mut reference = run(&case, &bodies, &mut Projector::default());
         assert_eq!(planned, reference, "{}", case.id);
-        let quiet = run_with_options::<0>(
+        let quiet = run_with_options(
             &case,
             &program,
             &mut Projector::default(),
@@ -1559,8 +1417,8 @@ fn lowered_dialect_loops_observe_what_their_bodies_observe() {
         {
             for charge in 0..=reference.charged {
                 assert_eq!(
-                    run_bounded::<0>(&case, &program, &mut Projector::default(), charge),
-                    run_bounded::<3>(&case, &bodies, &mut Projector::default(), charge),
+                    run_bounded(&case, &program, &mut Projector::default(), charge),
+                    run_bounded(&case, &bodies, &mut Projector::default(), charge),
                     "{} at charge {charge}",
                     case.id,
                 );

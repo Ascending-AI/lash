@@ -173,6 +173,7 @@ mod tests {
             written_signature: None,
             signature_origin: None,
             implicit_text_conversions: Vec::new(),
+            declared_locals: Vec::new(),
             callable: CallableId {
                 link: "11".repeat(32).parse().unwrap(),
                 function: lash_kernel_value::FunctionId::parse(&"22".repeat(32)).unwrap(),

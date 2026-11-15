@@ -44,7 +44,7 @@ use lash_kernel_doc::{
 
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
-use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::diagnostics::{self, Code};
 use crate::exceptions::Classes;
@@ -195,7 +195,6 @@ pub(crate) struct Lowerer<'a> {
     imports: lash_kernel_dialect::authoring::Imports,
     local_functions: BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
     local_notes: BTreeMap<FunctionId, Vec<Note>>,
-    used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     taken: HashSet<String>,
     scopes: Vec<Scope>,
@@ -233,6 +232,14 @@ pub(crate) struct Lowerer<'a> {
     /// The package value types operands are known to hold, which
     /// `Ty::Package` names by position.
     brands: Vec<lash_kernel_dialect::dispatch::Brand>,
+    /// For each function being lowered, innermost last, the bindings whose
+    /// trusted annotation its lowering used, by kernel name: source
+    /// evidence its written notes keep. A binding annotated two ways has
+    /// none.
+    declared: Vec<BTreeMap<Name, Option<lash_kernel_value::Type>>>,
+    /// The declared locals of the function body lowered last, for its
+    /// written notes.
+    declared_locals: Vec<lash_kernel_doc::DeclaredLocal>,
 }
 
 /// Whether `name` is one of the dialect's built-ins.
@@ -320,7 +327,6 @@ pub(crate) fn lower(
         imports: lash_kernel_dialect::authoring::Imports::default(),
         local_functions: BTreeMap::new(),
         local_notes: BTreeMap::new(),
-        used: BTreeMap::new(),
         private: BTreeSet::new(),
         taken,
         scopes: vec![Scope {
@@ -362,6 +368,8 @@ pub(crate) fn lower(
         },
         typed_dicts,
         brands: Vec::new(),
+        declared: Vec::new(),
+        declared_locals: Vec::new(),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -398,9 +406,10 @@ pub(crate) fn lower(
         .requires
         .kernels
         .insert(lash_kernel_doc::KERNEL_VERSION);
+    let referenced = document.referenced_functions();
     lash_kernel_dialect::authoring::include_library_dependencies(
         &mut document,
-        lowerer.used.keys().copied(),
+        referenced,
         environment.library,
     )
     .map_err(|message| diagnostics::unplaced(Code::LibraryMissing, message))?;
@@ -418,6 +427,7 @@ pub(crate) fn lower(
         source_map,
         written,
         captions,
+        source_evidence,
     } = lash_kernel_dialect::site_layers(
         &document,
         source,
@@ -428,7 +438,7 @@ pub(crate) fn lower(
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
     Ok(Lowered {
-        document,
+        document: document.with_source_evidence(source_evidence),
         source_map: Some(source_map),
         written,
         captions,
@@ -439,13 +449,19 @@ pub(crate) fn lower(
 impl Lowerer<'_> {
     // Names.
 
-    /// A name the source does not spell and nothing has taken.
+    /// A name the source does not spell and nothing has taken. The
+    /// module's are private: a name the source does not spell is never a
+    /// session binding (`K-SES-001`), whatever statement declares it.
     fn fresh(&mut self, base: &str) -> Name {
         let mut number = 1usize;
         loop {
             let candidate = format!("{base}{number}");
             if self.taken.insert(candidate.clone()) {
-                return Name::new(candidate);
+                let name = Name::new(candidate);
+                if self.in_module() {
+                    self.private.insert(name.clone());
+                }
+                return name;
             }
             number += 1;
         }
@@ -582,16 +598,36 @@ impl Lowerer<'_> {
     /// An inferred type fact applies only to a bound local of the current
     /// scope. An enclosing scope may run differently when a closure is
     /// called, and a branch-local definition may not reach this read.
-    fn type_of(&self, found: &Found, id: &str) -> Ty {
-        let annotated = found
-            .scope
-            .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied())
-            .unwrap_or(Ty::Unknown);
+    fn type_of(&mut self, found: &Found, id: &str) -> Ty {
+        let annotated = self.annotated(found, id);
         // Explicit annotations retain the dialect's existing trust rule.
         if annotated != Ty::Unknown {
             return annotated;
         }
         self.local_type(found.scope, id)
+    }
+
+    /// The trusted annotation of the binding `found` of `id`, recorded as
+    /// source evidence of every function being lowered when there is one.
+    fn annotated(&mut self, found: &Found, id: &str) -> Ty {
+        let annotated = found
+            .scope
+            .and_then(|scope| self.scopes[scope].bindings.types.get(id).copied())
+            .unwrap_or(Ty::Unknown);
+        if annotated != Ty::Unknown {
+            let ty = annotated.declared();
+            for frame in &mut self.declared {
+                frame
+                    .entry(found.name.clone())
+                    .and_modify(|known| {
+                        if *known != ty {
+                            *known = None;
+                        }
+                    })
+                    .or_insert_with(|| ty.clone());
+            }
+        }
+        annotated
     }
 
     /// Facts proved from definitions, independently of annotations.
@@ -925,10 +961,6 @@ impl Lowerer<'_> {
         };
         #[cfg(test)]
         inventory::record(name, function);
-        let listed = FunctionName::new(name).map_err(|error| {
-            diagnostics::unplaced(Code::LibraryMissing, format!("`{name}`: {error}"))
-        })?;
-        self.used.insert(function, listed);
         Ok(function)
     }
 

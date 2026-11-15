@@ -2,6 +2,7 @@
 use crate::generated_scope::BindingScope;
 mod authored;
 mod direct;
+mod environment;
 mod names;
 mod packed;
 mod readable;
@@ -9,6 +10,7 @@ mod signature;
 mod structured;
 mod syntax;
 mod task;
+mod unpack;
 use lash_kernel_dialect::{
     NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
     check_document_depth,
@@ -49,13 +51,16 @@ pub(crate) fn print_regions(
         authored: true,
         sync: synchronous.clone(),
         asynchronous: BTreeSet::new(),
+        aliases: BTreeMap::new(),
         substitutions: BTreeMap::new(),
         direct: BTreeMap::new(),
         comprehensions: BTreeMap::new(),
         displays: BTreeMap::new(),
         expression_depth: 0,
         max_depth: options.limits.max_depth.min(k::MAX_NESTING_DEPTH),
+        declared: declared_locals(document, None),
     };
+    r.binding_aliases();
     let asyncio = ["py.task.run", "py.gather", "py.sleep"]
         .iter()
         .any(|helper| r.operators.uses(helper));
@@ -67,6 +72,17 @@ pub(crate) fn print_regions(
         r.out.write("import time\n");
     }
     if asyncio || time {
+        r.out.write("\n");
+    }
+    let modules: BTreeSet<_> = r
+        .operators
+        .functions()
+        .values()
+        .filter_map(|name| name.as_str().strip_prefix("py.module.").map(str::to_owned))
+        .collect();
+    for module in modules {
+        r.out.write("import ");
+        r.out.write(&module);
         r.out.write("\n");
     }
     let signatures = r.typed_dicts(document, &regions.authored);
@@ -129,12 +145,84 @@ struct Renderer<'a> {
     /// whose calls take no `await`.
     sync: BTreeSet<Name>,
     asynchronous: BTreeSet<Name>,
+    aliases: BTreeMap<Name, Name>,
     substitutions: BTreeMap<Name, k::Expr>,
     direct: BTreeMap<Name, (Name, lash_kernel_value::FunctionId)>,
     comprehensions: BTreeMap<Name, authored::Comprehension>,
     displays: BTreeMap<Name, syntax::Display>,
     expression_depth: usize,
     max_depth: usize,
+    /// The declared types source evidence gives the locals of the scope
+    /// being written, not yet spelled.
+    declared: BTreeMap<Name, lash_kernel_value::Type>,
+}
+
+/// The declared types of the locals a scope binds, by kernel name: those of
+/// `function`'s source evidence, or, for a scope with none of its own (`main`
+/// or a materialized factory), those every function it contains with
+/// evidence agrees on.
+fn declared_locals(
+    document: &k::Document,
+    function: Option<lash_kernel_value::FunctionId>,
+) -> BTreeMap<Name, lash_kernel_value::Type> {
+    if let Some(evidence) = function.and_then(|id| document.source_evidence.get(&id)) {
+        return evidence
+            .declared_locals
+            .iter()
+            .map(|local| (local.name.clone(), local.ty.clone()))
+            .collect();
+    }
+    let contained: BTreeSet<lash_kernel_value::FunctionId> = match function {
+        None => document.source_evidence.keys().copied().collect(),
+        Some(root) => {
+            let mut reached = BTreeSet::new();
+            let mut pending = vec![root];
+            while let Some(id) = pending.pop() {
+                if let Some(body) = document.functions.get(&id).and_then(|d| d.body())
+                    && reached.insert(id)
+                {
+                    pending.extend(k::Node::Block(&body.block).functions_within());
+                }
+            }
+            reached
+        }
+    };
+    let mut declared = BTreeMap::new();
+    let mut conflicting = BTreeSet::new();
+    for local in contained
+        .iter()
+        .filter_map(|id| document.source_evidence.get(id))
+        .flat_map(|evidence| &evidence.declared_locals)
+    {
+        match declared.get(&local.name) {
+            Some(ty) if *ty != local.ty => {
+                conflicting.insert(local.name.clone());
+            }
+            Some(_) => {}
+            None => {
+                declared.insert(local.name.clone(), local.ty.clone());
+            }
+        }
+    }
+    declared.retain(|name, _| !conflicting.contains(name));
+    declared
+}
+
+/// The annotation a trusted Python local declaration of `ty` is written with:
+/// the bare name the dialect's annotation trust reads.
+fn declared_annotation(ty: &lash_kernel_value::Type) -> Option<&'static str> {
+    use lash_kernel_value::Type;
+    Some(match ty {
+        Type::Null => "None",
+        Type::Bool => "bool",
+        Type::Int => "int",
+        Type::Float => "float",
+        Type::Text => "str",
+        Type::List(_) => "list",
+        Type::Set(_) => "set",
+        Type::Map(_) => "dict",
+        _ => return None,
+    })
 }
 impl Renderer<'_> {
     fn export_function(
@@ -196,7 +284,10 @@ impl Renderer<'_> {
         }
         let scope = std::mem::replace(&mut self.scope, local);
         let main = std::mem::replace(&mut self.main, false);
-        self.root_block(&body.block, Some(&unit));
+        let aliases = self.aliases.clone();
+        let prefix = self.module_environment(&body.block);
+        self.root_block(&body.block, Some(&unit), prefix);
+        self.aliases = aliases;
         self.main = main;
         self.scope = scope;
         Ok(start..self.out.len())
@@ -240,7 +331,12 @@ impl Renderer<'_> {
         }
         self.out.write(")");
     }
-    fn root_block(&mut self, block: &k::Block, root: Option<&lash_kernel_value::sites::Unit>) {
+    fn root_block(
+        &mut self,
+        block: &k::Block,
+        root: Option<&lash_kernel_value::sites::Unit>,
+        prefix: usize,
+    ) {
         let sync = self.sync.clone();
         let asynchronous = self.asynchronous.clone();
         self.out.begin_node(root);
@@ -248,6 +344,7 @@ impl Renderer<'_> {
         if block.is_empty() {
             self.empty();
         }
+        let mut declared = None;
         if let Some(lash_kernel_value::sites::Unit::Library(id)) = root {
             let params = self.document.functions[id]
                 .signature
@@ -255,15 +352,27 @@ impl Renderer<'_> {
                 .iter()
                 .map(|p| p.name.clone())
                 .collect::<Vec<_>>();
-            self.nonlocals(block, &params);
+            let nonlocal = self.nonlocals(&block[prefix..].to_vec(), &params);
+            // A parameter or a `nonlocal` is no declaration of this scope.
+            let mut own = declared_locals(self.document, Some(*id));
+            own.retain(|name, _| !params.contains(name) && !nonlocal.contains(name));
+            declared = Some(std::mem::replace(&mut self.declared, own));
         }
-        self.authored_statements(block);
+        for _ in 0..prefix {
+            self.implicit();
+        }
+        self.authored_statement_range(block, prefix..block.len());
+        if let Some(declared) = declared {
+            self.declared = declared;
+        }
         self.indent -= 1;
         self.out.end_node();
         self.sync = sync;
         self.asynchronous = asynchronous;
     }
-    fn nonlocals(&mut self, block: &k::Block, params: &[Name]) {
+    /// Writes the `nonlocal` statements of a function body, giving the
+    /// names they declare.
+    fn nonlocals(&mut self, block: &k::Block, params: &[Name]) -> BTreeSet<Name> {
         let mut locals: BTreeSet<_> = params.iter().cloned().collect();
         let mut writes = BTreeSet::new();
         let mut pending = vec![k::Node::Block(block)];
@@ -283,14 +392,25 @@ impl Renderer<'_> {
             }
             pending.extend(node.children());
         }
-        for name in writes.difference(&locals) {
+        let nonlocal: BTreeSet<Name> = writes.difference(&locals).cloned().collect();
+        for name in &nonlocal {
             self.padding();
-            self.out.write("nonlocal ");
+            self.out.write(if self.module_binding(name) {
+                "global "
+            } else {
+                "nonlocal "
+            });
             self.name(name);
             self.out.write("\n");
         }
+        nonlocal
+    }
+    fn module_binding(&self, name: &Name) -> bool {
+        let name = self.aliases.get(name).unwrap_or(name);
+        !self.document.private_bindings.contains(name) && self.document.main.as_deref().is_some_and(|body| body.iter().any(|statement| matches!(statement, k::Stmt::Let { name: declared, .. } if declared == name)))
     }
     fn name(&mut self, n: &Name) {
+        let n = self.aliases.get(n).unwrap_or(n);
         // Authored source spells the document's names; only the kernel
         // surface reserves some for its own syntax.
         if self.authored && attribute_identifier(n.as_str()) {

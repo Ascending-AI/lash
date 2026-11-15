@@ -103,6 +103,44 @@ pub(crate) fn forms() -> Vec<(String, String)> {
             "try { throw x; } catch (error) { return error; }",
         ),
         ("template escape", "return `a\\n${x}\\`${x}`;"),
+        ("do while", "do { x = x - 1; } while (x > 0); return x;"),
+        (
+            "do while exits",
+            "do { if (x.a) break; if (x.b) continue; x = x.c; } while (x); return x;",
+        ),
+        (
+            "do while true",
+            "do { x = x.next; if (!x) break; } while (true); return x;",
+        ),
+        (
+            "counted for",
+            "let s = 0; for (let i = 0; i < x; i++) { s += i; } return s;",
+        ),
+        ("for without parts", "for (;;) { if (x) break; } return x;"),
+        ("while", "while (x) { x = x.next; } return x;"),
+        (
+            "labeled loops",
+            "outer: for (const a of x) { for (const b of a) { if (b) continue outer; break outer; } } return x;",
+        ),
+        (
+            "switch",
+            "switch (x) { case 1: return 'a'; case 'b': break; default: x = 2; } return x;",
+        ),
+        (
+            "regular expression",
+            "return x.match(/W\\s*[123]\\s*:\\s*\\d+/gi);",
+        ),
+        ("closure", "const f = (y: any) => x + y; return f(1);"),
+        ("conditional", "return x ? x.a : x.b;"),
+        ("nullish", "return x ?? 1;"),
+        ("logical", "return x && x.a || x.b;"),
+        ("typeof", "return typeof x;"),
+        ("in", "return 'a' in x;"),
+        ("delete", "delete x.a; return x;"),
+        ("compound", "x += 1; x ??= 2; x ||= 3; x &&= 4; return x;"),
+        ("throw", "if (!x) throw new Error('e'); return x;"),
+        ("try finally", "try { return x.a; } finally { x = 1; }"),
+        ("destructuring", "const {a, b: [c]} = x; return a + c;"),
     ] {
         forms.push((
             name.into(),
@@ -156,6 +194,65 @@ pub(crate) fn forms() -> Vec<(String, String)> {
             expression = pattern.replace('$', &expression);
         }
         forms.push((name.into(), last.unwrap()));
+    }
+    forms
+}
+
+/// Every member the built-in table gives, on a value of no known kind, on
+/// each receiver an annotation states, and on a map and a set the body
+/// builds: a new row reaches the printer through this table alone. The
+/// front end refuses some rows on some receivers (`eval`); those lower
+/// nothing to print.
+pub(crate) fn members() -> Vec<(String, String)> {
+    let mut forms = Vec::new();
+    let table = lash_ext_ts_helpers::builtins::table();
+    use lash_ext_ts_helpers::builtins::Receiver;
+    let receivers = [
+        (None, "any", "x"),
+        (Some(Receiver::Text), "string", "x"),
+        (Some(Receiver::Number), "number", "x"),
+        (Some(Receiver::Bool), "boolean", "x"),
+        (Some(Receiver::BigInt), "bigint", "x"),
+        (Some(Receiver::List), "any[]", "x"),
+        (Some(Receiver::Map), "any", "new Map([[x, x]])"),
+        (Some(Receiver::Set), "any", "new Set([x])"),
+    ];
+    for (kind, annotation, receiver) in receivers {
+        let answers = |rows: &lash_ext_ts_helpers::builtins::Rows| {
+            kind.is_none_or(|kind| rows.iter().any(|(row, _)| *row == kind))
+        };
+        let bind = format!("const r = {receiver};");
+        for (name, _) in table.methods.iter().filter(|(_, rows)| answers(rows)) {
+            forms.push((
+                format!("{receiver}: {annotation} .{name}()"),
+                format!(
+                    "export function demo(x: {annotation}, y: any): any {{ {bind} return r.{name}(y); }}"
+                ),
+            ));
+        }
+        for (name, _) in table.properties.iter().filter(|(_, rows)| answers(rows)) {
+            forms.push((
+                format!("{receiver}: {annotation} .{name}"),
+                format!("export function demo(x: {annotation}): any {{ {bind} return r.{name}; }}"),
+            ));
+        }
+    }
+    // A prototype's method is its receiver's member above, not a global call.
+    for (path, _) in table
+        .functions
+        .iter()
+        .filter(|(path, _)| !path.contains(".prototype."))
+    {
+        forms.push((
+            format!("{path}(x)"),
+            format!("export function demo(x: any): any {{ return {path}(x); }}"),
+        ));
+    }
+    for (path, _) in table.values.iter() {
+        forms.push((
+            path.to_string(),
+            format!("export function demo(): any {{ return {path}; }}"),
+        ));
     }
     forms
 }

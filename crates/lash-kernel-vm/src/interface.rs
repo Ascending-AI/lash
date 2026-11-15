@@ -72,7 +72,6 @@ pub struct Program {
     pub closure: lash_kernel_doc::heap::PageId,
     pub document: Arc<Document>,
     pub library: PreparedLibrary,
-    pub selection: lash_kernel_doc::Selection,
     /// The root instance of this execution.
     pub link: LinkId,
     /// Reached instances, loaded before the first instruction.
@@ -137,7 +136,6 @@ impl Program {
         links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
-        selection: lash_kernel_doc::Selection,
     ) -> Result<Self, StartError> {
         for document in documents.values() {
             library.note_identified_document(document);
@@ -151,7 +149,6 @@ impl Program {
             links,
             closure,
             library,
-            selection,
         )
     }
 
@@ -279,7 +276,6 @@ impl Program {
         links: &BTreeMap<LinkId, lash_kernel_value::package::Link>,
         closure: lash_kernel_doc::heap::PageId,
         library: PreparedLibrary,
-        selection: lash_kernel_doc::Selection,
     ) -> Result<Self, StartError> {
         let instances = Self::prepare_instances(&documents, links)?;
         let invalid = |problem: &str| StartError::Linked {
@@ -302,7 +298,6 @@ impl Program {
             document: root,
             closure,
             library,
-            selection,
         };
         program.validate_links()?;
         let content = lash_kernel_package::LinkedContent {
@@ -314,27 +309,19 @@ impl Program {
             links: links.clone(),
             packages: BTreeMap::new(),
         };
-        program.functions = match &program.selection {
-            lash_kernel_doc::Selection::Restored(selection) => selection
-                .live
-                .iter()
-                .map(|callable| callable.function)
-                .chain(selection.pins.iter().copied())
-                .collect(),
-            lash_kernel_doc::Selection::Fresh => content
-                .inspect(
-                    link,
-                    &lash_kernel_package::ReachSelection::AllExports,
-                    program.helpers().as_ref(),
-                )
-                .map_err(|error| StartError::Linked {
-                    problem: error.to_string(),
-                })?
-                .functions
-                .into_values()
-                .flatten()
-                .collect(),
-        };
+        program.functions = content
+            .inspect(
+                link,
+                &lash_kernel_package::ReachSelection::AllExports,
+                program.helpers().as_ref(),
+            )
+            .map_err(|error| StartError::Linked {
+                problem: error.to_string(),
+            })?
+            .functions
+            .into_values()
+            .flatten()
+            .collect();
         Ok(program)
     }
 
@@ -343,45 +330,6 @@ impl Program {
         let invalid = |problem: &str| StartError::Linked {
             problem: problem.into(),
         };
-        if let lash_kernel_doc::Selection::Restored(selection) = &self.selection {
-            for callable in &selection.live {
-                let instance = self
-                    .instances
-                    .get(&callable.link)
-                    .ok_or_else(|| invalid("retained callable Link is not loaded"))?;
-                let document = self
-                    .documents
-                    .get(&instance.document)
-                    .ok_or_else(|| invalid("retained callable document is not loaded"))?;
-                if document.functions.contains_key(&callable.function) {
-                    continue;
-                }
-                let mut pending = vec![callable.function];
-                let mut seen = std::collections::BTreeSet::new();
-                while let Some(function) = pending.pop() {
-                    if !seen.insert(function) {
-                        continue;
-                    }
-                    if !selection.pins.contains(&function) {
-                        return Err(invalid("retained helper has no proven pin"));
-                    }
-                    let registered = self
-                        .helpers()
-                        .registered(&function)
-                        .ok_or_else(|| invalid("pinned helper is not installed"))?;
-                    if registered.kernel() != document.kernel() {
-                        return Err(invalid("retained helper requires another kernel"));
-                    }
-                    for import in registered.imports().values() {
-                        let id = lash_kernel_value::HelperOperationId::of_import(import);
-                        if instance.helper_operations.get(&id) != Some(import) {
-                            return Err(invalid("retained helper operation context differs"));
-                        }
-                    }
-                    pending.extend(registered.callees());
-                }
-            }
-        }
         let root = self
             .instances
             .get(&self.link)
@@ -437,20 +385,8 @@ impl Program {
                         if !target.functions.contains_key(&callable.function) {
                             return Err(invalid("code target definition is not loaded"));
                         }
-                        let descriptor = match (target.exports.get(&export.name), &export.member) {
-                            (Some(lash_kernel_doc::Export::Function(function)), None) => function,
-                            (Some(lash_kernel_doc::Export::Type(ty)), Some(member)) => {
-                                match ty.members.get(member) {
-                                    Some(
-                                        lash_kernel_doc::TypeMember::Static(function)
-                                        | lash_kernel_doc::TypeMember::Method(function)
-                                        | lash_kernel_doc::TypeMember::Property(function),
-                                    ) => function,
-                                    _ => return Err(invalid("code target Type member is absent")),
-                                }
-                            }
-                            _ => return Err(invalid("code target Export is absent")),
-                        };
+                        let descriptor = exported(target, export)
+                            .ok_or_else(|| invalid("code target Export is absent"))?;
                         if descriptor.function != callable.function {
                             return Err(invalid("code target differs from its Export"));
                         }
@@ -830,8 +766,9 @@ pub enum RunError {
         /// statement whose evaluation raised, a library call's included.
         /// A raise out of library code names the first document statement
         /// it unwinds into, and one a `finally` held names its `try`
-        /// statement. `None` when a run-root cleanup held it, or no
-        /// document statement was left to name it.
+        /// statement. `None` when the run's root entry's cleanup held it
+        /// (an imported entry's caller names its call's statement), or
+        /// no document statement was left to name it.
         site: Option<lash_kernel_value::sites::Site>,
     },
     /// The run reached its end with tasks that were unfinished, or that
@@ -900,9 +837,29 @@ pub enum StartError {
     Heap(#[from] lash_kernel_doc::heap::HeapFault),
 }
 
-pub use crate::paged::{
-    CellSave, CellStart, Finished, Machine, MachineError, OpenError, SaveCell, SavedCell, SealError,
+pub use crate::durable::session::{
+    CellSave, SaveCell, SaveRules, SavedCell, SavedFunction, Saving,
 };
+pub use crate::paged::{
+    CellStart, Finished, Inadmissible, Machine, MachineError, OpenError, SealError,
+};
+
+/// The function export `export` names in `document`: a function export,
+/// or a function member of a type export.
+pub(crate) fn exported<'d>(
+    document: &'d Document,
+    export: &ExportName,
+) -> Option<&'d lash_kernel_doc::FunctionExport> {
+    match (document.exports.get(&export.name)?, &export.member) {
+        (lash_kernel_doc::Export::Function(function), None) => Some(function),
+        (lash_kernel_doc::Export::Type(ty), Some(member)) => match ty.members.get(member)? {
+            lash_kernel_doc::TypeMember::Static(function)
+            | lash_kernel_doc::TypeMember::Method(function)
+            | lash_kernel_doc::TypeMember::Property(function) => Some(function),
+        },
+        _ => None,
+    }
+}
 
 /// A slot resolved under its owning Link. Code/type lookup never calls the host.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -939,8 +896,41 @@ pub struct PreparedInstance {
 /// Source-owned coordinates used only when callables cross a boundary.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionOrigins {
+    /// The written facts of a function the running cell creates, by the
+    /// site that creates it.
     pub sites: BTreeMap<(LinkId, lash_kernel_value::sites::Site), lash_kernel_dialect::Written>,
-    pub environments: BTreeMap<lash_kernel_doc::heap::EntityId, lash_kernel_dialect::Written>,
+    /// The written facts of a saved function, by its identity: a closure
+    /// an earlier cell made keeps that cell's link and creation site, which
+    /// the running cell's facts do not name.
+    pub functions: BTreeMap<FunctionId, lash_kernel_dialect::Written>,
+}
+
+impl FunctionOrigins {
+    /// The facts a dialect wrote for the cell linked as `link`: one at a
+    /// library site with no path is a saved function's, and is kept by
+    /// the function.
+    pub fn of<'a>(
+        link: LinkId,
+        written: impl IntoIterator<
+            Item = (
+                &'a lash_kernel_value::sites::Site,
+                &'a lash_kernel_dialect::Written,
+            ),
+        >,
+    ) -> Self {
+        let mut origins = Self::default();
+        for (site, written) in written {
+            match &site.unit {
+                lash_kernel_value::sites::Unit::Library(function) if site.path.is_empty() => {
+                    origins.functions.insert(*function, written.clone());
+                }
+                _ => {
+                    origins.sites.insert((link, site.clone()), written.clone());
+                }
+            }
+        }
+        origins
+    }
 }
 
 impl PreparedInstance {

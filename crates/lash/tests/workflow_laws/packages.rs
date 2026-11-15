@@ -102,13 +102,27 @@ pub(super) async fn capturing_views() -> (
     lash::package::RecordedPackages,
     lash::vm::WorkflowEnvironmentRequest,
 ) {
-    let core = super::crossing::crossing_core().await;
+    let core = super::crossing::crossing_core_with_workflow_capture(true).await;
     let pin = lash::process::HostArtifactPin::mint();
     let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
         .component(super::crossing::CAPTURE_TOOLS, &())
         .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
         .build()
         .unwrap();
+    capturing_views_on(core, pin, base).await
+}
+
+pub(super) async fn capturing_views_on(
+    core: lash::LashCore,
+    pin: lash::process::HostArtifactPin,
+    base: lash::process::ProcessEnv,
+) -> (
+    lash::LashCore,
+    lash::process::HostArtifactPin,
+    lash::process::ProcessEnv,
+    lash::package::RecordedPackages,
+    lash::vm::WorkflowEnvironmentRequest,
+) {
     let (packages, namespace) = namespace(&core, &pin, &base).await;
     let mut fixture = Packages {
         core,

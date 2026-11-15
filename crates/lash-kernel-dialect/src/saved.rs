@@ -3,24 +3,21 @@
 use crate::Written;
 
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::snapshot::{FrozenToken, SnapshotError, SnapshotHeap, SnapshotRefusal};
-use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition, FunctionRepresentation};
+use lash_kernel_doc::snapshot::{SnapshotError, SnapshotRefusal};
+use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition};
 
-use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::paged::{FrozenRef, HeapWriteError, SemanticHeap};
+use lash_kernel_state::paged::FrozenRef;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use {
     lash_kernel_value::CallableId, lash_kernel_value::EffectName, lash_kernel_value::LinkId,
     lash_kernel_value::Name,
 };
-use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
-mod carry;
 mod graph;
 mod relink;
 #[cfg(test)]
 mod relink_laws;
-pub use carry::{Saved, save};
+pub mod run;
 pub use graph::{
     Bundle, BundleBody, BundleRefusal, DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, MemberBody,
 };
@@ -80,15 +77,6 @@ pub struct Token {
     pub before: Vec<FrozenRef>,
     pub after: Vec<FrozenRef>,
 }
-impl Token {
-    fn frozen(token: FrozenToken<FrozenRef>) -> Self {
-        Self {
-            tag: token.tag,
-            before: token.before,
-            after: token.after,
-        }
-    }
-}
 /// Why a binding that holds a function was not saved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -137,26 +125,6 @@ pub enum NotSaved {
     Unreadable { problem: String },
 }
 
-/// The terminal cell's root values, read directly from its paged heap.
-#[derive(Clone, Copy)]
-pub struct Left<'a> {
-    pub document: &'a Document,
-    pub link: LinkId,
-    pub documents: &'a BTreeMap<LinkId, Document>,
-    pub bindings: &'a BTreeMap<Name, PageValue>,
-    pub not_carried: &'a [Name],
-    pub controls: &'a BTreeMap<lash_kernel_value::OperationUse, BTreeSet<crate::EffectControl>>,
-    /// What the source wrote of each function the document makes, by the
-    /// site of its closure ([`crate::Lowered::written`]).
-    pub written: &'a BTreeMap<Site, Written>,
-    /// How the dialect holds a function as a value.
-    pub values: &'a FunctionRepresentation,
-    /// The cell's ExecutionClosure node.
-    pub closure: PageRef,
-    /// The library the cell ran against: what the bodies its functions
-    /// reach perform is read from it.
-    pub catalog: &'a dyn FunctionCatalog,
-}
 #[derive(Debug, thiserror::Error)]
 enum SaveError {
     #[error(transparent)]
@@ -187,95 +155,8 @@ impl From<SnapshotError> for SaveError {
         }
     }
 }
-fn write_fault(error: HeapWriteError) -> SnapshotError {
-    match error {
-        HeapWriteError::Fault(error) => error.into(),
-        other => {
-            HeapFault::Malformed(format!("validated capture failed to freeze: {other}")).into()
-        }
-    }
-}
-/// The cell's heap as a saving reads it: a closure `main` made reads the
-/// bindings the cell left, and a capture freezes to pages.
-struct Saving<'a, 'h> {
-    heap: &'h mut PagedHeap,
-    left: &'a Left<'a>,
-}
-impl SnapshotHeap for Saving<'_, '_> {
-    type Frozen = FrozenRef;
-
-    fn pages(&self) -> &dyn PageReader {
-        self.heap
-    }
-
-    fn closure_site(&self, id: EntityId) -> Result<std::sync::Arc<Site>, HeapFault> {
-        self.heap.closure(id)?.site.resolve(self.heap.pages())
-    }
-
-    fn closure_callable(&self, id: EntityId) -> Result<CallableId, HeapFault> {
-        Ok(self.heap.closure(id)?.callable)
-    }
-
-    fn closure_capture(
-        &mut self,
-        id: EntityId,
-        name: &Name,
-    ) -> Result<Option<PageValue>, HeapFault> {
-        let object = self.heap.closure(id)?;
-        match object.captures.get(
-            &lash_kernel_state::kernel_internals::metadata::metadata_key(name),
-            self.heap.pages(),
-        )? {
-            Some((_, cell)) => self.heap.variable_get(cell).map(Some),
-            None => {
-                let site = object.site.resolve(self.heap.pages())?;
-                if object.callable.link != self.left.link || site.unit != Unit::Main {
-                    return Ok(None);
-                }
-                let value = match self.left.bindings.get(name) {
-                    Some(value) => Some(value.clone()),
-                    None => self.heap.session_binding(name)?,
-                };
-                if let Some(value) = &value {
-                    self.heap
-                        .bind_closure_capture(id, name, value.clone())
-                        .map_err(|error| match error {
-                            HeapWriteError::Fault(fault) => fault,
-                            other => HeapFault::Malformed(format!(
-                                "saved Main capture cannot be retained: {other}"
-                            )),
-                        })?;
-                }
-                Ok(value)
-            }
-        }
-    }
-
-    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<PageValue>, HeapFault> {
-        // The bindings the cell left, whether or not they are among the
-        // bindings it drops.
-        match unit {
-            Unit::Main => match self.left.bindings.get(name) {
-                Some(value) => Ok(Some(value.clone())),
-                None => self.heap.session_binding(name),
-            },
-            _ => Ok(None),
-        }
-    }
-
-    fn freeze(
-        &mut self,
-        value: &PageValue,
-        named: &BTreeSet<EntityId>,
-    ) -> Result<(FrozenRef, BTreeSet<EntityId>), SnapshotError> {
-        self.heap.freeze_named(value, named).map_err(write_fault)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Unusable {
-    #[error("saved function `{function}` refers to unavailable callable {needs:?}")]
-    Missing { function: Name, needs: EntityId },
     #[error("saved function `{function}` calls `{callee}`, which {gap}")]
     Relink {
         function: Name,
@@ -285,37 +166,11 @@ pub enum Unusable {
     #[error("saved function `{function}` has inconsistent defining Link")]
     Link { function: Name },
 }
-pub fn closure_of<'a>(
-    functions: &'a BTreeMap<Name, SavedFunction>,
-    roots: &BTreeSet<Name>,
-) -> Result<BTreeMap<Name, &'a SavedFunction>, Unusable> {
-    let mut held = BTreeMap::new();
-    let mut pending = roots
-        .iter()
-        .filter_map(|name| functions.get(name))
-        .collect::<Vec<_>>();
-    while let Some(function) = pending.pop() {
-        if held.insert(function.name.clone(), function).is_some() {
-            continue;
-        }
-        for needed in &function.references {
-            let next = functions
-                .values()
-                .find(|candidate| candidate.environment == *needed)
-                .ok_or_else(|| Unusable::Missing {
-                    function: function.label(),
-                    needs: *needed,
-                })?;
-            pending.push(next);
-        }
-    }
-    Ok(held)
-}
-
 /// A closure cannot end a cell through a known control operation. Follow
 /// immutable local identities; diagnostic spellings do not select controls.
 fn check_controls(
-    left: &Left<'_>,
+    controls: &BTreeMap<lash_kernel_value::OperationUse, BTreeSet<crate::EffectControl>>,
+    catalog: &dyn FunctionCatalog,
     callable: CallableId,
     document: &Document,
 ) -> Result<(), SaveError> {
@@ -328,7 +183,7 @@ fn check_controls(
         let definition = document
             .functions
             .get(&id)
-            .or_else(|| left.catalog.definition(&id))
+            .or_else(|| catalog.definition(&id))
             .ok_or_else(|| unreadable("the saved callable definition is not loaded"))?;
         if let Some(body) = definition.body() {
             pending.extend(lash_kernel_doc::Node::Block(&body.block).functions_within());
@@ -347,8 +202,7 @@ fn check_controls(
                         )
                     },
                 };
-                if left
-                    .controls
+                if controls
                     .get(&use_)
                     .is_some_and(|controls| !controls.is_empty())
                 {

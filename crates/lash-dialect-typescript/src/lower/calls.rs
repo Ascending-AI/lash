@@ -11,6 +11,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 use lash_ext_ts_helpers::builtins::Receiver;
 
 mod discovery;
+mod exact;
 mod methods;
 mod values;
 pub(crate) use discovery::tool_calls;
@@ -294,7 +295,7 @@ impl Lowerer<'_> {
     }
 
     /// The helper that reads `object.key` with JavaScript's meaning.
-    fn read_member(&mut self, object: &Operand, key: &Key, ty: Ty) -> Lowering<Operand> {
+    pub(super) fn read_member(&mut self, object: &Operand, key: &Key, ty: Ty) -> Lowering<Operand> {
         if let Key::Static(name) = key
             && self.table.properties.contains_key(name.as_str())
         {
@@ -843,6 +844,23 @@ impl Lowerer<'_> {
         span: SourceSpan,
         discard_result: bool,
     ) -> Lowering<Operand> {
+        // `value.initialized(k)` and the operand spellings are the read of
+        // `k` they name, whose check stands before the expression reading
+        // it, as a read's does. `value.text_join` is a template's join,
+        // which lowers where the expression stands, as the template does.
+        if let Some((root, path)) = static_path(callee)
+            && !self.is_bound(root)
+            && let Some(
+                exact @ (exact::Exact::Initialized
+                | exact::Exact::Operand
+                | exact::Exact::ListOperand
+                | exact::Exact::RecordOperand
+                | exact::Exact::TextOperand
+                | exact::Exact::TextJoin),
+            ) = exact::Exact::named(&path)
+        {
+            return self.call_exact(exact, args, span, discard_result, false);
+        }
         self.expression_block(|this| this.call(callee, args, span, discard_result, false))
     }
 
@@ -857,6 +875,12 @@ impl Lowerer<'_> {
         discard_result: bool,
         awaited: bool,
     ) -> Lowering<Operand> {
+        if let Some((root, path)) = static_path(callee)
+            && !self.is_bound(root)
+            && let Some(exact) = exact::Exact::named(&path)
+        {
+            return self.call_exact(exact, args, span, discard_result, awaited);
+        }
         if let Some((root, path)) = static_path(callee)
             && !self.is_bound(root)
             && let Some(constructor) =
@@ -1047,54 +1071,7 @@ impl Lowerer<'_> {
         match callee {
             ast::Expr::Member {
                 object, property, ..
-            } => {
-                let proven = self.facts.primitive(object);
-                let object = self.lower_expr(object)?;
-                let mut object = self.pin(object);
-                // Representation proof can refine unknown data, but a
-                // contradictory trusted kind still owns its typed refusal.
-                let proven = proven.filter(|ty| {
-                    declared_receiver(&object.ty).is_none_or(|(receiver, _)| {
-                        declared_receiver(ty).is_some_and(|(kind, _)| kind == receiver)
-                    })
-                });
-                if let Some(ty) = &proven {
-                    object.ty = ty.clone();
-                }
-                let key = self.lower_key(property)?;
-                let key = self.reference_key(&object, key)?;
-                self.check_method(&object, &key, args, span)?;
-                if let (Ty::Package(brand), Key::Static(name)) = (&object.ty, &key) {
-                    let brand = brand.clone();
-                    return self.call_typed_member(&object, &brand, name, args, awaited);
-                }
-                if let Key::Static(name) = &key
-                    && matches!(
-                        object.ty,
-                        Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
-                    )
-                {
-                    let targets = self.selectable(name, true);
-                    if !targets.is_empty() || self.seals() {
-                        return self.select_call(&object, name, &targets, args, awaited);
-                    }
-                }
-                if let Key::Static(name) = &key
-                    && let Some(called) =
-                        self.call_declared(&object, name, args, discard_result, proven.is_some())?
-                {
-                    return Ok(called);
-                }
-                if let Key::Static(name) = &key
-                    && let Some(called) = self.call_map(&object, name, args)?
-                {
-                    return Ok(called);
-                }
-                let function = self.get_member(&object, &key)?;
-                let function = self.pin(function);
-                let args = self.arguments(args)?;
-                self.apply_method(function, object, key.operand(), args)
-            }
+            } => self.call_method(object, property, args, span, discard_result, awaited),
             ast::Expr::OptionalChain { base, operations } => {
                 let (function, receiver, name) =
                     self.optional_reference(base, operations, false)?;
@@ -1113,6 +1090,92 @@ impl Lowerer<'_> {
                 self.apply(function, Operand::undefined(), args, declared)
             }
         }
+    }
+
+    /// `object.property(args)`: the receiver, held before the arguments
+    /// run unless nothing can reassign it.
+    pub(super) fn call_method(
+        &mut self,
+        object: &ast::Expr,
+        property: &ast::MemberProperty,
+        args: &[ast::CallArg],
+        span: SourceSpan,
+        discard_result: bool,
+        awaited: bool,
+    ) -> Lowering<Operand> {
+        let proven = self.facts.primitive(object);
+        let object = self.lower_expr(object)?;
+        let mut object = self.pin(object);
+        // Representation proof can refine unknown data, but a
+        // contradictory trusted kind still owns its typed refusal.
+        let proven = proven.filter(|ty| {
+            declared_receiver(&object.ty).is_none_or(|(receiver, _)| {
+                declared_receiver(ty).is_some_and(|(kind, _)| kind == receiver)
+            })
+        });
+        if let Some(ty) = &proven {
+            object.ty = ty.clone();
+        }
+        self.call_method_on(
+            object,
+            proven.is_some(),
+            MethodCall {
+                property,
+                args,
+                span,
+                discard_result,
+                awaited,
+            },
+        )
+    }
+
+    /// `object.property(args)` on a receiver already read and held, whose
+    /// type is its own (`proven` when construction proved it).
+    pub(super) fn call_method_on(
+        &mut self,
+        object: Operand,
+        proven: bool,
+        call: MethodCall<'_>,
+    ) -> Lowering<Operand> {
+        let MethodCall {
+            property,
+            args,
+            span,
+            discard_result,
+            awaited,
+        } = call;
+        let key = self.lower_key(property)?;
+        let key = self.reference_key(&object, key)?;
+        self.check_method(&object, &key, args, span)?;
+        if let (Ty::Package(brand), Key::Static(name)) = (&object.ty, &key) {
+            let brand = brand.clone();
+            return self.call_typed_member(&object, &brand, name, args, awaited);
+        }
+        if let Key::Static(name) = &key
+            && matches!(
+                object.ty,
+                Ty::Unknown | Ty::Callable(_) | Ty::Map | Ty::Set | Ty::Union(_)
+            )
+        {
+            let targets = self.selectable(name, true);
+            if !targets.is_empty() || self.seals() {
+                return self.select_call(&object, name, &targets, args, awaited);
+            }
+        }
+        if let Key::Static(name) = &key
+            && let Some(called) = self.call_declared(&object, name, args, discard_result, proven)?
+        {
+            return Ok(called);
+        }
+        if let Key::Static(name) = &key
+            && let Some(called) = self.call_map(&object, name, args, proven)?
+        {
+            return Ok(called);
+        }
+        let function = self.get_member(&object, &key)?;
+        let function = self.pin(function);
+        let args = self.arguments(args)?;
+        self.apply_method(function, object, key.operand(), args)
     }
 
     /// A Map cannot carry guest fields: its method read always selects its
@@ -1177,6 +1240,7 @@ impl Lowerer<'_> {
         object: &Operand,
         name: &str,
         args: &[ast::CallArg],
+        proven: bool,
     ) -> Lowering<Option<Operand>> {
         if !matches!(
             object.ty,
@@ -1190,13 +1254,26 @@ impl Lowerer<'_> {
             "has" => "ts.map.has",
             _ => return Ok(None),
         };
+        let call = |this: &mut Self| match plain_arguments(args) {
+            Some(values) => this.map_method(object, name, &values),
+            None => {
+                let passed = this.arguments(args)?;
+                this.invoke(function, &[object.clone(), passed], Ty::Unknown)
+            }
+        };
+        if proven && object.ty == Ty::Map {
+            let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+            let place = Place::Variable(super::statements::variable_of(&result));
+            let value = call(self)?;
+            self.store(place, value);
+            return Ok(Some(result));
+        }
         let kind = self.native("kind", vec![object.expr()])?;
         let test = self.same(kind, Operand::text("map").expr())?;
         let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
         let place = Place::Variable(super::statements::variable_of(&result));
         let direct = self.block(|this| {
-            let passed = this.arguments(args)?;
-            let value = this.invoke(function, &[object.clone(), passed], Ty::Unknown)?;
+            let value = call(this)?;
             this.store(place.clone(), value);
             Ok(())
         })?;
@@ -1210,6 +1287,64 @@ impl Lowerer<'_> {
         })?;
         self.emit_if(test, direct, fallback);
         Ok(Some(result))
+    }
+
+    /// `get`, `set` or `has` on a value already tested to be a map, with
+    /// plain arguments: the helper's body (`ts.map.get`, `ts.map.set`,
+    /// `ts.map.has`) in place, over its arguments without the list. A key
+    /// the lowerer knows is a text is its own key (`K-COL-017`); any other
+    /// key is `ts.map.key`'s.
+    fn map_method(
+        &mut self,
+        object: &Operand,
+        name: &str,
+        args: &[&ast::Expr],
+    ) -> Lowering<Operand> {
+        let arity = if name == "set" { 2 } else { 1 };
+        let mut passed = self.positional_arguments(args, arity)?;
+        passed.resize_with(arity, Operand::undefined);
+        // Every argument is taken, in order, before the key is made.
+        let passed: Vec<Operand> = passed.into_iter().map(|value| self.pin(value)).collect();
+        let key = passed[0].clone();
+        let key = if key.ty == Ty::Text {
+            key
+        } else {
+            self.invoke("ts.map.key", &[key], Ty::Unknown)?
+        };
+        match name {
+            "set" => {
+                self.emit(Stmt::Assign {
+                    place: Place::Member(Member::Index {
+                        target: object.expr(),
+                        index: key.expr(),
+                    }),
+                    value: lash_kernel_doc::Rhs::Expr(passed[1].expr()),
+                    order: AssignOrder::PlaceFirst,
+                });
+                Ok(object.clone())
+            }
+            "has" => {
+                let found = self.native("map.contains", vec![object.expr(), key.expr()])?;
+                Ok(self.inline(found, Ty::Bool))
+            }
+            _ => {
+                let found = self.native("map.contains", vec![object.expr(), key.expr()])?;
+                let value = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+                let place = Place::Variable(super::statements::variable_of(&value));
+                let read = Expr::Member(Box::new(Member::Index {
+                    target: object.expr(),
+                    index: key.expr(),
+                }));
+                let hit = self.block(|this| {
+                    let entry = this.inline(read, Ty::Unknown);
+                    this.store(place, entry);
+                    Ok(())
+                })?;
+                let miss = self.block(|_| Ok(()))?;
+                self.emit_if(found, hit, miss);
+                Ok(value)
+            }
+        }
     }
 
     /// `object.name(args)` where the object's type is one built-in kind
@@ -1227,7 +1362,9 @@ impl Lowerer<'_> {
         discard_result: bool,
         proven: bool,
     ) -> Lowering<Option<Operand>> {
-        let Some((receiver, check)) = declared_receiver(&object.ty) else {
+        let receiver = declared_receiver(&object.ty)
+            .or_else(|| (proven && object.ty == Ty::Set).then_some((Receiver::Set, None)));
+        let Some((receiver, check)) = receiver else {
             return Ok(None);
         };
         let Some(function) = self
@@ -1382,4 +1519,13 @@ pub(crate) fn position_guard(
     is_native: impl Fn(&lash_kernel_value::FunctionId, &str) -> bool,
 ) -> Option<&Expr> {
     reads::position(condition, &is_native)
+}
+
+/// A method call's own parts, apart from its receiver.
+pub(super) struct MethodCall<'a> {
+    pub(super) property: &'a ast::MemberProperty,
+    pub(super) args: &'a [ast::CallArg],
+    pub(super) span: SourceSpan,
+    pub(super) discard_result: bool,
+    pub(super) awaited: bool,
 }

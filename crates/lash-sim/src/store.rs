@@ -627,8 +627,7 @@ impl ModelStore {
                             "session": event.actor_alias,
                         },
                         "output": lash_protocol_types::Durable(&tool_output),
-                        "execution": "recorded",
-                        "read": null,
+                        "classification": { "kind": "recorded" },
                     },
                 })
             }

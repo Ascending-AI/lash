@@ -233,7 +233,10 @@ py.namespace	total
 py.neg	total
 py.next	operation
 py.no_attribute	total
+py.number.floordiv	total
 py.number.iadd	total
+py.number.mod	total
+py.number.truediv	total
 py.number_text	total
 py.number_underscores	total
 py.oct	total

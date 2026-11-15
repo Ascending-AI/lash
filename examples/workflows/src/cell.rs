@@ -88,7 +88,6 @@ fn machine(
                 &content.links[&link].document.to_string().into_bytes(),
             )),
             library,
-            k::Selection::Fresh,
         )?,
         BOUNDS,
         CellStart {

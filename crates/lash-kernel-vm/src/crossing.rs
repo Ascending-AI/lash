@@ -12,27 +12,20 @@
 //! not in it. Anywhere else, a concretely typed slot such as a record field
 //! or JSON data, it raises `not_data` naming its path
 //! (`input.plan.steps[2].map`). A task, a ref, a cycle, a function no
-//! adapter says how to start, one whose exact library origin is unavailable, and a value past its
+//! adapter says how to start, one whose exact library origin is unavailable, one of a Link the run
+//! has not loaded, and a value past its
 //! bound still raise. Every refusal comes before anything is requested.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::data::{CopyError, raised};
-use lash_kernel_doc::heap::{EntityId, HeapFault, PageReader, PageValue};
-use lash_kernel_doc::snapshot::{members, text_of};
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionCatalog};
+use crate::data::CopyError;
+use lash_kernel_doc::{Datum, FunctionCatalog};
 
-use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::paged::SemanticHeap;
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::data_limits::KernelDataLimits;
 use lash_kernel_value::types::Type;
 use {lash_kernel_value::names::CallableId, lash_kernel_value::names::DocumentId};
-
-pub(crate) struct CrossingHeap<'m> {
-    pub heap: &'m mut PagedHeap,
-}
 
 pub(crate) struct CrossingRun<'a> {
     pub function_origins: &'a crate::interface::FunctionOrigins,
@@ -41,7 +34,6 @@ pub(crate) struct CrossingRun<'a> {
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
     pub catalog: &'a dyn FunctionCatalog,
     pub helpers: &'a lash_kernel_doc::BuildHelpers,
-    pub selection: &'a lash_kernel_doc::Selection,
     pub data: KernelDataLimits,
 }
 
@@ -53,60 +45,34 @@ fn defining_document<'a>(
         .get(&callable.link)
         .and_then(|instance| run.documents.get(&instance.document))
         .map(Arc::as_ref)
-        .ok_or_else(|| CopyError::Heap(HeapFault::Malformed("callable Link is not loaded".into())))
-}
-
-fn callable(heap: &CrossingHeap<'_>, value: &PageValue) -> Result<Option<CallableId>, CopyError> {
-    Ok(match value {
-        PageValue::Function(callable) => Some(**callable),
-        PageValue::Closure(id) => Some(heap.heap.closure(*id)?.callable),
-        _ => None,
-    })
-}
-
-/// Packed dialect callables cross as one FunctionValue; ordinary tuples keep their shape.
-fn function_root(
-    heap: &CrossingHeap<'_>,
-    run: &CrossingRun<'_>,
-    value: &PageValue,
-) -> Result<Option<PageValue>, CopyError> {
-    if callable(heap, value)?.is_some() {
-        return Ok(Some(value.clone()));
-    }
-    let PageValue::Tuple(tuple) = value else {
-        return Ok(None);
-    };
-    let values = members(heap.heap, tuple)?;
-    for (index, member) in values.iter().enumerate() {
-        let PageValue::Closure(id) = member else {
-            continue;
-        };
-        let closure = heap.heap.closure(*id)?;
-        let document = defining_document(run, closure.callable)?;
-        let site = closure.site.resolve(heap.heap.pages())?;
-        if let Some(start) = lash_kernel_doc::snapshot::closure_at(
-            document,
-            &site,
-            closure.callable.link,
-            run.helpers,
-            run.selection,
-        )
-        .and_then(|c| c.presentation.as_ref())
-            && let lash_kernel_doc::FunctionRepresentation::Token { tag, callable } =
-                &start.representation
-            && *callable as usize == index
-            && let Some(PageValue::Text(first)) = values.first()
-            && text_of(heap.heap, first)? == *tag
-        {
-            return Ok(Some(member.clone()));
-        }
-    }
-    Ok(None)
+        .ok_or_else(|| crate::data::raised("not_data", "callable Link is not loaded").into())
 }
 
 #[path = "crossing/captures.rs"]
 mod captures;
-use captures::extract_function;
+
+#[path = "crossing/arena.rs"]
+pub(crate) mod arena;
+
+/// The bytes a crossed argument's function values add to its boundary
+/// charge: each one's canonical form.
+pub(crate) fn crossed_bytes(datum: &Datum) -> u64 {
+    match datum {
+        Datum::FunctionValue(value) => value
+            .canonical_tagged_bytes()
+            .map_or(0, |bytes| bytes.len() as u64),
+        Datum::Tuple(items) | Datum::List(items) | Datum::Set(items) => {
+            items.iter().map(crossed_bytes).sum()
+        }
+        Datum::Map(entries) => entries
+            .iter()
+            .map(|(key, value)| crossed_bytes(key) + crossed_bytes(value))
+            .sum(),
+        Datum::Record(fields) => fields.iter().map(|(_, value)| crossed_bytes(value)).sum(),
+        Datum::Error(error) => crossed_bytes(error.data()),
+        _ => 0,
+    }
+}
 
 /// The declared type at one path of an effect argument: open, where every
 /// value is admitted, or the members of the union it is. No member means no
@@ -210,209 +176,4 @@ fn step_text(step: &Step<'_>) -> String {
         Step::Entry(None) => "[entry]".to_owned(),
         Step::ErrorData => ".data".to_owned(),
     }
-}
-
-/// Copies an effect argument out of the run, walked with `ty`, the type its
-/// parameter `name` declares: each function in it crosses as a function
-/// value where that type admits one and raises `not_data` naming its path
-/// elsewhere. The copy-out rules hold for everything else.
-pub(crate) fn copy_out_tool_arg(
-    heap: &mut CrossingHeap<'_>,
-    run: &mut CrossingRun<'_>,
-    value: &PageValue,
-    name: &str,
-    ty: &Type,
-) -> Result<Datum, CopyError> {
-    let depth = heap.heap.value_depth_limit();
-    let mut at = ArgumentPath {
-        steps: vec![name.to_owned()],
-    };
-    copy(
-        heap,
-        run,
-        value,
-        &Slot::of(ty),
-        &mut at,
-        depth,
-        &mut Vec::new(),
-    )
-}
-
-/// Copies the member one `step` into a value standing at `slot`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one walk carries the heap, the run, the slot, the path and the bounds"
-)]
-fn member(
-    heap: &mut CrossingHeap<'_>,
-    run: &mut CrossingRun<'_>,
-    value: &PageValue,
-    slot: &Slot<'_>,
-    step: Step<'_>,
-    at: &mut ArgumentPath,
-    budget: usize,
-    path: &mut Vec<EntityId>,
-) -> Result<Datum, CopyError> {
-    let child = slot.child(&step);
-    let typed = matches!(child, Slot::Typed(_));
-    if typed {
-        at.steps.push(step_text(&step));
-    }
-    let copied = copy(heap, run, value, &child, at, budget, path);
-    if typed {
-        at.steps.pop();
-    }
-    copied
-}
-
-fn copy(
-    heap: &mut CrossingHeap<'_>,
-    run: &mut CrossingRun<'_>,
-    value: &PageValue,
-    slot: &Slot<'_>,
-    at: &mut ArgumentPath,
-    budget: usize,
-    path: &mut Vec<EntityId>,
-) -> Result<Datum, CopyError> {
-    let Some(budget) = budget.checked_sub(1) else {
-        return Err(raised(
-            "too_deep",
-            format!(
-                "a value copied out of the run exceeds the configured {}-level value depth",
-                heap.heap.value_depth_limit()
-            ),
-        )
-        .into());
-    };
-    if function_root(heap, run, value)?.is_some() {
-        if !slot.admits_function() {
-            return Err(raised(
-                "not_data",
-                format!(
-                    "a function cannot leave the run: `{}` is declared as data, which admits no function",
-                    at.render()
-                ),
-            )
-            .into());
-        }
-        let function =
-            extract_function(heap, run, value, budget, path).map_err(|error| match error {
-                CopyError::Raised(mut raised) => {
-                    raised.message = format!("a function cannot leave the run: {}", raised.message);
-                    CopyError::Raised(raised)
-                }
-                other => other,
-            })?;
-        return Ok(Datum::FunctionValue(Box::new(function)));
-    }
-    Ok(match value {
-        PageValue::Tuple(tuple) => {
-            let mut items = Vec::new();
-            for (index, item) in members(heap.heap, tuple)?.iter().enumerate() {
-                items.push(member(
-                    heap,
-                    run,
-                    item,
-                    slot,
-                    Step::Item(index),
-                    at,
-                    budget,
-                    path,
-                )?);
-            }
-            Datum::Tuple(items)
-        }
-        PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
-            if path.contains(id) {
-                return Err(
-                    raised("cycle", "a value that holds itself cannot leave the run").into(),
-                );
-            }
-            path.push(*id);
-            // The members are read before any is copied: a crossing reads
-            // the heap again.
-            let mut elements = Vec::new();
-            heap.heap.visit(*id, &mut |element| {
-                elements.push(match element {
-                    lash_kernel_doc::heap::Element::Item(v) => (None, None, v.clone()),
-                    lash_kernel_doc::heap::Element::Entry { key, value } => {
-                        (Some(key.clone()), None, value.clone())
-                    }
-                    lash_kernel_doc::heap::Element::Field { name, value } => {
-                        (None, Some(name.clone()), value.clone())
-                    }
-                });
-                std::ops::ControlFlow::Continue(())
-            })?;
-            let mut items = Vec::new();
-            let mut entries = Vec::new();
-            let mut fields = Vec::new();
-            for (index, (key, field, element)) in elements.into_iter().enumerate() {
-                match (key, field) {
-                    (Some(key), _) => {
-                        // A text key names its entry, as a field names
-                        // its value.
-                        let name = match (&key, slot) {
-                            (PageValue::Text(text), Slot::Typed(_)) => {
-                                Some(text_of(heap.heap, text)?)
-                            }
-                            _ => None,
-                        };
-                        let copied = member(
-                            heap,
-                            run,
-                            &element,
-                            slot,
-                            Step::Entry(name.as_deref()),
-                            at,
-                            budget,
-                            path,
-                        )?;
-                        let key = member(heap, run, &key, slot, Step::Key, at, budget, path)?;
-                        entries.push((key, copied));
-                    }
-                    (None, Some(field)) => {
-                        let name = text_of(heap.heap, &field)?;
-                        let copied = member(
-                            heap,
-                            run,
-                            &element,
-                            slot,
-                            Step::Field(&name),
-                            at,
-                            budget,
-                            path,
-                        )?;
-                        fields.push((name, copied));
-                    }
-                    (None, None) => items.push(member(
-                        heap,
-                        run,
-                        &element,
-                        slot,
-                        Step::Item(index),
-                        at,
-                        budget,
-                        path,
-                    )?),
-                }
-            }
-            path.pop();
-            match value {
-                PageValue::List(_) => Datum::List(items),
-                PageValue::Set(_) => Datum::Set(items),
-                PageValue::Map(_) => Datum::Map(entries),
-                _ => Datum::Record(fields),
-            }
-        }
-        PageValue::Error(error) => {
-            let data = heap.heap.error_data(error)?;
-            Datum::Error(Box::new(ErrorDatum::new(
-                text_of(heap.heap, &error.kind)?,
-                text_of(heap.heap, &error.message)?,
-                member(heap, run, &data, slot, Step::ErrorData, at, budget, path)?,
-            )))
-        }
-        other => crate::data::copy_page_out(heap.heap, other)?,
-    })
 }

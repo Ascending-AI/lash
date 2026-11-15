@@ -2,6 +2,7 @@
 //! is diagnostic until collected on a qualified quiet host.
 mod attachments;
 mod facade;
+mod kernel_cold;
 mod ledger;
 mod observation;
 mod pg_statements;
@@ -26,6 +27,7 @@ use ledger::Observation;
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum Case {
+    KernelCold,
     WireSlots,
     TokenHealthy,
     TokenExpiring,
@@ -391,6 +393,7 @@ async fn run_observed(
             )
             .await?
         }
+        Case::KernelCold => kernel_cold::run(args.operations, args.ledger_cap)?,
         Case::WireSlots => attachments::run(args.operations, args.ledger_cap).await?,
         Case::TokenHealthy | Case::TokenExpiring | Case::TokenRejected => {
             tokens::run(args.case, args.operations, args.callers, args.ledger_cap).await?

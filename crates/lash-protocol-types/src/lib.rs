@@ -145,6 +145,6 @@ pub use llm::types::{
 /// )
 /// version_surface = "drain"
 /// format_manifest = "TurnJournal"
-pub const TURN_JOURNAL_SCHEMA_VERSION: u32 = 1;
+pub const TURN_JOURNAL_SCHEMA_VERSION: u32 = 2;
 
 pub mod engine_fault;

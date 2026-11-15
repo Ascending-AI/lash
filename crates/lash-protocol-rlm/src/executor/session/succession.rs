@@ -123,7 +123,6 @@ impl CodeModeExecutionState {
                 &reach.machine,
                 &held,
                 documents.helpers().as_ref(),
-                &lash_kernel_doc::Selection::Fresh,
             )
             .map_err(|error| refuse(error.to_string()))?;
             let id = plan
@@ -139,10 +138,6 @@ impl CodeModeExecutionState {
             edits.push((
                 name.clone(),
                 function.description(),
-                PageRef {
-                    id: PageId(loaded.closure.reference().0),
-                    grant: PageGrant::NONE,
-                },
                 function.callable,
                 plan.rewritten.correspondence,
             ));
@@ -159,8 +154,8 @@ impl CodeModeExecutionState {
             .pages
             .read(move |source| {
                 let mut editor = SessionEditor::open(Some(&session), source)?;
-                for (name, description, closure, callable, proof) in &edits {
-                    editor.succeed_function(name, description, *closure, *callable, proof)?;
+                for (name, description, callable, proof) in &edits {
+                    editor.succeed_function(name, description, *callable, proof)?;
                 }
                 editor.seal()
             })

@@ -81,17 +81,23 @@ impl SqliteProcessRegistry {
                 )
                 .map_err(process_sqlite_error)?;
             let Some(end) = end else { break };
-            crate::conn::cached_execute(
-                conn,
+            for sql in [
                 process_sql().event.release.sql(),
-                params![
-                    process_id.as_str(),
-                    crate::clamp_sequence_bound(after),
-                    end,
-                    lash_execution_contracts::process::ProcessEventKind::CancelRequested.as_str(),
-                ],
-            )
-            .map_err(process_sqlite_error)?;
+                process_sql().event.release_packed.sql(),
+            ] {
+                crate::conn::cached_execute(
+                    conn,
+                    sql,
+                    params![
+                        process_id.as_str(),
+                        crate::clamp_sequence_bound(after),
+                        end,
+                        lash_execution_contracts::process::ProcessEventKind::CancelRequested
+                            .as_str(),
+                    ],
+                )
+                .map_err(process_sqlite_error)?;
+            }
             released_events += plugin_u64_from_sql("ProcessEvent", "count", count)?;
             after = plugin_u64_from_sql("ProcessEvent", "sequence", end)?;
         }

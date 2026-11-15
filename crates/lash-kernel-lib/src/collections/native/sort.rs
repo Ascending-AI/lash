@@ -1,6 +1,7 @@
 //! Key sorting uses the native ABI's single canonical merge continuation.
 pub use lash_kernel_doc::arena::native::sort::{Comparison, ComparisonPhase, Merge, MergePosition};
 
+use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{NativeError, Value};
 use std::cmp::Ordering;
 
@@ -41,11 +42,11 @@ pub(super) fn keys(
             return Ok(sorted);
         } else {
             sorted.sort_by(|first, second| {
-                let (Value::Text(first), Value::Text(second)) = (ranks[*first], ranks[*second])
+                let (Value::Text(first), Value::Text(second)) = (&ranks[*first], &ranks[*second])
                 else {
                     unreachable!("the complete key list was checked")
                 };
-                let order = first.as_bytes().cmp(second.as_bytes());
+                let order = text_key(first).cmp(&text_key(second));
                 if descending { order.reverse() } else { order }
             });
             return Ok(sorted);
@@ -74,4 +75,11 @@ pub(super) fn keys(
         );
     }
     merge.finish()
+}
+
+/// Zero padding orders a short text before any nonzero extension. Length
+/// breaks a padded tie, so a prefix also precedes its NUL-only extensions.
+#[inline]
+fn text_key(text: &ShortText) -> u128 {
+    (text.word() >> 8).swap_bytes() | text.as_bytes().len() as u128
 }

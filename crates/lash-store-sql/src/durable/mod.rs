@@ -132,6 +132,11 @@ crate::statements! {
                  AND state_revision = ?3
              RETURNING state_revision, mail_seq, acked_seq";
 
+        /// The format set actor `?1`'s state is written in, when it has not
+        /// ended: what a mailbox commit checks against the sender's
+        /// retired sets.
+        formats_of = "SELECT formats FROM actors WHERE actor_key = ?1 AND state <> 'terminal'";
+
         /// Actor `?1`'s epoch and state, for a refusal's account.
         epoch_of = "SELECT epoch, state, state_revision FROM actors WHERE actor_key = ?1";
 

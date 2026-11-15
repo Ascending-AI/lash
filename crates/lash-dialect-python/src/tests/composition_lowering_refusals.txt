@@ -1,0 +1,21 @@
+# Explicitly refused source identities in the composition enumeration.
+control closure/closure/plain/module
+control closure/for-pattern/break/module
+control closure/for-pattern/continue/module
+control closure/for/break/module
+control closure/for/continue/module
+control closure/while/break/module
+control closure/while/continue/module
+flat async for/cell
+flat async for/module
+flat attribute assignment/cell
+flat attribute assignment/module
+flat break/cell
+flat break/module
+flat class/cell
+flat class/module
+flat continue/cell
+flat continue/module
+flat return/cell
+flat return/module
+review py-156 global read write/module

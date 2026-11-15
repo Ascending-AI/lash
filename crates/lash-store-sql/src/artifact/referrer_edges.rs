@@ -56,11 +56,6 @@ crate::statements! {
              WHERE namespace = ?1 AND referrer_kind = ?2 AND referrer_id = ?3
              ORDER BY artifact_ref";
 
-        /// Every referrer of artifact `?1`/`?2`, in stored-pair order.
-        select_artifact_edges = "SELECT referrer_kind, referrer_id FROM artifact_referrer_edges
-             WHERE namespace = ?1 AND artifact_ref = ?2
-             ORDER BY referrer_kind, referrer_id";
-
         /// Whether any referrer still holds artifact `?1`/`?2`.
         select_artifact_has_edge = "SELECT EXISTS (
                  SELECT 1 FROM artifact_referrer_edges

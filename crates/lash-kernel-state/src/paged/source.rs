@@ -31,44 +31,67 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/root.rs",
-///         KeyedRoot, SequenceRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
-///         CheckpointRoot, JoinerRecord, TaskStateRecord, IncomingRecord, EndedTask, BindingRecord,
-///         FunctionRecord, BoundRecord, LoopRecord, HeaderRecord, CursorRecord, CursorKind,
-///         GuardRecord, FinallyRecord, EnteredRecord, WaitRecord, WaitKindRecord, WaitPhase,
-///         CommittedOutcomeRecord, ListJoinRecord,
+///         KeyedRoot, SequenceRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind, CheckpointRoot,
 ///     ),
-///     items(path = "crates/lash-kernel-state/src/paged/census.rs", AccountingMetric, AccountingCertificate),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/family.rs",
-///         FrozenSummary, FrozenRef, MembershipRun, FamilyRecord, SessionRoot, DataOnlyCertificate,
-///     ),
-///     items(
-///         path = "crates/lash-kernel-state/src/paged/directory.rs",
-///         Body, ObjectHead, Entry, Ordinal, IteratedRecord, FrameRecord, TaskRecord, OccurrenceOwner, OccurrenceRecord, encode, decode,
-///     ),
-///     items(
-///         path = "crates/lash-kernel-state/src/paged/directory/continuation.rs",
-///         ROLE_FLAT, ROLE_CHUNK, ContinuationRecord, RolesRecord, ContinuationPhase, RoleRecord, RoleChunk,
-///         decode_cell, encode_roles, encode, decode,
+///         FrozenSummary, FrozenRef, SessionRoot,
 ///     ),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/key.rs", Key),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, load_shared, seal, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/inline.rs", inline_node, seal_nested, encode, decode),
-///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode),
+///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode, canonical_spans),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/tree/canonical.rs",
+///         HARD_BYTES, leaf_cap, index_cap, boundary_hash, ends, weight, cut,
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/run/session.rs",
+///         RunFunction, BINDING, FUNCTION, row_key, Held, SessionRow, SessionPage, encode, decode,
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/identity.rs",
+///         FLAT_MAX, LEAF, FANOUT, Kind, Node, counts, cuts, leaf, index, of, text_key, bytes_key, long,
+///         embed, flat, encode,
+///     ),
+///     items(path = "crates/lash-kernel-state/src/arena/keys.rs", nested, normal_key, long_key, tokens, body_tokens, detached_normal),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/metadata.rs",
 ///         NameRef, UnitRef, SiteRef, TaskIdentityRef, SpawnNode, encode, decode,
 ///     ),
-///     items(
-///         path = "crates/lash-kernel-state/src/paged/family_impl/mod.rs",
-///         RelativeValue, RelativeEntry, FrozenHeader, encode, decode,
+///     file(path = "crates/lash-kernel-state/src/paged/run/ids.rs", cover("impl TokenCodec for ObjectId", "impl TokenCodec for HighWater")),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/objects.rs",
+///         cover(
+///             "impl TokenCodec for ObjectKind", "impl TokenCodec for RunValue", "impl TokenCodec for Record",
+///             "impl TokenCodec for Head", "impl TokenCodec for Heads", "impl TokenCodec for Paged",
+///         ),
 ///     ),
-///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/directory.rs",
+///         cover("impl TokenCodec for Row", "impl TokenCodec for DirectoryRoot"),
+///     ),
+///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/continuation.rs",
+///         cover("macro_rules! record", "macro_rules! tags", "impl TokenCodec for UnitKind", "impl TokenCodec for RunStart"),
+///     ),
+///     items(path = "crates/lash-kernel-value/src/names.rs", ExportName),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/chunked.rs",
+///         cover("impl TokenCodec for Chunked", "impl TokenCodec for IndexPage", "impl TokenCodec for ChunkPage"),
+///     ),
+///     file(path = "crates/lash-kernel-state/src/paged/checkpoint.rs", cover("impl TokenCodec for Checkpoint")),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/session.rs",
+///         cover("impl TokenCodec for NoteRecord", "impl TokenCodec for SessionNotes"),
+///     ),
+///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode, key_digest, sha256, text_summary),
 ///     file(path = "crates/lash-checkpoint-encoder/src/registry.rs", cover("SEMANTIC_REGISTRY")),
 /// )
 /// version_surface = "coexist"
 /// format_outside_manifest = "the page grammar beneath the parked-state and code mode snapshot surfaces, which the manifest reports; a semantic admission records it beside the kernel version"
-pub const PAGE_FORMAT: u32 = 14;
+pub const PAGE_FORMAT: u32 = 20;
 
 /// A semantic page kind: a generic envelope kind number in the range the
 /// node registry reserved for a complete object graph, 1000 to 1999.
@@ -100,6 +123,15 @@ impl PageKind {
     pub const FROZEN_ROOT: Self = Self(1007);
     /// A session root: carried heap, bindings and functions (S8).
     pub const SESSION_ROOT: Self = Self(1008);
+    /// A bytecode-core run's root: its directory and the segments of its
+    /// encoded state ([`run::continuation`](super::run::continuation)).
+    pub const RUN_ROOT: Self = Self(1009);
+    /// One segment of a bytecode-core run's encoded state.
+    pub const RUN_SEGMENT: Self = Self(1010);
+    /// A bytecode-core session's root: its directory and the keyed tree
+    /// of its bindings and saved functions
+    /// ([`run::session`](super::run::session)).
+    pub const RUN_SESSION: Self = Self(1011);
     /// The first number past the semantic kinds a format may add.
     pub const END: u32 = 2000;
 }
@@ -110,9 +142,12 @@ pub const INDEX_FANOUT: u64 = 32;
 pub const SEQUENCE_LEAF_CELLS: u64 = 64;
 /// Rows per keyed leaf (start value, `D-CAP`).
 pub const KEYED_LEAF_ROWS: u64 = 64;
-/// A leaf stops packing at this many envelope bytes, whichever of its
-/// count bound comes first (start value, `D-CAP`). The format's absolute
-/// node bound, 65 536 bytes, is never exceeded.
+/// A sequence leaf stops packing at this many envelope bytes, whichever
+/// of its count bound comes first; a keyed chunk holds about this many,
+/// each item ending it in proportion to its own bytes, and never more
+/// than four times as many ([`tree::canonical`](super::tree)) (start
+/// value, `D-CAP`). The format's absolute node bound, 65 536 bytes, is
+/// never exceeded.
 pub const PAGE_TARGET_BYTES: u64 = 8_192;
 /// An object body of at most this many token bytes lives inline in its
 /// directory row; a larger one is paged under the same schema.
@@ -198,4 +233,11 @@ pub fn grant(page: &mut PageRef, children: &[PageRef]) -> Result<(), HeapFault> 
             reason: "a descriptor references an undeclared child".into(),
         })?;
     Ok(())
+}
+
+/// What a seal may spend before it yields (host work, never guest charge).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SealBudget {
+    pub pages: u64,
+    pub bytes: u64,
 }

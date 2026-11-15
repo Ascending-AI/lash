@@ -2,7 +2,9 @@
 //!
 //! A replayable transaction is a complete database write whose inputs are
 //! fixed before it begins: the same payload under the same epoch, with no
-//! tool or model call inside it. [`RetryPolicy::run`] runs it again from a
+//! tool or model call inside it. A clock an attempt reads itself is the one
+//! exception; only the committed attempt's timestamp persists.
+//! [`RetryPolicy::run`] runs it again from a
 //! fresh `BEGIN` when the database rolled it back for contention, so every
 //! attempt passes the writer fence and its ownership fence afresh, and an
 //! attempt fenced out stops the loop. Each pause comes after the failed
@@ -24,17 +26,93 @@ use tokio::time::Instant;
 use crate::connection_sql::connection_sql;
 use crate::host::RetryPolicy;
 
+tokio::task_local! {
+    /// What the running attempt has done toward its seal (FIG-7700).
+    static ATTEMPT: std::cell::Cell<SealRecord>;
+}
+
+/// One attempt's seal: whether it has taken its artifact locks, and
+/// whether its last contention was a wait that expired after them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SealRecord {
+    sealed: bool,
+    expired_after_seal: bool,
+}
+
+/// Private SQLSTATE class LZ: these codes are emitted only by Lash's schema.
+/// A nested handler catches only raw 55P03, so already classified errors pass
+/// through without depending on their display message.
+pub(crate) const SEALED_WAIT_EXPIRED_SQLSTATE: &str = "LZ001";
+pub(crate) const UNPLANNED_ADVISORY_REFUSED_SQLSTATE: &str = "LZ002";
+
+/// The message prefix the schema raises when a lock wait inside one of
+/// its sealing functions expires after that function's seal
+/// ([`crate::advisory_lock`]).
+pub(crate) const SEALED_WAIT_EXPIRED: &str = "a lock wait after the artifact locks expired";
+
+/// The refusal the schema's advisory helper raises for an advisory lock a
+/// sealed transaction did not plan ([`crate::advisory_lock`]).
+pub(crate) const UNPLANNED_ADVISORY_REFUSED: &str =
+    "an advisory lock this transaction needs after its artifact locks is held elsewhere";
+
+/// Record that the running attempt's sealing statement returned: its
+/// artifact locks are held and its `lock_timeout` is the sealed bound.
+/// Called by each Rust site that runs a sealing statement, after it
+/// succeeds; outside a retry loop it records nothing.
+pub(crate) fn note_sealed() {
+    let _ = ATTEMPT.try_with(|record| {
+        record.set(SealRecord {
+            sealed: true,
+            ..record.get()
+        });
+    });
+}
+
+/// Record one contention failure's SQLSTATE on the running
+/// attempt: whether it is a lock wait that expired after the attempt's
+/// seal. That is the schema's own after-seal expiry (a wait inside a
+/// sealing function), or a plain lock timeout once a sealing statement has
+/// returned. The advisory helper's refusal of an unplanned lock, deadlock,
+/// serialization failure and every lock timeout before the seal are not.
+pub(crate) fn note_contention(code: &str) {
+    let _ = ATTEMPT.try_with(|record| {
+        let current = record.get();
+        let expired_after_seal =
+            code == SEALED_WAIT_EXPIRED_SQLSTATE || (code == "55P03" && current.sealed);
+        record.set(SealRecord {
+            expired_after_seal,
+            ..current
+        });
+    });
+}
+
 impl RetryPolicy {
     /// Run `attempt` until it answers anything but a failure `aborted`
-    /// accepts (one the database is known to have rolled back), at most
-    /// `attempts` times, pausing before each retry.
+    /// accepts (one the database is known to have rolled back), pausing
+    /// before each retry (FIG-5242, FIG-7700).
+    ///
+    /// - Per wait: after an attempt takes its artifact locks, each later
+    ///   lock wait lasts at most the sealed `lock_timeout`
+    ///   (`guards.sealed_lock_timeout_ms`), then the attempt rolls back.
+    /// - Attempts: an attempt that rolled back because such a wait expired
+    ///   does not spend one of the policy's `attempts`. Every other
+    ///   contention does: deadlock, serialization failure, a lock timeout
+    ///   before the seal, and the advisory helper's refusal of an advisory
+    ///   lock the attempt did not plan (a planning gap, which waiting does
+    ///   not cure, so it stays bounded by the count).
+    /// - Pauses: the policy's doubling backoff and jitter, capped at its
+    ///   longest pause, grow with every retry, spent or not.
+    /// - Deadline: `deadline`, the whole operation's, bounds the loop. A
+    ///   pause that would end at or past it is not taken, and the last
+    ///   failure, the existing contention answer, is returned. Without a
+    ///   deadline every contention spends an attempt.
     ///
     /// `attempt` runs one complete transaction from its `BEGIN`, and
     /// returns only once a failed transaction is rolled back or dropped:
-    /// no pause holds one. A pause that would end at or past `deadline`, the
-    /// whole operation's, is not taken: the last failure is the answer.
-    /// Never put a tool or model call, or another retry loop, inside
-    /// `attempt`.
+    /// no pause holds one. Each attempt runs with a fresh seal record,
+    /// which its sealing statements ([`note_sealed`]) and the contention
+    /// classification ([`note_contention`]) fill. Never put a tool or model
+    /// call, or another retry loop, inside `attempt`.
     ///
     /// # Errors
     ///
@@ -48,15 +126,34 @@ impl RetryPolicy {
     where
         Fut: Future<Output = Result<T, E>>,
     {
+        let mut spent = 0;
         let mut retry = 0;
         loop {
-            match attempt().await {
-                Err(error) if aborted(&error) && retry + 1 < self.attempts => {
+            let running = attempt();
+            // Boxed: the scope holds the whole attempt, the largest part of
+            // every caller's future.
+            let (outcome, record) = Box::pin(ATTEMPT.scope(
+                std::cell::Cell::new(SealRecord::default()),
+                async move {
+                    let outcome = running.await;
+                    (outcome, ATTEMPT.with(std::cell::Cell::get))
+                },
+            ))
+            .await;
+            match outcome {
+                Err(error) if aborted(&error) => {
+                    let free = record.expired_after_seal && deadline.is_some();
+                    if !free && spent + 1 >= self.attempts {
+                        return Err(error);
+                    }
                     let Some(pause) = self.pause_within(retry, deadline) else {
                         return Err(error);
                     };
                     tokio::time::sleep(pause).await;
-                    retry += 1;
+                    retry = retry.saturating_add(1);
+                    if !free {
+                        spent += 1;
+                    }
                 }
                 outcome => return outcome,
             }
@@ -248,4 +345,70 @@ async fn recorded_status(
     status
         .fetch_one(crate::observed_sql::executor(settle.pool))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Connection as _;
+
+    /// A database error's localized/rendered message cannot choose a retry
+    /// class. Exercise real server ErrorResponse values through the production
+    /// classifier, including messages that imitate another condition.
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL; run through kiln gate"]
+    async fn contention_classification_uses_sqlstate_and_attempt_record_not_message() {
+        let url = crate::testing::required_database_url();
+        let mut connection = PgConnection::connect(&url).await.expect("database");
+        sqlx::query("CREATE FUNCTION pg_temp.lash_classification_error(code text, message text) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE = code, MESSAGE = message; END $$")
+            .execute(&mut connection).await.expect("error producer");
+        let messages = [
+            "canceling statement due to lock timeout",
+            "a lock wait after the artifact locks expired: original detail",
+            "an advisory lock this transaction needs after its artifact locks is held elsewhere",
+            "verrou indisponible, message remplace",
+        ];
+        for (code, sealed, contended, expired) in [
+            ("LZ001", false, true, true),
+            ("LZ001", true, true, true),
+            ("LZ002", false, true, false),
+            ("LZ002", true, true, false),
+            ("55P03", false, true, false),
+            ("55P03", true, true, true),
+            ("40P01", true, true, false),
+            ("40001", true, true, false),
+            ("23505", true, false, false),
+        ] {
+            for message in messages {
+                ATTEMPT
+                    .scope(
+                        std::cell::Cell::new(SealRecord {
+                            sealed,
+                            expired_after_seal: false,
+                        }),
+                        async {
+                            let error =
+                                sqlx::query("SELECT pg_temp.lash_classification_error($1, $2)")
+                                    .bind(code)
+                                    .bind(message)
+                                    .execute(&mut connection)
+                                    .await
+                                    .expect_err("server refusal");
+                            assert_eq!(
+                                crate::support::is_contention_error(&error),
+                                contended,
+                                "{code}, {sealed}, {message}"
+                            );
+                            assert_eq!(
+                                ATTEMPT.with(|record| record.get().expired_after_seal),
+                                expired,
+                                "{code}, {sealed}, {message}"
+                            );
+                        },
+                    )
+                    .await;
+            }
+        }
+        connection.close().await.expect("close database");
+    }
 }

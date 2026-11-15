@@ -518,7 +518,6 @@ pub(crate) fn open_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "perf-witness")]
     use crate::statement::Prepare as _;
 
     /// SQL-PAYLOAD-ONCE: the physical window and SQL receipts share one

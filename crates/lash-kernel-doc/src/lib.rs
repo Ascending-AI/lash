@@ -54,6 +54,8 @@ pub mod function;
 mod function_capture;
 mod implicit_text;
 pub use implicit_text::{ImplicitTextConversion, SourceOperandType};
+mod source_evidence;
+pub use source_evidence::{DeclaredLocal, SourceEvidence};
 pub mod function_value;
 pub use function_capture::CaptureValue;
 mod graph_codec;
@@ -110,8 +112,7 @@ pub use ast::{
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
     DecodeError, Document, DocumentCatalog, EncodeError, Export, FunctionExport, KERNEL_VERSION,
-    LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, RestoreSelection, Selection, TypeDef,
-    TypeMember, validate_restored_document_with_limits,
+    LibraryDependencies, MAX_NESTING_DEPTH, Ordinals, TypeDef, TypeMember,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,

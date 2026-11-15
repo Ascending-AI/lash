@@ -183,9 +183,9 @@ pub(crate) fn retire_session_rows(
     Ok(roots)
 }
 
-/// Delete `process`'s run facts and the waits it owns, in its prune: the
-/// process host API's tool calls go with its record, and the RoundFact
-/// nodes they held are peeled.
+/// Delete `process`'s run facts, prompt snapshots and the waits it owns, in
+/// its prune: the process host API's tool calls go with its record, and the
+/// RoundFact nodes they held are peeled.
 pub(crate) fn retire_process_rows(
     tx: &Connection,
     process: &lash_vocabulary::identity::ProcessId,
@@ -198,10 +198,11 @@ pub(crate) fn retire_process_rows(
         tx,
         &lash_durable::domain::CallOwner::Process(process.clone()),
     )?);
-    facts.extend(model_calls::delete_session(
-        tx,
-        &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
-    )?);
+    let session = lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str());
+    facts.extend(model_calls::delete_session(tx, &session)?);
+    // The prompt snapshots of its model calls are the process's history
+    // too: they go with it, and their texts no other root holds with them.
+    prompts::release(tx, &session, None)?;
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
     }
@@ -980,7 +981,39 @@ fn apply_mail(tx: &FencedTx<'_>, writes: MailTx, now: DurableInstant) -> Flow<Ma
             }
         }
     }
+    let retired = retired_woken(tx, &writes, &receipt)?;
+    if !retired.is_empty() {
+        return refuse(writes.retired_refusal(retired));
+    }
     commit(receipt)
+}
+
+/// The actors `receipt` woke that are in one of `writes`' retired sets,
+/// read inside the commit that would wake them.
+fn retired_woken(
+    tx: &Connection,
+    writes: &MailTx,
+    receipt: &MailCommit,
+) -> rusqlite::Result<Vec<lash_durable::RetiredActor>> {
+    let mut found = Vec::new();
+    if writes.retired().is_empty() {
+        return Ok(found);
+    }
+    let mut statement = tx.statement(SQL.actor.formats_of.sql())?;
+    for woken in &receipt.woken {
+        let formats = statement
+            .query_row([woken.actor.as_str()], |row| row.get::<_, String>(0))
+            .optional()?;
+        if let Some(set) =
+            formats.and_then(|formats| writes.retired().iter().find(|set| set.as_str() == formats))
+        {
+            found.push(lash_durable::RetiredActor {
+                actor: woken.actor.clone(),
+                formats: set.clone(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 #[async_trait::async_trait]

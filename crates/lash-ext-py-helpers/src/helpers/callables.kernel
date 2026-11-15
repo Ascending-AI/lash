@@ -65,7 +65,7 @@ metering statements
 body {
   let slots = []
   let position = 0
-  let used = map{}
+  let used = absent
   let variadic = false
   let extra = false
   for param in params metered 2 {
@@ -81,12 +81,14 @@ body {
         if map.contains(kwargs, key) {
           if bool.not(same(value, absent)) { do invoke py.fail("TypeError", text.join(["got multiple values for argument '", key, "'"], "")) }
           set value = kwargs[key]
+          if same(used, absent) { set used = map{} }
           set used[key] = true
         }
       }
     } else {
       if same(mode, 2) {
         if map.contains(kwargs, key) { set value = kwargs[key]
+          if same(used, absent) { set used = map{} }
           set used[key] = true }
       } else {
         if same(mode, 3) {
@@ -97,8 +99,10 @@ body {
           if same(mode, 4) {
             set extra = true
             set value = map{}
-            for key in map.keys(kwargs) metered 2 {
-              if bool.not(map.contains(used, key)) { set value[key] = kwargs[key] }
+            if lt(0, map.len(kwargs)) {
+              for key in map.keys(kwargs) metered 2 {
+                if if(same(used, absent), true, bool.not(map.contains(used, key))) { set value[key] = kwargs[key] }
+              }
             }
           }
         }
@@ -115,8 +119,10 @@ body {
     if lt(position, list.len(args)) { do invoke py.fail("TypeError", "the function takes fewer positional arguments") }
   }
   if bool.not(extra) {
-    for key in map.keys(kwargs) metered 2 {
-      if bool.not(map.contains(used, key)) { do invoke py.fail("TypeError", text.join(["got an unexpected keyword argument '", key, "'"], "")) }
+    if lt(0, map.len(kwargs)) {
+      for key in map.keys(kwargs) metered 2 {
+        if if(same(used, absent), true, bool.not(map.contains(used, key))) { do invoke py.fail("TypeError", text.join(["got an unexpected keyword argument '", key, "'"], "")) }
+      }
     }
   }
   return slots

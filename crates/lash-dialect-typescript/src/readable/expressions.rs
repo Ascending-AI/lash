@@ -71,7 +71,8 @@ impl Lifter<'_> {
                     if entry.field == "__proto__" {
                         return refuse("a field an object literal cannot name");
                     }
-                    fields.push((entry.field.clone(), self.expr(&entry.value)?));
+                    let value = self.operand(&entry.value, "value.operand")?;
+                    fields.push((entry.field.clone(), value));
                 }
                 Ok(Expr::Object(fields))
             }
@@ -100,7 +101,14 @@ impl Lifter<'_> {
         {
             return self.expr(value);
         }
-        self.expr(expr)
+        let value = self.expr(expr)?;
+        Ok(
+            if self.style.exact && matches!(expr, k::Expr::Variable(_)) {
+                Expr::As(Box::new(value), source::Type::Word("boolean"))
+            } else {
+                value
+            },
+        )
     }
 
     /// A temporary the source wrote in place, or a variable.
@@ -180,6 +188,13 @@ impl Lifter<'_> {
         if let Some(builtin) = self.positional_builtin(&name, args) {
             return builtin;
         }
+        if self.style.exact
+            && crate::constructs::operators::BINARY
+                .iter()
+                .any(|entry| entry.helper == name)
+        {
+            return self.helper(&name, args);
+        }
         if name == "ts.to_property_key"
             && let [value] = args
         {
@@ -214,6 +229,9 @@ impl Lifter<'_> {
             && self.is(function, "list.len")
             && let [target] = args.as_slice()
         {
+            if self.style.exact && self.reads_binding(target) {
+                return Ok(constructor("list.length", vec![self.expr(target)?]));
+            }
             return Ok(Expr::Field(
                 Box::new(self.expr(target)?),
                 "length".to_owned(),
@@ -236,7 +254,15 @@ impl Lifter<'_> {
         {
             return self.template(args);
         }
-        if self.style.operators
+        // Numeric operators evaluate both operands before checking their kinds.
+        // Keep that order for held results even in the exact-call style; nested
+        // native calls would check the left before evaluating the right.
+        let held_number = args.iter().any(|value| {
+            matches!(value, k::Expr::Call { function, args }
+                if self.is(function, crate::constructs::operators::NUMBER_GUARD)
+                    && matches!(args.as_slice(), [k::Expr::Variable(name)] if self.pending_at(name).is_some()))
+        });
+        if (self.style.operators || held_number)
             && let Some(operator) = self.operator(&name, args)
         {
             return operator;
@@ -249,6 +275,13 @@ impl Lifter<'_> {
                 args.iter().map(|v| self.expr(v)).collect::<Lift<_>>()?,
             ));
         }
+        // A built-in's helper called directly spells as its invocation would.
+        let table = lash_ext_ts_helpers::builtins::table();
+        let builtin = table
+            .functions
+            .iter()
+            .chain(table.values.iter())
+            .any(|(_, helper)| *helper == name);
         match (name.as_str(), args) {
             // A materialized capture cell starts as null and is filled after
             // its closures exist. Keep the strict text operation even when
@@ -266,6 +299,12 @@ impl Lifter<'_> {
                 )),
             )),
             ("num.to_float", [value]) => self.expr(value),
+            // A known text's element read, `t[i]` (an optional chain's link
+            // reads it as a value).
+            ("ts.text_index", [target, key]) => Ok(Expr::Index(
+                Box::new(self.operand(target, "value.text_operand")?),
+                Box::new(self.expr(key)?),
+            )),
             (name, [value]) => match crate::constructs::operators::unary_inverse(name, true) {
                 Some((token, condition)) => Ok(Expr::Unary(
                     token,
@@ -275,6 +314,7 @@ impl Lifter<'_> {
                         self.expr(value)?
                     }),
                 )),
+                None if builtin => self.helper(name, args),
                 None => refuse(format!("`{name}` has no source spelling")),
             },
             (
@@ -283,11 +323,13 @@ impl Lifter<'_> {
                     k::Expr::List(parts),
                     k::Expr::Literal(k::Literal::Text(separator)),
                 ],
-            ) if separator.is_empty() => self.template(parts),
+            ) if separator.is_empty() => self.joined(parts),
             (name, [left, right]) => match crate::constructs::operators::native_inverse(name) {
                 Some(op) => self.binary(op, left, right),
+                None if builtin => self.helper(name, args),
                 None => refuse(format!("`{name}` has no operator")),
             },
+            (name, _) if builtin => self.helper(name, args),
             (name, _) => refuse(format!("`{name}` has no source spelling")),
         }
     }
@@ -324,8 +366,12 @@ impl Lifter<'_> {
     fn operator(&mut self, name: &str, args: &[k::Expr]) -> Option<Lift<Expr>> {
         match (name, args) {
             (crate::constructs::operators::NUMBER_GUARD, [value]) => Some(self.expr(value)),
-            // Text operands read as text without the assertions.
-            ("text.concat", [left, right]) => Some(self.binary("+", left, right)),
+            // The exact style keeps the text assertions below: array element
+            // annotations may have been erased while lifting their reads.
+            ("text.concat", [left, right]) if !self.style.exact => {
+                Some(self.binary("+", left, right))
+            }
+            ("text.concat", _) => None,
             (name, [k::Expr::Call { function, args }])
                 if name == crate::constructs::operators::native_not()
                     && self.is(
@@ -367,11 +413,16 @@ impl Lifter<'_> {
             return Ok(Expr::Binary(mirrored, Box::new(right), Box::new(left)));
         }
         let mut operand = |value: &k::Expr| {
-            if !self.style.operators
-                && crate::constructs::operators::asserted(op)
-                && let k::Expr::Call { function, args } = value
+            if op == "in" {
+                return self.operand(value, "value.operand");
+            }
+            // The assertion inverts this existing guard, preserving its held
+            // operand and check order without inferring a capture cell's kind.
+            if let k::Expr::Call { function, args } = value
                 && self.is(function, crate::constructs::operators::NUMBER_GUARD)
                 && let [value] = args.as_slice()
+                && ((!self.style.operators && crate::constructs::operators::asserted(op))
+                    || matches!(value, k::Expr::Variable(name) if self.pending_at(name).is_some()))
             {
                 return Ok(Expr::As(
                     Box::new(self.expr(value)?),
@@ -383,6 +434,23 @@ impl Lifter<'_> {
         let left = operand(left)?;
         let right = operand(right)?;
         Ok(Expr::Binary(op, Box::new(left), Box::new(right)))
+    }
+
+    /// A template's join. A part read from a capture cell, of no known kind
+    /// on readback, would gain a conversion as a template's part: the join
+    /// is spelled `value.text_join`, its parts as they are.
+    fn joined(&mut self, parts: &[k::Expr]) -> Lift<Expr> {
+        if !parts.iter().any(|part| self.cell_read(part)) {
+            return self.template(parts);
+        }
+        let parts = parts
+            .iter()
+            .map(|part| self.expr(part))
+            .collect::<Lift<_>>()?;
+        Ok(constructor(
+            "value.text_join",
+            vec![Expr::Array(parts), Expr::Text(String::new())],
+        ))
     }
 
     fn template(&mut self, parts: &[k::Expr]) -> Lift<Expr> {
@@ -558,11 +626,26 @@ impl Lifter<'_> {
             return Ok(None);
         };
         let applies = matches!(&act.kind, k::ActKind::Call(k::Callee::Value(value)) if value == callable)
-            && act.args.as_slice() == [receiver, k::Expr::Variable(list.clone())];
+            && act.args.as_slice() == [receiver.clone(), k::Expr::Variable(list.clone())];
         if !selects || !applies {
             return Ok(None);
         }
-        let callee = self.expr(value)?;
+        let callee = self.operand(value, "value.operand")?;
+        // A method a record holds, read by `record.field` and called with
+        // its receiver, is the record's member call.
+        let callee = match callee {
+            Expr::Call(read, mut field)
+                if !matches!(receiver, k::Expr::Literal(k::Literal::Absent))
+                    && matches!(&*read, Expr::Ident(name) if name == "record.field")
+                    && matches!(field.as_slice(), [_, Expr::Text(_)]) =>
+            {
+                let Some(Expr::Text(member)) = field.pop() else {
+                    return refuse("a record method's name");
+                };
+                Expr::Field(Box::new(constructor("record.operand", field)), member)
+            }
+            callee => callee,
+        };
         let Expr::Array(args) = self.expr(args)? else {
             return refuse("a call's argument list");
         };
@@ -571,7 +654,11 @@ impl Lifter<'_> {
         Ok(Some(
             if matches!(args.first(), Some(Expr::TemplateObject(_))) {
                 authored_call(callee, args)
-            } else if direct && !authored {
+            } else if direct
+                && !authored
+                && !args.iter().any(|arg| matches!(arg, Expr::Spread(_)))
+                && !matches!(callee, Expr::Optional(_))
+            {
                 constructor(
                     "callable.invoke_token",
                     std::iter::once(callee).chain(args).collect(),
@@ -607,12 +694,17 @@ impl Lifter<'_> {
             }
             k::ActKind::Call(k::Callee::Import(slot)) => {
                 let callee = self.operation(slot)?;
+                let held_argument = act.args.iter().any(|arg| {
+                    matches!(arg, k::Expr::Variable(name)
+                        if self.pending_at(name).is_some())
+                });
                 let args = act
                     .args
                     .iter()
                     .map(|value| self.expr(value))
                     .collect::<Lift<Vec<_>>>()?;
-                Ok(if self.style.operators {
+                // An ordinary call recreates the surrounding argument snapshot.
+                Ok(if self.style.operators || held_argument {
                     Expr::Call(Box::new(callee), args)
                 } else {
                     constructor(
@@ -626,6 +718,16 @@ impl Lifter<'_> {
                     return refuse("a call of a function the manifest does not list");
                 };
                 self.helper(&name, &act.args)
+            }
+            k::ActKind::Call(k::Callee::Value(name)) if self.positional.contains_key(name) => {
+                let callee = Expr::Ident(self.positional[name].clone());
+                let args = act
+                    .args
+                    .iter()
+                    .skip(1)
+                    .map(|arg| self.expr(arg))
+                    .collect::<Lift<Vec<_>>>()?;
+                Ok(Expr::Call(Box::new(callee), args))
             }
             k::ActKind::Call(k::Callee::Value(name)) => {
                 let callee = self.variable(name)?;
@@ -747,9 +849,14 @@ impl Lifter<'_> {
             ));
         }
         match (name, args) {
+            ("ts.instanceof", [left, right]) => Ok(Expr::Binary(
+                "instanceof",
+                Box::new(self.expr(left)?),
+                Box::new(self.expr(right)?),
+            )),
             ("ts.to_property_key", [value]) => self.expr(value),
             ("ts.construct", [callee, args]) => {
-                let callee = self.expr(callee)?;
+                let callee = self.operand(callee, "value.operand")?;
                 let Expr::Array(args) = self.expr(args)? else {
                     return refuse("a constructor's arguments");
                 };
@@ -759,7 +866,7 @@ impl Lifter<'_> {
             ("ts.delete", [target, key]) => Ok(Expr::Unary(
                 "delete ",
                 Box::new(Expr::Index(
-                    Box::new(self.expr(target)?),
+                    Box::new(self.operand(target, "value.operand")?),
                     Box::new(self.expr(key)?),
                 )),
             )),
@@ -867,7 +974,14 @@ impl Lifter<'_> {
                     k::Expr::Variable(name),
                     k::Expr::Literal(k::Literal::Text(label)),
                 ],
-            ) if name.as_str() == label => self.variable(name),
+            ) if name.as_str() == label => {
+                // Where the binding is declared before the read (a
+                // materialized capture cell), the check is spelled.
+                if self.style.exact {
+                    return Ok(constructor("value.initialized", vec![self.variable(name)?]));
+                }
+                self.variable(name)
+            }
             (name, [left, right])
                 if crate::constructs::operators::BINARY
                     .iter()
@@ -877,7 +991,27 @@ impl Lifter<'_> {
                     .iter()
                     .find(|entry| entry.helper == name)
                     .unwrap_or_else(|| unreachable!("declared helper"));
-                if declaration.swapped {
+                if declaration.token == "in" {
+                    return if declaration.swapped {
+                        self.binary(declaration.token, right, left)
+                    } else {
+                        self.binary(declaration.token, left, right)
+                    };
+                }
+                if self.style.exact {
+                    let left = Expr::As(Box::new(self.expr(left)?), source::Type::Word("any"));
+                    let right = Expr::As(Box::new(self.expr(right)?), source::Type::Word("any"));
+                    let (left, right) = if declaration.swapped {
+                        (right, left)
+                    } else {
+                        (left, right)
+                    };
+                    Ok(Expr::Binary(
+                        declaration.token,
+                        Box::new(left),
+                        Box::new(right),
+                    ))
+                } else if declaration.swapped {
                     self.binary(declaration.token, right, left)
                 } else {
                     self.binary(declaration.token, left, right)
@@ -890,19 +1024,71 @@ impl Lifter<'_> {
                     .unwrap_or_else(|| unreachable!("a declared unary inverse"));
                 Ok(Expr::Unary(token, Box::new(self.expr(value)?)))
             }
-            (name, [target]) if name.starts_with("ts.property.") => {
-                let property = &name["ts.property.".len()..];
+            (name, [target])
+                if name.starts_with("ts.property.") || name.starts_with("ts.member.") =>
+            {
+                let property = name
+                    .strip_prefix("ts.property.")
+                    .or_else(|| name.strip_prefix("ts.member."))
+                    .unwrap_or_else(|| unreachable!("a member helper"));
+                let exact = self.style.exact && self.reads_binding(target);
+                let text =
+                    matches!(target, k::Expr::Variable(name) if self.text_checked.contains(name));
                 let target = self.expr(target)?;
-                Ok(Expr::Field(Box::new(target), property.to_owned()))
+                Ok(match (exact, property, text) {
+                    (true, "length", _) => constructor("value.length", vec![target]),
+                    (true, _, true) => {
+                        constructor("value.field", vec![target, Expr::Text(property.to_owned())])
+                    }
+                    (true, _, false) => {
+                        constructor("list.field", vec![target, Expr::Text(property.to_owned())])
+                    }
+                    (false, ..) => Expr::Field(Box::new(target), property.to_owned()),
+                })
             }
             ("ts.get_numeric" | "ts.get_computed" | "ts.text_index", [target, key]) => {
-                let target = self.expr(target)?;
+                // A direct numeric read is a record's: any other kind's
+                // takes a ladder.
+                let target = match name {
+                    "ts.text_index" => self.operand(target, "value.text_operand")?,
+                    "ts.get_numeric" => self.operand(target, "record.operand")?,
+                    _ => self.operand(target, "value.operand")?,
+                };
                 let key = self.expr(key)?;
+                let key = if self.style.exact && name == "ts.get_computed" {
+                    Expr::As(Box::new(key), source::Type::Word("any"))
+                } else {
+                    key
+                };
                 Ok(Expr::Index(Box::new(target), Box::new(key)))
             }
             ("ts.read", [target, k::Expr::Literal(k::Literal::Text(field))]) => {
-                let target = self.expr(target)?;
-                Ok(Expr::Field(Box::new(target), field.clone()))
+                // A known list's or text's field read: its kind's own read
+                // under the exact style.
+                let exact = self.style.exact && self.reads_binding(target);
+                let text =
+                    matches!(target, k::Expr::Variable(name) if self.text_checked.contains(name));
+                let target = if exact {
+                    self.expr(target)?
+                } else {
+                    self.operand(
+                        target,
+                        if text {
+                            "value.text_operand"
+                        } else {
+                            "list.operand"
+                        },
+                    )?
+                };
+                Ok(match (exact, text) {
+                    (true, true) => {
+                        constructor("value.field", vec![target, Expr::Text(field.clone())])
+                    }
+                    (true, false) => {
+                        constructor("list.field", vec![target, Expr::Text(field.clone())])
+                    }
+                    (false, _) => Expr::Field(Box::new(target), field.clone()),
+                })
             }
             (name, [receiver, k::Expr::List(rest)]) => {
                 let Some((namespace, method)) = name
@@ -915,7 +1101,8 @@ impl Lifter<'_> {
                     .iter()
                     .map(|arg| self.expr(arg))
                     .collect::<Lift<Vec<_>>>()?;
-                let constructor = lash_ext_ts_helpers::builtins::table()
+                let table = lash_ext_ts_helpers::builtins::table();
+                let constructor = table
                     .constructors
                     .iter()
                     .find(|(_, helper)| **helper == name)
@@ -927,6 +1114,18 @@ impl Lifter<'_> {
                     }
                     return Ok(Expr::New(Box::new(Expr::Ident(class.to_owned())), args));
                 }
+                // A static built-in keeps the spelling its namespace gives
+                // (`Math.abs`) and otherwise takes its table path
+                // (`Array.isArray` is `ts.array.is_array`).
+                if matches!(receiver, k::Expr::Literal(k::Literal::Absent))
+                    && global(namespace).is_none_or(|root| {
+                        table.functions.get(&format!("{root}.{method}")) != Some(&name)
+                    })
+                    && let Some(path) = global_path(name, table.functions.iter())
+                {
+                    return Ok(Expr::Call(Box::new(spelled(path)), args));
+                }
+                let binding = self.style.exact && self.reads_binding(receiver);
                 let target = match (receiver, global(namespace)) {
                     (k::Expr::Literal(k::Literal::Absent), Some(global)) => {
                         Expr::Ident(global.to_owned())
@@ -936,14 +1135,87 @@ impl Lifter<'_> {
                     }
                     (receiver, _) => self.expr(receiver)?,
                 };
+                // The member is one the table's method rows name for this
+                // helper: the helper's own name where a row has it, since a
+                // helper need not be named for its method (`localeCompare`
+                // is `ts.string.locale_unsupported`).
+                let implements = |rows: &lash_ext_ts_helpers::builtins::Rows| {
+                    rows.iter()
+                        .any(|(_, path)| table.functions.get(path) == Some(&name))
+                };
+                let method = if table.methods.get(method).is_some_and(implements) {
+                    method
+                } else {
+                    table
+                        .methods
+                        .iter()
+                        .find(|(_, rows)| implements(rows))
+                        .map_or(method, |(member, _)| member)
+                };
+                // A list's or text's own row on a receiver binding is
+                // `list.method` or `value.method` under the exact style: a
+                // capture cell is of no known kind.
+                let own = |receiver| {
+                    table.methods.get(method).is_some_and(|rows| {
+                        rows.iter().any(|(kind, path)| {
+                            *kind == receiver && table.functions.get(path) == Some(&name)
+                        })
+                    })
+                };
+                use lash_ext_ts_helpers::builtins::Receiver;
+                let text =
+                    matches!(receiver, k::Expr::Variable(name) if self.text_checked.contains(name));
+                let spelling = if own(Receiver::Text) && (text || !own(Receiver::List)) {
+                    Some("value.method")
+                } else if own(Receiver::List) {
+                    Some("list.method")
+                } else {
+                    None
+                };
+                if binding && let Some(spelling) = spelling {
+                    return Ok(self::constructor(
+                        spelling,
+                        [target, Expr::Text(method.to_owned())]
+                            .into_iter()
+                            .chain(args)
+                            .collect(),
+                    ));
+                }
                 Ok(Expr::Call(
                     Box::new(Expr::Field(Box::new(target), method.to_owned())),
                     args,
                 ))
             }
+            // A built-in value (`Math.PI`) reads its helper.
+            (name, []) => {
+                match global_path(name, lash_ext_ts_helpers::builtins::table().values.iter()) {
+                    Some(path) => Ok(spelled(path)),
+                    None => refuse(format!("`{name}` has no source spelling")),
+                }
+            }
             (name, _) => refuse(format!("`{name}` has no source spelling")),
         }
     }
+}
+
+/// The global path (`Array.isArray`, `isNaN`) a built-in's helper
+/// implements. A prototype's path is its receiver's method, not a global.
+fn global_path<'a>(
+    helper: &str,
+    mut paths: impl Iterator<Item = (&'a &'static str, &'a &'static str)>,
+) -> Option<&'static str> {
+    paths
+        .find(|(path, implementing)| **implementing == helper && !path.contains(".prototype."))
+        .map(|(path, _)| *path)
+}
+
+/// `Math.PI` as the member reads that spell it.
+fn spelled(path: &str) -> Expr {
+    let mut segments = path.split('.');
+    let root = Expr::Ident(segments.next().unwrap_or(path).to_owned());
+    segments.fold(root, |target, field| {
+        Expr::Field(Box::new(target), field.to_owned())
+    })
 }
 
 /// The global a static helper's namespace stands for.
@@ -1010,7 +1282,7 @@ pub(super) fn literal_of(literal: &k::Literal) -> Lift<Expr> {
     })
 }
 
-fn constructor(name: &str, args: Vec<Expr>) -> Expr {
+pub(super) fn constructor(name: &str, args: Vec<Expr>) -> Expr {
     Expr::Call(Box::new(Expr::Ident(name.into())), args)
 }
 

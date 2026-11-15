@@ -87,8 +87,18 @@ pub(crate) const BINARY: &[Alternative] = &[
         ..op!(Mult, Numbers, "mul", Native, Number, "*")
     },
     op!(Mult, Dynamic, "py.mul", Action, Unknown, "*"),
+    op!(Div, Numbers, "py.number.truediv", Action, Float, "/"),
     op!(Div, Always, "py.truediv", Action, Float, "/"),
+    op!(
+        FloorDiv,
+        Numbers,
+        "py.number.floordiv",
+        Action,
+        Number,
+        "//"
+    ),
     op!(FloorDiv, Always, "py.floordiv", Action, Number, "//"),
+    op!(Mod, Numbers, "py.number.mod", Action, Number, "%"),
     op!(Mod, Always, "py.mod", Action, Number, "%"),
     op!(Pow, Always, "py.pow", Action, Unknown, "**"),
     op!(BitOr, Always, "py.bitwise", SymbolAction, Unknown, "|"),

@@ -22,6 +22,22 @@ impl AdminContext {
         value
     }
 
+    /// Refuses a write to a session this build retires: it would wait on
+    /// work no node of this build runs (ADR 0115 §8). Reads stay open.
+    pub(crate) async fn refuse_retired(&self) -> Result<()> {
+        if let Ok(actor) =
+            lash_core::durable_port::ActorKey::session(self.target.session_id().as_str())
+        {
+            self.runtime
+                .observe()
+                .effect_host
+                .backend()
+                .refuse_retired(&actor)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// The session's store, which every durable admin read answers from.
     pub(crate) fn head_store(&self) -> Result<lash_core::store::SessionStore> {
         self.runtime.observe().queue_store.clone().ok_or_else(|| {

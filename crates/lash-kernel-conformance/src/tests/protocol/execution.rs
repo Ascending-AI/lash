@@ -101,10 +101,6 @@ fn formula(case: &Case) {
 
 fn session(rule: &str, case: &Case) {
     use crate::pages::Session;
-    use lash_kernel_doc::heap::PageValue;
-    use lash_kernel_state::kernel_internals::tree::Tree;
-    use lash_kernel_state::paged::{BindingRecord, BoundRecord};
-    use lash_kernel_value::names::Name;
     let library = registry();
     let mut session = Session::default();
     let mut machine = start(
@@ -121,32 +117,6 @@ fn session(rule: &str, case: &Case) {
         case.expected.end
     );
     session.root = first.carry;
-    let aliases = |session: &Session| {
-        let heap = session.heap();
-        let root =
-            lash_kernel_state::kernel_internals::session_bindings(session.root.as_ref().unwrap());
-        let table = Tree::<BindingRecord>::of_keyed(&root);
-        let a = table
-            .get(
-                &lash_kernel_state::kernel_internals::metadata::metadata_key(&Name::new("a")),
-                heap.pages(),
-            )
-            .unwrap()
-            .unwrap();
-        let b = table
-            .get(
-                &lash_kernel_state::kernel_internals::metadata::metadata_key(&Name::new("b")),
-                heap.pages(),
-            )
-            .unwrap()
-            .unwrap();
-        let (BoundRecord::Value(PageValue::List(a)), BoundRecord::Value(PageValue::List(b))) =
-            (a.value, b.value)
-        else {
-            panic!("list aliases")
-        };
-        assert_eq!(a, b);
-    };
     let names = |session: &Session| {
         session
             .names()
@@ -170,17 +140,26 @@ fn session(rule: &str, case: &Case) {
             assert_eq!(names(&session), ["x", "y"]);
         }
         "K-SES-002" => {
-            aliases(&session);
-            let mut next = case.clone();
-            next.document =
-                "kernel 1\nnumbers by_spelling\nmain { set b[0] = 9 finish a[0] }".into();
-            let mut machine = start(program(&next, library), next.environment.bounds, &session);
-            let End::Finished(second) = end(&mut machine, &mut world) else {
-                panic!("second cell")
+            // K-SES-002 is observed as behaviour: a write through one carried
+            // binding is read through the other in the next cell.
+            let mut aliased = |session: &mut Session, write: &str, read: &str, value: i64| {
+                let mut next = case.clone();
+                next.document = format!(
+                    "kernel 1\nnumbers by_spelling\nmain {{ set {write}[0] = {value} finish {read}[0] }}"
+                );
+                let mut machine = start(
+                    program(&next, library.clone()),
+                    next.environment.bounds,
+                    session,
+                );
+                let End::Finished(next) = end(&mut machine, &mut world) else {
+                    panic!("aliasing cell")
+                };
+                assert_eq!(next.result, int(value));
+                session.root = next.carry;
             };
-            assert_eq!(second.result, int(9));
-            session.root = second.carry;
-            aliases(&session);
+            aliased(&mut session, "b", "a", 9);
+            aliased(&mut session, "a", "b", 11);
         }
         "K-SES-003" => {
             assert_eq!(
@@ -198,191 +177,135 @@ fn session(rule: &str, case: &Case) {
 }
 
 fn sites(rule: &str, case: &Case) {
+    use lash_kernel_doc::{ActKind, Action, Expr, Node, Stmt};
+    use lash_kernel_state::paged::run::continuation::{PointPhase, RunTask, SlotRole};
+    use lash_kernel_value::sites::{Site, TaskIdentity, Unit};
     let library = PreparedLibrary::new(registry());
     let mut inspected = 0;
     let actual = crate::machine::run_case::<KernelMachine>(&library, case, &mut |mut at| {
         inspected += 1;
         let saved = at.machine.seal(crate::pages::BUDGET).unwrap().unwrap();
-        let heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-            lash_kernel_vm::kernel_internals::sealed_root(&saved).heap,
+        // The coordinates are read from the saved run itself: where each
+        // frame stands, the slots it holds by declaring site, and the
+        // occurrences counted per action site.
+        let (run, _) = lash_kernel_state::paged::run::continuation::open(
             Box::new(at.source.clone()),
-            lash_kernel_state::paged::EditEpoch(2),
+            lash_kernel_vm::kernel_internals::sealed_root(&saved).heap,
         )
         .unwrap();
-        let tasks = lash_kernel_state::kernel_internals::tree::Tree::<
-            lash_kernel_state::paged::TaskRecord,
-        >::of_keyed(
-            &lash_kernel_vm::kernel_internals::sealed_root(&saved).tasks
-        );
-        let task = |n| {
-            tasks
-                .get(
-                    &lash_kernel_state::kernel_internals::directory::ordinal_key(n),
-                    heap.pages(),
-                )
-                .unwrap()
-                .unwrap()
+        let document = &at.program.document;
+        let in_f = |path: &[u32]| Site {
+            unit: Unit::Library(
+                document
+                    .functions
+                    .iter()
+                    .find(|(_, definition)| definition.name.as_str() == "f")
+                    .map(|(id, _)| *id)
+                    .expect("written f body"),
+            ),
+            path: path.to_vec(),
         };
-        let frame = |task: &lash_kernel_state::paged::TaskRecord, n| {
-            task.frames
-                .get(
-                    &lash_kernel_state::kernel_internals::directory::ordinal_key(n),
-                    heap.pages(),
-                )
-                .unwrap()
-                .unwrap()
+        // K-SITE-001: a frame stands at a statement or at an action nested
+        // in one, never at a block or another expression.
+        let stands = |task: &RunTask| {
+            for frame in &task.frames {
+                match document.node(&frame.site) {
+                    Some(Node::Stmt(_)) => {}
+                    Some(Node::Action(_) | Node::Expr(Expr::Act(_))) => {
+                        assert_ne!(frame.phase, PointPhase::Statement, "{frame:?}");
+                    }
+                    other => panic!("a frame stands at {other:?}"),
+                }
+            }
         };
-        let effect = || {
-            at.requests
+        let occurrences = |task: &RunTask, site: &Site| {
+            task.occurrences
                 .iter()
-                .map(|r| {
-                    let lash_kernel_vm::Request::Effect(r) = r;
-                    r
-                })
-                .next()
-                .unwrap()
+                .find(|occurrence| occurrence.site == *site)
+                .map(|occurrence| occurrence.count)
         };
+        let effect = at
+            .requests
+            .iter()
+            .map(|r| {
+                let lash_kernel_vm::Request::Effect(r) = r;
+                lash_kernel_value::kernel_internals::effect_parts(&r.identity)
+            })
+            .next()
+            .unwrap();
         match rule {
             "K-SITE-001" => {
-                let task = task(0);
-                let outer = frame(&task, 0);
-                let inner = frame(&task, 1);
-                assert_eq!(*outer.statement.resolve(heap.pages()).unwrap(), main(&[0]));
+                let [task] = run.tasks.as_slice() else {
+                    panic!("one task")
+                };
+                stands(task);
+                let [outer, inner] = task.frames.as_slice() else {
+                    panic!("main and f")
+                };
+                // main stands at its `invoke f()`, f at its waited perform.
                 assert_eq!(
-                    *inner.statement.resolve(heap.pages()).unwrap(),
-                    lash_kernel_value::sites::Site {
-                        unit: lash_kernel_value::sites::Unit::Library(
-                            at.program
-                                .document
-                                .functions
-                                .iter()
-                                .find(|(_, definition)| definition.name.as_str() == "f")
-                                .map(|(id, _)| *id)
-                                .expect("written f body")
-                        ),
-                        path: vec![0, 1, 0]
-                    }
+                    (&outer.site, outer.phase),
+                    (&main(&[0, 0]), PointPhase::Call)
                 );
                 assert_eq!(
-                    inner
-                        .finally
-                        .get(
-                            &lash_kernel_state::kernel_internals::directory::ordinal_key(0),
-                            heap.pages()
-                        )
-                        .unwrap()
-                        .unwrap()
-                        .site
-                        .resolve(heap.pages())
-                        .unwrap()
-                        .path,
-                    [0]
+                    (&inner.site, inner.phase),
+                    (&in_f(&[0, 1, 0, 0]), PointPhase::Issued)
                 );
-                task.frames
-                    .visit(heap.pages(), &mut |_, call| {
-                        assert!(matches!(
-                            at.program
-                                .document
-                                .node(&call.statement.resolve(heap.pages()).unwrap()),
-                            Some(lash_kernel_doc::Node::Stmt(_))
-                        ));
-                        call.finally
-                            .visit(heap.pages(), &mut |_, cleanup| {
-                                assert!(matches!(
-                                    at.program
-                                        .document
-                                        .node(&cleanup.site.resolve(heap.pages()).unwrap()),
-                                    Some(lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::Try(
-                                        _
-                                    )))
-                                ));
-                                true
-                            })
-                            .unwrap();
-                        true
-                    })
-                    .unwrap();
+                // The `try` whose finally f runs holds its completion under
+                // the try's own site; every held site is a statement.
+                for slot in &inner.slots {
+                    assert!(
+                        matches!(document.node(&in_f(&slot.site)), Some(Node::Stmt(_))),
+                        "{slot:?}"
+                    );
+                }
+                assert!(inner.slots.iter().any(|slot| slot.role == SlotRole::Held
+                    && matches!(
+                        document.node(&in_f(&slot.site)),
+                        Some(Node::Stmt(Stmt::Try(_)))
+                    )));
             }
             "K-SITE-002" => {
-                let child = task(1);
-                let lash_kernel_value::sites::TaskIdentity::Spawned(spawn) =
-                    lash_kernel_vm::kernel_internals::task_identity(&at.machine, child.identity)
-                        .unwrap()
-                else {
+                let [parent, child] = run.tasks.as_slice() else {
+                    panic!("main and its spawn")
+                };
+                stands(parent);
+                stands(child);
+                let TaskIdentity::Spawned(spawn) = &child.identity else {
                     panic!("child identity")
                 };
                 assert_eq!(spawn.site, main(&[0, 0]));
-                assert_eq!(
-                    task(0)
-                        .occurrences
-                        .get(
-                            &lash_kernel_state::kernel_internals::metadata::metadata_key(
-                                &spawn.site
-                            ),
-                            heap.pages()
-                        )
-                        .unwrap()
-                        .map(|row| row.count),
-                    Some(1)
-                );
-                assert!(matches!(
-                    child.state,
-                    lash_kernel_state::paged::TaskStateRecord::Waiting(_)
-                ));
-                let identity =
-                    lash_kernel_value::kernel_internals::effect_parts(&effect().identity);
-                assert_eq!(identity.site.path, [0, 1, 0, 0]);
-                assert_eq!(
-                    child
-                        .occurrences
-                        .get(
-                            &lash_kernel_state::kernel_internals::metadata::metadata_key(
-                                &identity.site
-                            ),
-                            heap.pages()
-                        )
-                        .unwrap()
-                        .map(|row| row.count),
-                    Some(1)
-                );
-                let mut statement = identity.site.clone();
-                statement.path.pop();
-                assert_eq!(
-                    statement,
-                    *frame(&child, 0).statement.resolve(heap.pages()).unwrap()
-                );
-                let Some(lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(act))) =
-                    at.program.document.node(&identity.site)
-                else {
-                    panic!("wait site is not an action expression")
-                };
-                assert!(matches!(act.kind, lash_kernel_doc::ActKind::Perform { .. }));
+                assert_eq!(occurrences(parent, &spawn.site), Some(1));
+                assert_eq!(effect.site, in_f(&[0, 1, 0, 0]));
+                assert_eq!(occurrences(child, &effect.site), Some(1));
+                assert_eq!(child.frames.last().unwrap().site, effect.site);
+                match document.node(&effect.site) {
+                    Some(Node::Action(Action::Perform { .. })) => {}
+                    Some(Node::Expr(Expr::Act(act))) => {
+                        assert!(matches!(act.kind, ActKind::Perform { .. }));
+                    }
+                    other => panic!("the wait stands at {other:?}"),
+                }
             }
             "K-SITE-003" => {
-                let call = frame(&task(0), 0);
-                let site = call
-                    .loops
-                    .get(
-                        &lash_kernel_state::kernel_internals::directory::ordinal_key(0),
-                        heap.pages(),
-                    )
-                    .unwrap()
-                    .unwrap()
-                    .site
-                    .resolve(heap.pages())
-                    .unwrap();
-                assert_eq!(site.as_ref(), &main(&[0]));
-                assert_eq!(
-                    lash_kernel_value::kernel_internals::effect_parts(&effect().identity).loops[0]
-                        .site,
-                    main(&[0])
-                );
+                let [task] = run.tasks.as_slice() else {
+                    panic!("one task")
+                };
+                stands(task);
+                assert_eq!(effect.loops[0].site, main(&[0]));
                 assert!(matches!(
-                    at.program.document.node(&site),
-                    Some(lash_kernel_doc::Node::Stmt(
-                        lash_kernel_doc::Stmt::For { .. }
-                    ))
+                    document.node(&effect.loops[0].site),
+                    Some(Node::Stmt(Stmt::For { .. }))
                 ));
+                // The loop's saved state is named by the same site.
+                let loops: Vec<_> = task.frames[0]
+                    .slots
+                    .iter()
+                    .filter(|slot| matches!(slot.role, SlotRole::Loop(_)))
+                    .map(|slot| main(&slot.site))
+                    .collect();
+                assert!(!loops.is_empty());
+                assert!(loops.iter().all(|site| *site == main(&[0])));
             }
             _ => unreachable!(),
         }
@@ -419,30 +342,19 @@ fn committed(case: &Case) {
     let outcome = lash_kernel_vm::Outcome::Completed(int(7));
     machine.deliver(request.wait, outcome.clone()).unwrap();
     let committed = machine.seal(crate::pages::BUDGET).unwrap().unwrap();
-    let heap = lash_kernel_state::kernel_internals::PagedHeap::open_header(
-        lash_kernel_vm::kernel_internals::sealed_root(&committed).heap,
+    let (run, _) = lash_kernel_state::paged::run::continuation::open(
         Box::new(session.source.clone()),
-        lash_kernel_state::paged::EditEpoch(2),
+        lash_kernel_vm::kernel_internals::sealed_root(&committed).heap,
     )
     .unwrap();
-    let waits = lash_kernel_state::kernel_internals::tree::Tree::<
-        lash_kernel_state::paged::WaitRecord,
-    >::of_keyed(&lash_kernel_vm::kernel_internals::sealed_root(&committed).waits);
-    assert!(matches!(
-        waits
-            .get(
-                &lash_kernel_state::kernel_internals::directory::ordinal_key(
-                    lash_kernel_doc::kernel_internals::wait_number(request.wait)
-                ),
-                heap.pages()
-            )
-            .unwrap()
-            .unwrap()
-            .phase,
-        lash_kernel_state::paged::WaitPhase::Committed(
-            lash_kernel_state::paged::CommittedOutcomeRecord::Completed(_)
-        )
-    ));
+    let wait = lash_kernel_doc::kernel_internals::wait_number(request.wait);
+    assert_eq!(
+        run.waits
+            .iter()
+            .find(|saved| saved.number == wait)
+            .map(|saved| &saved.phase),
+        Some(&lash_kernel_state::paged::run::continuation::WaitPhase::Completed(int(7)))
+    );
     let mut restored = crate::pages::open::<KernelMachine>(
         written.clone(),
         case.environment.bounds.into(),

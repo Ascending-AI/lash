@@ -1,7 +1,7 @@
 use super::Selection;
 use lash_kernel_doc::{
     Formula, Integer, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
-    TextView, Value,
+    TextView, Value, arena::SharedText,
 };
 
 use num_traits::ToPrimitive;
@@ -335,7 +335,7 @@ fn trim_set(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     output.push_str(trimmed);
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(output.len() as u64);
-    Ok(call.new.text(&output))
+    Ok(call.new.text(output))
 }
 
 fn normalize(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -375,7 +375,7 @@ fn normalize(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     }
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(output.len() as u64);
-    Ok(call.new.text(&output))
+    Ok(call.new.text(output))
 }
 
 /// A distance from the selected end. A magnitude beyond machine size can
@@ -691,20 +691,52 @@ fn utf16_compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         text, other, &call.args,
     )?))
 }
+/// The two texts joined, its lengths the sums of theirs: the bytes are
+/// copied once and never counted again. A long result is on a shared
+/// append buffer (K-LIB-007): when the left text ends at the tip of an
+/// unfrozen buffer with room, the right text is written past the tip and
+/// the left's bytes are not copied; at the tip of a full buffer the result
+/// takes a new one of twice its length; otherwise one of exactly its
+/// length. Each text is admitted for its own length only, as a copy is.
 fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-    let (text, other) = (text_arg(&call.args, 0)?, text_arg(&call.args, 1)?);
+    let (text, other) = (text_view(&call.args, 0)?, text_view(&call.args, 1)?);
+    let (a, b) = (text.summary(), other.summary());
+    let tip = text.shared().filter(|shared| shared.at_tip());
+    let (text, other) = (text.whole()?, other.whole()?);
     let len = text
         .len()
         .checked_add(other.len())
         .ok_or_else(crate::exhausted)?;
     call.new.hold(0, super::room(len))?;
-    let mut out = String::new();
-    out.try_reserve_exact(len).map_err(|_| crate::exhausted())?;
-    out.push_str(&text);
-    out.push_str(&other);
+    let summary = lash_kernel_doc::heap::TextSummary {
+        utf8_bytes: len as u64,
+        chars: a.chars + b.chars,
+        utf16_units: a.utf16_units + b.utf16_units,
+    };
+    if len <= lash_kernel_doc::arena::ShortText::MAX {
+        let mut out = String::with_capacity(len);
+        out.push_str(&text);
+        out.push_str(&other);
+        return Ok(call.new.text_of(out, summary));
+    }
+    let parts = [text.as_ref(), other.as_ref()];
+    // A host that refuses the doubled buffer still gets the exact one, so
+    // the call refuses only where a copy would.
+    let out = match tip {
+        Some(tip) => tip
+            .append(&other)
+            .or_else(|| SharedText::new(&parts, len.saturating_mul(2))),
+        None => None,
+    }
+    .or_else(|| SharedText::new(&parts, len))
+    .ok_or_else(crate::exhausted)?;
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    // Longer than a short text, so it is built.
+    Ok(call.new.allocate(lash_kernel_doc::NewObject::LongText {
+        text: out.into(),
+        summary,
+    }))
 }
 /// [`concat`] of two short texts whose concatenation is short: the same
 /// text, which is inline, so the call builds and holds nothing of the
@@ -821,7 +853,7 @@ fn join_or_index(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         String::from_utf8(out).map_err(|_| NativeError::Malformed("joined text is not UTF-8"))?;
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 
 fn replace(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -845,7 +877,7 @@ fn replace(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     out.push_str(&text[end..]);
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 fn trim(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = materialized_text(&call.args, call.new, 0)?;
@@ -864,14 +896,14 @@ fn lower(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let out = text.to_lowercase();
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 fn upper(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let text = materialized_text(&call.args, call.new, 0)?;
     let out = text.to_uppercase();
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 
 fn repeat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -886,7 +918,7 @@ fn repeat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     }
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(call.new.text(&out))
+    Ok(call.new.text(out))
 }
 
 fn pad_start(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
@@ -928,7 +960,7 @@ pub(super) fn padded(
     }
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
-    Ok(new.text(&out))
+    Ok(new.text(out))
 }
 
 fn pad(call: NativeCall<'_, '_>, start: bool) -> Result<Value, NativeError> {
@@ -972,7 +1004,7 @@ fn from_code_points(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         })
         .collect();
     let chars = chars?;
-    Ok(call.new.text(&chars))
+    Ok(call.new.text(chars))
 }
 
 fn from_utf16_units(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

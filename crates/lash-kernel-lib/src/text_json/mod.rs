@@ -105,7 +105,12 @@ impl NativeFunction for Native {
         }
     }
     fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
         lash_kernel_doc::NativeSpecialization {
+            inline: self.text_append.then_some(InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: InlineOperation::TextConcat,
+            }),
             immediate: self.prepared,
             text_append: self.text_append,
             ..Default::default()
@@ -203,7 +208,13 @@ pub fn native(name: &str) -> Option<Arc<dyn NativeFunction>> {
 /// The first [`FunctionRegistry::implement_named`] refuses.
 pub fn implement_text_json(registry: &mut FunctionRegistry) -> Result<(), RegistryError> {
     for (definition, native) in text_json() {
-        registry.implement_named(definition.name.as_str(), native)?;
+        let name = definition.name.as_str();
+        let function = crate::current_definition(registry, name).ok_or_else(|| {
+            RegistryError::NameNotRegistered {
+                name: name.to_owned(),
+            }
+        })?;
+        registry.implement(function, native)?;
     }
     Ok(())
 }

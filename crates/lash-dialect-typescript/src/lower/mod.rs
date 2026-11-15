@@ -19,7 +19,7 @@ use lash_kernel_doc::{
     Rhs, Stmt, TryStmt,
 };
 
-use {lash_kernel_value::FunctionId, lash_kernel_value::FunctionName, lash_kernel_value::Name};
+use {lash_kernel_value::FunctionId, lash_kernel_value::Name};
 
 use crate::adapter as ast;
 use crate::types::{Facts, PlainRecord, Ty};
@@ -215,6 +215,10 @@ enum Control {
 struct FunctionFrame {
     bigint_result: Option<Expr>,
     implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
+    /// Every binding the function and the functions it contains declare, by
+    /// kernel name, with the type it was declared with. A name declared
+    /// without a type, or by two bindings with different ones, has none.
+    declared: BTreeMap<Name, Option<lash_kernel_value::Type>>,
     arrow: bool,
     async_body: bool,
     this: Option<Name>,
@@ -257,9 +261,12 @@ pub(crate) struct Lowerer<'a> {
     pub(crate) buf: Buf,
     kernel_depth: usize,
     span: Option<SourceSpan>,
-    used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     facts: Facts,
+    /// The source names an exact operation spelling reads in place while
+    /// its operands are lowered (`callable.method`): no hold before the
+    /// operation reads them.
+    in_place: BTreeSet<String>,
     /// What tests have shown of names, innermost last, for the code being
     /// lowered now.
     narrowed: Vec<(String, Ty)>,
@@ -377,6 +384,7 @@ fn lower_beside_result(
         functions: vec![FunctionFrame {
             bigint_result: None,
             implicit_text_conversions: Vec::new(),
+            declared: BTreeMap::new(),
             arrow: false,
             async_body: false,
             this: None,
@@ -389,8 +397,8 @@ fn lower_beside_result(
         buf: Buf::default(),
         kernel_depth: 0,
         span: None,
-        used: BTreeMap::new(),
         private: BTreeSet::new(),
+        in_place: BTreeSet::new(),
         facts: Facts::analyse(
             program,
             cell.bindings,
@@ -455,6 +463,28 @@ fn lower_beside_result(
     // and frozen captures stay in heap pages; lowering never reconstructs
     // those payloads as source expressions.
     let mut document = Document::new(NumberPolicy::Float, main);
+    // Fresh names are also reserved before entering a function frame. Only
+    // names main actually declares can be its private bindings (K-SES-001).
+    // In particular, a nested function's unused `arguments` is not one.
+    let mut declared = BTreeSet::new();
+    let mut pending = vec![lash_kernel_doc::Node::Block(
+        document.main.as_deref().unwrap_or_default(),
+    )];
+    while let Some(node) = pending.pop() {
+        use lash_kernel_doc::Node;
+        match node {
+            Node::Stmt(Stmt::Let { name, .. } | Stmt::For { binding: name, .. })
+            | Node::Expr(Expr::Let { name, .. }) => {
+                declared.insert(name.clone());
+            }
+            Node::Stmt(Stmt::Try(scope)) => {
+                declared.extend(scope.catch.iter().map(|catch| catch.binding.clone()));
+            }
+            _ => {}
+        }
+        pending.extend(node.children());
+    }
+    lowerer.private.retain(|name| declared.contains(name));
     document.private_bindings = lowerer.private;
     document.functions = lowerer.local_functions;
     if let Some(module) = lowerer.module.take() {
@@ -495,9 +525,10 @@ fn lower_beside_result(
         .requires
         .kernels
         .insert(lash_kernel_doc::KERNEL_VERSION);
+    let referenced = document.referenced_functions();
     lash_kernel_dialect::authoring::include_library_dependencies(
         &mut document,
-        lowerer.used.keys().copied(),
+        referenced,
         environment.library,
     )
     .map_err(|message| Diagnostic::new(DiagnosticCode::LinkError, message, lowerer.span))?;
@@ -505,6 +536,8 @@ fn lower_beside_result(
     // holds, are declared in the cell's own document, with what they
     // require.
     lowerer.declared_notes.extend(lowerer.local_notes);
+    #[cfg(test)]
+    crate::tests::compile_on_core(&document, environment.library);
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let layers = lash_kernel_dialect::site_layers(
         &document,
@@ -516,7 +549,7 @@ fn lower_beside_result(
     )
     .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
     Ok(Lowered {
-        document,
+        document: document.with_source_evidence(layers.source_evidence),
         source_map: Some(layers.source_map),
         written: layers.written,
         captions: layers.captions,
@@ -527,7 +560,9 @@ fn lower_beside_result(
 impl Lowerer<'_> {
     // Names.
 
-    /// A name the source does not spell and nothing has taken.
+    /// A name the source does not spell and nothing has taken. Main's are
+    /// private: a name the source does not spell is never a session
+    /// binding (`K-SES-001`), whatever statement declares it.
     fn fresh(&mut self, base: &str) -> Name {
         let mut number = self.next_fresh.get(base).copied().unwrap_or(1);
         loop {
@@ -535,7 +570,11 @@ impl Lowerer<'_> {
             number += 1;
             if self.taken.insert(candidate.clone()) {
                 self.next_fresh.insert(base.to_string(), number);
-                return Name::new(candidate);
+                let name = Name::new(candidate);
+                if self.in_main() {
+                    self.private.insert(name.clone());
+                }
+                return name;
             }
         }
     }
@@ -606,6 +645,17 @@ impl Lowerer<'_> {
     /// Declares a source binding in the innermost scope and gives the kernel
     /// name it is lowered to.
     pub(crate) fn declare(&mut self, name: &str, kind: BindingKind) -> Name {
+        self.declare_typed(name, kind, None)
+    }
+
+    /// [`Self::declare`], recording the type a `let` or `const` declares the
+    /// binding with as source evidence for every enclosing function.
+    pub(crate) fn declare_typed(
+        &mut self,
+        name: &str,
+        kind: BindingKind,
+        ty: Option<lash_kernel_value::Type>,
+    ) -> Name {
         if let Some(existing) = self
             .scopes
             .last()
@@ -627,6 +677,17 @@ impl Lowerer<'_> {
         } else {
             self.fresh(&format!("{name}_"))
         };
+        for frame in &mut self.functions {
+            frame
+                .declared
+                .entry(kernel.clone())
+                .and_modify(|declared| {
+                    if *declared != ty {
+                        *declared = None;
+                    }
+                })
+                .or_insert_with(|| ty.clone());
+        }
         let function = self.functions.len() - 1;
         let Some(scope) = self.scopes.last_mut() else {
             unreachable!("a scope is open");
@@ -665,6 +726,15 @@ impl Lowerer<'_> {
             && !self.facts.assigned(name)
     }
 
+    /// The kernel name a source binding in scope is lowered to.
+    pub(crate) fn binding_kernel(&self, name: &str) -> Option<Name> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.bindings.get(name))
+            .map(|binding| binding.kernel.clone())
+    }
+
     pub(crate) fn is_bound(&self, name: &str) -> bool {
         self.scopes
             .iter()
@@ -700,7 +770,11 @@ impl Lowerer<'_> {
 
     /// The variable a source name reads, checked for use before its
     /// declaration.
-    fn resolve(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Option<Name>> {
+    pub(crate) fn resolve(
+        &mut self,
+        name: &str,
+        span: Option<SourceSpan>,
+    ) -> Lowering<Option<Name>> {
         let function = self.functions.len() - 1;
         let Some((scope, binding)) = self.binding_mut(name) else {
             if let Some(captured) = self.captured(name) {
@@ -713,9 +787,13 @@ impl Lowerer<'_> {
             return Ok(Some(session));
         };
         let kernel = binding.kernel.clone();
+        let owner = binding.function;
         if binding.live {
+            self.carry_declared(owner, &kernel);
             return Ok(Some(kernel));
         }
+        self.carry_declared(owner, &kernel);
+        let binding = &self.scopes[scope].bindings[name];
         let lexical = matches!(binding.kind, BindingKind::Let | BindingKind::Const);
         if lexical && binding.function == function {
             return Err(Diagnostic::new(
@@ -732,9 +810,35 @@ impl Lowerer<'_> {
         Ok(Some(kernel))
     }
 
+    /// Carries the type the function `owner` declares `kernel` with into
+    /// every function between it and the one using it: a capture's declared
+    /// type is source evidence where it is used, and a materialized factory
+    /// declares it again from there. It never proves a construction.
+    fn carry_declared(&mut self, owner: usize, kernel: &Name) {
+        let Some(Some(ty)) = self
+            .functions
+            .get(owner)
+            .and_then(|f| f.declared.get(kernel))
+            .cloned()
+        else {
+            return;
+        };
+        for frame in self.functions.iter_mut().skip(owner + 1) {
+            frame
+                .declared
+                .entry(kernel.clone())
+                .and_modify(|declared| {
+                    if declared.as_ref() != Some(&ty) {
+                        *declared = None;
+                    }
+                })
+                .or_insert_with(|| Some(ty.clone()));
+        }
+    }
+
     /// Checks that a `let` or `const` a function reads from an enclosing
     /// scope has been initialised, and gives the checked value's variable.
-    fn initialised(&mut self, kernel: Name, name: &str) -> Lowering<Name> {
+    pub(crate) fn initialised(&mut self, kernel: Name, name: &str) -> Lowering<Name> {
         let checked = self.invoke(
             "ts.tdz",
             &[Operand::variable(kernel, Ty::Unknown), Operand::text(name)],
@@ -763,7 +867,10 @@ impl Lowerer<'_> {
                 ));
             }
             let kernel = binding.kernel.clone();
-            if !binding.live {
+            let owner = binding.function;
+            let live = binding.live;
+            self.carry_declared(owner, &kernel);
+            if !live {
                 // The check reads the variable; a `var` or a function is
                 // only made to exist.
                 if let Some(checked) = self.resolve(name, span)?
@@ -1037,9 +1144,6 @@ impl Lowerer<'_> {
         })?;
         #[cfg(test)]
         inventory::record(name, function);
-        if let Ok(qualified) = FunctionName::new(name) {
-            self.used.insert(function, qualified);
-        }
         Ok(function)
     }
 

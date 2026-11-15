@@ -29,12 +29,23 @@ pub(crate) fn reclaim_settled_plans_conn(
     conn: &Connection,
     cutoff: i64,
 ) -> Result<usize, PluginError> {
-    crate::conn::cached_execute(
-        conn,
+    let mut reclaimed = 0;
+    for sql in [
         process_sql().plan_sqlite.delete_reclaimable.sql(),
-        params![cutoff],
-    )
-    .map_err(process_sqlite_error)
+        process_sql().plan_sqlite.reclaim_packed.sql(),
+    ] {
+        reclaimed += crate::conn::cached_execute(conn, sql, params![cutoff])
+            .map_err(process_sqlite_error)?;
+    }
+    Ok(reclaimed)
+}
+
+/// The process whose row keeps this scope's plan, if the scope is a process.
+fn packing_process(scope: &ScopeId) -> Option<&str> {
+    match scope.opener() {
+        Some(EffectOpener::Process { process_id }) => Some(process_id.as_str()),
+        _ => None,
+    }
 }
 
 /// The typed payload a ledger row persists beside the projection key.
@@ -61,17 +72,30 @@ pub(crate) fn record_conn(
         return Ok(());
     }
     let (kind, id) = ledger_key(parent);
-    crate::conn::cached_execute(
-        conn,
-        process_sql().plan.insert_if_absent.sql(),
-        params![
-            kind,
-            id,
-            ledger_payload(parent, fleet_format)?,
-            ended_at_ms as i64
-        ],
-    )
-    .map_err(process_sqlite_error)?;
+    let payload = ledger_payload(parent, fleet_format)?;
+    let process = packing_process(parent);
+    // A process keeps its own plan on its row (FIG-7701); the first stamp,
+    // packed or in the table, stands.
+    let packed = match process {
+        Some(process) => {
+            crate::conn::cached_execute(
+                conn,
+                process_sql().plan.pack.sql(),
+                params![process, id, payload, ended_at_ms as i64],
+            )
+            .map_err(process_sqlite_error)?
+                == 1
+        }
+        None => false,
+    };
+    if !packed {
+        crate::conn::cached_execute(
+            conn,
+            process_sql().plan.insert_if_absent.sql(),
+            params![kind, id, payload, ended_at_ms as i64, process],
+        )
+        .map_err(process_sqlite_error)?;
+    }
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused above, so no redrive needs the row pinned.
@@ -113,9 +137,11 @@ pub(super) fn plan_exists_conn(conn: &Connection, parent: &ScopeId) -> Result<bo
             .map_err(process_sqlite_error);
     }
     let (kind, id) = ledger_key(parent);
-    conn.query_row_once(process_sql().plan.exists.sql(), params![kind, id], |_| {
-        Ok(())
-    })
+    conn.query_row_once(
+        process_sql().plan.exists.sql(),
+        params![kind, id, packing_process(parent)],
+        |_| Ok(()),
+    )
     .optional()
     .map(|row| row.is_some())
     .map_err(process_sqlite_error)
@@ -172,13 +198,13 @@ pub(super) async fn get(
         }));
     }
     let (kind, id) = ledger_key(parent);
-    let inside = (kind, id.clone());
+    let inside = (kind, id.clone(), packing_process(parent).map(str::to_owned));
     let row = registry
         .conn
         .call(move |conn| {
             conn.query_row_once(
                 process_sql().plan.select_stamps.sql(),
-                params![inside.0, inside.1],
+                params![inside.0, inside.1, inside.2],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
             .optional()

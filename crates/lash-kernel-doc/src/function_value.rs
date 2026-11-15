@@ -53,6 +53,11 @@ pub struct FunctionValue {
     pub signature_origin: Option<lash_kernel_value::SignatureOrigin>,
     /// Source evidence used when this callable becomes a saved workflow.
     pub implicit_text_conversions: Vec<crate::ImplicitTextConversion>,
+    /// The declared types of the locals of the callable's code, which a
+    /// printed workflow spells again. Evidence only, as
+    /// [`crate::SourceEvidence`]; a value from before it existed has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_locals: Vec<crate::DeclaredLocal>,
     pub callable: lash_kernel_value::names::CallableId,
     pub captures: std::collections::BTreeMap<Name, crate::CaptureValue>,
     pub signature: Signature,
@@ -363,16 +368,14 @@ impl FunctionValue {
         &self,
         document: &crate::Document,
         helpers: &crate::BuildHelpers,
-        selection: &crate::Selection,
     ) -> Result<CallablePresentation, FunctionValueRefusal> {
         let defining = if let Some(site) = &self.creation {
-            let closure =
-                crate::snapshot::closure_at(document, site, self.callable.link, helpers, selection)
-                    .filter(|closure| closure.function == self.callable.function)
-                    .ok_or(FunctionValueRefusal::Identity)?;
+            let closure = crate::snapshot::closure_at(document, site, helpers)
+                .filter(|closure| closure.function == self.callable.function)
+                .ok_or(FunctionValueRefusal::Identity)?;
             match &closure.presentation {
                 Some(presentation) => presentation.clone(),
-                None => self.direct_presentation(document, helpers, selection)?,
+                None => self.direct_presentation(document, helpers)?,
             }
         } else if let Some(export) = document.exports.values().find_map(|export| match export {
             crate::Export::Function(export) if export.function == self.callable.function => {
@@ -386,7 +389,7 @@ impl FunctionValue {
                 representation: FunctionRepresentation::Bare,
             }
         } else {
-            self.direct_presentation(document, helpers, selection)?
+            self.direct_presentation(document, helpers)?
         };
         if self.signature != defining.signature
             || self.convention != defining.convention
@@ -401,15 +404,14 @@ impl FunctionValue {
         &self,
         document: &crate::Document,
         helpers: &crate::BuildHelpers,
-        selection: &crate::Selection,
     ) -> Result<CallablePresentation, FunctionValueRefusal> {
         let definition = document
             .functions
             .get(&self.callable.function)
             .map(|definition| std::sync::Arc::new(crate::FunctionHeader::of(definition)))
             .or_else(|| {
-                selection
-                    .admits_helper(&self.callable, &document.library, helpers)
+                helpers
+                    .admits(&document.library, &self.callable.function)
                     .then(|| {
                         helpers
                             .registered(&self.callable.function)
@@ -435,9 +437,8 @@ impl FunctionValue {
         &self,
         document: &crate::Document,
         helpers: &crate::BuildHelpers,
-        selection: &crate::Selection,
     ) -> Result<crate::FunctionExport, FunctionValueRefusal> {
-        self.check_definition(document, helpers, selection)?
+        self.check_definition(document, helpers)?
             .promote_entry(
                 self.callable.function,
                 FunctionLocation {

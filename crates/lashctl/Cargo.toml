@@ -32,6 +32,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
 lash = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }

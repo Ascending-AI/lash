@@ -93,8 +93,8 @@ pub struct LowerFunction {
     pub document: lash_kernel_doc::IdentifiedDocument,
     pub link: lash_kernel_value::content_ids::LinkId,
     pub callable: lash_kernel_value::names::CallableId,
-    pub environment: lash_kernel_doc::heap::EntityId,
-    pub references: BTreeSet<lash_kernel_doc::heap::EntityId>,
+    /// The session bindings its code reads by name.
+    pub references: BTreeSet<Name>,
     pub written: Option<lash_kernel_dialect::Written>,
     /// The tag of the function value that held it, when one did.
     pub token: Option<String>,
@@ -103,63 +103,35 @@ pub struct LowerFunction {
     pub held: Option<lash_kernel_dialect::HeldAt>,
 }
 
-impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
-    fn from(function: &lash_kernel_dialect::SavedFunction) -> Self {
+impl From<&lash_kernel_vm::SavedFunction> for LowerFunction {
+    fn from(function: &lash_kernel_vm::SavedFunction) -> Self {
         Self {
             name: function.name.clone(),
             document: function.document.clone(),
             link: function.link,
             callable: function.callable,
-            environment: function.environment,
             references: function.references.clone(),
             written: function.written.clone(),
-            token: function.token.as_ref().map(|token| token.tag.clone()),
+            token: function.token.clone(),
             held: function.held.clone(),
         }
     }
 }
 
 impl LowerFunction {
-    /// The saved function lowering installs: no captures, which only a
-    /// call instantiates, and no closure, which only the machine pins.
-    #[must_use]
-    pub fn into_saved(self) -> lash_kernel_dialect::SavedFunction {
-        lash_kernel_dialect::SavedFunction {
-            name: self.name,
-            document: self.document,
-            captures: BTreeMap::new(),
-            closure: lash_kernel_doc::heap::PageRef {
-                id: lash_kernel_doc::heap::PageId([0; 32]),
-                grant: lash_kernel_doc::heap::PageGrant::NONE,
-            },
-            link: self.link,
-            callable: self.callable,
-            environment: self.environment,
-            references: self.references,
-            written: self.written,
-            token: self.token.map(|tag| lash_kernel_dialect::Token {
-                tag,
-                before: Vec::new(),
-                after: Vec::new(),
-            }),
-            held: self.held,
-        }
-    }
-
     /// The function's description: a token sequence of its name, its
-    /// document's token body (copied, not encoded), its helper owners, its
-    /// references, what its source wrote, its token's tag, where a binding
-    /// held it and the signatures of its library functions.
+    /// document's token body (copied, not encoded), its Link, its callable,
+    /// the bindings it references, what its source wrote, its token's tag
+    /// and where a binding held it.
     #[must_use]
     pub fn description(&self) -> Vec<u8> {
         use {lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenWriter};
         let mut out = TokenWriter::with_capacity(self.document.body().len() + 64);
-        out.seq(9);
+        out.seq(8);
         self.name.encode(&mut out);
         out.raw(self.document.body());
         self.link.encode(&mut out);
         self.callable.encode(&mut out);
-        self.environment.encode(&mut out);
         self.references.encode(&mut out);
         self.written.encode(&mut out);
         self.token.encode(&mut out);
@@ -197,7 +169,7 @@ impl LowerFunction {
     ) -> Result<Self, lash_kernel_value::tokens::TokenError> {
         use {lash_kernel_value::tokens::TokenCodec as _, lash_kernel_value::tokens::TokenReader};
         let mut input = TokenReader::new(description).with_data_limits(limits);
-        input.expect_struct(9)?;
+        input.expect_struct(8)?;
         let name = Name::decode(&mut input)?;
         let body = input.tree()?;
         let document = decode_document(body)?;
@@ -211,7 +183,6 @@ impl LowerFunction {
             document,
             link: lash_kernel_value::content_ids::LinkId::decode(&mut input)?,
             callable: lash_kernel_value::names::CallableId::decode(&mut input)?,
-            environment: lash_kernel_doc::heap::EntityId::decode(&mut input)?,
             references: BTreeSet::decode(&mut input)?,
             written: Option::decode(&mut input)?,
             token: Option::decode(&mut input)?,

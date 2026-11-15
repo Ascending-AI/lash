@@ -375,6 +375,7 @@ impl Discovery<'_> {
                     && !self.is_bound(root)
                     && !lash_ext_ts_helpers::builtins::is_global(root)
                     && lash_kernel_dialect::value_constructors::Constructor::named(&path).is_none()
+                    && super::exact::Exact::named(&path).is_none()
                 {
                     self.calls.insert(path);
                 }

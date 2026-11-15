@@ -198,7 +198,8 @@ impl CodeModeCheckpointPerfFixture {
 
     /// Run the edit under the backend's scoped controller and this cell's
     /// invocation: one binding is rebound per turn, keeping its large text
-    /// and adding a text an eighth its size.
+    /// and adding nonrepeating text an eighth its size, so payload-page
+    /// sharing cannot hide growth along the byte axis.
     pub async fn assign_one(
         &mut self,
         index: usize,
@@ -208,7 +209,7 @@ impl CodeModeCheckpointPerfFixture {
         let binding = index % self.binding_count.max(1);
         let code = format!(
             "mid_{binding} = [mid_{binding}[0], \"turn-{turn}-{}\"];",
-            "y".repeat(self.payload_bytes / 8)
+            payload(turn ^ binding, self.payload_bytes / 8)
         );
         self.state.shows_packages(ctx.recorded_packages().clone());
         let response =

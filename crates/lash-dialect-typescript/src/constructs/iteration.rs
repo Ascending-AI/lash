@@ -1,5 +1,5 @@
 //! Property enumeration emits a key snapshot and visits keys still present.
-use lash_kernel_doc::{self as k, Expr, Rhs, Stmt};
+use lash_kernel_doc::{self as k, Expr, Stmt};
 use lash_kernel_value::{FunctionId, Name};
 
 pub(crate) const FOR_IN: ForIn = ForIn {
@@ -19,7 +19,7 @@ impl ForIn {
     pub fn recognize<'a>(
         &self,
         iterable: &'a Expr,
-        item: &Name,
+        item: &'a Name,
         body: &'a [Stmt],
         is: &impl Fn(&FunctionId, &str) -> bool,
     ) -> Option<Enumeration<'a>> {
@@ -52,20 +52,10 @@ impl ForIn {
         {
             return None;
         }
-        let [
-            Stmt::Let {
-                name,
-                value: Rhs::Expr(Expr::Variable(from)),
-            },
-            rest @ ..,
-        ] = then_block.as_slice()
-        else {
-            return None;
-        };
-        (from == item).then_some(Enumeration {
+        Some(Enumeration {
             subject,
-            binding: name,
-            body: rest,
+            binding: item,
+            body: then_block,
         })
     }
 }

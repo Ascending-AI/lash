@@ -359,6 +359,7 @@ mod named_component_laws {
                 .build(),
             lash::rlm::CellDialect::typescript(),
         )
+        .with_kernel_succession(Arc::new(lash::vm::plan_migration))
         .with_worker_service(lash::vm::WorkerService::default());
         let mut builder = lash::LashCore::rlm_builder(backend, rlm)
             .serve_test_llm_profile(

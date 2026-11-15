@@ -5,22 +5,17 @@
 //! [`first_divergence`].
 //!
 //! - **Park everywhere** seals the run and opens it cold at every park and
-//!   at the charge points [`stops`] picks, rotating through the layouts
-//!   PLAN-INDEP rotates through (`K-MACH-007`).
+//!   at the charge points [`stops`] picks (`K-MACH-007`).
 //! - **Bodies only** runs on [`installed_bodies`]: every library function a
 //!   kernel body defines answers from that body (`K-LIB-006`, `K-CHG-007`).
 
 use lash_kernel_doc::Datum;
 use lash_kernel_state::paged::PageSource;
-use lash_kernel_vm::kernel_internals::{self, Layout};
+use lash_kernel_vm::kernel_internals;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Park, Program, Request, Step,
     WaitId,
 };
-
-/// The layouts a reopened run takes by turns: the native declining, the
-/// prepared entries off, and a shuffled table order.
-const TURNS: [Layout; 3] = [Layout(3), Layout(1), Layout(0x5eed)];
 
 /// How many interior charge points a park-everywhere run of a case reopens
 /// at besides its first and last unit.
@@ -99,20 +94,19 @@ pub fn drive(
         Drive::ParkEverywhere { stops } => (true, stops.as_slice()),
     };
     let mut stops = stops.iter().copied().peekable();
-    let mut turns = TURNS.iter().copied().cycle();
-    let mut reopen = |machine: &mut KernelMachine| -> Result<(), String> {
+    let reopen = |machine: &mut KernelMachine| -> Result<(), String> {
         let sealed = machine
             .checkpoint()
             .map_err(|error| format!("seal: {error}"))?;
-        let layout = turns.next().unwrap_or_default();
-        *machine = kernel_internals::open_with_layout(
+        *machine = KernelMachine::open(
             program.clone(),
             bounds,
-            kernel_internals::sealed_root(&sealed),
+            &lash_kernel_state::kernel_internals::checkpoint(
+                kernel_internals::sealed_root(&sealed).clone(),
+            ),
             source(),
-            layout,
         )
-        .map_err(|error| format!("open in {layout:?}: {error}"))?;
+        .map_err(|error| format!("open: {error}"))?;
         Ok(())
     };
     let mut requests = Vec::new();
@@ -235,8 +229,7 @@ pub fn first_divergence(plain: &Observation, mode: &Observation) -> Option<(&'st
 /// A whole-corpus stress mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// Sealed and opened cold at every park and every drawn charge point,
-    /// in the layouts PLAN-INDEP rotates through.
+    /// Sealed and opened cold at every park and every drawn charge point.
     ParkEverywhere,
     /// Every library function a kernel body defines answers from it.
     BodiesOnly,

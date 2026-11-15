@@ -212,6 +212,34 @@ pub enum TokenError {
     /// A typed decoder's semantic refusal of well-formed tokens.
     #[error("invalid value: {0}")]
     Invalid(String),
+    /// State a retired engine format wrote, recognised and refused before
+    /// any of it is interpreted.
+    #[error("{0} was written in a retired format, which this build never reads")]
+    Retired(RetiredState),
+}
+
+/// What a decoder found written in a retired engine format. A build reads
+/// none of it and rewrites none of it: the state is retired explicitly,
+/// never translated (contract §9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum RetiredState {
+    /// A session root, with its bindings and saved functions.
+    #[error("the session")]
+    Session,
+    /// A parked run's heap.
+    #[error("the parked run")]
+    ParkedRun,
+}
+
+impl RetiredState {
+    /// The retired format's name, as a graph refusal names it.
+    #[must_use]
+    pub const fn format(self) -> &'static str {
+        match self {
+            Self::Session => "paged-engine session",
+            Self::ParkedRun => "paged-engine parked run",
+        }
+    }
 }
 
 impl From<CanonicalFault> for TokenError {

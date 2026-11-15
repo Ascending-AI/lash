@@ -538,14 +538,7 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
     let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
     document.library.insert(owner_id);
     let creation = Site::new(Unit::Library(owner_id), [0, 0]);
-    let closure = crate::snapshot::closure_at(
-        &document,
-        &creation,
-        LinkId::from_bytes([3; 32]),
-        &helpers,
-        &crate::Selection::Fresh,
-    )
-    .unwrap();
+    let closure = crate::snapshot::closure_at(&document, &creation, &helpers).unwrap();
     let value = FunctionValue {
         written_signature: None,
         callable: CallableId {
@@ -566,109 +559,13 @@ fn saved_helper_callable_preserves_its_exact_creation_origin() {
         token: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
     };
-    value
-        .check_definition(&document, &helpers, &crate::Selection::Fresh)
-        .unwrap();
+    value.check_definition(&document, &helpers).unwrap();
     document.library.0.clear();
     assert_eq!(
-        value.check_definition(&document, &helpers, &crate::Selection::Fresh),
+        value.check_definition(&document, &helpers),
         Err(crate::FunctionValueRefusal::Identity)
-    );
-}
-
-/// A saved child remains admitted after its old parent disappears: restored
-/// origin is the exact live callable and pin, rather than current ancestry.
-#[test]
-fn saved_child_of_removed_helper_keeps_only_its_live_pin() {
-    use crate::{
-        BuildHelpers, Captions, Document, FunctionRepresentation, FunctionValue, HelperUnavailable,
-        LibraryDependencies, NumberPolicy, RestoreSelection, Selection, StartConvention,
-    };
-    use {lash_kernel_value::CallableId, lash_kernel_value::LinkId};
-    let child = definition("law.saved_child", false);
-    let child_id = child.identity();
-    let mut parent = definition("law.removed_parent", false);
-    if let crate::Implementation::Guest { body, .. } = &mut parent.implementation {
-        body.functions.insert(child_id, child.name.clone());
-    }
-    let parent_id = parent.identity();
-    let mut registry = FunctionRegistry::declarations();
-    registry.register(child.clone(), None).unwrap();
-    let helpers = BuildHelpers::new(registry, [child_id]).unwrap();
-    assert!(!helpers.contains(&parent_id));
-    let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
-    document.library.insert(parent_id);
-    let callable = CallableId {
-        link: LinkId::from_bytes([7; 32]),
-        function: child_id,
-    };
-    let selection = Selection::Restored(RestoreSelection {
-        pins: [child_id].into(),
-        live: [callable].into(),
-    });
-    let value = FunctionValue {
-        written_signature: None,
-        callable,
-        captures: Default::default(),
-        signature: child.signature,
-        convention: StartConvention::Direct,
-        representation: FunctionRepresentation::Bare,
-        creation: None,
-        captions: Captions::empty(document.identity()),
-        token: None,
-        signature_origin: None,
-        implicit_text_conversions: Vec::new(),
-    };
-    assert!(!Selection::Fresh.admits_helper(&callable, &document.library, &helpers));
-    assert!(selection.admits_helper(&callable, &document.library, &helpers));
-    let other_link = CallableId {
-        link: LinkId::from_bytes([8; 32]),
-        ..callable
-    };
-    assert!(!selection.admits_helper(&other_link, &document.library, &helpers));
-    let no_pin = Selection::Restored(RestoreSelection {
-        pins: Default::default(),
-        live: [callable].into(),
-    });
-    let no_live = Selection::Restored(RestoreSelection {
-        pins: [child_id].into(),
-        live: Default::default(),
-    });
-    assert!(!no_pin.admits_helper(&callable, &document.library, &helpers));
-    assert!(!no_live.admits_helper(&callable, &document.library, &helpers));
-    let explicit = LibraryDependencies([child_id].into());
-    assert!(Selection::Fresh.admits_helper(&callable, &explicit, &helpers));
-    assert!(Selection::Fresh.admits_helper(&other_link, &explicit, &helpers));
-    assert!(!Selection::Fresh.admits_helper(&callable, &LibraryDependencies::default(), &helpers));
-    // Missing roots are skipped by admits, but rejected by reach. Both
-    // duties survive warmed positive and negative queries.
-    let mixed = LibraryDependencies([parent_id, child_id].into());
-    assert!(helpers.admits(&mixed, &child_id));
-    assert_eq!(
-        helpers.reach(&mixed),
-        Err(HelperUnavailable {
-            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
-            function: parent_id
-        })
-    );
-
-    value
-        .check_definition(&document, &helpers, &selection)
-        .unwrap();
-    let absent = BuildHelpers::empty();
-    assert!(!selection.admits_helper(&callable, &document.library, &absent));
-    assert_eq!(
-        absent.reach(&LibraryDependencies([child_id].into())),
-        Err(HelperUnavailable {
-            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
-            function: child_id
-        })
-    );
-    assert!(
-        value
-            .check_definition(&document, &absent, &selection)
-            .is_err()
     );
 }
 
@@ -895,9 +792,12 @@ fn logical_prices_ignore_residency_and_reject_understated_summaries() {
     use lash_kernel_value::tokens::{decode_body, encode_body};
     use std::sync::Arc;
 
-    let page = Arc::new(PageRef {
-        id: PageId([13; 32]),
-        grant: PageGrant::NONE,
+    let page = Arc::new(PayloadRoot {
+        page: PageRef {
+            id: PageId([13; 32]),
+            grant: PageGrant::NONE,
+        },
+        id: [13; 32],
     });
     let text = "a long λ payload";
     let warm = PageValue::text(text);
@@ -952,4 +852,83 @@ fn logical_prices_ignore_residency_and_reject_understated_summaries() {
     assert_eq!(Cost::record(65, 2), 65);
     assert_eq!(Cost::frame([16, 17]), 97);
     assert_eq!(Cost::task(97, Some(&PageValue::Null)), 113);
+}
+
+#[test]
+fn a_batch_names_each_reserved_slot_once_and_a_refusal_releases_nothing() {
+    use crate::arena::{Body, Objects};
+    let mut objects = Objects::default();
+    let first = objects.insert(Body::Cell(crate::Value::Bool(true)));
+    let second = objects.insert(Body::Cell(crate::Value::Bool(false)));
+    objects.release(first);
+    objects.release(second);
+    // `second` was released last, so it is taken first; `first` stays listed.
+    let taken = objects.reserve();
+    let listed = crate::arena::ArenaHandle::new(first.index(), first.generation() + 1);
+    assert_eq!(taken.index(), second.index());
+    for refused in [vec![taken, taken], vec![taken, listed], vec![listed]] {
+        assert!(
+            objects.prepare_install(refused.iter().copied()).is_err(),
+            "{refused:?}"
+        );
+    }
+    assert!(objects.prepare_install([taken].into_iter()).is_ok());
+    assert_eq!(objects.reserve().index(), first.index());
+}
+
+/// `K-ID-003`: source evidence sits beside a document, outside its identity.
+/// Two documents that differ only in their evidence have the same canonical
+/// bytes, identity, token body and JSON. The version checker leaves a
+/// skipped field its codec never names out of a document's guarded shape on
+/// the strength of this law (`scripts/check_version_bumps.py`).
+#[test]
+fn source_evidence_never_reaches_a_documents_bytes_or_identity() {
+    use crate::{
+        DeclaredLocal, Document, IdentifiedDocument, ImplicitTextConversion, NumberPolicy,
+        SourceEvidence, SourceOperandType,
+    };
+    use lash_kernel_value::names::Name;
+    use lash_kernel_value::types::Type;
+
+    let mut bare = Document::new(NumberPolicy::Float, vec![]);
+    for name in ["app.one", "app.two", "app.three"] {
+        let definition = definition(name, false);
+        bare.functions.insert(definition.identity(), definition);
+    }
+    let mut evidenced = bare.clone();
+    for (n, id) in bare.functions.keys().enumerate() {
+        evidenced.source_evidence.insert(
+            *id,
+            SourceEvidence {
+                implicit_text_conversions: vec![ImplicitTextConversion {
+                    span: None,
+                    operand_type: SourceOperandType::Union(vec![
+                        SourceOperandType::Null,
+                        SourceOperandType::Text,
+                    ]),
+                }],
+                declared_locals: (0..=n)
+                    .map(|local| DeclaredLocal {
+                        name: Name::new(format!("local{local}")),
+                        ty: Type::Json,
+                    })
+                    .collect(),
+            },
+        );
+    }
+    assert_eq!(evidenced.source_evidence.len(), 3);
+
+    assert_eq!(evidenced.canonical_bytes(), bare.canonical_bytes());
+    assert_eq!(evidenced.identity(), bare.identity());
+    assert_eq!(
+        lash_kernel_value::tokens::encode_body(&evidenced),
+        lash_kernel_value::tokens::encode_body(&bare)
+    );
+    assert_eq!(evidenced.to_json().unwrap(), bare.to_json().unwrap());
+    let (evidenced, bare) = (
+        IdentifiedDocument::new(evidenced),
+        IdentifiedDocument::new(bare),
+    );
+    assert_eq!(evidenced.id(), bare.id());
+    assert_eq!(evidenced.body(), bare.body());
 }

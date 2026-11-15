@@ -68,8 +68,8 @@
 //! worker cancellation is separately acknowledged by `WorkerMessage::Cancelled`.
 //! This library neither starts processes nor owns that durable winner.
 //!
-//! Carry is also outside execution: `lash_kernel_migrate::carry_checkpoint`
-//! accepts a completed checkpoint, returns a typed `CarryFault` (including
+//! Carry is also outside execution: `lash_kernel_migrate::carry_run`
+//! accepts a parked run, returns a typed `CarryFault` (including
 //! `ParkedRefusal`), and its owner calls [`validate_foreign_checkpoint`]
 //! before publication. Open/admission returns [`OpenError`] (including
 //! `HelperUnavailable`, `MissingFunction`, identity errors and `Heap` for
@@ -101,7 +101,7 @@
 //!   `laws::frames::a_seal_inside_an_expression_callee_is_exact`, and
 //!   `laws::bounds::the_memory_bound_holds_inside_a_native_call`.
 //! - Partial projection, seal deferral and typed refusal:
-//!   `laws::identity::a_seal_out_of_budget_holds_the_run_until_it_completes`
+//!   `laws::identity::a_seal_out_of_budget_publishes_no_root_and_assigns_unbudgeted_ids`
 //!   requires multiple incomplete seals, `MachineError::Projecting`, equal
 //!   completed state and successful continuation;
 //!   `laws::paged::an_exhausted_seal_budget_preserves_both_continuations`;
@@ -124,13 +124,20 @@
 //!   `linked_carry::a_foreign_linked_kernel_or_closure_refuses_before_rewriting_on_sqlite`,
 //!   `paged_carry::a_paged_carry_commits_one_consistent_side_and_resumes_after_retirement_on_sqlite`.
 
-mod admission;
-mod compile;
-mod costs;
+/// The bytecode core's compiler output (FIG-7688 cutover).
+#[allow(dead_code)]
+mod bytecode;
 mod crossing;
 mod data;
+/// Seal and open of the bytecode core (FIG-7692).
+#[allow(dead_code)]
+mod durable;
 mod functions;
+/// The bytecode core's heap (FIG-7688 cutover).
+#[allow(dead_code)]
+mod heap;
 pub mod interface;
+mod library;
 mod machine;
 mod observe;
 /// The machine's face after the persistent-heap cutover (FIG-6195):
@@ -138,21 +145,21 @@ mod observe;
 mod paged;
 #[cfg(any(test, feature = "perf-witness"))]
 pub mod perf_witness;
-mod save;
 mod session_editor;
+/// The bytecode core's dispatcher (FIG-7688 cutover).
+#[allow(dead_code)]
+mod vm;
 
 #[cfg(test)]
 mod laws;
 
-#[cfg(test)]
-pub(crate) use compile::Layout;
-pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
-pub use machine::KernelMachine;
-pub use observe::{ChargeTape, ObservationMode};
+pub use library::{PreparedLibrary, body_census};
+pub use machine::kernel::KernelMachine;
+pub use observe::{ChargeTape, ObservationMode, Weight};
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
-pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
+pub use vm::machine::CoreMachine;
 pub use {
     lash_kernel_value::observation::ExecutionPath, lash_kernel_value::observation::SiteCounts,
 };
@@ -167,9 +174,10 @@ pub mod kernel_internals;
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, ChargeLimiter, DeliverError,
     Delivered, EffectModes, EffectRequest, End, Finished, FunctionOrigins, Host, HostFault,
-    LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters,
-    OpenError, Outcome, Park, PreparedInstance, PreparedSlot, Program, Request, RunError,
-    RunObserver, SaveCell, SavedCell, SealError, StartError, Step, Target, WaitId,
+    Inadmissible, LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter,
+    Meters, OpenError, Outcome, Park, PreparedInstance, PreparedSlot, Program, Request, RunError,
+    RunObserver, SaveCell, SaveRules, SavedCell, SavedFunction, Saving, SealError, StartError,
+    Step, Target, WaitId,
 };
 
 pub use functions::machine_native;

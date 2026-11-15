@@ -26,8 +26,9 @@ receipt. Zero executed is Abort. Inspect the observed assertions against
 
 - Build N leaves an idle process and session; N+1's sweep wakes both, they
   migrate under its node, and the closing build reads their retained state.
-- The closing build refuses with typed `Unmigrated`, naming
-  `lashctl kernel-migration run`, while the old session stands. After N+1's
+- The closing build refuses with typed `RetiredStateRemains`, naming the
+  session, its format set and `lashctl kernel-migration run`, while the old
+  session stands, and changes no row of the store. After N+1's
   sweep, startup succeeds and `double(21)` still returns 42.
 - The listing names the refused session and its cell with the typed reason
   for the parked library body the synthetic migration cannot carry. It never
@@ -121,7 +122,7 @@ Fill from the actual receipts and artifacts; a missing observation is Abort.
 | Gate | Expected | Observed | Verdict/evidence |
 | --- | --- | --- | --- |
 | Idle carry law | executed=1, passed=1 | | |
-| Closing refusal then startup law | executed=1, passed=1; typed Unmigrated | | |
+| Closing refusal then startup law | executed=1, passed=1; typed RetiredStateRemains, no row changed | | |
 | Refused-cell listing law | executed=1, passed=1; cell and reason retained | | |
 | Owned initial state | idle session, one parked process | | |
 | CLI envelopes | same SQLite path, exit 0, error absent | | |

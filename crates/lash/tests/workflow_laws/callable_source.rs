@@ -107,6 +107,7 @@ async fn saved_source(
             }),
             signature_origin: written.signature_origin.clone(),
             implicit_text_conversions: written.implicit_text_conversions.clone(),
+            declared_locals: written.declared_locals.clone(),
             callable: lash::package::CallableId {
                 link: start.link,
                 function: closure.function,
@@ -556,8 +557,19 @@ async fn print_standalone_reopens_both_dialects_without_a_source_definition() {
 
 /// PRINT-STANDALONE (FIG-7660, FIG-7663): every published callable in the
 /// capture corpus prints, ordinarily imports and retains its frozen behavior.
+/// Cenote's R14 number-concatenation refusal is retained as an exact cell.
 #[tokio::test]
 async fn published_callable_capture_corpus_prints_and_roundtrips() {
+    const CENOTE_SIGNUP_COUNTS: &str = r#"const created = await workflows.create({
+  name: 'signup-counts-report',
+  run: async (): Promise<unknown> => {
+    const lines: Array<string> = [];
+    for (let i = 1; i <= 3; i++) lines.push('Week ' + i + ':');
+    return views.text(lines.join('\n'));
+  }
+});
+console.log(created);
+"#;
     let mut failures = Vec::new();
     for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
         let (core, pin, base, packages, request) = super::packages::capturing_views().await;
@@ -641,6 +653,9 @@ async def ships() -> str:
                 )),
             }
         }
+        if format == SourceFormat::TypeScriptV1 {
+            extra.push_str(CENOTE_SIGNUP_COUNTS);
+        }
         let source = source.replace(
             "    captured = \"later\"",
             &(extra + "    captured = \"later\""),
@@ -697,16 +712,33 @@ async def ships() -> str:
             (0..literal_cases.len())
                 .map(|index| (format!("literal{index}"), "", serde_json::Map::new())),
         );
+        if format == SourceFormat::TypeScriptV1 {
+            cases.push((
+                "signup-counts-report".to_owned(),
+                "",
+                serde_json::Map::new(),
+            ));
+        }
         for (name, suffix, args) in cases {
             let marker = format!("frozen-helper-{name}");
-            let shipped = ECHO_CALLS
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .iter()
-                .rev()
-                .find(|args| args["value"] == marker)
-                .unwrap()["nested"]["fact"]
-                .clone();
+            let shipped = {
+                let calls = ECHO_CALLS
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let captured = calls
+                    .iter()
+                    .rev()
+                    .find(|args| {
+                        args["value"] == marker
+                            || (name == "signup-counts-report" && args["name"] == name)
+                    })
+                    .unwrap();
+                if name == "signup-counts-report" {
+                    captured["run"].clone()
+                } else {
+                    captured["nested"]["fact"].clone()
+                }
+            };
             let function = FunctionValue::from_transport_json(
                 &shipped,
                 &lash::workflow::document::FunctionRegistry::default(),
@@ -756,6 +788,8 @@ async def ships() -> str:
                         serde_json::json!({"type":"card", "title":"Pi", "children":[{"type":"heading", "text":"3.1415926535897932384"},{"type":"text", "value":"20 digits"}]})
                     } else if name == "greet" {
                         serde_json::json!(format!("frozen `template` ${{text}}{suffix}"))
+                    } else if name == "signup-counts-report" {
+                        serde_json::json!({"type":"text", "value":"Week 1:\nWeek 2:\nWeek 3:"})
                     } else {
                         serde_json::json!({"type":"text", "value":true})
                     },
@@ -766,6 +800,668 @@ async def ships() -> str:
         core.shutdown().await.unwrap();
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The workflow `ships` of `source`, imported and run once; it hands each
+/// callable of `names` to `tools.capture` as `collection-{name}`. Answers
+/// the run's publication and each shipped callable with the origin its
+/// publication takes.
+async fn shipped_callables(
+    core: &lash::LashCore,
+    pin: &lash::process::HostArtifactPin,
+    (base, packages, request): (
+        &lash::process::ProcessEnv,
+        &lash::package::RecordedPackages,
+        &lash::vm::WorkflowEnvironmentRequest,
+    ),
+    format: SourceFormat,
+    source: &str,
+    names: &[&str],
+) -> (
+    super::support::Publication,
+    lash::package::CallableOrigin,
+    Vec<FunctionValue>,
+) {
+    let imported = core
+        .host_artifacts()
+        .import_workflow(format.language(), source, request, None)
+        .await
+        .unwrap();
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("{imported:?}");
+    };
+    let publication = publish_recorded(
+        core,
+        pin,
+        &document,
+        &Name::new("ships"),
+        base,
+        None,
+        (packages, request),
+    )
+    .await
+    .unwrap();
+    let run = start_with(
+        core,
+        &publication.env_ref,
+        &publication.definition,
+        &format!("ship-{}", names.join("-")),
+        Default::default(),
+    )
+    .await;
+    assert_eq!(finished(core, &run).await, serde_json::json!("shipped"));
+    let origin = lash::package::CallableOrigin {
+        publications: publication
+            .environment
+            .execution()
+            .publications
+            .iter()
+            .map(lash::package::PublicationRecord::key)
+            .collect(),
+        authored: publication.environment.execution().authored.clone(),
+    };
+    let functions = names
+        .iter()
+        .map(|name| {
+            let marker = format!("collection-{name}");
+            let shipped = ECHO_CALLS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .rev()
+                .find(|args| args["value"] == marker)
+                .unwrap()["nested"]["fact"]
+                .clone();
+            FunctionValue::from_transport_json(
+                &shipped,
+                &lash::workflow::document::FunctionRegistry::default(),
+                Default::default(),
+                lash_kernel_value::data_limits::KernelDataLimits::standard(),
+            )
+            .unwrap()
+        })
+        .collect();
+    (publication, origin, functions)
+}
+
+/// Each shipped callable of `cases` publishes, prints in `format` and
+/// re-imports; the original and the reimported callable both answer the
+/// case's expected value. Answers each printed source by case name.
+async fn printed_callables(
+    (core, pin, base, request): (
+        &lash::LashCore,
+        &lash::process::HostArtifactPin,
+        &lash::process::ProcessEnv,
+        &lash::vm::WorkflowEnvironmentRequest,
+    ),
+    (publication, origin): (&super::support::Publication, &lash::package::CallableOrigin),
+    format: SourceFormat,
+    cases: &[(&str, serde_json::Value, serde_json::Value)],
+    functions: &[FunctionValue],
+) -> std::collections::BTreeMap<String, String> {
+    let mut printed_sources = std::collections::BTreeMap::new();
+    let mut refused = Vec::new();
+    for ((name, args, expected), function) in cases.iter().zip(functions) {
+        let definition = match core
+            .host_artifacts()
+            .publish_callable(pin, function, request, origin, None)
+            .await
+        {
+            Ok(definition) => definition,
+            Err(error) => {
+                refused.push(format!("{format:?} {name} publication: {error:?}"));
+                continue;
+            }
+        };
+        let printed = core
+            .host_artifacts()
+            .print_workflow(&definition.id, None, format, Default::default())
+            .await
+            .unwrap();
+        let roundtrip = publish_source(core, pin, &printed.source, format, request, "run").await;
+        let roundtrip_env = definition_environment(core, pin, &roundtrip, base).await;
+        for (definition, env, kind) in [
+            (&definition, &publication.env_ref, "original"),
+            (&roundtrip, &roundtrip_env, "roundtrip"),
+        ] {
+            assert_eq!(
+                outcome(
+                    core,
+                    env,
+                    definition,
+                    &format!("{format:?}-{name}-{kind}"),
+                    args
+                )
+                .await,
+                Ok(expected.clone()),
+                "{format:?} {name} {kind}\n{}",
+                printed.source,
+            );
+        }
+        printed_sources.insert((*name).to_owned(), printed.source);
+    }
+    assert!(refused.is_empty(), "{}", refused.join("\n"));
+    printed_sources
+}
+
+/// What `definition` started under `env` with `args` ends in.
+async fn outcome(
+    core: &lash::LashCore,
+    env: &lash::process::ProcessEnvRef,
+    definition: &lash::process::ProcessDefinition,
+    key: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, (Option<String>, String)> {
+    let run = start_with(
+        core,
+        env,
+        definition,
+        key,
+        args.as_object().unwrap().clone(),
+    )
+    .await;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        core.processes().await_output(&run),
+    )
+    .await
+    .expect("the process settles")
+    .expect("the output reads");
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process settles with an output: {output:?}");
+    };
+    if output.is_success() {
+        return Ok(output.value_for_projection());
+    }
+    let lash::tools::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("the process fails: {output:?}");
+    };
+    let kind = match failure.cause.as_deref() {
+        Some(lash::tools::ToolFailureCause::UncaughtError { error_kind, .. }) => error_kind.clone(),
+        other => panic!("the failure's cause is the uncaught error: {other:?}"),
+    };
+    Err((kind, failure.message))
+}
+
+/// FIG-7697, FIG-7707, FIG-7710: a callable that reads a captured list by a
+/// literal or computed index or its length, maps over it or calls another
+/// of its rows, pushes onto it or adds into its element, calls a captured
+/// map's or set's methods, indexes a captured list it reassigns, reads a
+/// captured text's length or record's field, reads a `const` declared
+/// after it, or is an anonymous arrow another arrow returns (FIG-7711),
+/// publishes: its printed source
+/// re-imports to the same kernel document (publication proves it), and
+/// both answer alike. The printed operations keep their own checks: a list
+/// read or length of an edited fill that is no list fails the list's kind
+/// check rather than reading the text, and a method of a fill of another
+/// kind fails as that method call of an ordinary binding does.
+#[tokio::test]
+async fn published_callables_capturing_collections_print_their_exact_operations() {
+    let (core, pin, base, packages, request) = super::packages::capturing_views().await;
+    let source = r#"
+export async function ships(): Promise<string> {
+    const xs = [7, 8];
+    const m = new Map([["a", 1]]);
+    const s = new Set([1]);
+    let ys = [5];
+    const t = "abc";
+    const r = {a: 5, b: "z"};
+    const listed = async (x: number): Promise<number> => x + xs[1];
+    const indexed = async (x: number): Promise<number> => xs[x];
+    const long = async (x: number): Promise<number> => x + xs.length;
+    const scaled = async (x: number): Promise<unknown> => xs.map((v: number) => v + x);
+    const found = async (x: number): Promise<number> => xs.indexOf(x);
+    const measured = async (x: number): Promise<number> => x + t.length;
+    const fielded = async (x: number): Promise<number> => x + r.a;
+    const owned = async (key: string): Promise<boolean> => r.hasOwnProperty(key);
+    const u = " ab ";
+    const trimmed = async (x: number): Promise<unknown> => [x, u.trim()];
+    const zs = [1];
+    const pushed = async (x: number): Promise<number> => { zs.push(x); return zs.length + zs[1]; };
+    const ws = [1, 2];
+    const bumped = async (x: number): Promise<number> => { ws[1] += x; return ws[1]; };
+    const later = async (x: number): Promise<unknown> => [x, k];
+    const k = 4;
+    const mapped = async (key: string): Promise<unknown> => { m.set(key, 2); return m.has(key) ? m.get(key) : 0; };
+    const sets = async (x: number): Promise<boolean> => { s.add(x); return s.has(x); };
+    const reassigned = async (x: number): Promise<number> => { ys = [x, x + 1]; return ys[1]; };
+    const make = async (): Promise<unknown> => { const vs = [1, 2]; return async (x: number): Promise<unknown> => [x, vs[1]]; };
+    await tools.capture({value: "collection-listed", nested: {fact: listed}});
+    await tools.capture({value: "collection-mapped", nested: {fact: mapped}});
+    await tools.capture({value: "collection-sets", nested: {fact: sets}});
+    await tools.capture({value: "collection-reassigned", nested: {fact: reassigned}});
+    await tools.capture({value: "collection-indexed", nested: {fact: indexed}});
+    await tools.capture({value: "collection-long", nested: {fact: long}});
+    await tools.capture({value: "collection-scaled", nested: {fact: scaled}});
+    await tools.capture({value: "collection-found", nested: {fact: found}});
+    await tools.capture({value: "collection-measured", nested: {fact: measured}});
+    await tools.capture({value: "collection-fielded", nested: {fact: fielded}});
+    await tools.capture({value: "collection-owned", nested: {fact: owned}});
+    await tools.capture({value: "collection-trimmed", nested: {fact: trimmed}});
+    await tools.capture({value: "collection-pushed", nested: {fact: pushed}});
+    await tools.capture({value: "collection-bumped", nested: {fact: bumped}});
+    await tools.capture({value: "collection-later", nested: {fact: later}});
+    await tools.capture({value: "collection-returned", nested: {fact: await make()}});
+    return "shipped";
+}
+"#;
+    let cases = [
+        ("listed", serde_json::json!({"x": 1}), serde_json::json!(9)),
+        (
+            "mapped",
+            serde_json::json!({"key": "k"}),
+            serde_json::json!(2),
+        ),
+        ("sets", serde_json::json!({"x": 2}), serde_json::json!(true)),
+        (
+            "reassigned",
+            serde_json::json!({"x": 3}),
+            serde_json::json!(4),
+        ),
+        ("indexed", serde_json::json!({"x": 0}), serde_json::json!(7)),
+        ("long", serde_json::json!({"x": 1}), serde_json::json!(3)),
+        (
+            "scaled",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([8, 9]),
+        ),
+        (
+            "measured",
+            serde_json::json!({"x": 1}),
+            serde_json::json!(4),
+        ),
+        ("fielded", serde_json::json!({"x": 1}), serde_json::json!(6)),
+        (
+            "owned",
+            serde_json::json!({"key": "a"}),
+            serde_json::json!(true),
+        ),
+        (
+            "trimmed",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([1, "ab"]),
+        ),
+        ("found", serde_json::json!({"x": 8}), serde_json::json!(1)),
+        ("pushed", serde_json::json!({"x": 5}), serde_json::json!(7)),
+        ("bumped", serde_json::json!({"x": 3}), serde_json::json!(5)),
+        (
+            "later",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([1, 4]),
+        ),
+        (
+            "returned",
+            serde_json::json!({"x": 1}),
+            serde_json::json!([1, 2]),
+        ),
+    ];
+    let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
+    let (publication, origin, functions) = shipped_callables(
+        &core,
+        &pin,
+        (&base, &packages, &request),
+        SourceFormat::TypeScriptV1,
+        source,
+        &names,
+    )
+    .await;
+    let printed_sources = printed_callables(
+        (&core, &pin, &base, &request),
+        (&publication, &origin),
+        SourceFormat::TypeScriptV1,
+        &cases,
+        &functions,
+    )
+    .await;
+
+    // Each edited fill replaces the one literal the printed source fills
+    // the capture with.
+    let edited = |name: &str, literal: &str, replacement: &str| {
+        let source = &printed_sources[name];
+        assert_eq!(source.matches(literal).count(), 1, "{source}");
+        source.replace(literal, replacement)
+    };
+    let run_source = |source: String, key: &'static str, args: serde_json::Value| {
+        let (core, pin, request, base) = (&core, &pin, &request, &base);
+        async move {
+            let definition = publish_source(
+                core,
+                pin,
+                &source,
+                SourceFormat::TypeScriptV1,
+                request,
+                "run",
+            )
+            .await;
+            let env = definition_environment(core, pin, &definition, base).await;
+            outcome(core, &env, &definition, key, &args).await
+        }
+    };
+    // `xs[1]` of a text would read its character ("18"); the list read
+    // takes the list's length first, whose kind check fails.
+    assert_eq!(
+        run_source(
+            edited("listed", "[7, 8]", "\"78\""),
+            "listed-text",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // `xs.length` of a text would be its length (2); the list's length
+    // takes the list's own read, whose kind check fails.
+    assert_eq!(
+        run_source(
+            edited("long", "[7, 8]", "\"78\""),
+            "long-text",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // A map method of a list fails as the same method of an ordinary
+    // binding nothing reassigns, a parameter.
+    let ordinary = run_source(
+        "export async function run(key: string, m: unknown): Promise<unknown> {\n  m.set(key, 2);\n  return m.has(key) ? m.get(key) : 0;\n}\n".into(),
+        "mapped-ordinary",
+        serde_json::json!({"key": "k", "m": [["a", 1]]}),
+    )
+    .await;
+    assert!(ordinary.is_err(), "{ordinary:?}");
+    assert_eq!(
+        run_source(
+            edited("mapped", "map.from_entries([\"a\", 1])", "[[\"a\", 1]]"),
+            "mapped-list",
+            serde_json::json!({"key": "k"}),
+        )
+        .await,
+        ordinary,
+    );
+    // FIG-7710: a list's own row on a text fill runs the list row,
+    // `Array.prototype.indexOf.call("78", 8)` (-1: no element is strictly
+    // 8), not the text's `"78".indexOf(8)` (1).
+    assert_eq!(
+        run_source(
+            edited("found", "[7, 8]", "\"78\""),
+            "found-text",
+            serde_json::json!({"x": 8}),
+        )
+        .await,
+        Ok(serde_json::json!(-1)),
+    );
+    // FIG-7711: `[7, 8].hasOwnProperty("a")` would be false; the record's
+    // method read tests the receiver's own fields first, whose kind check
+    // fails on a list.
+    assert_eq!(
+        run_source(
+            edited("owned", "{ a: 5, b: \"z\" }", "[7, 8]"),
+            "owned-list",
+            serde_json::json!({"key": "a"}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // `[7, 8].trim()` would fail as a missing method's call; the text's
+    // own row checks its receiver's length first, which fails.
+    assert_eq!(
+        run_source(
+            edited("trimmed", "\" ab \"", "[7, 8]"),
+            "trimmed-list",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        Err((Some("type_error".to_owned()), "expected text".to_owned())),
+    );
+    // A push onto a text would dispatch the text's member; the
+    // list's own push reads the list's length first, whose kind check
+    // fails.
+    assert_eq!(
+        run_source(
+            edited("pushed", "[1]", "\"ab\""),
+            "pushed-text",
+            serde_json::json!({"x": 5}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // `ws[1] += x` of a text would read its character and write nothing;
+    // the list's element read fails its kind check where it runs, and the
+    // list's write fails at the bound it tests.
+    assert_eq!(
+        run_source(
+            edited("bumped", "[1, 2]", "\"ab\""),
+            "bumped-text",
+            serde_json::json!({"x": 3}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    assert_eq!(
+        run_source(
+            "export async function run(x: number, xs: unknown): Promise<unknown> {\n  list.set(xs, 1, x);\n  return xs;\n}\n".into(),
+            "set-text",
+            serde_json::json!({"x": 3, "xs": "ab"}),
+        )
+        .await,
+        Err((
+            Some("type_error".to_owned()),
+            "collection has the wrong kind".to_owned()
+        )),
+    );
+    // The spelled check fails where the read of a binding still in its
+    // temporal dead zone does.
+    let uninitialized = |read: &str| {
+        format!(
+            "export async function run(x: number): Promise<unknown> {{\n  const f = async (): Promise<unknown> => [x, {read}];\n  const r = await f();\n  const k = 4;\n  return r;\n}}\n"
+        )
+    };
+    let ordinary = run_source(
+        uninitialized("k"),
+        "later-ordinary",
+        serde_json::json!({"x": 1}),
+    )
+    .await;
+    assert!(ordinary.is_err(), "{ordinary:?}");
+    assert_eq!(
+        run_source(
+            uninitialized("value.initialized(k)"),
+            "later-spelled",
+            serde_json::json!({"x": 1}),
+        )
+        .await,
+        ordinary,
+    );
+    // The Python twins: `zs.append(x)` and `ws[1] += x` on a captured list.
+    let python = r#"
+async def ships() -> str:
+    zs = [1]
+    async def appended(x: int) -> int:
+        zs.append(x)
+        return len(zs) + zs[1]
+    ws = [1, 2]
+    async def added(x: int) -> int:
+        ws[1] += x
+        return ws[1]
+    await tools.capture({"value": "collection-appended", "nested": {"fact": appended}})
+    await tools.capture({"value": "collection-added", "nested": {"fact": added}})
+    return "shipped"
+"#;
+    let cases = [
+        (
+            "appended",
+            serde_json::json!({"x": 5}),
+            serde_json::json!(7),
+        ),
+        ("added", serde_json::json!({"x": 3}), serde_json::json!(5)),
+    ];
+    let names: Vec<_> = cases.iter().map(|(name, ..)| *name).collect();
+    let (publication, origin, functions) = shipped_callables(
+        &core,
+        &pin,
+        (&base, &packages, &request),
+        SourceFormat::PythonV1,
+        python,
+        &names,
+    )
+    .await;
+    let printed_python = printed_callables(
+        (&core, &pin, &base, &request),
+        (&publication, &origin),
+        SourceFormat::PythonV1,
+        &cases,
+        &functions,
+    )
+    .await;
+    // A captured binding's receiver is untyped in Python: `ws[1] += x` of a
+    // text reads its character with the generic item read, and the
+    // in-place add fails where the original's does, before any store.
+    let source = &printed_python["added"];
+    assert_eq!(source.matches("[1, 2]").count(), 1, "{source}");
+    let definition = publish_source(
+        &core,
+        &pin,
+        &source.replace("[1, 2]", "\"ab\""),
+        SourceFormat::PythonV1,
+        &request,
+        "run",
+    )
+    .await;
+    let env = definition_environment(&core, &pin, &definition, &base).await;
+    assert_eq!(
+        outcome(
+            &core,
+            &env,
+            &definition,
+            "added-text",
+            &serde_json::json!({"x": 3})
+        )
+        .await,
+        Err((
+            Some("TypeError".to_owned()),
+            "unsupported operand type(s) for +: 'str' and 'int'".to_owned()
+        )),
+    );
+    core.shutdown().await.unwrap();
+}
+
+/// FIG-7697 graph: each of two instances of one callable, bound to distinct
+/// values, captures a list holding a callable that calls it back. Each
+/// publishes, prints and re-imports to a callable that recurses through
+/// its own list to its own value, while the published callable still runs
+/// under its original defining Link. A capture past the function-value
+/// bound is refused before anything is published.
+#[tokio::test]
+async fn published_callables_capturing_a_collection_of_themselves_keep_their_graph() {
+    let (core, pin, base, packages, request) = super::packages::capturing_views().await;
+    let source = r#"
+export async function ships(): Promise<string> {
+    const make = (base: number) => {
+        const loop = [null];
+        const seen = new Set([base]);
+        const answer = async (n: number): Promise<number> => {
+            if (n <= 0) {
+                return seen.has(base) ? base : -1;
+            }
+            const next = loop[0];
+            return await next(n - 1);
+        };
+        const again = async (n: number): Promise<number> => await answer(n);
+        loop[0] = again;
+        return answer;
+    };
+    const ten = make(10);
+    const twenty = make(20);
+    await tools.capture({value: "collection-ten", nested: {fact: ten}});
+    await tools.capture({value: "collection-twenty", nested: {fact: twenty}});
+    return "shipped";
+}
+"#;
+    let (publication, origin, functions) = shipped_callables(
+        &core,
+        &pin,
+        (&base, &packages, &request),
+        SourceFormat::TypeScriptV1,
+        source,
+        &["ten", "twenty"],
+    )
+    .await;
+    assert_eq!(functions[0].callable, functions[1].callable);
+    for (function, expected) in functions.iter().zip([10, 20]) {
+        let definition = core
+            .host_artifacts()
+            .publish_callable(&pin, function, &request, &origin, None)
+            .await
+            .unwrap_or_else(|error| panic!("{expected}: {error:?}"));
+        let printed = core
+            .host_artifacts()
+            .print_workflow(
+                &definition.id,
+                None,
+                SourceFormat::TypeScriptV1,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let roundtrip = publish_source(
+            &core,
+            &pin,
+            &printed.source,
+            SourceFormat::TypeScriptV1,
+            &request,
+            "run",
+        )
+        .await;
+        let roundtrip_env = definition_environment(&core, &pin, &roundtrip, &base).await;
+        // The published callable runs under the environment its own
+        // defining Link was published in.
+        for (definition, env, kind) in [
+            (&definition, &publication.env_ref, "original"),
+            (&roundtrip, &roundtrip_env, "roundtrip"),
+        ] {
+            assert_eq!(
+                outcome(
+                    &core,
+                    env,
+                    definition,
+                    &format!("{expected}-{kind}"),
+                    &serde_json::json!({"n": 2}),
+                )
+                .await,
+                Ok(serde_json::json!(expected)),
+                "{expected} {kind}\n{}",
+                printed.source,
+            );
+        }
+    }
+
+    let ceiling = lash::workflow::document::FunctionValueLimits::CEILING;
+    let mut large = functions[0].clone();
+    large.captures.insert(
+        Name::new("surplus"),
+        CaptureValue::Data(Datum::Text("x".repeat(usize::try_from(ceiling).unwrap()))),
+    );
+    let refused = core
+        .host_artifacts()
+        .publish_callable(&pin, &large, &request, &origin, None)
+        .await
+        .unwrap_err();
+    assert!(format!("{refused:?}").contains("TooLarge"), "{refused:?}");
+    core.shutdown().await.unwrap();
 }
 
 async fn publish_source(
@@ -1333,3 +2029,6 @@ async fn print_environment_selects_fresh_dependencies_and_refuses_conflicts() {
     ));
     core.shutdown().await.unwrap();
 }
+
+#[path = "callable_source/cenote_r14.rs"]
+mod cenote_r14;

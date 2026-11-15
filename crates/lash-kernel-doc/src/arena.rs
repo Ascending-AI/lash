@@ -23,6 +23,9 @@
 //! value a native sees carries a release protocol.
 
 pub mod native;
+mod text_buffer;
+
+pub use text_buffer::{SharedText, TextBytes};
 
 use crate::number::{Float, Integer};
 
@@ -94,6 +97,56 @@ impl ShortText {
         // The untouched tail stays zero-padded, as in `new`.
         let mut bytes = self.bytes;
         bytes[head..len].copy_from_slice(other.as_bytes());
+        Some(Self {
+            len: len as u8,
+            bytes,
+        })
+    }
+
+    /// A word's digits in `radix`, `2..=36`, lower-case with a leading
+    /// `-` when negative, when they fit inline: the one spelling of an
+    /// integer as text, which the native and its inline answer share.
+    pub fn digits(word: i64, radix: u32) -> Option<Self> {
+        // Decimal, the radix nearly every call spells, divides by a
+        // constant.
+        if radix == 10 {
+            Self::spell(word, 10)
+        } else {
+            Self::spell(word, radix)
+        }
+    }
+
+    /// Counts the digits first, so each digit is written once, in place.
+    #[inline(always)]
+    fn spell(word: i64, radix: u32) -> Option<Self> {
+        const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+        if !(2..=36).contains(&radix) {
+            return None;
+        }
+        let mut rest = word.unsigned_abs();
+        let places = if radix == 10 {
+            rest.checked_ilog10()
+        } else {
+            rest.checked_ilog(u64::from(radix))
+        };
+        let len = places.map_or(1, |places| places as usize + 1) + usize::from(word < 0);
+        if len > Self::MAX {
+            return None;
+        }
+        let radix = u64::from(radix);
+        let mut bytes = [0u8; Self::MAX];
+        let mut at = len;
+        loop {
+            at -= 1;
+            bytes[at] = *DIGITS.get(usize::try_from(rest % radix).ok()?)?;
+            rest /= radix;
+            if rest == 0 {
+                break;
+            }
+        }
+        if word < 0 {
+            bytes[0] = b'-';
+        }
         Some(Self {
             len: len as u8,
             bytes,
@@ -566,19 +619,32 @@ impl Table {
 /// its whole payload; decoding a chunk that names an index page gives one
 /// cold chunk per child, and one that names a leaf gives its text, so a
 /// read decodes only the leaves it reaches and their index path. A text a
-/// region's accumulator built holds spare capacity past its bytes, which
-/// the next concatenation of it grows into (FIG-6795).
+/// concatenation built is one resident chunk on a shared append buffer
+/// ([`TextBytes::Shared`]).
 #[derive(Debug)]
 pub struct LongText {
     pub summary: TextSummary,
-    pub chunks: Box<[Chunk<String>]>,
+    pub chunks: Box<[Chunk<TextBytes>]>,
 }
 
 impl LongText {
-    /// Whether a concatenation took the text's storage: it keeps its
-    /// summary and holds no chunk, and nothing may read its bytes.
-    pub fn moved(&self) -> bool {
-        self.chunks.is_empty() && self.summary.utf8_bytes != 0
+    /// The text's shared bytes, when it is one resident chunk on a shared
+    /// append buffer.
+    #[inline]
+    pub fn shared(&self) -> Option<&SharedText> {
+        match &*self.chunks {
+            [Chunk::Resident(bytes)] => bytes.shared(),
+            _ => None,
+        }
+    }
+
+    /// Lets no later append extend the buffer the text is on: it has a
+    /// durable identity, a head or a page form.
+    #[inline]
+    pub fn freeze(&self) {
+        if let Some(shared) = self.shared() {
+            shared.freeze();
+        }
     }
 }
 
@@ -627,6 +693,22 @@ pub enum Body {
     /// A variable a closure shares (`K-CLO-001`), or a `for` iteration's
     /// fresh one (`K-CLO-002`): not a value kind, only a holder of one.
     Cell(Value),
+    /// A big integer, a big timestamp or an error whose payload the machine
+    /// has not read: only its head's summaries. Every read of its payload
+    /// answers [`Retry::Cold`](native::Retry::Cold); no reader that matches
+    /// the resident kind finds it. A tuple's, a long text's and bytes'
+    /// unread payloads are cold chunks of their own bodies instead.
+    Cold(ColdImmutable),
+}
+
+/// What a cold [`Body::Cold`] immutable is, and the summaries its head
+/// certifies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColdImmutable {
+    BigInt(crate::heap::IntSummary),
+    Timestamp(crate::heap::IntSummary),
+    /// Its depth and edge summaries are the arena's, as for a resident one.
+    Error,
 }
 
 // A tiny list's, tuple's or table's inline values fit beside the widest
@@ -664,15 +746,30 @@ pub struct Objects {
     free: std::cell::RefCell<Vec<u32>>,
     /// Slots past the end reserved by the call running.
     reserved: std::cell::Cell<u32>,
+    /// The cold object whose next load may batch every payload sibling.
+    whole_read: std::cell::Cell<Option<ArenaHandle>>,
 }
 
 #[derive(Debug)]
 struct Slot {
     generation: u32,
+    /// Whether the slot is on the free list: a released slot not yet
+    /// reserved again.
+    listed: std::cell::Cell<bool>,
     body: Body,
 }
 
 impl Objects {
+    /// Marks a whole payload read until this arena's next load takes it.
+    pub fn wants_whole(&self, object: ArenaHandle) {
+        self.whole_read.set(Some(object));
+    }
+
+    /// Takes this arena's whole-read hint, clearing it even for another object.
+    pub fn take_whole_read(&self, object: ArenaHandle) -> bool {
+        self.whole_read.take() == Some(object)
+    }
+
     /// The body `handle` names, or `None` for a stale handle.
     #[inline]
     pub fn get(&self, handle: ArenaHandle) -> Option<&Body> {
@@ -737,7 +834,9 @@ impl Objects {
     /// [`Self::install`].
     pub fn reserve(&self) -> ArenaHandle {
         if let Some(index) = self.free.borrow_mut().pop() {
-            let generation = self.slots[index as usize].generation;
+            let slot = &self.slots[index as usize];
+            slot.listed.set(false);
+            let generation = slot.generation;
             return ArenaHandle::new(index, generation);
         }
         let index = self.slots.len() as u32 + self.reserved.get();
@@ -747,7 +846,8 @@ impl Objects {
 
     /// Gives back a slot [`Self::reserve`] took, last reserved first.
     pub(crate) fn unreserve(&self, handle: ArenaHandle) {
-        if (handle.index as usize) < self.slots.len() {
+        if let Some(slot) = self.slots.get(handle.index as usize) {
+            slot.listed.set(true);
             self.free.borrow_mut().push(handle.index);
         } else {
             self.reserved.set(self.reserved.get().saturating_sub(1));
@@ -756,40 +856,59 @@ impl Objects {
 
     /// Reserves storage for a complete nursery batch without installing a body.
     /// Every target must still be reserved, distinct and in installation order.
+    #[inline]
     pub fn prepare_install(
         &mut self,
-        handles: impl ExactSizeIterator<Item = ArenaHandle>,
+        handles: impl Iterator<Item = ArenaHandle> + Clone,
     ) -> Result<(), crate::heap::HeapFault> {
         use crate::heap::{HeapFault, HostResource};
-        let exhausted = || HeapFault::Exhausted {
-            resource: HostResource::StagingBytes,
-        };
-        let mut seen = std::collections::HashSet::new();
-        seen.try_reserve(handles.len()).map_err(|_| exhausted())?;
-        let free = self.free.borrow();
+        // A released slot taken again is unlisted. While it is checked it is
+        // listed once more, so a second target naming it is refused like a
+        // slot nobody reserved; past the end, targets must run consecutively.
         let mut end = self.slots.len();
-        for handle in handles {
+        let mut marked = 0;
+        let mut valid = true;
+        for handle in handles.clone() {
             let index = handle.index as usize;
-            let valid = if index < self.slots.len() {
-                self.slots[index].generation == handle.generation
-                    && matches!(self.slots[index].body, Body::Free)
-                    && !free.contains(&handle.index)
+            valid = if let Some(slot) = self.slots.get(index) {
+                let reserved = slot.generation == handle.generation
+                    && matches!(slot.body, Body::Free)
+                    && !slot.listed.get();
+                if reserved {
+                    slot.listed.set(true);
+                    marked += 1;
+                }
+                reserved
             } else {
-                let valid = index == end
+                let reserved = index == end
                     && handle.generation == 0
                     && index < self.slots.len() + self.reserved.get() as usize;
                 end += 1;
-                valid
+                reserved
             };
-            if !valid || !seen.insert(handle.index) {
-                return Err(HeapFault::Malformed(
-                    "a batch target is not a distinct reserved slot".into(),
-                ));
+            if !valid {
+                break;
             }
+        }
+        for handle in handles {
+            if marked == 0 {
+                break;
+            }
+            if let Some(slot) = self.slots.get(handle.index as usize) {
+                slot.listed.set(false);
+                marked -= 1;
+            }
+        }
+        if !valid {
+            return Err(HeapFault::Malformed(
+                "a batch target is not a distinct reserved slot".into(),
+            ));
         }
         self.slots
             .try_reserve(end - self.slots.len())
-            .map_err(|_| exhausted())
+            .map_err(|_| HeapFault::Exhausted {
+                resource: HostResource::StagingBytes,
+            })
     }
 
     /// Returns an abandoned batch's reserved slots in reverse reservation order.
@@ -807,6 +926,7 @@ impl Objects {
             self.reserved.set(self.reserved.get().saturating_sub(1));
             self.slots.push(Slot {
                 generation: handle.generation,
+                listed: std::cell::Cell::new(false),
                 body,
             });
         } else {
@@ -822,7 +942,19 @@ impl Objects {
         {
             slot.generation = slot.generation.wrapping_add(1);
             slot.body = Body::Free;
+            slot.listed.set(true);
             self.free.get_mut().push(handle.index);
         }
+    }
+
+    /// Advances a free slot over complete allocate/release cycles for
+    /// generation-wrap laws, without executing billions of equivalent
+    /// cycles. Each omitted cycle leaves the same free-list entry and
+    /// increments only this slot's generation.
+    #[cfg(feature = "perf-witness")]
+    pub fn skip_free_slot_cycles(&mut self, index: u32, cycles: u32) {
+        let slot = &mut self.slots[index as usize];
+        assert!(matches!(slot.body, Body::Free) && slot.listed.get());
+        slot.generation = slot.generation.wrapping_add(cycles);
     }
 }

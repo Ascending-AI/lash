@@ -4,15 +4,16 @@
 //! errors, prints, tool calls and each callback's receiver and arguments, in
 //! order, are the same; only the charge, which bounds the work done, drops.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc::Datum;
 
-use lash_kernel_state::semantic::{self, Checkpoint};
+use lash_kernel_value::Name;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, Step, Target,
+    Request, SessionEditor, SessionValue, Step, Target,
 };
 
 const BEFORE: &str = include_str!("array_callbacks_before.kernel");
@@ -135,9 +136,9 @@ impl Host for Console {
 #[derive(Debug, PartialEq)]
 struct Observed {
     end: End,
-    // Compare the reachable carry graph, retaining aliases and cycles, rather
-    // than projection ids, garbage or the conservative census in its pages.
-    carry: Option<Checkpoint>,
+    // Compare what each carried binding reads as, rather than page ids,
+    // garbage or the layout of the session's pages.
+    carry: Option<BTreeMap<Name, SessionValue>>,
     printed: Vec<Datum>,
     requests: Vec<(String, Vec<Datum>)>,
     charged: u64,
@@ -171,8 +172,20 @@ fn observe(program: Program, relay: bool) -> Observed {
             Step::Ended(mut end) => {
                 let carry = match &mut end {
                     End::Finished(finished) => finished.carry.take().map(|root| {
-                        semantic::session(&root, Box::new(source.clone()))
-                            .expect("the carried graph is readable")
+                        let mut session =
+                            SessionEditor::open(Some(&root), Box::new(source.clone()))
+                                .expect("the carried session opens");
+                        let names = session.names().expect("the carried names read");
+                        names
+                            .into_iter()
+                            .map(|name| {
+                                let value = session
+                                    .get(&name)
+                                    .expect("the carried binding reads")
+                                    .expect("a carried name is bound");
+                                (name, value)
+                            })
+                            .collect()
                     }),
                     _ => None,
                 };

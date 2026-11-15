@@ -389,11 +389,13 @@ pub(crate) fn function_ddl() -> String {
     let registry = &*REGISTRY;
     let receipt_statement = super::head_commit::RECORD_RECEIPT.name();
     let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
+    let sealed = crate::advisory_lock::SEALED_LOCK_TIMEOUT;
+    let after_seal = crate::advisory_lock::after_seal_handler("v_sealed");
     format!(
         "CREATE OR REPLACE FUNCTION {FUNCTION}(
     p_registry TEXT, p_actor TEXT, p_epoch BIGINT, p_session TEXT,
     p_fleet_low INTEGER, p_fleet_high INTEGER, p_token TEXT,
-    p_lock_timeout TEXT, p_statement_ms BIGINT,
+    p_lock_timeout TEXT, p_statement_ms BIGINT, p_sealed_lock_timeout TEXT,
     p_body_hashes BYTEA[], p_bodies BYTEA[],
     p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
@@ -452,6 +454,7 @@ DECLARE
     v_frame TEXT;
     v_debts TEXT[];
     v_environment TEXT[];
+    v_sealed BOOLEAN := FALSE;
 BEGIN
     -- Generated from this build's statements (registry {registry}); a call
     -- built from others is refused, as is any isolation but read committed.
@@ -473,6 +476,9 @@ BEGIN
     END;
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    END IF;
+    IF p_sealed_lock_timeout IS NOT NULL THEN
+        PERFORM set_config('{sealed}', p_sealed_lock_timeout, true);
     END IF;
     {fleet_fence};
     {envelope}
@@ -524,6 +530,10 @@ BEGIN
         END IF;
         {installed_bytes} INTO v_installed;
     END IF;
+    -- From the first step that seals (FIG-7700) on, a lock wait that
+    -- expires is the schema's after-seal expiry; a plpgsql variable keeps
+    -- that record through the block's rollback, a setting would not.
+    BEGIN
     FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps->'steps') LOOP
         v_index := v_index + 1;
         -- A step runs only when the slot it names holds what it names: a
@@ -544,6 +554,8 @@ BEGIN
 {branches}        ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
+        -- A backend that never sealed has no such setting: unsealed.
+        v_sealed := v_sealed OR COALESCE(current_setting('lash.artifacts_sealed', true) = 'on', FALSE);
         -- The result is assembled from the exact successful receipt write,
         -- including the transaction's clock, without a post-commit read.
         IF v_step->>'s' = '{receipt_statement}' THEN
@@ -652,11 +664,17 @@ BEGIN
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
         v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
         v_session_heads, CASE WHEN p_profile THEN v_inserted ELSE NULL::BYTEA[] END, v_leases, v_answered;
+    {after_seal}
+    END;
 END
 $lash_owner_commit$;
 "
-    ) + &crate::artifact_store::local_end_function_ddl()
+    ) + &crate::advisory_lock::function_ddl()
+        + &crate::artifact_store::local_end_function_ddl()
+        + &crate::artifact_store::holds_function_ddl()
+        + &crate::artifact_store::env_over_body_function_ddl()
         + &renewal_ddl()
+        + &registration_ddl()
         + &super::graph::retirement_function_ddl()
 }
 
@@ -720,6 +738,103 @@ ${RENEW_FUNCTION}$;
     )
 }
 
+/// A created process's execution writes as one server request (FIG-7701):
+/// its registration's step program, then each initial resolution's, then
+/// the stamp of the actor's requirements, in the order the explicit form
+/// runs them, each statement static SQL dispatched by name. The programs'
+/// only lock wait is the referrer lock their first step takes; every later
+/// statement reads with its own snapshot, taken after that wait. A step
+/// that answers another number of rows than it must ends the call there,
+/// answering its program and step, which the caller names and rolls back
+/// as the explicit form does; the stamp runs only when `p_stamp` holds.
+fn registration_ddl() -> String {
+    let entries = super::packages::registration_entries();
+    for entry in entries {
+        assert!(
+            entry.collects().next().is_none() && entry.shape != Shape::GraphReclaim,
+            "a registration step gathers nothing: {}",
+            entry.name()
+        );
+        assert!(
+            !entry.params.contains(&Ty::Now),
+            "a registration step names no clock: {}",
+            entry.name()
+        );
+    }
+    let branches: String = entries.iter().map(|entry| branch(entry)).collect();
+    let registry = &*REGISTRY;
+    let debt_tokens = inline(super::packages::SQL.debt_tokens.sql(), &["p_actor"]);
+    let stamp_requires = inline(
+        EXECUTOR_SQL.stamp_requires.sql(),
+        &["p_actor", "NULL::TEXT", "v_debts"],
+    );
+    let function = super::packages::REGISTRATION_FUNCTION;
+    format!(
+        "CREATE OR REPLACE FUNCTION {function}(
+    p_registry TEXT, p_actor TEXT, p_programs JSONB, p_stamp BOOLEAN)
+RETURNS TABLE (o_program INTEGER, o_step INTEGER)
+LANGUAGE plpgsql
+VOLATILE
+AS ${function}$
+DECLARE
+    v_program JSONB;
+    v_programs INTEGER := 0;
+    v_index INTEGER;
+    v_step JSONB;
+    v_p JSONB;
+    v_rows BIGINT;
+    v_row RECORD;
+    v_first JSONB;
+    v_slots JSONB := '{{}}';
+    v_when JSONB;
+    v_debts TEXT[];
+BEGIN
+    IF p_registry IS DISTINCT FROM '{registry}'
+        OR current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION '{function}: registry or isolation refused' USING ERRCODE = 'LX000';
+    END IF;
+    FOR v_program IN SELECT value FROM jsonb_array_elements(p_programs) LOOP
+        v_index := 0;
+        FOR v_step IN SELECT value FROM jsonb_array_elements(v_program) LOOP
+            v_index := v_index + 1;
+            IF v_step ? 'w' THEN
+                v_when := v_slots->(v_step->'w'->>0);
+                IF (CASE
+                        WHEN v_when IS NULL OR v_when = 'null'::JSONB THEN FALSE
+                        WHEN v_step->'w'->>1 IS NULL THEN TRUE
+                        ELSE COALESCE((v_when->>(v_step->'w'->>1))::BOOLEAN, FALSE)
+                    END) IS DISTINCT FROM (v_step->'w'->>2)::BOOLEAN THEN
+                    CONTINUE;
+                END IF;
+            END IF;
+            v_p := v_step->'p';
+            v_first := NULL;
+            CASE v_step->>'s'
+{branches}            ELSE
+                RAISE EXCEPTION '{function}: no step %', v_step->>'s' USING ERRCODE = 'LX000';
+            END CASE;
+            IF v_step ? 'c' THEN
+                v_slots := v_slots || jsonb_build_object(v_step->>'c', COALESCE(v_first, 'null'::JSONB));
+            END IF;
+            IF v_step ? 'n' AND v_rows <> (v_step->>'n')::BIGINT THEN
+                RETURN QUERY SELECT v_programs, v_index - 1;
+                RETURN;
+            END IF;
+        END LOOP;
+        v_programs := v_programs + 1;
+    END LOOP;
+    IF p_stamp THEN
+        SELECT COALESCE(array_agg(debt.token), '{{}}') INTO v_debts
+        FROM ({debt_tokens}) AS debt(token);
+        {stamp_requires};
+    END IF;
+    RETURN QUERY SELECT NULL::INTEGER, NULL::INTEGER;
+END
+${function}$;
+"
+    )
+}
+
 /// Replace the generated owner commit in the published DDL.
 pub(crate) fn owner_commit_artifact() -> Result<String, &'static str> {
     let schema = crate::schema::SCHEMA_DDL;
@@ -769,5 +884,117 @@ mod tests {
             "schema.sql's lash_owner_commit is stale: regenerate it with \
              python3 scripts/regenerate-postgres-artifact.py schema.sql"
         );
+    }
+
+    /// A lock wait that expires before an owner commit's seal spends a retry
+    /// attempt, whatever its backend ran before (FIG-7700). The owner commit
+    /// locks its session's writes, then its plan waits on the session's held
+    /// referrer lock, before any artifact lock. A backend that never sealed
+    /// has no `lash.artifacts_sealed` setting: the commit's seal record read
+    /// it as `NULL`, its handler took `NULL` for sealed and named the timeout
+    /// an after-seal expiry, and the retry loop retried it without spending an
+    /// attempt, while a backend that had sealed and rolled back spent it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_pre_seal_owner_commit_timeout_spends_an_attempt_on_any_backend() {
+        use sqlx::Connection as _;
+        let Some(database_url) = crate::postgres_test_support::database_url() else {
+            eprintln!("skipping the pre-seal law: database URL is not set");
+            return;
+        };
+        let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+        let mut setup = sqlx::PgConnection::connect(database.url())
+            .await
+            .expect("connect");
+        sqlx::raw_sql(crate::schema::SCHEMA_DDL)
+            .execute(&mut setup)
+            .await
+            .expect("install the schema");
+        sqlx::query(
+            "INSERT INTO lash_actors (actor_key, kind, state, epoch, owner_node, owner_boot,
+                 formats, state_revision, mail_seq, acked_seq, created_at_ms)
+             VALUES ('s/probe', 'session', 'owned', 1, 'probe', 'boot', '{}', 0, 0, 0, 0)",
+        )
+        .execute(&mut setup)
+        .await
+        .expect("an owned session actor");
+        let mut holder = setup.begin().await.expect("begin the holder");
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('lash-artifact-referrer:session:probe', 0))",
+        )
+        .execute(&mut *holder)
+        .await
+        .expect("hold the session's referrer lock");
+        let mut plan = vec![serde_json::json!([]); 15];
+        plan[6] = serde_json::json!(["session"]);
+        plan[7] = serde_json::json!(["probe"]);
+        // The production head-plan prefix: the session's writes, then its plan.
+        let steps = serde_json::json!({
+            "version": 1,
+            "expected_revision": 0,
+            "steps": [
+                {"s": "durable_postgres.lock_session_writes", "p": ["s/probe", "probe"]},
+                {"s": "durable_lock_plan_postgres.plan", "p": plan},
+            ],
+        });
+        let call = "SELECT * FROM lash_owner_commit($1, 's/probe', 1, NULL, 0, 2147483647,
+            'probe-token', '100ms', 5000, '250ms',
+            '{}'::bytea[], '{}'::bytea[], '{}'::bytea[], '{}'::bytea[],
+            '{}'::bytea[], '{}'::bytea[], '{}'::bytea[], '{}'::bytea[],
+            $2::jsonb, NULL, NULL, NULL, NULL, NULL, NULL, false)";
+        let policy = crate::host::RetryPolicy {
+            attempts: 1,
+            initial_delay: std::time::Duration::from_millis(5),
+            max_delay: std::time::Duration::from_millis(20),
+            jitter: false,
+        };
+        for (backend, prior) in [
+            ("a fresh backend", None),
+            (
+                "a backend that sealed and rolled back",
+                Some("SELECT lash_lock_artifacts('{}')"),
+            ),
+        ] {
+            let mut connection = sqlx::PgConnection::connect(database.url())
+                .await
+                .expect("connect");
+            if let Some(prior) = prior {
+                let mut sealed = connection.begin().await.expect("begin");
+                sqlx::query(prior)
+                    .execute(&mut *sealed)
+                    .await
+                    .expect("seal");
+                sealed.rollback().await.expect("roll the seal back");
+            }
+            let connection = tokio::sync::Mutex::new(connection);
+            let calls = std::sync::atomic::AtomicUsize::new(0);
+            // The attempt classifies its own failure, as the store's attempts
+            // do: the classification reads the attempt's seal record.
+            let answer = policy
+                .run(
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5)),
+                    |(_, contended): &(sqlx::Error, bool)| *contended,
+                    || async {
+                        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        sqlx::query(call)
+                            .bind(&*super::super::executor::REGISTRY)
+                            .bind(&steps)
+                            .execute(&mut *connection.lock().await)
+                            .await
+                            .map(|_| ())
+                            .map_err(|error| {
+                                let contended = crate::support::is_contention_error(&error);
+                                (error, contended)
+                            })
+                    },
+                )
+                .await;
+            assert!(matches!(answer, Err((_, true))), "{backend}: {answer:?}");
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                1,
+                "{backend}: the pre-seal timeout did not spend the one attempt"
+            );
+        }
+        holder.rollback().await.expect("release the referrer lock");
     }
 }

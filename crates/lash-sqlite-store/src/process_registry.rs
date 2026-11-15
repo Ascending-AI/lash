@@ -783,6 +783,61 @@ impl lash_execution_contracts::process::ProcessRegistryTestSupport for SqlitePro
             .await
             .map_err(process_sqlite_error)?
     }
+
+    async fn stored_event_sequences_for_testing(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(Option<u64>, Vec<u64>), lash_execution_contracts::plugin_error::PluginError> {
+        let process_id = process_id.clone();
+        let (packed, rows) = self
+            .conn
+            .call(move |conn| {
+                let packed: Option<i64> = conn.query_row(
+                    "SELECT terminal_event_sequence FROM processes WHERE process_id = ?1",
+                    [process_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let rows = conn
+                    .prepare("SELECT sequence FROM process_events WHERE process_id = ?1 ORDER BY sequence")?
+                    .query_map([process_id.as_str()], |row| row.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<i64>>>()?;
+                Ok((packed, rows))
+            })
+            .await
+            .map_err(process_sqlite_error)?;
+        let sequence = |value: i64| plugin_u64_from_sql("ProcessEvent", "sequence", value);
+        Ok((
+            packed.map(sequence).transpose()?,
+            rows.into_iter().map(sequence).collect::<Result<_, _>>()?,
+        ))
+    }
+}
+
+/// An environment row as one statement read it: its head blob and its
+/// body's offset and blob (FIG-7700).
+struct StoredEnvironment {
+    head: Option<Vec<u8>>,
+    body_at: Option<i64>,
+    body: Option<Vec<u8>>,
+}
+
+impl StoredEnvironment {
+    fn read(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Self> {
+        Ok(Self {
+            head: row.get(at)?,
+            body_at: row.get(at + 1)?,
+            body: row.get(at + 2)?,
+        })
+    }
+
+    /// The exact published bytes.
+    fn bytes(self) -> Result<Vec<u8>, StoreError> {
+        let missing =
+            || stored_data_corrupt("process environment", "artifact points at a missing blob");
+        let head = crate::codec::decode_artifact_blob(&self.head.ok_or_else(missing)?)?;
+        let body = crate::codec::decode_artifact_blob(&self.body.ok_or_else(missing)?)?;
+        crate::artifact_store::splice_env_parts(&head, self.body_at.ok_or_else(missing)?, &body)
+    }
 }
 
 #[async_trait::async_trait]
@@ -792,26 +847,19 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
         env: &lash_core_store::process_identity::ProcessEnvRef,
     ) -> Result<Option<Vec<u8>>, StoreError> {
         let env = env.clone();
-        let bytes: Option<Option<Vec<u8>>> = self
+        let bytes: Option<StoredEnvironment> = self
             .conn
             .call(move |conn| {
                 conn.query_row_once(
                     process_sql().process_sqlite.select_environment_bytes.sql(),
                     params![crate::artifact_store::PROCESS_ENV_NAMESPACE, env.as_str()],
-                    |row| row.get(0),
+                    |row| StoredEnvironment::read(row, 0),
                 )
                 .optional()
             })
             .await
             .map_err(sqlite_error)?;
-        match bytes {
-            None => Ok(None),
-            Some(None) => Err(stored_data_corrupt(
-                "process environment",
-                "artifact points at a missing blob",
-            )),
-            Some(Some(bytes)) => crate::codec::decode_artifact_blob(&bytes).map(Some),
-        }
+        bytes.map(StoredEnvironment::bytes).transpose()
     }
 
     async fn process_authority(
@@ -821,14 +869,31 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
         let process = process.clone();
         self.conn
             .call(move |conn| {
-                let row: Option<(Option<String>, Option<Vec<u8>>, Option<String>, Option<i64>)> =
-                    conn.query_row_once(
+                let row: Option<(
+                    Option<String>,
+                    Option<StoredEnvironment>,
+                    Option<String>,
+                    Option<i64>,
+                )> = conn
+                    .query_row_once(
                         process_sql().process_sqlite.select_authority.sql(),
                         params![
                             process.as_str(),
                             crate::artifact_store::PROCESS_ENV_NAMESPACE
                         ],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                        |row| {
+                            let environment = row
+                                .get::<_, Option<Vec<u8>>>(1)?
+                                .map(|head| {
+                                    Ok::<_, rusqlite::Error>(StoredEnvironment {
+                                        head: Some(head),
+                                        body_at: row.get(4)?,
+                                        body: row.get(5)?,
+                                    })
+                                })
+                                .transpose()?;
+                            Ok((row.get(0)?, environment, row.get(2)?, row.get(3)?))
+                        },
                     )
                     .optional()?;
                 Ok(row)
@@ -839,12 +904,7 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
                 if let Some(record) = record {
                     let record = serde_json::from_str(&record)
                         .map_err(|error| StoreError::Backend(error.to_string()))?;
-                    Ok((
-                        record,
-                        bytes
-                            .map(|bytes| crate::codec::decode_artifact_blob(&bytes))
-                            .transpose()?,
-                    ))
+                    Ok((record, bytes.map(StoredEnvironment::bytes).transpose()?))
                 } else {
                     Err(StoreError::ProcessAuthorityPruned {
                         terminal_label: label

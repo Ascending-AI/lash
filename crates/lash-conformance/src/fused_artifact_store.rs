@@ -19,6 +19,8 @@ use pretty_assertions::assert_eq;
 /// backing storage.
 pub struct ArtifactStoreHandles {
     pub packages: Arc<dyn lash_durable::packages::PackageStore>,
+    /// The same store's package primitives, for what only they answer.
+    pub package_storage: Arc<dyn lash_durable::packages::PackageStorage>,
     pub artifacts: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
     pub process_env: Arc<dyn ProcessEnvStore>,
     pub turn_preludes: Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
@@ -28,8 +30,22 @@ pub struct ArtifactStoreHandles {
 /// durable backing store.
 pub struct ReopenableArtifactStore {
     pub open: ArtifactStoreHandles,
-    pub reopen: Arc<dyn Fn() -> ArtifactStoreHandles + Send + Sync>,
+    pub reopen: Reopen,
+    /// Where the fixture can cut a transaction in flight: see
+    /// [`InterruptNextWrite`].
+    pub interrupt: Option<InterruptNextWrite>,
 }
+
+/// Fresh handles over a durable store.
+pub type Reopen = Arc<dyn Fn() -> ArtifactStoreHandles + Send + Sync>;
+
+/// Cut the next write transaction while it is open. Calling it arms the
+/// cut; the future waits until a write holds its transaction, takes the
+/// store as a crash at that point leaves it, lets the write go on over the
+/// original, and answers a reopen over the crashed store.
+pub type InterruptNextWrite = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Reopen> + Send>> + Send + Sync,
+>;
 
 fn sample_module_artifact(name: &str) -> SampleArtifact {
     SampleArtifact::named(name)

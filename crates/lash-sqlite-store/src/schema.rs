@@ -444,11 +444,19 @@ CREATE TABLE IF NOT EXISTS attachment_blobs (
     stored_at_ms  INTEGER NOT NULL
 );
 
+-- An environment head's blob is its bytes without the body span, which
+-- splices back from body_ref (namespace process_env_body) at body_at
+-- (FIG-7700). Every other row has neither.
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
     blob_ref     INTEGER NOT NULL REFERENCES blobs(id),
-    PRIMARY KEY (namespace, artifact_ref)
+    body_ref     TEXT,
+    body_at      INTEGER,
+    PRIMARY KEY (namespace, artifact_ref),
+    CONSTRAINT ck_artifact_refs_body CHECK (
+        (body_ref IS NULL AND body_at IS NULL)
+        OR (namespace = 'process_execution_env' AND body_ref IS NOT NULL AND body_at >= 0))
 );
 
 -- Exact referrer edges for immutable artifacts. The edge is the liveness fact;
@@ -485,6 +493,22 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 
 CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
+
+-- What an artifact itself keeps alive (FIG-7700): a head its body, a body
+-- its closure. Retention only, never a referrer. Deleting the holder deletes
+-- its edges; a held artifact cannot be deleted while an edge names it.
+CREATE TABLE IF NOT EXISTS artifact_dependency_edges (
+    namespace        TEXT NOT NULL,
+    artifact_ref     TEXT NOT NULL,
+    holder_namespace TEXT NOT NULL,
+    holder_ref       TEXT NOT NULL,
+    PRIMARY KEY (holder_namespace, holder_ref, namespace, artifact_ref),
+    FOREIGN KEY (holder_namespace, holder_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE,
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_artifact_dependency_edges_held
+    ON artifact_dependency_edges(namespace, artifact_ref);
 
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_cleanup_obligations_kind CHECK (length(referrer_kind) > 0),
@@ -601,6 +625,21 @@ CREATE TABLE IF NOT EXISTS processes (
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT,
     consumer_hold_cancels INTEGER,
+    -- A finished process keeps the event that ended it and its parent-end
+    -- plan on its own row (FIG-7701). The event is exactly the header,
+    -- nullable payload and replay digest an event row holds; readers see it
+    -- through process_event_log, never assuming it is the last event.
+    terminal_event_sequence INTEGER,
+    terminal_event_type TEXT,
+    terminal_event_key TEXT,
+    terminal_event_header TEXT,
+    terminal_event_payload TEXT,
+    terminal_event_digest TEXT,
+    end_plan_scope_id TEXT,
+    end_plan_payload TEXT,
+    end_plan_ended_at_ms INTEGER,
+    CONSTRAINT ck_processes_terminal_event CHECK ((terminal_event_sequence IS NULL) = (terminal_event_type IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_header IS NULL) AND (terminal_event_sequence IS NULL) = (terminal_event_digest IS NULL) AND (terminal_event_sequence IS NOT NULL OR (terminal_event_key IS NULL AND terminal_event_payload IS NULL))),
+    CONSTRAINT ck_processes_end_plan CHECK ((end_plan_scope_id IS NULL) = (end_plan_payload IS NULL) AND (end_plan_scope_id IS NULL) = (end_plan_ended_at_ms IS NULL)),
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned')),
     CONSTRAINT ck_processes_last_event_sequence CHECK (typeof(last_event_sequence) = 'integer'),
@@ -679,6 +718,19 @@ CREATE TABLE IF NOT EXISTS process_events (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
     ON process_events(process_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
+
+-- Every event of a process: its event rows and the terminal event packed on
+-- its row. Readers use this; only appends, releases and prunes name a part.
+CREATE VIEW IF NOT EXISTS process_event_log AS
+    SELECT process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest
+    FROM process_events
+    UNION ALL
+    SELECT process_id, terminal_event_sequence, terminal_event_type, terminal_event_key,
+        terminal_event_header, terminal_event_payload, terminal_event_digest
+    FROM processes WHERE terminal_event_sequence IS NOT NULL;
+-- Retention reclaims packed plans by their end instant.
+CREATE INDEX IF NOT EXISTS idx_processes_end_plan
+    ON processes(end_plan_ended_at_ms) WHERE end_plan_ended_at_ms IS NOT NULL;
 
 -- The event prefix a host released of a still-retained process (FIG-3482):
 -- events at or below `released_through` keep their row without a payload,

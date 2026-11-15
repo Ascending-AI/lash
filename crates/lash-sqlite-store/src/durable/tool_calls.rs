@@ -67,7 +67,8 @@ lash_store_sql::statements! {
                 = (excluded.execution_owner, excluded.run_seq, excluded.member, excluded.cancellable, excluded.counted)";
         selected = "SELECT call_id, execution_owner, run_seq, member, decision,
                 answer_outcome, (SELECT hash FROM blobs WHERE id = body_ref) AS body_ref, admission_seq
-            FROM tool_calls WHERE owner_key = ?1 AND call_id IN (SELECT value FROM json_each(?2))";
+            FROM tool_calls WHERE owner_key = ?1 AND call_id IN (SELECT value FROM json_each(?2))
+            ORDER BY admission_seq, call_id";
     }
 }
 static SQLITE: LazyLock<ToolCallSqliteStatements> =

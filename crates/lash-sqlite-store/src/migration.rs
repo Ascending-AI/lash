@@ -1006,7 +1006,7 @@ mod nested_format_tests {
             )
             .await
             {
-                Err(error) => crate::sqlite_async_error(error),
+                Err(error) => error,
                 Ok(_) => panic!("unreadable recovery record was admitted"),
             };
             assert!(

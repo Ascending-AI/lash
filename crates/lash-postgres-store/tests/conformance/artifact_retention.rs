@@ -56,6 +56,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 packages: Arc::new(open_storage.lash_vm_artifact_store()),
+                package_storage: Arc::new(open_storage.lash_vm_artifact_store()),
                 artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store()) as Arc<dyn ProcessEnvStore>,
@@ -74,6 +75,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                         packages: Arc::new(reopened.lash_vm_artifact_store()),
+                        package_storage: Arc::new(reopened.lash_vm_artifact_store()),
                         artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<
                                 dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore,
@@ -84,6 +86,7 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
                             as Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,
                     }
                 }),
+                interrupt: None,
             }
         })
     })
@@ -93,6 +96,12 @@ lash_conformance::artifact_referrer_tests!(@catalogue {
             (process_env_carry_retains_exact_origin, "process-env-origin-retention"),
             (attachment_only_referrers_cannot_acquire_artifacts, "artifact-referrer-kind-refusal"),
             (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
+            (process_env_spellings_read_back_exactly, "process-env-exact-spellings"),
+            (environment_holders_answer_package_authority_as_direct_holders, "process-env-package-authority"),
+            (environment_retention_survives_a_cut_at_every_step, "process-env-crash-cuts"),
+            (module_share_outlives_environment_share_in_either_order, "module-share-end-orders"),
+            (module_share_survives_a_cut_between_its_ends, "module-share-crash-cuts"),
+            (carried_environments_refuse_in_the_callers_order, "process-env-carry-refusal-order"),
 
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);

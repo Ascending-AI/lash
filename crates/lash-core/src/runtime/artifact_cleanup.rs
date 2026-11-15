@@ -606,6 +606,9 @@ impl ArtifactCleanupRelay {
         referrer: &ArtifactReferrer,
         carries: &[ArtifactCarry],
     ) -> Result<(), DeliveryFailure> {
+        // Environments end before modules: an environment carried to its
+        // destination gives it the environment's module closure, which must
+        // still be stored, so the referrer's module share ends after it.
         self.ports
             .process_env
             .end_process_env_referrer(&ResolvedArtifactCleanup::for_store(

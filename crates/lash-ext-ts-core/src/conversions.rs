@@ -37,6 +37,44 @@ impl NativeFunction for ToBoolean {
     }
 }
 
+/// `ts.not`, `!value`: the negation of what `ts.to_boolean`'s native
+/// answers, declining where it declines. A boolean negates inline by the
+/// declared `Not` specialization.
+pub(super) struct Not;
+
+fn not(args: &[Value]) -> Option<Value> {
+    match to_boolean(args)? {
+        Value::Bool(truth) => Some(Value::Bool(!truth)),
+        _ => None,
+    }
+}
+
+impl NativeFunction for Not {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Not,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        not(call.args.values()).ok_or(NativeError::Decline)
+    }
+
+    fn prepare(&self) -> Option<PreparedNative> {
+        Some(PreparedNative {
+            pair: None,
+            entry: not,
+            charged_entry: None,
+            operation: "ts.not(value: Any) -> Bool",
+        })
+    }
+}
+
 /// A fixed inline buffer: failure leaves allocation and its admission to
 /// the existing helper body, rather than building a speculative long text.
 #[derive(Default)]
@@ -155,6 +193,21 @@ fn number_to_string(args: &[Value]) -> Option<Value> {
 }
 
 impl NativeFunction for NumberToString {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            immediate: self.prepare(),
+            // The body's first arm: a whole float below 2^53 is its
+            // integer's decimal digits.
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::IntegerText(
+                    lash_kernel_doc::arena::native::IntegerTextDomain::WholeFloat,
+                ),
+            }),
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         number_to_string(call.args.values()).ok_or(NativeError::Decline)
     }

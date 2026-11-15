@@ -46,19 +46,16 @@ pub fn equal(a: &Value, b: &Value, args: &Args<'_>) -> Result<bool, NativeError>
 }
 
 pub(crate) fn scalar_same(a: &Value, b: &Value) -> Option<bool> {
-    Some(match (a, b) {
-        (Value::Float(a), Value::Float(b)) => a.get().to_bits() == b.get().to_bits(),
-        (Value::List(a), Value::List(b))
-        | (Value::Map(a), Value::Map(b))
-        | (Value::Set(a), Value::Set(b))
-        | (Value::Record(a), Value::Record(b))
-        | (Value::Closure(a), Value::Closure(b)) => a == b,
-        _ if a.kind() != b.kind() => false,
-        _ => scalar_equal(a, b)?,
-    })
+    match lash_kernel_doc::arena::native::InlineOperation::Same.answer(&[*a, *b]) {
+        Some(Value::Bool(same)) => Some(same),
+        _ => scalar_equal(a, b),
+    }
 }
 
 pub fn same(a: &Value, b: &Value, args: &Args<'_>) -> Result<bool, NativeError> {
+    if let Some(same) = scalar_same(a, b) {
+        return Ok(same);
+    }
     let mut pending = vec![(*a, *b)];
     while let Some((a, b)) = pending.pop() {
         if let Some(same) = scalar_same(&a, &b) {

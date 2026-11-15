@@ -117,19 +117,20 @@ pub(super) fn environment(
                 {
                     None
                 } else {
-                    Some(Name::new(name))
+                    Some(name.as_str())
                 }
             } else {
                 None
             }
         })
+        .map(|name| (!name.is_empty()).then(|| Name::new(name)))
         .or_else(|| {
             node.signature_origin
                 .as_ref()
                 .and_then(|origin| origin.name.as_ref())
-                .map(Name::new)
+                .map(|name| Some(Name::new(name)))
         })
-        .unwrap_or_else(|| fresh(format!("make_callable_{index}")));
+        .unwrap_or_else(|| Some(fresh(format!("make_callable_{index}"))));
     let raw = match (&node.representation, &node.token) {
         (FunctionRepresentation::Bare, None) => raw,
         (FunctionRepresentation::Token { callable, .. }, Some(token)) => {
@@ -158,6 +159,23 @@ pub(super) fn environment(
             }
         }
         _ => return Err(MaterializeRefusal::Callable(FunctionValueRefusal::Identity)),
+    };
+    // An anonymous function (a returned arrow) is bound as the front end
+    // binds one it evaluates ahead of its use, to a temporary `t<n>`: a
+    // named binding would name it, and the name is part of its token.
+    let raw_name = match raw_name {
+        Some(name) => name,
+        None => {
+            let mut n = 0_u32;
+            loop {
+                let temporary = format!("t{n}");
+                let name = fresh(temporary.clone());
+                if name.as_str() == temporary {
+                    break name;
+                }
+                n += 1;
+            }
+        }
     };
     body.push(binding(raw_name.clone(), raw));
     let parts = vec![Expr::Variable(raw_name), Expr::Variable(setter_name)];

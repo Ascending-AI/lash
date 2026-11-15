@@ -18,53 +18,63 @@ impl lash_execution_contracts::process::ProcessLifecycle for PostgresProcessRegi
         // append. Locking the row means the input class we validate is the one
         // we append against — the re-registration serialises either
         // fully before our load or fully after our commit.
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
-        let await_output = await_output.with_cancel_origin(
-            record
-                .cancel_request
-                .as_deref()
-                .map(|request| request.origin),
-        );
-        authority.validate(&record)?;
-        if record.is_terminal() {
-            tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(
-                lash_execution_contracts::process::ProcessCompletionOutcome::from_stored(
-                    record,
-                    &await_output,
-                ),
-            );
-        }
+        //
+        // The inputs and the clock are fixed before the first attempt, so an
+        // attempt the database rolled back for contention (a deadlock, or the
+        // parent-scope lock's wait) runs again as the identical write. Nothing
+        // leaves the transaction before it commits; the caller's completion
+        // effects follow the one acknowledged commit.
         let occurred_at_ms = self.clock.timestamp_ms();
-        let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
-        for request in prelude {
-            batch
-                .stage(&mut tx, &mut record, request, occurred_at_ms)
+        let (prelude, await_output, authority) = (&prelude, &await_output, &authority);
+        crate::guarded_tx::retry_contended(&self.fence, || async move {
+            let mut tx = begin_guarded(&self.pool, &self.fence)
+                .await
+                .map_err(plugin_store_error)?;
+            let mut record = require_process_tx(&mut tx, process_id).await?;
+            let await_output = await_output.clone().with_cancel_origin(
+                record
+                    .cancel_request
+                    .as_deref()
+                    .map(|request| request.origin),
+            );
+            authority.validate(&record)?;
+            if record.is_terminal() {
+                tx.commit().await.map_err(plugin_sqlx_error)?;
+                return Ok(
+                    lash_execution_contracts::process::ProcessCompletionOutcome::from_stored(
+                        record,
+                        &await_output,
+                    ),
+                );
+            }
+            let mut batch = ProcessEventBatch::for_fleet(self.fence.fleet());
+            for request in prelude.iter().cloned() {
+                batch
+                    .stage(&mut tx, &mut record, request, occurred_at_ms)
+                    .await?;
+            }
+            let request = lash_execution_contracts::process::terminal_append_request(
+                process_id,
+                &await_output,
+                Some(authority),
+            );
+            let (_, arm) = batch
+                .stage_arm(&mut tx, &mut record, request, occurred_at_ms)
                 .await?;
-        }
-        let request = lash_execution_contracts::process::terminal_append_request(
-            process_id,
-            &await_output,
-            Some(&authority),
-        );
-        let (_, arm) = batch
-            .stage_arm(&mut tx, &mut record, request, occurred_at_ms)
-            .await?;
-        batch.commit(&mut tx, &record).await?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(match arm {
-            ProcessEventAppendArm::Replayed => {
-                lash_execution_contracts::process::ProcessCompletionOutcome::AlreadyApplied {
-                    stored: record,
+            batch.commit(&mut tx, &record).await?;
+            tx.commit().await.map_err(plugin_sqlx_error)?;
+            Ok(match arm {
+                ProcessEventAppendArm::Replayed => {
+                    lash_execution_contracts::process::ProcessCompletionOutcome::AlreadyApplied {
+                        stored: record,
+                    }
                 }
-            }
-            ProcessEventAppendArm::Inserted => {
-                lash_execution_contracts::process::ProcessCompletionOutcome::Committed(record)
-            }
+                ProcessEventAppendArm::Inserted => {
+                    lash_execution_contracts::process::ProcessCompletionOutcome::Committed(record)
+                }
+            })
         })
+        .await
     }
 
     async fn get_parent_end_plan(

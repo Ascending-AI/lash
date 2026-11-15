@@ -600,7 +600,7 @@
       "cpu_count": 3,
       "cpu_samples": 24,
       "mean_cores": 2.66,
-      "memory_kb": 2621440,
+      "memory_kb": 14417920,
       "oom_all_killed_request_kb": 0,
       "oom_floor_kb": 2097152,
       "oom_kills": 1,

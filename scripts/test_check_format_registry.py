@@ -362,6 +362,83 @@ reason = "a projection identity, not a stored-format version"
                       (self.repo / "crates/demo/src/lib.rs").read_text())
         self.assertEqual((self.repo / gate.MANIFEST).read_text(), self.manifest)
 
+    def test_retired_build_records_the_stamps_the_last_advance_replaced(self) -> None:
+        # ADR 0115 §8 law: RETIRED_BUILD is the land's base whenever the land
+        # moved a retired surface's stamp. A hand edit, or a stamp moved by a
+        # commit the witness advance did not write, leaves the fence on a
+        # build nobody deploys, so the registry check refuses both.
+        import subprocess
+        import apply_format_witnesses as automatic
+
+        def commit(message: str) -> str:
+            for args in [("add", "--all"), ("commit", "--quiet", "-m", message)]:
+                subprocess.run(["git", "-c", "user.name=fixture",
+                                "-c", "user.email=fixture@example.invalid",
+                                "-c", "commit.gpgsign=false", *args], cwd=self.repo,
+                               check=True, capture_output=True)
+            return gate.check_version_bumps.git(self.repo, "rev-parse", "HEAD").stdout.strip()
+
+        def stamp(surface: str, version: int) -> None:
+            path, constant = gate.RETIRED_SURFACES[surface]
+            target = self.repo / path
+            text = target.read_text() if target.exists() else ""
+            text = re.sub(rf"(?m)^pub const {constant}: u32 = \d+;\n", "", text)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text + f"pub const {constant}: u32 = {version};\n")
+
+        def manifest() -> str:
+            return (self.repo / gate.MANIFEST).read_text()
+
+        def problems() -> list[str]:
+            return gate.retired_build_problems(self.repo, manifest())
+
+        def land(base: str) -> None:
+            view = gate.check_version_bumps.WorktreeView(self.repo)
+            base_view = gate.check_version_bumps.RevisionView(self.repo, base)
+            for path, text in automatic.retire_replaced_build(base_view, view).items():
+                (self.repo / path).write_text(text)
+
+        subprocess.run(["git", "init", "--quiet"], cwd=self.repo, check=True)
+        for surface in gate.RETIRED_SURFACES:
+            stamp(surface, 3)
+        first = commit("the deployed build")
+        rows = "".join(f'    ("{surface}", 3),\n' for surface in sorted(gate.RETIRED_SURFACES))
+        self.write(str(gate.MANIFEST), f"/// Replaced build: `{first}`.\n"
+                   f"const RETIRED_BUILD: &[(&str, u32)] = &[\n{rows}];\n")
+        commit("the fence names it")
+        self.assertEqual(problems(), [])
+
+        # A land that moves run-record replaces its base; one that moves no
+        # stamp keeps the recorded predecessor.
+        base = gate.check_version_bumps.git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        stamp("run-record", 4)
+        land(base)
+        commit("advance run-record")
+        self.assertEqual(gate.retired_build(manifest()),
+                         (base, {surface: 3 for surface in gate.RETIRED_SURFACES}))
+        self.assertEqual(problems(), [])
+        base = gate.check_version_bumps.git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        stamp("wait-row", 4)
+        land(base)
+        advanced = commit("advance wait-row")
+        expected = {surface: 3 for surface in gate.RETIRED_SURFACES} | {"run-record": 4}
+        self.assertEqual(gate.retired_build(manifest()), (base, expected))
+        self.assertEqual(problems(), [])
+
+        (self.repo / gate.MANIFEST).write_text(
+            manifest().replace('("run-record", 4)', '("run-record", 3)'))
+        commit("hand edit")
+        refused = problems()
+        self.assertEqual(len(refused), 1)
+        self.assertIn(f"RETIRED_BUILD disagrees with the stamps of {base[:12]}", refused[0])
+
+        subprocess.run(["git", "reset", "--quiet", "--hard", advanced], cwd=self.repo, check=True)
+        stamp("session-state", 4)
+        unrecorded = commit("move session-state outside the land")
+        refused = problems()
+        self.assertEqual(len(refused), 1)
+        self.assertIn(f"{unrecorded[:12]} moved the stamps of ['session-state']", refused[0])
+
     def test_a_surface_without_an_upgrade_policy_fails(self) -> None:
         self.write("crates/demo/src/lib.rs", SOURCE.replace('/// version_surface = "migrate"\n', ""))
         self.assertTrue(any("needs version_surface" in p for p in self.problems()))

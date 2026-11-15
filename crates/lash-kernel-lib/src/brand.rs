@@ -90,7 +90,7 @@ fn brand(args: lash_kernel_doc::Args<'_>) -> Result<Value, NativeError> {
     let Some(value @ Value::Record(_)) = args.get(0) else {
         return Ok(Value::Absent);
     };
-    let Some(fields) = args.table(value)? else {
+    let Some(fields) = args.point_table(value)? else {
         return Ok(Value::Absent);
     };
     let key = Value::Text(

@@ -52,7 +52,7 @@ pub(crate) fn implementation(
         #[cfg(feature = "dialect-typescript")]
         ("typescript", version)
             if version
-                == if matches!(name, "ts.lt" | "ts.le" | "ts.gt" | "ts.ge") {
+                == if matches!(name, "ts.add" | "ts.lt" | "ts.le" | "ts.gt" | "ts.ge") {
                     2
                 } else {
                     1
@@ -64,7 +64,9 @@ pub(crate) fn implementation(
             })
         }
         #[cfg(feature = "dialect-python")]
-        ("python", 1) => lash_ext_py_core::native(name),
+        ("python", version) if version == if name == "py.add" { 2 } else { 1 } => {
+            lash_ext_py_core::native(name)
+        }
         _ => None,
     }
 }

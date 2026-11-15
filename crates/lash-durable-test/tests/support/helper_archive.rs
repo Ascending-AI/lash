@@ -1,7 +1,7 @@
 //! FIG-7512: exact helper code survives deployment, before and after a park.
 use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{BuildHelpers, Datum, Document, FunctionRegistry, Selection};
+use lash_kernel_doc::{BuildHelpers, Datum, Document, FunctionRegistry};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_value::{FunctionId, Link};
 use lash_kernel_vm::{KernelMachine, Machine, PreparedLibrary, Program, Step};
@@ -160,11 +160,7 @@ impl Fixture {
         )
         .unwrap()
     }
-    fn program(
-        &self,
-        release: &lash_kernel_releases::HelperRelease,
-        selection: Selection,
-    ) -> Program {
+    fn program(&self, release: &lash_kernel_releases::HelperRelease) -> Program {
         let registry = Arc::new(release.functions.clone());
         let stored = self
             .document
@@ -186,7 +182,6 @@ impl Fixture {
             &[(self.link.identity(), self.link.clone())].into(),
             PageId(closure.reference().0),
             PreparedLibrary::with_helpers(registry, Arc::clone(&release.helpers)),
-            selection,
         )
         .unwrap()
     }
@@ -197,7 +192,7 @@ impl Fixture {
         owner: PageId,
     ) -> KernelMachine {
         KernelMachine::start(
-            self.program(release, Selection::Fresh),
+            self.program(release),
             bounds(),
             lash_kernel_vm::CellStart {
                 owner,
@@ -423,19 +418,11 @@ pub(super) async fn run_across_deploy(tier: super::served::Tier) {
     let document: Document = lash_kernel_value::tokens::decode_body(&bytes).unwrap();
     assert_eq!(document.identity(), fixture.document.identity());
     let release = fixture.upgraded();
-    let (source, selection) = checkpoint
-        .check_helper_compatibility(
-            Box::new(loaded),
-            &[(fixture.link.identity(), document)].into(),
-            &Default::default(),
-            &release.helpers,
-        )
-        .unwrap();
     let mut restored = KernelMachine::open(
-        fixture.program(&release, selection),
+        fixture.program(&release),
         bounds(),
         &checkpoint,
-        source,
+        Box::new(loaded),
     )
     .unwrap();
     restored

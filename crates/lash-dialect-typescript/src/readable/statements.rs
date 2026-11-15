@@ -11,15 +11,67 @@ use super::source::{self, Arm, Expr, StmtKind};
 impl Lifter<'_> {
     pub(super) fn statement(&mut self, statement: &k::Stmt, site: &Site) -> Lift<StmtKind> {
         Ok(match statement {
-            k::Stmt::Let { name, value } => {
-                let name = self.binding(name)?;
+            k::Stmt::Let {
+                name: kernel,
+                value,
+            } => {
+                let name = self.binding(kernel)?;
                 if let k::Rhs::Expr(value) = value
                     && let Some(function) = self.closure(value)?
                 {
-                    return Ok(StmtKind::Const(name, Expr::arrow(function)));
+                    let value = match super::closures::authored_name(value) {
+                        Some(authored) if authored != name => {
+                            Expr::Function(authored.to_owned(), Box::new(function))
+                        }
+                        _ => Expr::arrow(function),
+                    };
+                    return Ok(StmtKind::Const(name, value));
                 }
                 let value = self.rhs(value)?;
-                if self.reassigned(&name) {
+                if site.unit == lash_kernel_value::sites::Unit::Main
+                    && !self.lexical_scopes.is_empty()
+                    && !self.document.private_bindings.contains(kernel)
+                {
+                    return Ok(StmtKind::Var(name, Some(value)));
+                }
+                // A local's declared type is spelled again where its source
+                // evidence names one an annotation writes; readback proves
+                // it lowers alike.
+                if let Some(ty) = self.evidence.get(kernel).cloned()
+                    && let Ok(ty) = self.ts_type(None, &ty, &k::FieldRoot::Result, &mut Vec::new())
+                {
+                    let constant = !self.reassigned(kernel.as_str());
+                    return Ok(StmtKind::Declared {
+                        constant,
+                        name,
+                        ty,
+                        value: match value {
+                            Expr::Undefined if !constant => None,
+                            value => Some(value),
+                        },
+                    });
+                }
+                // Numeric initializers retain their float evidence. Widening
+                // them to `any` changes index guards and String conversions.
+                if self.style.exact
+                    && (matches!(value, Expr::Text(_) | Expr::Bool(_))
+                        || (!self.style.float_initializers && matches!(value, Expr::Number(_))))
+                {
+                    return Ok(StmtKind::Declared {
+                        constant: false,
+                        name,
+                        ty: source::Type::Word("any"),
+                        value: Some(value),
+                    });
+                }
+                if self.style.exact
+                    && matches!(value, Expr::Undefined)
+                    && site.unit == lash_kernel_value::sites::Unit::Main
+                    && !self.document.private_bindings.contains(kernel)
+                {
+                    return Ok(StmtKind::Var(name, None));
+                }
+                if self.reassigned(kernel.as_str()) {
                     match value {
                         Expr::Undefined => StmtKind::Let(name, None),
                         value => StmtKind::Let(name, Some(value)),
@@ -32,6 +84,11 @@ impl Lifter<'_> {
                 place,
                 value,
                 order: k::AssignOrder::ValueFirst,
+            } => self.assign(place, value)?,
+            k::Stmt::Assign {
+                place,
+                value,
+                order: k::AssignOrder::PlaceFirst,
             } => self.assign(place, value)?,
             // A discarded dynamic member write is the exact ts.set import
             // call; retain the source's place-before-value evaluation order.
@@ -52,6 +109,15 @@ impl Lifter<'_> {
                 then_block,
                 else_block,
             } => {
+                if self.style.exact
+                    && let Some([target, index, value]) =
+                        self.list_write(condition, then_block, else_block)
+                {
+                    return Ok(StmtKind::Expr(super::expressions::constructor(
+                        "list.set",
+                        vec![self.expr(&target)?, self.expr(&index)?, self.expr(&value)?],
+                    )));
+                }
                 let condition = self.condition(condition)?;
                 let then = self.block(then_block, &site.child(1))?;
                 let arm = site.child(2);
@@ -86,12 +152,26 @@ impl Lifter<'_> {
                 ) else {
                     return refuse("a property enumeration the dialect does not lower to");
                 };
-                StmtKind::For {
+                let (binding, taken, declaration) =
+                    self.iteration_binding(enumeration.binding, enumeration.body)?;
+                let kind = StmtKind::For {
                     operator: "in",
-                    binding: self.binding(enumeration.binding)?,
-                    iterable: self.expr(enumeration.subject)?,
-                    body: self.block_at(enumeration.body, &site.child(1).child(0).child(1), 1)?,
-                }
+                    declaration: if declaration.is_empty()
+                        && !matches!(binding, source::Pattern::Name(_))
+                    {
+                        "var"
+                    } else {
+                        declaration
+                    },
+                    binding,
+                    iterable: self.operand(enumeration.subject, "value.operand")?,
+                    body: self.block_at(
+                        &enumeration.body[taken..],
+                        &site.child(1).child(0).child(1),
+                        taken,
+                    )?,
+                };
+                self.labeled(kind)
             }
             k::Stmt::For {
                 metered: 0,
@@ -100,23 +180,38 @@ impl Lifter<'_> {
                 via: Some(via),
                 body,
                 else_block,
-            } if else_block.is_empty() && self.for_of(via) => StmtKind::For {
-                operator: "of",
-                binding: self.binding(binding)?,
-                iterable: self.expr(iterable)?,
-                body: self.block(body, &site.child(1))?,
-            },
+            } if else_block.is_empty() && self.for_of(via) => {
+                let (pattern, taken, declaration) = self.iteration_binding(binding, body)?;
+                let kind = StmtKind::For {
+                    operator: "of",
+                    binding: pattern,
+                    declaration,
+                    iterable: self.expr(iterable)?,
+                    body: self.block_at(&body[taken..], &site.child(1), taken)?,
+                };
+                self.labeled(kind)
+            }
             k::Stmt::While {
                 metered: 0,
                 condition,
                 body,
                 else_block,
-            } if else_block.is_empty() => StmtKind::While {
-                condition: self.condition(condition)?,
-                body: self.block(body, &site.child(1))?,
-            },
-            k::Stmt::Break => StmtKind::Break,
-            k::Stmt::Continue => StmtKind::Continue,
+            } if else_block.is_empty() => {
+                let kind = match self.for_continuation_update(body) {
+                    Some((target, operator)) => StmtKind::ForClassic {
+                        condition: self.condition(condition)?,
+                        update: Expr::Unary(operator, Box::new(Expr::Ident(self.binding(target)?))),
+                        body: self.block(&body[..body.len() - 1], &site.child(1))?,
+                    },
+                    None => StmtKind::While {
+                        condition: self.condition(condition)?,
+                        body: self.block(body, &site.child(1))?,
+                    },
+                };
+                self.labeled(kind)
+            }
+            k::Stmt::Break => StmtKind::Break(None),
+            k::Stmt::Continue => StmtKind::Continue(None),
             k::Stmt::ReturnVia { value, .. }
                 if crate::constructs::conventions::RETURNS
                     .is_statement(statement, |target, name| self.is(target, name)) =>
@@ -146,7 +241,10 @@ impl Lifter<'_> {
                 k::Expr::Literal(k::Literal::Absent) => StmtKind::Return(None),
                 value => StmtKind::Return(Some(self.expr(value)?)),
             },
-            k::Stmt::Throw { value } => StmtKind::Throw(self.expr(value)?),
+            k::Stmt::Throw { value } => match self.exit(value) {
+                Some(exit) => exit,
+                None => StmtKind::Throw(self.expr(value)?),
+            },
             k::Stmt::Try(scope) if scope.catch.is_some() || scope.finally.is_some() => {
                 let body = self.block(&scope.body, &site.child(0))?;
                 let mut child = 1;
@@ -154,13 +252,32 @@ impl Lifter<'_> {
                     Some(catch) => {
                         let arm = site.child(child);
                         child += 1;
-                        let binding = self.binding(&catch.binding)?;
+                        let skipped = catch
+                            .body
+                            .iter()
+                            .take_while(|stmt| self.label_machinery(stmt))
+                            .count();
+                        let (binding, taken) = if super::lift::temporary(&catch.binding) {
+                            match self.bound_pattern(&catch.body[skipped..], &catch.binding)? {
+                                Some((pattern, taken)) => (Some(pattern), taken),
+                                None => (None, 0),
+                            }
+                        } else {
+                            (
+                                Some(source::Pattern::Name(self.binding(&catch.binding)?)),
+                                0,
+                            )
+                        };
                         Some((
                             Arm {
                                 caption: self.arm_caption(&arm),
-                                body: self.block(&catch.body, &arm)?,
+                                body: self.block_at(
+                                    &catch.body[skipped + taken..],
+                                    &arm,
+                                    skipped + taken,
+                                )?,
                             },
-                            Some(binding),
+                            binding,
                         ))
                     }
                     None => None,
@@ -211,7 +328,7 @@ impl Lifter<'_> {
         }
     }
 
-    fn assign(&mut self, place: &k::Place, value: &k::Rhs) -> Lift<StmtKind> {
+    pub(super) fn assign(&mut self, place: &k::Place, value: &k::Rhs) -> Lift<StmtKind> {
         match place {
             k::Place::Variable(name) => {
                 let name = self.binding(name)?;
@@ -227,6 +344,14 @@ impl Lifter<'_> {
                 {
                     let list = Expr::Ident(self.binding(list)?);
                     let value = self.rhs(value)?;
+                    // A binding of no known kind (a capture cell) spells the
+                    // list's own push.
+                    if self.style.exact {
+                        return Ok(StmtKind::Expr(super::expressions::constructor(
+                            "list.method",
+                            vec![list, Expr::Text("push".to_owned()), value],
+                        )));
+                    }
                     Ok(StmtKind::Expr(Expr::Call(
                         Box::new(Expr::Field(Box::new(list), "push".to_owned())),
                         vec![value],
@@ -324,6 +449,75 @@ impl Lifter<'_> {
     }
 
     /// `invoke helper(target, key)` with `helper` the named library function.
+    /// The element write `xs[i] = v` of a list the source built, as the
+    /// front end guards it: `i`'s position test unless it is a literal, the
+    /// bound that admits an append, the element written in place, and the
+    /// `ts.set` helper wherever a test fails. A binding of no known kind (a
+    /// capture cell) adds a kind test to that write, so it spells the
+    /// list's own write, `list.set(xs, i, v)`.
+    fn list_write(
+        &self,
+        condition: &k::Expr,
+        then_block: &[k::Stmt],
+        else_block: &[k::Stmt],
+    ) -> Option<[k::Expr; 3]> {
+        use crate::constructs::reads::{APPEND_BOUNDS, POSITION};
+        let is = |id: &lash_kernel_value::FunctionId, name: &str| self.is(id, name);
+        let mut guards = vec![(condition, else_block)];
+        let mut block = then_block;
+        if let [
+            k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            },
+        ] = block
+        {
+            guards.push((condition, else_block.as_slice()));
+            block = then_block;
+        }
+        let [
+            k::Stmt::Assign {
+                place: k::Place::Member(member),
+                value: k::Rhs::Expr(value),
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = block
+        else {
+            return None;
+        };
+        let k::Member::Index { target, index } = member else {
+            return None;
+        };
+        if !matches!(target, k::Expr::Variable(_)) {
+            return None;
+        }
+        let (bound, position) = match guards.as_slice() {
+            [bound] => (bound, None),
+            [position, bound] => (bound, Some(position)),
+            _ => return None,
+        };
+        if APPEND_BOUNDS.recognize(bound.0, &is)? != [index, target] {
+            return None;
+        }
+        match position {
+            Some(position) if POSITION.recognize(position.0, &is)? != [index] => return None,
+            Some(_) => {}
+            None if !matches!(index, k::Expr::Literal(_)) => return None,
+            None => {}
+        }
+        let helper = [target.clone(), index.clone(), value.clone()];
+        for (_, otherwise) in &guards {
+            let [k::Stmt::Do { value: written }] = otherwise else {
+                return None;
+            };
+            if self.helper_read(&k::Rhs::Expr(written.clone()), "ts.set")? != helper {
+                return None;
+            }
+        }
+        Some(helper)
+    }
+
     pub(super) fn helper_read(&self, value: &k::Rhs, helper: &str) -> Option<Vec<k::Expr>> {
         match value {
             k::Rhs::Action(k::Action::Call {
@@ -340,6 +534,25 @@ impl Lifter<'_> {
         }
     }
 
+    fn unbranded_branch<'a>(
+        &self,
+        condition: &'a k::Expr,
+        then_block: &'a [k::Stmt],
+        else_block: &'a [k::Stmt],
+    ) -> Option<(&'a k::Expr, &'a [k::Stmt], &'a [k::Stmt])> {
+        for (test, direct, guarded) in [
+            (crate::constructs::reads::UNBRANDED, then_block, else_block),
+            (crate::constructs::reads::BRANDED, else_block, then_block),
+        ] {
+            if let Some(values) = test.recognize(condition, &|id, name| self.is(id, name))
+                && let [target] = values.as_slice()
+            {
+                return Some((*target, direct, guarded));
+            }
+        }
+        None
+    }
+
     /// `x.field`, its record read guarded by the brand check.
     fn field_ladder(
         &mut self,
@@ -348,30 +561,41 @@ impl Lifter<'_> {
         then_block: &[k::Stmt],
         else_block: &[k::Stmt],
     ) -> Lift<Option<Expr>> {
-        let Some(target) = self.kind_test(condition, "record") else {
-            return Ok(None);
+        // A record the source built takes no kind test: its unbranded test
+        // alone guards the direct read, and its brand the helper's.
+        let (target, direct, guarded, otherwise) = match self.kind_test(condition, "record") {
+            Some(target) => {
+                let [
+                    k::Stmt::If {
+                        condition: test,
+                        then_block: direct,
+                        else_block: guarded,
+                    },
+                ] = then_block
+                else {
+                    return Ok(None);
+                };
+                let Some((held, direct, guarded)) = self.unbranded_branch(test, direct, guarded)
+                else {
+                    return Ok(None);
+                };
+                if held != target {
+                    return Ok(None);
+                }
+                (target, direct, guarded, Some(else_block))
+            }
+            None => {
+                let Some((target, direct, guarded)) =
+                    self.unbranded_branch(condition, then_block, else_block)
+                else {
+                    return Ok(None);
+                };
+                (target, direct, guarded, None)
+            }
         };
-        let [
-            k::Stmt::If {
-                condition: unbranded,
-                then_block: direct,
-                else_block: guarded,
-            },
-        ] = then_block
-        else {
-            return Ok(None);
-        };
-        let Some(values) =
-            crate::constructs::reads::UNBRANDED.recognize(unbranded, &|id, name| self.is(id, name))
-        else {
-            return Ok(None);
-        };
-        if values.as_slice() != [target] {
-            return Ok(None);
-        }
         // A name some built-in has is the record's own only where the record
         // holds a field by it; otherwise its built-in helper reads it.
-        let (direct, owned) = match direct.as_slice() {
+        let (direct, owned) = match direct {
             [
                 k::Stmt::If {
                     condition: k::Expr::Call { function, args },
@@ -419,12 +643,28 @@ impl Lifter<'_> {
                 held != field || !helper_args(Self::sets(otherwise, name))
             })
             || !helper_args(Self::sets(guarded, name))
-            || !helper_args(Self::sets(else_block, name))
+            || otherwise.is_some_and(|otherwise| !helper_args(Self::sets(otherwise, name)))
         {
             return Ok(None);
         }
-        let target = self.expr(target)?;
-        Ok(Some(Expr::Field(Box::new(target), field.clone())))
+        let exact = otherwise.is_none() && self.style.exact && self.reads_binding(target);
+        let erase_inferred_record = otherwise.is_some()
+            && matches!(target, k::Expr::Variable(name) if self.constructed_records.contains(name));
+        let target = match (exact, otherwise) {
+            (true, _) => self.expr(target)?,
+            (false, None) => self.operand(target, "record.operand")?,
+            (false, Some(_)) => self.operand(target, "value.operand")?,
+        };
+        let target = if erase_inferred_record {
+            Expr::As(Box::new(target), source::Type::Word("any"))
+        } else {
+            target
+        };
+        Ok(Some(if exact {
+            super::expressions::constructor("record.field", vec![target, Expr::Text(field.clone())])
+        } else {
+            Expr::Field(Box::new(target), field.clone())
+        }))
     }
 
     /// `x[i]`: a list's element, a hole read as undefined, or any other
@@ -542,8 +782,29 @@ impl Lifter<'_> {
         {
             return Ok(None);
         }
+        let read = target;
         let target = self.expr(target)?;
         let index = self.expr(index)?;
+        // An optional chain's link keeps its `?.`: the element read of its
+        // base's operand.
+        if otherwise.is_none() && self.style.exact && !matches!(target, Expr::Optional(_)) {
+            return Ok(Some(super::expressions::constructor(
+                "list.element",
+                vec![target, index],
+            )));
+        }
+        let spelling = if otherwise.is_none() {
+            "list.operand"
+        } else {
+            "value.operand"
+        };
+        let target = self.spell_operand(read, target, spelling);
+        let target =
+            if self.style.exact && otherwise.is_some() && !matches!(target, Expr::Optional(_)) {
+                Expr::As(Box::new(target), source::Type::Word("any"))
+            } else {
+                target
+            };
         Ok(Some(Expr::Index(Box::new(target), Box::new(index))))
     }
 

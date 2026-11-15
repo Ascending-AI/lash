@@ -47,7 +47,7 @@ impl Renderer<'_> {
     }
     /// A member's target is a primary: an operator is grouped, and so is any
     /// target but a variable, member or call when `simple` asks for it.
-    fn member_target(&mut self, target: &k::Expr, simple: bool) {
+    pub(super) fn member_target(&mut self, target: &k::Expr, simple: bool) {
         let grouped = self.precedence(target) < PRIMARY
             || simple
                 && !matches!(
@@ -621,6 +621,7 @@ impl Renderer<'_> {
                 self.root_block(
                     &body.block,
                     Some(&lash_kernel_value::sites::Unit::Library(c.function)),
+                    0,
                 );
                 self.main = outer_main;
                 self.scope = parent;
@@ -628,9 +629,9 @@ impl Renderer<'_> {
             }
             k::Stmt::Let { name, value } if self.inline_rhs(value) => {
                 self.name(name);
-                self.binding_annotation(name, true);
+                let declared = self.binding_annotation(name, true);
                 self.out.write(" = ");
-                self.write_inline_rhs(value);
+                self.declared_rhs(declared, name, value);
                 self.out.write("\n");
             }
             k::Stmt::Assign {
@@ -659,15 +660,21 @@ impl Renderer<'_> {
                     k::Place::Member(m) => self.inline_member(m),
                 } =>
             {
-                match place {
+                let declared = match place {
                     k::Place::Variable(n) => {
                         self.name(n);
-                        self.binding_annotation(n, false);
+                        self.binding_annotation(n, false).then_some(n)
                     }
-                    k::Place::Member(m) => self.write_member(m),
-                }
+                    k::Place::Member(m) => {
+                        self.write_member(m);
+                        None
+                    }
+                };
                 self.out.write(" = ");
-                self.write_inline_rhs(value);
+                match declared {
+                    Some(name) => self.declared_rhs(true, name, value),
+                    None => self.write_inline_rhs(value),
+                }
                 self.out.write("\n");
             }
             k::Stmt::Remove {
@@ -808,8 +815,52 @@ impl Renderer<'_> {
         }
         true
     }
-    fn binding_annotation(&mut self, name: &Name, declaration: bool) {
+    /// Binds `name` in the scope being written. Its first write spells the
+    /// type source evidence declares it with; readback proves it lowers alike.
+    /// Whether it spelled a type other than `None`.
+    fn binding_annotation(&mut self, name: &Name, declaration: bool) -> bool {
+        let mut declared = false;
+        if let Some(ty) = self.declared.remove(name)
+            && let Some(annotation) = super::declared_annotation(&ty)
+        {
+            self.out.write(": ");
+            self.out.write(annotation);
+            declared = ty != lash_kernel_value::Type::Null;
+        }
         self.scope.bind(name, Some(declaration));
+        declared
+    }
+
+    /// The value of `name`'s declaration under a declared type that is not
+    /// `None`. The check the annotation makes of a value of another type
+    /// (`py.name_check(value, "name", local)`) is the value it checks: the
+    /// annotation writes the check again. A `None` with no check, as a
+    /// materialized capture cell starts, is `value.null()`: the same null,
+    /// with no operand type for the annotation to check.
+    fn declared_rhs(&mut self, declared: bool, name: &Name, value: &k::Rhs) {
+        if !declared {
+            return self.write_inline_rhs(value);
+        }
+        match value {
+            k::Rhs::Expr(k::Expr::Literal(k::Literal::Null)) => {
+                self.out.write("value.null()");
+            }
+            k::Rhs::Action(k::Action::Call {
+                callee: k::Callee::Local(check),
+                args,
+            }) if self.operators.is(check, "py.name_check")
+                && matches!(
+                    args.as_slice(),
+                    [_, k::Atom::Literal(k::Literal::Text(checked)), k::Atom::Literal(k::Literal::Bool(_))]
+                        if checked == name.as_str()
+                ) =>
+            {
+                self.out.begin_node(None);
+                self.atom(&args[0]);
+                self.out.end_node();
+            }
+            value => self.write_inline_rhs(value),
+        }
     }
 
     /// An operation as its dotted path: Python spells canonical names

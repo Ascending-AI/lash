@@ -61,7 +61,7 @@ impl Bundle {
     /// The bundle of the function bound to `root` in `functions`, keyed by
     /// binding under their saved names. A function a member uses
     /// that `functions` does not hold is left out: a cell that installs the
-    /// member is refused for it as ever ([`super::Unusable::Missing`]).
+    /// member is refused for it as ever.
     /// `None` when `root` holds no function.
     #[must_use]
     pub fn of(functions: &BTreeMap<Name, SavedFunction>, root: &Name) -> Option<Self> {

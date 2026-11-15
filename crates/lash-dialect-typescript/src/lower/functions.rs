@@ -53,6 +53,7 @@ impl Lowerer<'_> {
         Written {
             signature_origin: Some(self.entry_declaration(function).1),
             implicit_text_conversions: Vec::new(),
+            declared_locals: Vec::new(),
             captions: Vec::new(),
             language: SourceLanguage::TypeScript,
             signature,
@@ -185,6 +186,7 @@ impl Lowerer<'_> {
                 .as_ref()
                 .and_then(numbers::input_shape),
             implicit_text_conversions: Vec::new(),
+            declared: std::collections::BTreeMap::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,
             this: Some(this.clone()),
@@ -230,6 +232,7 @@ impl Lowerer<'_> {
         let body = body?;
         let mut written = self.written(function);
         written.implicit_text_conversions = frame.implicit_text_conversions;
+        written.declared_locals = declared_locals(frame.declared);
         self.written = Some(written);
         let start = self.callable_presentation(function);
         let closure = self.emit_named_closure(vec![this, args], body, start, name);
@@ -260,6 +263,7 @@ impl Lowerer<'_> {
                 .as_ref()
                 .and_then(numbers::input_shape),
             implicit_text_conversions: Vec::new(),
+            declared: std::collections::BTreeMap::new(),
             arrow: false,
             async_body: function.is_async,
             this: Some(this.clone()),
@@ -418,6 +422,7 @@ impl Lowerer<'_> {
                 .as_ref()
                 .and_then(numbers::input_shape),
             implicit_text_conversions: Vec::new(),
+            declared: std::collections::BTreeMap::new(),
             arrow: function.is_arrow,
             async_body: function.is_async,
             this: Some(this),
@@ -452,6 +457,7 @@ impl Lowerer<'_> {
         params.resize_with(params.len().max(arity + 1), || self.fresh("unused"));
         let mut written = self.written(function);
         written.implicit_text_conversions = frame.implicit_text_conversions;
+        written.declared_locals = declared_locals(frame.declared);
         self.written = Some(written.clone());
         Ok((
             self.emit_named_closure(
@@ -601,4 +607,16 @@ impl Lowerer<'_> {
         }
         binding
     }
+}
+
+/// The locals a function frame declared with one type, every binding of the
+/// name alike. A name some binding declares without a type, or with another,
+/// has no evidence.
+fn declared_locals(
+    declared: std::collections::BTreeMap<lash_kernel_value::Name, Option<lash_kernel_value::Type>>,
+) -> Vec<lash_kernel_doc::DeclaredLocal> {
+    declared
+        .into_iter()
+        .filter_map(|(name, ty)| Some(lash_kernel_doc::DeclaredLocal { name, ty: ty? }))
+        .collect()
 }

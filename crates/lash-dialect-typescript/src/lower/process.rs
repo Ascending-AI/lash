@@ -222,6 +222,7 @@ impl Lowerer<'_> {
                 FunctionFrame {
                     bigint_result: None,
                     implicit_text_conversions: Vec::new(),
+                    declared: BTreeMap::new(),
                     arrow: false,
                     async_body: false,
                     this: None,
@@ -234,6 +235,7 @@ impl Lowerer<'_> {
                 FunctionFrame {
                     bigint_result: None,
                     implicit_text_conversions: Vec::new(),
+                    declared: BTreeMap::new(),
                     arrow: false,
                     async_body: false,
                     this: None,

@@ -13,6 +13,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if ids.is_empty() {
             return;
         }
+        self.record_input(|| {
+            MachineInput::BoundCallIds(
+                ids.iter()
+                    .map(|(model, bound)| (model.clone(), bound.clone()))
+                    .collect(),
+            )
+        });
         let has_bound_id = |parts: &[Part]| {
             parts.iter().any(|part| match part {
                 Part::ToolCall { call_id, .. } | Part::ToolResult { call_id, .. } => {

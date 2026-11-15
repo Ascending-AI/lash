@@ -157,10 +157,7 @@ fn written(
 ) -> Result<Value, NativeError> {
     let args = call.args;
     let mut out = Out {
-        output: TextOutput {
-            text: String::new(),
-            new: call.new,
-        },
+        output: TextOutput::new(call.new),
         args: Some(&args),
         layout,
         verbatim_kinds,
@@ -168,16 +165,10 @@ fn written(
         encoding,
         indentation: None,
     };
-    write(
-        &args,
-        arg(args.values(), 0)?,
-        &mut Vec::new(),
-        0,
-        raw_numbers,
-        &mut out,
-    )?;
-    let text = out.output.text;
-    Ok(call.new.text(&text))
+    let answer = arg(args.values(), 0)
+        .and_then(|value| write(&args, value, &mut Vec::new(), 0, raw_numbers, &mut out));
+    let ((), text) = out.output.finish(answer)?;
+    Ok(call.new.text(text))
 }
 
 fn contract(args: Args<'_>, op: Op) -> Result<Contract, NativeError> {
@@ -294,7 +285,7 @@ fn number<S: Output>(
         }
     }
     match value {
-        Value::Int(number) => match crate::numbers::short_digits(*number, 10) {
+        Value::Int(number) => match lash_kernel_doc::arena::ShortText::digits(*number, 10) {
             Some(digits) => out.push(digits.as_str()),
             None => out.push(&number.to_string()),
         },

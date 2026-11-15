@@ -99,7 +99,10 @@ impl ProcessWorkSubstrate for DurableProcessWork {
         ));
         self.backend
             .durable()
-            .commit_mail(tx, lash_durable::CommitLabel::PROCESS_CANCEL)
+            .commit_mail(
+                self.backend.fence_mail(tx),
+                lash_durable::CommitLabel::PROCESS_CANCEL,
+            )
             .await
             .map(drop)
             .map_err(|error| PluginError::Invoke(error.to_string()))

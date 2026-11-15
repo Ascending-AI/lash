@@ -1,0 +1,258 @@
+//! The kernel machine: one run of one document on the bytecode core
+//! ([`CoreMachine`]), which compiles its own program, runs it on a slot
+//! heap and seals it as a site-keyed run record (FIG-7688).
+//!
+//! The machine keeps the embedding surface the engine it replaced had:
+//! [`Machine`] and the inherent entry points below, with the same
+//! signatures. No path selects another engine.
+
+use lash_kernel_state::paged::{Checkpoint, PageSource, SealBudget};
+use lash_kernel_value::data_limits::KernelDataLimits;
+
+use crate::interface::{
+    Bounds, DeliverError, Delivered, Host, Meters, Outcome, Program, StartError, Step, WaitId,
+};
+use crate::paged::{CellStart, Machine, MachineError, OpenError, SealError, SealedRoot};
+use crate::vm::machine::CoreMachine;
+use crate::{ChargeTape, ExecutionPath, MachineOptions, SiteCounts};
+
+/// A kernel machine. It implements [`Machine`]; an embedder drives it with
+/// `run` and `deliver`.
+pub struct KernelMachine {
+    core: CoreMachine,
+    /// What the laws' observation probes have turned on.
+    #[cfg(test)]
+    observing: bool,
+    #[cfg(test)]
+    path: bool,
+}
+
+impl std::fmt::Debug for KernelMachine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let meters = self.core.meters();
+        f.debug_struct("KernelMachine")
+            .field("charged", &meters.charged)
+            .field("live_tasks", &meters.live_tasks)
+            .finish_non_exhaustive()
+    }
+}
+
+impl KernelMachine {
+    fn of(core: CoreMachine) -> Self {
+        Self {
+            core,
+            #[cfg(test)]
+            observing: false,
+            #[cfg(test)]
+            path: false,
+        }
+    }
+
+    /// [`Machine::start`] under the deployment's data `limits` instead of
+    /// the standard ones; a reopened run decodes under the standard ones.
+    ///
+    /// # Errors
+    ///
+    /// [`Machine::start`]'s.
+    pub fn start_with_data_limits(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        limits: KernelDataLimits,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, StartError> {
+        CoreMachine::start_with_data_limits(program, bounds, start, limits, source).map(Self::of)
+    }
+
+    /// Records every charge the run makes from here on in `tape`, in order
+    /// (`K-CHG-002`); recording changes no result, charge or slice return.
+    pub fn record_charges(&mut self, tape: ChargeTape) {
+        self.core.record_charges(tape);
+    }
+
+    /// The bytes the run holds as its memory schedule counts them (R7).
+    pub fn memory_ledger(&self) -> u64 {
+        self.core.meters().memory
+    }
+
+    /// Pages every object the heap can out at each statement boundary:
+    /// the laws' forced-cold runs.
+    #[cfg(test)]
+    pub(crate) fn force_cold(&mut self) {
+        self.core.force_cold();
+    }
+
+    /// Collects at each statement boundary: the laws' collected runs.
+    #[cfg(test)]
+    pub(crate) fn collect_at_steps(&mut self) {
+        self.core.collect_at_steps();
+    }
+}
+
+impl Machine for KernelMachine {
+    fn start(
+        program: Program,
+        bounds: Bounds,
+        start: CellStart,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, StartError> {
+        CoreMachine::start(program, bounds, start, source).map(Self::of)
+    }
+
+    fn open(
+        program: Program,
+        bounds: Bounds,
+        root: &Checkpoint,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, OpenError> {
+        CoreMachine::open(program, bounds, root, source).map(Self::of)
+    }
+
+    fn set_options(&mut self, options: MachineOptions) {
+        #[cfg(test)]
+        {
+            self.observing = !options.observation.is_off();
+            self.path = options.trace_path;
+        }
+        self.core.set_options(options);
+    }
+
+    fn take_counts(&mut self) -> SiteCounts {
+        self.core.take_counts()
+    }
+
+    fn take_path(&mut self) -> Result<ExecutionPath, lash_kernel_doc::heap::HeapFault> {
+        self.core.take_path()
+    }
+
+    fn take_caught(&mut self) -> Vec<WaitId> {
+        self.core.take_caught()
+    }
+
+    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
+        self.core.run(host, slice)
+    }
+
+    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {
+        self.core.deliver(wait, outcome)
+    }
+
+    fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
+        self.core.seal(budget)
+    }
+
+    fn meters(&self) -> Meters {
+        self.core.meters()
+    }
+}
+
+#[cfg(any(test, feature = "perf-witness"))]
+impl crate::perf_witness::Profiling for KernelMachine {
+    /// The core counts no work by function yet: [`Self::work`] reads none.
+    fn count_work(&mut self) {}
+    fn work(&self) -> Option<crate::observe::WorkReport> {
+        None
+    }
+    /// The core publishes no guest context yet: the context stays inactive.
+    fn publish_context(&mut self, context: std::sync::Arc<crate::observe::GuestContext>) {
+        drop(context);
+    }
+    fn guest_symbols(&self) -> crate::observe::GuestSymbols {
+        self.core.guest_symbols()
+    }
+}
+
+/// The test-only entry points and probes the laws call, each reading the
+/// fact the core holds.
+#[cfg(test)]
+#[allow(clippy::unused_self, clippy::needless_pass_by_value)]
+impl KernelMachine {
+    /// Opens `root`, a whole checkpoint root.
+    pub(crate) fn open_in(
+        program: Program,
+        bounds: Bounds,
+        root: &lash_kernel_state::paged::CheckpointRoot,
+        source: Box<dyn PageSource>,
+    ) -> Result<Self, OpenError> {
+        let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root.clone());
+        Self::open(program, bounds, &checkpoint, source)
+    }
+
+    pub(crate) fn set_observe(&mut self, observe: crate::ObservationMode) {
+        self.observing = !observe.is_off();
+        self.core.watch(self.observing, self.path);
+    }
+    pub(crate) fn trace_path(&mut self) {
+        self.path = true;
+        self.core.watch(self.observing, self.path);
+    }
+    pub(crate) fn take_ran(&mut self) -> SiteCounts {
+        self.take_counts()
+    }
+    pub(crate) fn take_execution_path(
+        &mut self,
+    ) -> Result<ExecutionPath, lash_kernel_doc::heap::HeapFault> {
+        self.take_path()
+    }
+    pub(crate) fn wait_count(&self) -> u64 {
+        self.core.wait_count()
+    }
+    pub(crate) fn count_work(&mut self) {
+        crate::perf_witness::Profiling::count_work(self);
+    }
+    pub(crate) fn work(&self) -> Option<crate::observe::WorkReport> {
+        crate::perf_witness::Profiling::work(self)
+    }
+    pub(crate) fn publish_context(
+        &mut self,
+        context: std::sync::Arc<crate::observe::GuestContext>,
+    ) {
+        crate::perf_witness::Profiling::publish_context(self, context);
+    }
+
+    /// The run's semantic checkpoint: it seals, unbudgeted, and reads the
+    /// seal back through the port its heap sealed through.
+    pub(crate) fn semantic_checkpoint(&mut self) -> lash_kernel_state::semantic::Checkpoint {
+        let sealed = self
+            .core
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .expect("a semantic checkpoint seals the run")
+            .expect("an unbudgeted seal completes");
+        let access = self
+            .core
+            .page_access()
+            .expect("a sealed run has a page port")
+            .clone();
+        lash_kernel_state::semantic::run_checkpoint(&sealed.root, access)
+            .expect("a semantic checkpoint reads its own seal")
+    }
+    /// The tasks holding a delivered wait they have not yet run with, read
+    /// from an unbudgeted seal's run record.
+    pub(crate) fn delivered_tasks(&mut self) -> Vec<lash_kernel_doc::TaskId> {
+        use lash_kernel_state::paged::run::continuation::{self, WaitPhase};
+        let sealed = self
+            .core
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .expect("the run seals")
+            .expect("an unbudgeted seal completes");
+        let access = self
+            .core
+            .page_access()
+            .expect("a sealed run has a page port");
+        let record = continuation::read(access, sealed.root.heap).expect("the seal reads back");
+        let mut tasks: Vec<_> = record
+            .waits
+            .iter()
+            .filter(|wait| matches!(wait.phase, WaitPhase::Completed(_) | WaitPhase::Failed(_)))
+            .map(|wait| lash_kernel_doc::TaskId(u64::from(wait.task)))
+            .collect();
+        tasks.dedup();
+        tasks
+    }
+}

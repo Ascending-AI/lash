@@ -1,8 +1,26 @@
 """Reviewed instruction ceilings and the fixed measurement contract for FIG-7682."""
 
-# At the runtime switch every PY row must also be <=2x Monty 1.4.0 in this
-# same Kiln configuration, with no margin above 2x. This rule is recorded only.
+# The runtime switch gate: every PY row must also be <=3x Monty 1.4.0 in this
+# same Kiln configuration, with no margin above 3x, and no PY or TS row may
+# exceed its own ceiling below. This rule is binding.
+# The <=2x Monty goal is report-only until after the switch: a PY row above it
+# is named in the receipt and never fails the gate.
 # Current ceilings use the median of five raw paired secants times 1.03.
+# The four rows the reviewed replacement adds follow the same convention,
+# lead as reviewer: main d709cfaf7f's medians times 1.03, from the L7 land run
+# of 45f2a0ccf6 (14 Nov), whose candidate binary carries the diagnostic
+# statement counters. Ceilings are checked on both sides.
+
+MONTY_BINDING = True
+MONTY_MAX_RATIO = 3.0
+MONTY_REPORT_RATIO = 2.0
+
+# Contract r57, L7: only this exact predecessor may add these four rows.
+REVIEWED_REPLACEMENT = {
+    'previous_sha256': '6c12001454776ad428013cc59821d6d4babd437299a82fcef6c53e863dddca32',
+    'added_rows': ['python/func_closure_call', 'python/float_arith',
+                   'python/string_build1', 'python/int_to_string'],
+}
 
 CONFIGURATION = 'Kiln optimized, full optimization, perf_iteration=false'
 
@@ -19,6 +37,16 @@ QUICKJS_SHA256 = '6b74c81e8b8929e1d2d89e2091ac1731e55106087d7e7a7c7d8d014501a3e1
 PYTHON_SHA256 = 'e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f'
 
 PYTHON_VERSION = 'Python 3.12.3'
+
+# Part of the reference definition: every compare process, and so every
+# CPython and Monty process it starts, runs with address-space randomisation
+# off and exactly this environment (fixed hash seed, no bytecode writes, C
+# locale). Base and candidate run identically.
+REFERENCE_ENVIRONMENT = {
+    'personality': ['setarch', '-R'],
+    'env': {'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C',
+            'PYTHONHASHSEED': '0', 'PYTHONDONTWRITEBYTECODE': '1'},
+}
 
 MONTY_VERSION = '1.4.0'
 
@@ -45,7 +73,11 @@ COST_ORDER = ['typescript/map_set_string',
  'typescript/func_call',
  'python/map_set_string',
  'python/func_call',
- 'python/int_arith']
+ 'python/int_arith',
+ 'python/func_closure_call',
+ 'python/float_arith',
+ 'python/string_build1',
+ 'python/int_to_string']
 
 ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/int_arith.py',
                       'sha256': '0ff439911aedb3817aea93dc6af64ce82e33efa9b9e137511b8171bd053eeb3f',
@@ -101,4 +133,50 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                                'sha256': 'eb67836ac3d63d22ae77797a30d8f6bd454175f00b6f1fb38622a6ebbb2a336d',
                                'lo': 1,
                                'ops': 1,
-                               'ceiling': 13405047694.847895}}
+                               'ceiling': 13405047694.847895},
+ 'python/func_closure_call': {'source': 'crates/lash-perf/src/compare/workloads/func_closure_call.py',
+                              'sha256': '37e6120f7e3f91f05d4cad4303562de365c1295741a2df39aa573a625558e6c7',
+                              'lo': 1000,
+                              'ops': 4,
+                              'ceiling': 166471.98706013156},
+ 'python/float_arith': {'source': 'crates/lash-perf/src/compare/workloads/float_arith.py',
+                        'sha256': '096caf1f86bc46450ea51f55bd0c53074ac9c7ea82d0b05555fe8893684a45ac',
+                        'lo': 1,
+                        'ops': 1000,
+                        'ceiling': 96336.92663894738},
+ 'python/string_build1': {'source': 'crates/lash-perf/src/compare/workloads/string_build1.py',
+                          'sha256': 'f7f211a6d7b28ddca506ffeb9f1fd3a62b0a2db0b8dc48292d1a1be1f821d7b9',
+                          'lo': 1,
+                          'ops': 1000,
+                          'ceiling': 569673.8072510527},
+ 'python/int_to_string': {'source': 'crates/lash-perf/src/compare/workloads/int_to_string.py',
+                          'sha256': '3973e856976fafb5b440acc83a65d61457ee588644b7f88864291782ff5b5cdb',
+                          'lo': 1000,
+                          'ops': 3,
+                          'ceiling': 524099.4512266667}}
+
+# Information only, never checked: candidate (45f2a0ccf6) medians of the
+# rows added above, from the same land run.
+ADDED_ROW_CANDIDATE_MEDIANS = {'python/func_closure_call': 1738.2, 'python/float_arith': 739.6,
+                               'python/string_build1': 3099.2, 'python/int_to_string': 1113.5}
+
+# The old engine with this exact boundary instrument is pinned after its first land.
+CHECKPOINT_BASE = '3abbc2bd519228a4f43f7be7ba289f470324068a'
+BOUNDARY = {
+    'source': 'crates/lash-perf/src/boundary/kernel_cold_workload.rs',
+    'sha256': '9177216c2c801757575fe139410ccf484818cfdfb90a8c8914095ba1ccd07e91',
+    'elements': 200_000,
+    'samples': 5,
+    # Contract section 6, cold access (ruling A, 2026-11-09): reads are
+    # d + 2 for a fully cold container (d the directory depth including the
+    # leaf); heap writes C + I + E + D are held to the fixture ceiling, and
+    # all writes per seal to that plus s run segments, RUN_ROOT and
+    # CHECKPOINT_ROOT. Both fixtures hold 200,000 integers, which are
+    # immediates: one container row, so d = 1, and an overwrite writes one
+    # chunk, one chunk-index page and one directory leaf.
+    'fixtures': {
+        'list': {'directory_depth': 1, 'heap_writes': 3, 'run_segments': 1},
+        'map': {'directory_depth': 1, 'heap_writes': 3, 'run_segments': 1},
+    },
+    'max_checkpoint_ratio': 1.0,
+}

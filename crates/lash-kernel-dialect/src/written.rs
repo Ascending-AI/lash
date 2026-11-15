@@ -18,8 +18,9 @@ use lash_kernel_value::Name;
 use lash_kernel_value::sites::Site;
 use serde::{Deserialize, Serialize};
 use {
-    lash_kernel_value::tokens::TokenCodec, lash_kernel_value::tokens::TokenError,
-    lash_kernel_value::tokens::TokenReader, lash_kernel_value::tokens::TokenWriter,
+    lash_kernel_value::tokens::CanonicalFault, lash_kernel_value::tokens::TokenCodec,
+    lash_kernel_value::tokens::TokenError, lash_kernel_value::tokens::TokenReader,
+    lash_kernel_value::tokens::TokenWriter,
 };
 
 /// A function as its dialect's source wrote it.
@@ -31,6 +32,10 @@ pub struct Written {
     pub signature_origin: Option<lash_kernel_value::SignatureOrigin>,
     /// Implicit conversion evidence retained from source authoring.
     pub implicit_text_conversions: Vec<lash_kernel_doc::ImplicitTextConversion>,
+    /// The declared types of the locals of the function and the functions
+    /// it contains, as [`lash_kernel_doc::SourceEvidence`] holds them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_locals: Vec<lash_kernel_doc::DeclaredLocal>,
     /// The language the function was written in.
     pub language: SourceLanguage,
     /// Its signature in the dialect's own syntax, for display: Python's
@@ -114,27 +119,56 @@ pub mod written_table {
     }
 }
 
+/// Declared locals are a seventh field only when there are some, so a
+/// record without them keeps its six-field encoding.
 impl TokenCodec for Written {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(6);
+        out.seq(if self.declared_locals.is_empty() {
+            6
+        } else {
+            7
+        });
         self.language.encode(out);
         out.text(&self.signature);
         self.call.encode(out);
         self.captions.encode(out);
         self.signature_origin.encode(out);
         self.implicit_text_conversions.encode(out);
+        if !self.declared_locals.is_empty() {
+            self.declared_locals.encode(out);
+        }
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
-        Ok(Self {
+        let fields = input.seq()?;
+        if !matches!(fields, 6 | 7) {
+            return Err(CanonicalFault::FieldCount {
+                expected: 6,
+                found: fields,
+            }
+            .into());
+        }
+        let mut written = Self {
             language: SourceLanguage::decode(input)?,
             signature: String::decode(input)?,
             call: Option::decode(input)?,
             captions: Vec::decode(input)?,
             signature_origin: Option::decode(input)?,
             implicit_text_conversions: Vec::decode(input)?,
-        })
+            declared_locals: Vec::new(),
+        };
+        if fields == 7 {
+            written.declared_locals = Vec::decode(input)?;
+            // The empty list has the six-field encoding only.
+            if written.declared_locals.is_empty() {
+                return Err(CanonicalFault::FieldCount {
+                    expected: 6,
+                    found: 7,
+                }
+                .into());
+            }
+        }
+        Ok(written)
     }
 }
 

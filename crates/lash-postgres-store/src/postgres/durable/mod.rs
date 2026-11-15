@@ -72,6 +72,11 @@ mod claim_facts;
 pub(crate) mod environment;
 mod graph;
 mod head_commit;
+mod lock_plan;
+/// The lock plan's statement ([`crate::artifact_store::LockPlan`]).
+pub(crate) fn lock_plan_sql() -> &'static str {
+    lock_plan::plan_statement().sql()
+}
 pub(crate) mod packages;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
@@ -130,9 +135,72 @@ pub(crate) struct Committing<'a> {
     /// The storage's validated configurations, which a head commit reuses
     /// read-only.
     pub(crate) configs: &'a lash_core_store::store_backend_support::ConfigCache,
+    /// The artifact lock plan the transaction took from its whole write
+    /// before its first artifact lock (FIG-7700), which its head commits
+    /// check their frames and carries against.
+    pub(crate) planned: crate::artifact_store::Planned,
+    /// The actor's own process row, as the transaction's lock on it
+    /// leaves it, while each write since is one that keeps it current
+    /// (FIG-7701); `None` once a write could have changed it unseen.
+    pub(crate) locked: std::sync::Mutex<Option<crate::process_helpers::LockedProcess>>,
 }
 
 impl Committing<'_> {
+    /// The carried row of `process`, taken: its write hands back the row it
+    /// leaves with [`Self::relock`].
+    pub(crate) fn take_locked(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Option<crate::process_helpers::LockedProcess> {
+        let mut locked = self
+            .locked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if locked.as_ref().is_some_and(|row| row.record.id == *process) {
+            locked.take()
+        } else {
+            None
+        }
+    }
+
+    /// Carry `row` on.
+    pub(crate) fn relock(&self, row: Option<crate::process_helpers::LockedProcess>) {
+        *self
+            .locked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = row;
+    }
+
+    /// Keep the carry through `domain` only when it is a write the carry
+    /// follows (FIG-7701): an append or terminal of the carried process,
+    /// which hand its row back; a publication mark, outside the carried
+    /// columns; or an advance or format write of another process's row.
+    /// Any other write drops it, including the carried process's own
+    /// advance or format write, so its next append or terminal reads its
+    /// row again (a lost reuse, not stale data).
+    pub(crate) fn follow(&self, domain: &DomainWrite) {
+        let mut locked = self
+            .locked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(row) = locked.as_mut() else {
+            return;
+        };
+        let own = |process: &lash_vocabulary::identity::ProcessId| row.record.id == *process;
+        match domain {
+            DomainWrite::Process(
+                lash_durable::domain::ProcessWrite::AppendEvent { .. }
+                | lash_durable::domain::ProcessWrite::Terminal { .. }
+                | lash_durable::domain::ProcessWrite::Published { .. },
+            ) => {}
+            DomainWrite::Process(
+                lash_durable::domain::ProcessWrite::Advance { process, .. }
+                | lash_durable::domain::ProcessWrite::ComponentFormats { process, .. },
+            ) if !own(process) => {}
+            _ => *locked = None,
+        }
+    }
+
     /// What the commit's step programs run under.
     fn steps(&self) -> steps::Context<'_> {
         steps::Context {
@@ -237,6 +305,9 @@ pub struct PostgresDurableStore {
     /// Where a test holds a transaction inside its SQL.
     #[cfg(any(test, feature = "testing"))]
     storage_gates: Option<crate::testing::StorageGates>,
+    /// An advisory lock key an owner commit takes after its lock plan.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) lock_after_plan: Option<Arc<str>>,
 }
 
 impl std::fmt::Debug for PostgresDurableStore {
@@ -248,8 +319,8 @@ impl std::fmt::Debug for PostgresDurableStore {
 
 type Tx = GuardedTx<'static>;
 
-/// Delete `process`'s run facts and the waits it owns, in its prune: the
-/// process host API's tool calls go with its record. Answers the RoundFact
+/// Delete `process`'s run facts, prompt snapshots and the waits it owns, in
+/// its prune: the process host API's tool calls go with its record. Answers the RoundFact
 /// nodes they held: the prune's to peel.
 pub(crate) async fn retire_process_rows(
     tx: &mut PgConnection,
@@ -267,13 +338,11 @@ pub(crate) async fn retire_process_rows(
         )
         .await?,
     );
-    facts.extend(
-        model_calls::delete_session(
-            tx,
-            &lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str()),
-        )
-        .await?,
-    );
+    let session = lash_kernel_value::identity::SessionId::prefixed("process:", process.as_str());
+    facts.extend(model_calls::delete_session(&mut *tx, &session).await?);
+    // The prompt snapshots of its model calls are the process's history
+    // too: they go with it, and their texts no other root holds with them.
+    prompts::release(&mut *tx, &session, None).await?;
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor).await?;
     }
@@ -430,6 +499,8 @@ impl PostgresDurableStore {
             commit_fault: None,
             #[cfg(any(test, feature = "testing"))]
             storage_gates: None,
+            #[cfg(any(test, feature = "testing"))]
+            lock_after_plan: None,
         }
     }
 
@@ -451,6 +522,16 @@ impl PostgresDurableStore {
         fault: Arc<crate::testing::CommitFault>,
     ) -> Self {
         self.commit_fault = Some(fault);
+        self
+    }
+
+    /// Take advisory lock `key` in every owner commit right after its lock
+    /// plan, as a path the plan missed would: the rule-2 seam
+    /// ([`crate::advisory_lock`]). Owner commits then take the explicit
+    /// path, which the seam sits in.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_lock_after_plan_for_testing(mut self, key: &str) -> Self {
+        self.lock_after_plan = Some(Arc::from(key));
         self
     }
 
@@ -1003,7 +1084,40 @@ async fn apply_mail(
             }
         }
     }
+    let retired = retired_woken(tx, writes, &receipt).await?;
+    if !retired.is_empty() {
+        return Err(writes.retired_refusal(retired));
+    }
     Ok(receipt)
+}
+
+/// The actors `receipt` woke that are in one of `writes`' retired sets,
+/// read inside the commit that would wake them.
+async fn retired_woken(
+    tx: &mut GuardedTx<'_>,
+    writes: &MailTx,
+    receipt: &MailCommit,
+) -> Result<Vec<lash_durable::RetiredActor>, DurableError> {
+    let mut found = Vec::new();
+    if writes.retired().is_empty() {
+        return Ok(found);
+    }
+    for woken in &receipt.woken {
+        let formats: Option<(String,)> = crate::observed_sql::query_as(SQL.actor.formats_of.sql())
+            .bind(woken.actor.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
+        if let Some(set) = formats
+            .and_then(|(formats,)| writes.retired().iter().find(|set| set.as_str() == formats))
+        {
+            found.push(lash_durable::RetiredActor {
+                actor: woken.actor.clone(),
+                formats: set.clone(),
+            });
+        }
+    }
+    Ok(found)
 }
 
 #[async_trait::async_trait]

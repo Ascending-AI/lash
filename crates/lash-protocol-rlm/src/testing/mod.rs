@@ -74,7 +74,23 @@ pub(crate) fn session_state(
                 .expect("open the test host's staging directory")
         });
     crate::executor::CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+        .carrying(session_kernel())
         .staging(Ok(Arc::clone(&SPOOLS)))
+}
+
+pub(crate) fn session_kernel() -> crate::executor::KernelCarry {
+    #[cfg(feature = "synthetic-next")]
+    {
+        crate::executor::KernelCarry::holding(
+            Some(lash_vm_client::packages::WorkerLibrary::built().expect("fixture worker library")),
+            None,
+        )
+        .with_succession(Some(Arc::new(lash_vm_runtime::plan_migration)))
+    }
+    #[cfg(not(feature = "synthetic-next"))]
+    {
+        crate::executor::KernelCarry::default()
+    }
 }
 
 /// What a cell of `dialect` needs of its session, with no bounds and the
@@ -90,7 +106,7 @@ pub(crate) fn cell_services(
 
         code_renderer: crate::render::CodeRendererSlot::default(),
         prompts: dialect.prompts(),
-        kernel: crate::executor::KernelCarry::default(),
+        kernel: session_kernel(),
     }
 }
 

@@ -65,7 +65,7 @@ pub use plans::PLANS;
 /// definition carries. Closed kernel callee plans are installed as
 /// dependencies, sharing an already installed kernel plan across dialects.
 /// The registry must hold the kernel library already: the natives call
-/// its `num.sub`, `num.lt` and `text.utf16_compare`.
+/// its `num.add`, `text.concat`, `num.sub`, `num.lt` and `text.utf16_compare`.
 ///
 /// # Errors
 ///
@@ -90,7 +90,13 @@ pub fn implement(
         })
         .collect();
     registry.install_plans(&plans)?;
-    for name in ["num.sub", "num.lt", "text.utf16_compare"] {
+    for name in [
+        "num.add",
+        "text.concat",
+        "num.sub",
+        "num.lt",
+        "text.utf16_compare",
+    ] {
         registry
             .native_named(name)
             .ok_or(ImplementError::Missing(name))?;
@@ -139,8 +145,29 @@ natives!(name, kernel;
         "ts.string.toUpperCase" => Arc::new(strings::Uppercase),
         "ts.spread" => Arc::new(arrays::Spread),
         "ts.builtin_name" => Arc::new(BuiltinName),
-        "ts.sub" => Arc::new(Subtract {
+        "ts.add" => Arc::new(Add {
+            add: kernel("num.add")?,
+            concat: kernel("text.concat")?,
+        }),
+        "ts.sub" => Arc::new(FloatPair {
             native: kernel("num.sub")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Sub,
+        }),
+        "ts.mul" => Arc::new(FloatPair {
+            native: kernel("num.mul")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Mul,
+        }),
+        "ts.div" => Arc::new(FloatPair {
+            native: kernel("num.div")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Div,
+        }),
+        "ts.rem" => Arc::new(FloatPair {
+            native: kernel("num.rem_trunc")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::RemTrunc,
+        }),
+        "ts.step" => Arc::new(FloatPair {
+            native: kernel("num.add")?,
+            operation: lash_kernel_doc::scalar::ScalarOp::Add,
         }),
         "ts.primitive_to_string" => Arc::new(conversions::PrimitiveToString),
         "ts.to_int32" => Arc::new(bitwise::ToInt32),
@@ -153,8 +180,9 @@ natives!(name, kernel;
             "ts.shr" => lash_kernel_doc::scalar::WordOp::Shr,
             _ => lash_kernel_doc::scalar::WordOp::Ushr,
         })),
-        "ts.to_number" => Arc::new(ToNumber),
+        "ts.to_number" | "ts.to_numeric" => Arc::new(ToNumber),
         "ts.to_boolean" => Arc::new(conversions::ToBoolean),
+        "ts.not" => Arc::new(conversions::Not),
         "ts.number.format_value" => Arc::new(conversions::NumberToString),
         "ts.number_index" => Arc::new(number_index::NumberIndex {
             less: kernel("num.lt")?,
@@ -221,6 +249,19 @@ impl NativeFunction for Relate {
         use lash_kernel_doc::scalar::ScalarOp;
         lash_kernel_doc::NativeSpecialization {
             immediate: self.prepare(),
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                // The helpers' definitions state `native 2`.
+                native_version: 2,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+                    operation: match self.relation {
+                        Relation::Lt => ScalarOp::Lt,
+                        Relation::Le => ScalarOp::Le,
+                        Relation::Gt => ScalarOp::Gt,
+                        Relation::Ge => ScalarOp::Ge,
+                    },
+                    domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
+                },
+            }),
             text_relation: Some(match self.relation {
                 Relation::Lt => ScalarOp::Lt,
                 Relation::Le => ScalarOp::Le,
@@ -291,10 +332,22 @@ fn relate(relation: Relation, args: &[Value]) -> Option<Value> {
     Some(Value::Bool(truth))
 }
 
-/// Float operands already are ECMA Numbers. Every conversion case, including
-/// guest valueOf, is declined to the complete operation body.
+/// `ts.to_number` and `ts.to_numeric`: float operands already are ECMA
+/// Numbers, and each body returns one unchanged. Every conversion case,
+/// including guest valueOf and a BigInt, is declined to the complete
+/// operation body.
 struct ToNumber;
 impl NativeFunction for ToNumber {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::FloatIdentity,
+            }),
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match call.args.values() {
             [value @ Value::Float(_)] => Ok(*value),
@@ -303,10 +356,62 @@ impl NativeFunction for ToNumber {
     }
 }
 
-struct Subtract {
-    native: Arc<dyn NativeFunction>,
+/// `ts.add`, `a + b`, where neither operand needs ToPrimitive, as the
+/// body's first branch: two floats add and two texts join. Every other pair
+/// declines to the body.
+struct Add {
+    add: Arc<dyn NativeFunction>,
+    concat: Arc<dyn NativeFunction>,
 }
-impl NativeFunction for Subtract {
+
+impl NativeFunction for Add {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                // The helper's definition states `native 2`.
+                native_version: 2,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+                    operation: lash_kernel_doc::scalar::ScalarOp::Add,
+                    domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
+                },
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        // The call's two arguments are the kernel function's.
+        match pair(&call) {
+            (Value::Float(_), Value::Float(_)) => self.add.call(call),
+            (Value::Text(_) | Value::LongText(_), Value::Text(_) | Value::LongText(_)) => {
+                self.concat.call(call)
+            }
+            _ => Err(NativeError::Decline),
+        }
+    }
+}
+
+/// Numeric TypeScript operators whose bodies forward two
+/// floats, which each body answers by its kernel operation alone. Every other
+/// pair declines to the body.
+struct FloatPair {
+    native: Arc<dyn NativeFunction>,
+    operation: lash_kernel_doc::scalar::ScalarOp,
+}
+impl NativeFunction for FloatPair {
+    fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+        lash_kernel_doc::NativeSpecialization {
+            inline: Some(lash_kernel_doc::arena::native::InlineNative {
+                native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                operation: lash_kernel_doc::arena::native::InlineOperation::Scalar {
+                    operation: self.operation,
+                    domain: lash_kernel_doc::arena::native::ScalarDomain::Floats,
+                },
+            }),
+            ..Default::default()
+        }
+    }
+
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         match call.args.values() {
             // The call's two arguments are the kernel function's.

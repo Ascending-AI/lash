@@ -126,7 +126,7 @@ pub use lash_vm_runtime::{
 /// )
 /// version_surface = "drain"
 /// format_manifest = "HostStoredShapes"
-pub const HOST_STORED_SCHEMA_VERSION: u32 = 19;
+pub const HOST_STORED_SCHEMA_VERSION: u32 = 20;
 
 /// One durable format whose version decides whether stored bytes open under
 /// this build.
@@ -613,4 +613,39 @@ pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::
         #[cfg(feature = "rlm")]
         FormatSurface::new("codemode-snapshot", CODEMODE_SNAPSHOT_VERSION),
     ]
+}
+
+/// Each durable format the actors of the build this one replaces held, with
+/// the version that build wrote. A node of this build retires each of its
+/// own format sets spelled at these versions that is not one of its own
+/// (ADR 0115 §8): it neither decodes nor carries one forward, and does not
+/// start while an unfinished actor is in one. A set that comes out as one of
+/// this build's own retires nothing.
+///
+/// These are the predecessor's versions, not this build's witnesses.
+/// `scripts/land` writes them: when its witness advance moves the stamp of
+/// any of these formats, it records the stamps of the land's base, the build
+/// being replaced, and names that base below. Nobody edits this table by
+/// hand; `scripts/check_format_registry.py` holds it to the named build's
+/// stamps and refuses a stamp moved since without it.
+///
+/// Replaced build: `d709cfaf7f5bbc3ed9efb5363f10bbca7c7525ff`.
+const RETIRED_BUILD: &[(&str, u32)] = &[
+    ("codemode-snapshot", 16),
+    ("engine/lashvm", 1),
+    ("kernel-parked-state", 15),
+    ("kernel-saved-function", 4),
+    ("outcome-material", 1),
+    ("run-record", 19),
+    ("session-state", 3),
+    ("turn-journal", 1),
+    ("wait-row", 1),
+];
+
+/// The surfaces of the build this one retires: [`RETIRED_BUILD`].
+pub(crate) fn retired_build_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
+    RETIRED_BUILD
+        .iter()
+        .map(|(id, version)| lash_core::durable_port::FormatSurface::new(*id, *version))
+        .collect()
 }

@@ -23,6 +23,11 @@ END;
 CREATE TEMP TRIGGER lash_capture_appended AFTER INSERT ON main.process_events BEGIN
     SELECT lash_capture_appended('p/' || NEW.process_id);
 END;
+CREATE TEMP TRIGGER lash_capture_appended_terminal
+    AFTER UPDATE OF terminal_event_sequence ON main.processes
+    WHEN OLD.terminal_event_sequence IS NULL AND NEW.terminal_event_sequence IS NOT NULL BEGIN
+    SELECT lash_capture_appended('p/' || NEW.process_id);
+END;
 CREATE TEMP TRIGGER lash_capture_session_commit AFTER UPDATE OF state_revision ON main.actors
     WHEN NEW.kind = 'session' BEGIN
     SELECT lash_capture_appended(NEW.actor_key);

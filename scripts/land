@@ -204,6 +204,7 @@ def main():
             "--test_arg=--exact",
             "--test_arg=tests::checked_archive_covers_current_release_and_native_implementations")
         qualified_head = git("rev-parse", "HEAD")
+        run("python3", "scripts/continuation_compat.py", "--base", main_sha)
         run("python3", "scripts/perf_land_gate.py", "--base", main_sha)
         if args.dry_run:
             print("dry-run: push skipped; HEAD " + git("rev-parse", "HEAD"))

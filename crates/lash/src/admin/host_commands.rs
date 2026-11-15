@@ -58,6 +58,7 @@ impl SessionCommandAdmin {
         let receipt = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
+                self.context.refuse_retired().await?;
                 Box::pin(runtime.submit_session_command(command, idempotency_key, parent))
                     .await
                     .map_err(crate::EmbedError::from)

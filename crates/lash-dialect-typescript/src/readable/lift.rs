@@ -14,26 +14,10 @@ use lash_kernel_value::Name;
 use {lash_kernel_value::sites::Site, lash_kernel_value::sites::Unit};
 
 use super::source::{self, Item, Param, Property, Stmt, Type};
+use super::style::Style;
 
 /// Why a region did not lift.
 pub(super) type Lift<T> = Result<T, String>;
-
-/// How a lift spells what it may spell more than one way. [`super::print`]
-/// tries the plainest style first and keeps the first one that reads back.
-#[derive(Clone, Copy)]
-pub(super) struct Style {
-    /// Keep a singleton return in a block: lowering an arrow expression can
-    /// introduce an additional scope around nested callable metadata.
-    pub(super) block_bodies: bool,
-    /// Captured module functions retain their `const` declaration form.
-    pub(super) const_functions: bool,
-    /// Front-end temporaries keep their own `const`s instead of being written
-    /// where they are read.
-    pub(super) preserve_temporaries: bool,
-    /// Numeric natives over checked `number` operands are written as the
-    /// operators they lower from (`n < 1`), not as `num.lt(num.checked_float(n), 1)`.
-    pub(super) operators: bool,
-}
 
 pub(super) fn refuse<T>(why: impl Into<String>) -> Lift<T> {
     Err(why.into())
@@ -136,9 +120,6 @@ fn module_main(
         .collect()
 }
 
-/// What [`Lifter::enter`] set aside.
-pub(super) struct Saved(Vec<Pending>, Vec<Caption>);
-
 /// A temporary the front end introduced, waiting to be written where it is
 /// read.
 struct Pending {
@@ -157,6 +138,8 @@ pub(super) struct Lifter<'a> {
     pending: Vec<Pending>,
     pub(super) substitutions: BTreeMap<Name, source::Expr>,
     pub(super) templates: BTreeMap<Name, Vec<String>>,
+    pub(super) constructed_records: BTreeSet<Name>,
+    pub(super) constructed_lists: BTreeSet<Name>,
     pub(super) style: Style,
     /// The captions of the temporaries the statement being lifted read.
     taken_captions: Vec<Caption>,
@@ -167,6 +150,20 @@ pub(super) struct Lifter<'a> {
     pub(super) module_helpers: BTreeSet<Name>,
     /// Bindings consumed by the conditional process-handle await adapter.
     pub(super) process_awaits: BTreeSet<Name>,
+    /// The unit's label tokens, with the exit each one's throw is.
+    pub(super) labels: BTreeMap<Name, super::labels::Exit>,
+    /// The label a loop body's exit handler gave the loop being lifted.
+    pub(super) loop_label: Option<String>,
+    /// The unit's source evidence: the declared types of its locals. A
+    /// materialized factory has none of its own; it takes the agreeing union
+    /// of the functions it contains, whose captures it declares.
+    pub(super) evidence: BTreeMap<Name, lash_kernel_value::Type>,
+    /// The bindings a primitive text method's receiver check tested: a row
+    /// both a list and a text have is the text's on them.
+    pub(super) text_checked: BTreeSet<Name>,
+    pub(super) switch_continuations: BTreeSet<Name>,
+    pub(super) positional: BTreeMap<Name, String>,
+    pub(super) lexical_scopes: BTreeSet<Name>,
 }
 
 impl<'a> Lifter<'a> {
@@ -206,12 +203,18 @@ impl<'a> Lifter<'a> {
         if matches!(unit, Unit::Main)
             && let Some(body) = body
         {
-            // Main's nested lexical bindings acquire a fresh suffix on lowering.
-            // Recover the input name so readback does not suffix it a second time.
+            // Main's nested lexical declarations, iteration bindings and catch
+            // bindings are allocated by declare_typed. Top-level authored
+            // bindings are public and retain their complete spelling, even
+            // when that spelling ends in a numeric suffix.
             let mut pending = vec![(k::Node::Block(body), 0)];
             while let Some((node, depth)) = pending.pop() {
                 let names: Vec<&Name> = match node {
-                    k::Node::Stmt(k::Stmt::Let { name, .. }) if depth > 0 => vec![name],
+                    k::Node::Stmt(k::Stmt::Let { name, .. })
+                        if depth > 0 || document.private_bindings.contains(name) =>
+                    {
+                        vec![name]
+                    }
                     k::Node::Stmt(k::Stmt::For { binding, .. }) => vec![binding],
                     k::Node::Stmt(k::Stmt::Try(scope)) => {
                         scope.catch.iter().map(|catch| &catch.binding).collect()
@@ -259,6 +262,15 @@ impl<'a> Lifter<'a> {
                     ] = parts.as_slice()
                     && tag == "ts.function"
                     && source::identifier(original)
+                    && document.private_bindings.contains(name)
+                    && name
+                        .as_str()
+                        .strip_prefix(original)
+                        .and_then(|suffix| suffix.strip_prefix('_'))
+                        .is_some_and(|sequence| {
+                            !sequence.is_empty()
+                                && sequence.bytes().all(|byte| byte.is_ascii_digit())
+                        })
                 {
                     bindings.insert(name.clone(), original.clone());
                 }
@@ -273,14 +285,27 @@ impl<'a> Lifter<'a> {
             pending: Vec::new(),
             substitutions: BTreeMap::new(),
             templates: BTreeMap::new(),
+            constructed_records: BTreeSet::new(),
+            constructed_lists: BTreeSet::new(),
             style,
             taken_captions: Vec::new(),
             assigned,
             bindings,
             module_helpers: BTreeSet::new(),
             process_awaits: BTreeSet::new(),
+            labels: BTreeMap::new(),
+            loop_label: None,
+            evidence: match &unit {
+                Unit::Library(id) => declared_locals(document, *id),
+                _ => BTreeMap::new(),
+            },
+            text_checked: BTreeSet::new(),
+            switch_continuations: BTreeSet::new(),
+            positional: BTreeMap::new(),
+            lexical_scopes: BTreeSet::new(),
         };
         if let Some(body) = body {
+            lifter.labels = lifter.label_tokens(body);
             let mut pending = vec![k::Node::Block(body)];
             while let Some(node) = pending.pop() {
                 if let k::Node::Expr(k::Expr::If { then, r#else, .. }) = node
@@ -295,6 +320,22 @@ impl<'a> Lifter<'a> {
                     && let Some(raw) = super::expressions::template_object(value)
                 {
                     lifter.templates.insert(name.clone(), raw);
+                }
+                if let k::Node::Stmt(k::Stmt::Let {
+                    name,
+                    value: k::Rhs::Expr(k::Expr::Record(_)),
+                }) = node
+                    && !lifter.assigned.contains(name)
+                {
+                    lifter.constructed_records.insert(name.clone());
+                }
+                if let k::Node::Stmt(k::Stmt::Let {
+                    name,
+                    value: k::Rhs::Expr(k::Expr::List(_)),
+                }) = node
+                    && !lifter.assigned.contains(name)
+                {
+                    lifter.constructed_lists.insert(name.clone());
                 }
                 pending.extend(node.children());
             }
@@ -328,6 +369,7 @@ impl<'a> Lifter<'a> {
             self.library,
             self.style,
         );
+        inner.positional.extend(self.positional.clone());
         inner.bindings.extend(self.bindings.clone());
         inner.module_helpers.extend(self.module_helpers.clone());
         inner.templates.extend(self.templates.clone());
@@ -337,6 +379,56 @@ impl<'a> Lifter<'a> {
     /// Whether some statement of the unit assigns `name` after binding it.
     pub(super) fn reassigned(&self, name: &str) -> bool {
         self.assigned.contains(&Name::new(name))
+    }
+
+    /// Whether `expr` reads a binding itself, rather than a temporary the
+    /// front end held a value in.
+    pub(super) fn reads_binding(&self, expr: &k::Expr) -> bool {
+        matches!(expr, k::Expr::Variable(name)
+            if !self.substitutions.contains_key(name)
+                && !self.templates.contains_key(name)
+                && self.pending_at(name).is_none())
+    }
+
+    /// `target` as the operand an operation applies to it in place. A
+    /// binding some statement reassigns (a capture cell) is of no known
+    /// kind and reads back held, so the exact style names its in-place
+    /// read for the operation's kind: `spelling(x)`, or `spelling(x)?.`
+    /// where `x` is an optional chain's tested base.
+    pub(super) fn operand(&mut self, target: &k::Expr, spelling: &str) -> Lift<source::Expr> {
+        let value = self.expr(target)?;
+        Ok(self.spell_operand(target, value, spelling))
+    }
+
+    /// [`Self::operand`] of `target` already lifted as `value`.
+    /// Whether `target` reads a binding something reassigns, as a capture
+    /// cell is, which readback holds of no known kind: the exact style
+    /// spells the operation applied to it.
+    pub(super) fn cell_read(&self, target: &k::Expr) -> bool {
+        matches!(target, k::Expr::Variable(name)
+            if self.style.exact
+                && self.reassigned(name.as_str())
+                && !self.templates.contains_key(name)
+                && self.pending_at(name).is_none())
+    }
+
+    pub(super) fn spell_operand(
+        &self,
+        target: &k::Expr,
+        value: source::Expr,
+        spelling: &str,
+    ) -> source::Expr {
+        if !self.cell_read(target) {
+            return value;
+        }
+        let spelled = |value| super::expressions::constructor(spelling, vec![value]);
+        match value {
+            source::Expr::Optional(base) if matches!(*base, source::Expr::Ident(_)) => {
+                source::Expr::Optional(Box::new(spelled(*base)))
+            }
+            value @ source::Expr::Ident(_) => spelled(value),
+            value => value,
+        }
     }
 
     /// Where the temporary `name` stands among those waiting to be read.
@@ -444,19 +536,27 @@ impl<'a> Lifter<'a> {
                 self.module_helpers.insert(name.clone());
             }
         }
+        let prelude = skip;
         let mut skip = skip;
         if packed {
+            if let Some(receiver) = function.signature.params.first() {
+                self.bindings.insert(receiver.name.clone(), "this".into());
+            }
             // The entry binder pads its supplied list, then binds each source parameter.
-            if !matches!(
-                statements.get(skip),
-                Some(k::Stmt::Let {
-                    value: k::Rhs::Expr(k::Expr::If { .. }),
-                    ..
-                })
-            ) {
+            if !entry.signature.params.is_empty()
+                && !matches!(
+                    statements.get(skip),
+                    Some(k::Stmt::Let {
+                        value: k::Rhs::Expr(k::Expr::If { .. }),
+                        ..
+                    })
+                )
+            {
                 return refuse("a packed entry's parameter binder");
             }
-            skip += 1 + entry.signature.params.len();
+            if !entry.signature.params.is_empty() {
+                skip += 1 + entry.signature.params.len();
+            }
             if let Some(k::Stmt::Let { name, value }) = statements.get(skip)
                 && self.helper_read(value, "ts.arguments").is_some()
             {
@@ -465,7 +565,27 @@ impl<'a> Lifter<'a> {
                 skip += 1;
             }
         }
-        let body = self.block_at(&statements[skip..], &site, skip)?;
+        let mut body = self.block_at(&statements[skip..], &site, skip)?;
+        // A module binding the entry recreates is one its source reads; a
+        // read whose value goes unused (`void x`) lowers to nothing, so it
+        // is written again for the binding to be recreated.
+        let mut unread = Vec::new();
+        for statement in &statements[..prelude] {
+            if let k::Stmt::Let { name, .. } = statement
+                && self.module_capture(statement)
+                && !reads_name(k::Node::Block(&statements[skip..]), name)
+            {
+                unread.push(Stmt {
+                    caption: None,
+                    kind: source::StmtKind::Expr(source::Expr::Unary(
+                        "void ",
+                        Box::new(source::Expr::Ident(self.binding(name)?)),
+                    )),
+                });
+            }
+        }
+        unread.append(&mut body);
+        let body = unread;
         let captured_body = self.module_body(name, &body)?;
         let const_binding = captured_body.is_some() && self.style.const_functions;
         let body = captured_body.unwrap_or(source::Body::Block(body));
@@ -613,20 +733,6 @@ impl<'a> Lifter<'a> {
         self.block_at(block, site, 0)
     }
 
-    /// The temporaries waiting to be read, set aside while a function value
-    /// nested in the statement being lifted is: it reads none of them.
-    pub(super) fn enter(&mut self) -> Saved {
-        Saved(
-            std::mem::take(&mut self.pending),
-            std::mem::take(&mut self.taken_captions),
-        )
-    }
-
-    pub(super) fn leave(&mut self, saved: Saved) {
-        self.pending = saved.0;
-        self.taken_captions = saved.1;
-    }
-
     /// An expression-scoped temporary is spelled at its one consuming read,
     /// just like a statement temporary. Unconsumed effects cannot disappear.
     pub(super) fn scoped_temporary(
@@ -648,8 +754,53 @@ impl<'a> Lifter<'a> {
             .position(|pending| pending.name == *name)
         {
             self.pending.remove(index);
+            // The body's own refusal names the shape that stopped it.
+            result?;
             return refuse("an unconsumed expression temporary");
         }
+        result
+    }
+
+    /// Lift argument evaluation through the same read/conditional recipes
+    /// used by ordinary statement temporaries. Every introduced value must
+    /// be consumed; statement effects cannot disappear from an argument.
+    pub(super) fn statement_arguments(
+        &mut self,
+        statements: &[k::Stmt],
+        arguments: &[k::Expr],
+        site: &Site,
+        first: usize,
+    ) -> Lift<Vec<source::Expr>> {
+        let preserve = self.style.preserve_temporaries;
+        self.style.preserve_temporaries = false;
+        let result = (|| {
+            let outer = self
+                .pending
+                .iter()
+                .map(|pending| pending.name.clone())
+                .collect::<BTreeSet<_>>();
+            let mut index = 0;
+            while index < statements.len() {
+                let taken = self.pend(&statements[index..], site, first + index)?;
+                if taken == 0 {
+                    return refuse("a statement among a method's arguments");
+                }
+                index += taken;
+            }
+            let written = arguments
+                .iter()
+                .map(|argument| self.expr(argument))
+                .collect::<Lift<_>>()?;
+            if self
+                .pending
+                .iter()
+                .any(|pending| !outer.contains(&pending.name))
+            {
+                return refuse("an unconsumed method argument temporary");
+            }
+            Ok(written)
+        })();
+        self.style.preserve_temporaries = preserve;
         result
     }
 
@@ -853,7 +1004,15 @@ impl<'a> Lifter<'a> {
         }
         // A primitive text method's receiver check, and its slice bounds:
         // the method call they precede writes and lowers them again.
-        if self.receiver_check(&block[0]) {
+        if self.receiver_check(&block[0]) || self.typed_receiver_check(block) {
+            if let k::Stmt::Do {
+                value: k::Expr::Call { function, args },
+            } = &block[0]
+                && self.is(function, "text.len")
+                && let [k::Expr::Variable(receiver)] = args.as_slice()
+            {
+                self.text_checked.insert(receiver.clone());
+            }
             self.taken_captions.extend(caption);
             return Ok(1);
         }
@@ -887,9 +1046,16 @@ impl<'a> Lifter<'a> {
             });
             return Ok(2);
         }
-        let ladder = match self.array_ladder(block)? {
+        let ladder = match self.constructed_map(block)? {
             Some(ladder) => Some(ladder),
-            None => self.read_ladder(block)?,
+            None => self.array_ladder(block, site, at)?,
+        };
+        let ladder = match ladder {
+            Some(ladder) => Some(ladder),
+            None => match self.map_ladder(block)? {
+                Some(ladder) => Some(ladder),
+                None => self.read_ladder(block)?,
+            },
         };
         if let Some((name, value, taken)) = ladder {
             if (1..taken).any(|later| caption_at(later).is_some()) {
@@ -912,15 +1078,22 @@ impl<'a> Lifter<'a> {
             });
             return Ok(2);
         }
-        // A helper call's result is a temporary too: reading the call where
-        // it is read hoists it again.
+        // Reading a helper result in place hoists it again. Record construction,
+        // snapshots and TDZ reads must remain in place even in the style that
+        // names other intermediates, or preceding pending reads move past them.
         if let k::Stmt::Let { name, value } = &block[0]
             && matches!(
                 value,
                 k::Rhs::Expr(_) | k::Rhs::Action(k::Action::Call { .. })
             )
             && temporary(name)
-            && !self.style.preserve_temporaries
+            && (!self.style.preserve_temporaries
+                || (!self.reassigned(name.as_str())
+                    && (matches!(
+                        value,
+                        k::Rhs::Expr(k::Expr::Record(_) | k::Expr::Variable(_))
+                    ) || self.helper_read(value, "ts.tdz").is_some()
+                        || self.regexp_argument_array(block, name))))
         {
             let value = self.rhs(value)?;
             self.pending.push(Pending {
@@ -941,6 +1114,62 @@ impl<'a> Lifter<'a> {
         site: &Site,
         first: usize,
     ) -> Lift<Vec<Stmt>> {
+        if site.unit == Unit::Main
+            && site.path.is_empty()
+            && let Some((start, name)) =
+                block
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, statement)| match statement {
+                        k::Stmt::Let { name, .. }
+                            if self.document.private_bindings.contains(name)
+                                && self.bindings.contains_key(name)
+                                && !self.lexical_scopes.contains(name)
+                                && !temporary(name) =>
+                        {
+                            Some((index, name.clone()))
+                        }
+                        _ => None,
+                    })
+        {
+            let mut start = start;
+            loop {
+                let earlier = (0..start).find(|&index| match &block[index] {
+                    k::Stmt::Let { name, .. } if temporary(name) => {
+                        mentions_name(k::Node::Block(&block[start..]), name)
+                    }
+                    _ => false,
+                });
+                match earlier {
+                    Some(index) => start = index,
+                    None => break,
+                }
+            }
+            let mut end = start + 1;
+            let mut at = start;
+            while at < end {
+                if let k::Stmt::Let { name, .. } = &block[at]
+                    && self.document.private_bindings.contains(name)
+                {
+                    for (index, statement) in block.iter().enumerate().skip(at + 1) {
+                        if mentions_name(k::Node::Stmt(statement), name) {
+                            end = end.max(index + 1);
+                        }
+                    }
+                }
+                at += 1;
+            }
+            let mut out = self.block_at(&block[..start], site, first)?;
+            self.lexical_scopes.insert(name.clone());
+            let body = self.block_at(&block[start..end], site, first + start);
+            self.lexical_scopes.remove(&name);
+            out.push(Stmt {
+                caption: None,
+                kind: source::StmtKind::Block(body?),
+            });
+            out.extend(self.block_at(&block[end..], site, first + end)?);
+            return Ok(out);
+        }
         let outer = self.pending.len();
         let mut out = Vec::new();
         let mut index = 0;
@@ -962,10 +1191,11 @@ impl<'a> Lifter<'a> {
                 && !temporary(name)
                 && let Some((name, value)) = self.array_callback_statement(&block[index..])?
             {
+                let mutable = self.reassigned(name.as_str());
                 let name = self.binding(&name)?;
                 out.push(Stmt {
                     caption,
-                    kind: if self.reassigned(&name) {
+                    kind: if mutable {
                         source::StmtKind::Let(name, Some(value))
                     } else {
                         source::StmtKind::Const(name, value)
@@ -1002,8 +1232,72 @@ impl<'a> Lifter<'a> {
             if let Some((pattern, value, taken)) = self.binding_pattern(&block[index..])? {
                 out.push(Stmt {
                     caption,
-                    kind: source::StmtKind::Pattern(pattern, value),
+                    kind: if !self.lexical_scopes.is_empty()
+                        && pattern_names(&pattern).iter().all(|name| {
+                            !self
+                                .document
+                                .private_bindings
+                                .iter()
+                                .any(|private| self.binding(private).ok().as_ref() == Some(name))
+                        }) {
+                        source::StmtKind::VarPattern(pattern, value)
+                    } else if self.pattern_reassigned(&pattern, &block[index..index + taken]) {
+                        source::StmtKind::LetPattern(pattern, value)
+                    } else {
+                        source::StmtKind::Pattern(pattern, value)
+                    },
                 });
+                index += taken;
+                continue;
+            }
+            if let Some(kind) =
+                self.do_while(&block[index..], &site.child((first + index + 1) as u32))?
+            {
+                let kind = self.labeled(kind);
+                out.push(Stmt { caption, kind });
+                index += 2;
+                continue;
+            }
+            if self.label_machinery(&block[index]) {
+                index += 1;
+                continue;
+            }
+            if let Some(body) = self.exit_handler(&block[index], &here)? {
+                out.extend(body);
+                index += 1;
+                continue;
+            }
+            if matches!(&block[index..], [k::Stmt::Assign { place: k::Place::Variable(name), value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(true))), .. }, k::Stmt::Break, ..] if self.switch_continuations.contains(name))
+            {
+                out.push(Stmt {
+                    caption,
+                    kind: source::StmtKind::Continue(None),
+                });
+                index += 2;
+                continue;
+            }
+            if let Some((kind, taken)) = self.declaration(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.enum_statement(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.logical_assignment(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.compound_assignment(&block[index..])? {
+                out.push(Stmt { caption, kind });
+                index += taken;
+                continue;
+            }
+            if let Some((kind, taken)) = self.switch_statement(&block[index..], &here)? {
+                out.push(Stmt { caption, kind });
                 index += taken;
                 continue;
             }
@@ -1072,6 +1366,103 @@ impl<'a> Lifter<'a> {
             return refuse("a temporary nothing reads");
         }
         Ok(out)
+    }
+}
+
+impl Lifter<'_> {
+    /// `do body while (test)`: a first-pass flag, then a loop that tests
+    /// on every pass but the first (`lower::statements`'s `DoWhile`).
+    /// `loop_site` is the loop statement's site.
+    fn do_while(&mut self, block: &[k::Stmt], loop_site: &Site) -> Lift<Option<source::StmtKind>> {
+        let [
+            k::Stmt::Let {
+                name: flag,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(true))),
+            },
+            k::Stmt::While {
+                metered: 0,
+                condition: k::Expr::Literal(k::Literal::Bool(true)),
+                body,
+                else_block: loop_else,
+            },
+            rest @ ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let [
+            k::Stmt::If {
+                condition: k::Expr::Variable(tested),
+                then_block,
+                else_block: test,
+            },
+            body @ ..,
+        ] = body.as_slice()
+        else {
+            return Ok(None);
+        };
+        let lowered = matches!(then_block.as_slice(), [k::Stmt::Assign {
+                place: k::Place::Variable(cleared),
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Bool(false))),
+                order: k::AssignOrder::ValueFirst,
+            }] if cleared == flag);
+        let exits = match test.last() {
+            None => true,
+            Some(k::Stmt::If {
+                then_block,
+                else_block,
+                ..
+            }) => then_block.is_empty() && matches!(else_block.as_slice(), [k::Stmt::Break]),
+            Some(_) => false,
+        };
+        if !temporary(flag)
+            || tested != flag
+            || !lowered
+            || !exits
+            || !loop_else.is_empty()
+            || reads_name(k::Node::Block(body), flag)
+            || reads_name(k::Node::Block(rest), flag)
+        {
+            return Ok(None);
+        }
+        let first_pass = loop_site.child(1).child(0);
+        let condition = if test.is_empty() {
+            source::Expr::Bool(true)
+        } else {
+            let lifted = self.block(test, &first_pass.child(2))?;
+            match <[Stmt; 1]>::try_from(lifted) {
+                Ok(
+                    [
+                        Stmt {
+                            caption: None,
+                            kind:
+                                source::StmtKind::If {
+                                    condition,
+                                    then,
+                                    otherwise:
+                                        Some(source::Arm {
+                                            caption: None,
+                                            body: exit,
+                                        }),
+                                },
+                        },
+                    ],
+                ) if then.is_empty()
+                    && matches!(
+                        exit.as_slice(),
+                        [Stmt {
+                            caption: None,
+                            kind: source::StmtKind::Break(None)
+                        }]
+                    ) =>
+                {
+                    condition
+                }
+                _ => return refuse("a do-while test the dialect does not lower to"),
+            }
+        };
+        let body = self.block_at(body, &loop_site.child(1), 1)?;
+        Ok(Some(source::StmtKind::DoWhile { body, condition }))
     }
 }
 
@@ -1179,4 +1570,79 @@ pub(super) fn reads_name(node: k::Node<'_>, name: &Name) -> bool {
             .into_iter()
             .any(|child| reads_name(child, name)),
     }
+}
+
+fn mentions_name(node: k::Node<'_>, name: &Name) -> bool {
+    reads_name(node, name)
+        || matches!(node, k::Node::Stmt(k::Stmt::Assign {
+            place: k::Place::Variable(target), ..
+        }) if target == name)
+        || node
+            .children()
+            .into_iter()
+            .any(|child| mentions_name(child, name))
+}
+
+pub(super) fn pattern_names(pattern: &source::Pattern) -> Vec<String> {
+    match pattern {
+        source::Pattern::Name(name) => vec![name.clone()],
+        source::Pattern::Default(pattern, _) => pattern_names(pattern),
+        source::Pattern::Object(fields, rest) => fields
+            .iter()
+            .map(|(_, pattern)| pattern)
+            .chain(rest.iter().map(|pattern| &**pattern))
+            .flat_map(pattern_names)
+            .collect(),
+        source::Pattern::Array(elements, rest) => elements
+            .iter()
+            .flatten()
+            .chain(rest.iter().map(|pattern| &**pattern))
+            .flat_map(pattern_names)
+            .collect(),
+    }
+}
+
+/// The declared types `function`'s locals carry: its own source evidence, or
+/// for a function without any (a materialized factory) the types its
+/// contained functions agree on. A name two of them declare differently
+/// keeps none.
+fn declared_locals(
+    document: &k::Document,
+    function: lash_kernel_value::FunctionId,
+) -> BTreeMap<Name, lash_kernel_value::Type> {
+    if let Some(evidence) = document.source_evidence.get(&function) {
+        return evidence
+            .declared_locals
+            .iter()
+            .map(|local| (local.name.clone(), local.ty.clone()))
+            .collect();
+    }
+    let mut reached = BTreeSet::new();
+    let mut pending = vec![function];
+    while let Some(id) = pending.pop() {
+        if let Some(body) = document.functions.get(&id).and_then(|d| d.body())
+            && reached.insert(id)
+        {
+            pending.extend(k::Node::Block(&body.block).functions_within());
+        }
+    }
+    let mut declared = BTreeMap::new();
+    let mut conflicting = BTreeSet::new();
+    for local in reached
+        .iter()
+        .filter_map(|id| document.source_evidence.get(id))
+        .flat_map(|evidence| &evidence.declared_locals)
+    {
+        match declared.get(&local.name) {
+            Some(ty) if *ty != local.ty => {
+                conflicting.insert(local.name.clone());
+            }
+            Some(_) => {}
+            None => {
+                declared.insert(local.name.clone(), local.ty.clone());
+            }
+        }
+    }
+    declared.retain(|name, _| !conflicting.contains(name));
+    declared
 }

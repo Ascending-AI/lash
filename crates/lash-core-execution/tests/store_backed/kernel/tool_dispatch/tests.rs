@@ -394,7 +394,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
         DeferredAnswer, DeferredPackageProvider, PackageContribution, PackageProvider,
         ResolverFault, operation_publication,
     };
-    use crate::runtime::actor::round::{self, MemberBodies as _};
+    use crate::runtime::actor::round;
     use crate::tool_dispatch::{CellCall, CellMember, CellMembers};
     use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
     use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
@@ -675,7 +675,7 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
         classification: Default::default(),
     });
     let opener = crate::EffectOpener::turn("test-session", "test-turn");
-    let members = CellMembers::new(&context, opener.clone()).unwrap();
+    let members = Arc::new(CellMembers::new(&context, opener.clone()).unwrap());
     members
         .require_capable(&member)
         .expect("a recorded deferred match must not park as catalogue drift");
@@ -693,30 +693,46 @@ async fn a_resolved_package_cell_call_needs_its_executor_and_codec_without_redis
         lash_vocabulary::identity::TurnId::parse("test-turn").unwrap(),
     );
     let mut tx = controller.begin().await.unwrap();
-    let admitted = round::admit(&mut tx, &ledger_owner, round::RunSeq(1), vec![draft]).unwrap();
+    let admitted = round::admit_round(
+        &mut tx,
+        &crate::runtime::actor::waits::wait_scope(&controller).unwrap(),
+        round::RoundDraft {
+            owner: ledger_owner,
+            run: round::RunSeq(1),
+            members: vec![draft],
+        },
+    )
+    .unwrap();
     controller
         .commit(tx, CommitLabel::new("law.admit"))
         .await
         .unwrap();
     members.register(member.clone());
-    let outcome = members.body(&admitted[0])(tokio_util::sync::CancellationToken::new()).await;
+    // The production lifecycle issues the admitted attempt's decision authority.
+    let round::RoundEnd::Settled(settled) = round::RoundRunner::admitted(
+        &controller,
+        &admitted,
+        round::PolicyView::new([]),
+        members.clone(),
+    )
+    .unwrap()
+    .run()
+    .await
+    .unwrap() else {
+        panic!("the deferred call settles");
+    };
+    let outcome = settled.round().members()[0].outcome().unwrap();
     assert!(
         matches!(
-            outcome.output,
+            outcome,
             lash_core_store::tool_run::SettledOutput::Completed(_)
         ),
         "{outcome:?}"
     );
-    let reply = members.reply(&member, &outcome.output);
+    let reply = members.reply(&member, outcome);
     assert!(reply.output.is_success(), "{reply:?}");
     assert_eq!(reply.output.value_for_projection(), json!("sent"));
     assert_eq!(provider.executed.load(Ordering::SeqCst), 1);
-    let mut tx = controller.begin().await.unwrap();
-    round::settle(&mut tx, &admitted[0], outcome.output, Vec::new(), None).unwrap();
-    controller
-        .commit(tx, CommitLabel::new("law.settle"))
-        .await
-        .unwrap();
 
     // Binding readability is a node capability, checked again when a
     // retained cell member is restored, before its next admission.

@@ -444,6 +444,7 @@ pub struct BuildHelpers {
     members: std::collections::HashMap<FunctionId, HelperMember>,
     member_order: BTreeSet<FunctionId>,
     resolver_roots: BTreeSet<FunctionId>,
+    closures: Closures,
 }
 
 #[derive(Clone, Debug)]
@@ -499,6 +500,7 @@ impl BuildHelpers {
             members,
             resolver_roots: member_order.clone(),
             member_order,
+            closures: Closures::default(),
         })
     }
 
@@ -519,6 +521,7 @@ impl BuildHelpers {
                 members: Default::default(),
                 member_order: Default::default(),
                 resolver_roots: Default::default(),
+                closures: Closures::default(),
             })
         }))
     }
@@ -574,6 +577,7 @@ impl BuildHelpers {
                 .collect(),
             resolver_roots: members.clone(),
             member_order: members,
+            closures: Closures::default(),
         })
     }
 
@@ -765,44 +769,61 @@ impl BuildHelpers {
     /// Exact admission closure, skipping absent roots as `admits` does.
     /// `reach` separately refuses a missing helper when closure is required.
     pub fn admitted(&self, roots: &crate::LibraryDependencies) -> BTreeSet<FunctionId> {
-        let mut reached = BTreeSet::new();
-        let _ = self.visit_admitted(roots, |id| {
-            reached.insert(id);
-            std::ops::ControlFlow::Continue(())
-        });
-        reached
+        self.closure(roots).as_ref().clone()
     }
 
-    fn visit_admitted(
-        &self,
-        roots: &crate::LibraryDependencies,
-        mut visit: impl FnMut(FunctionId) -> std::ops::ControlFlow<()>,
-    ) -> std::ops::ControlFlow<()> {
+    /// Whether `function` is in the admission closure of `roots`.
+    pub fn admits(&self, roots: &crate::LibraryDependencies, function: &FunctionId) -> bool {
+        self.closure(roots).contains(function)
+    }
+
+    /// The admission closure of `roots`, walked once per root set
+    /// (ADMIT-ONCE): the members and their edges never change once built,
+    /// so every later query of the same origin reads the closure it left.
+    fn closure(&self, roots: &crate::LibraryDependencies) -> std::sync::Arc<BTreeSet<FunctionId>> {
+        let mut closures = self
+            .closures
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(closure) = closures.get(&roots.0) {
+            return std::sync::Arc::clone(closure);
+        }
         let mut pending: Vec<_> = roots.iter().copied().collect();
+        let mut reached = BTreeSet::new();
         let mut seen = BTreeSet::new();
         while let Some(id) = pending.pop() {
             if !seen.insert(id) {
                 continue;
             }
             if let Some(callees) = self.callees(&id) {
-                visit(id)?;
+                reached.insert(id);
                 pending.extend(callees.iter().copied());
             }
         }
-        std::ops::ControlFlow::Continue(())
-    }
-
-    pub fn admits(&self, roots: &crate::LibraryDependencies, function: &FunctionId) -> bool {
-        self.visit_admitted(roots, |id| {
-            if id == *function {
-                std::ops::ControlFlow::Break(())
-            } else {
-                std::ops::ControlFlow::Continue(())
-            }
-        })
-        .is_break()
+        let closure = std::sync::Arc::new(reached);
+        if closures.len() >= Closures::MAX {
+            closures.clear();
+        }
+        closures.insert(roots.0.clone(), std::sync::Arc::clone(&closure));
+        closure
     }
 }
+
+/// The admission closures a [`BuildHelpers`] has walked, by root set,
+/// shared by its clones: each one a function of members that never change.
+#[derive(Clone, Debug, Default)]
+struct Closures(std::sync::Arc<std::sync::Mutex<ClosureMap>>);
+
+/// Each walked root set's admission closure.
+type ClosureMap =
+    std::collections::HashMap<BTreeSet<FunctionId>, std::sync::Arc<BTreeSet<FunctionId>>>;
+
+impl Closures {
+    /// The distinct root sets held; past it every closure is walked again.
+    const MAX: usize = 1024;
+}
+
 impl crate::FunctionCatalog for BuildHelpers {
     fn named_helper(&self, name: &str) -> Option<FunctionId> {
         let mut found = self

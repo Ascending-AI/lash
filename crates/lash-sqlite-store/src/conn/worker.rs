@@ -245,6 +245,14 @@ impl Connection {
     pub(super) async fn start(
         open: impl FnOnce() -> rusqlite::Result<rusqlite::Connection> + Send + 'static,
     ) -> rusqlite::Result<Self> {
+        Self::start_guarded(move || open().map(|connection| ((), connection))).await
+    }
+
+    /// Retain an open-time guard on the worker until after its SQLite
+    /// connection closes, including when a caller cancels an admitted read.
+    pub(super) async fn start_guarded<G: Send + 'static>(
+        open: impl FnOnce() -> rusqlite::Result<(G, rusqlite::Connection)> + Send + 'static,
+    ) -> rusqlite::Result<Self> {
         let (sender, receiver) = channel();
         let (opened, ready) = oneshot::channel();
         #[cfg(feature = "testing")]
@@ -254,8 +262,10 @@ impl Connection {
         let worker = thread::Builder::new()
             .name("lash-sqlite".into())
             .spawn(move || {
-                let mut connection = match open() {
-                    Ok(connection) => connection,
+                // Declare the guard first so the connection drops first on
+                // every return path. Explicit Close also closes it first.
+                let (_guard, mut connection) = match open() {
+                    Ok(opened) => opened,
                     Err(error) => {
                         let _ = opened.send(Err(error));
                         return;

@@ -8,7 +8,7 @@ From the repository root, after sourcing `env.sh`, regenerate all readable outpu
 with one command:
 
 ```sh
-kiln test //examples/workflows:corpus__test --local-test-execution --no-test-cache --test_arg=regenerate_readable_workflow_outputs --test_arg=--ignored --test_arg=--exact --test_env=LASH_REGENERATE=1 --test_env=BUILD_WORKSPACE_DIRECTORY="$PWD"
+kiln run //examples/workflows:regenerate__bin -- "$PWD"
 ```
 
 Review the resulting diffs. Regeneration checks reproducible lowering, canonical

@@ -2,30 +2,34 @@
 //! (`K-SES-001`): the host's view of the bindings a cell hands on, over the
 //! same pages, with nothing copied out but what it asks for.
 //!
-//! The editor opens the session's heap header and nothing else. A binding
-//! is read by its name's key, and copied out of the heap as data only when
-//! the host asks for its value; a binding the host sets is frozen in from
-//! data, and the session it seals names every page it did not touch as it
-//! was.
+//! The editor opens the session's heap as a cell does: each binding's
+//! value a root, each object by proxy, nothing loaded. A binding's value
+//! is copied out as data only when the host asks for it, loading what it
+//! reaches; a binding the host sets is built from data in the same heap,
+//! and the session it seals keeps every row it did not touch as it was.
+//!
+//! A session is a run session ([`run::session`]). Its saved functions
+//! (`K-SES-004`) are roots past its bindings, each described by its
+//! dialect; the editor lists them, relinks one in place, and drops one.
+//!
+//! [`run::session`]: lash_kernel_state::paged::run::session
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::HeapFault;
-use lash_kernel_doc::heap::PageValue;
+use lash_kernel_doc::{Datum, Value};
 use lash_kernel_state::arena::Arena;
-use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::kernel_internals::census_impl::Census;
-use lash_kernel_state::kernel_internals::family_impl::FrozenBase;
-use lash_kernel_state::kernel_internals::logical::{Owner, RootValue};
-use lash_kernel_state::kernel_internals::metadata::metadata_key;
-use lash_kernel_state::kernel_internals::tree::Tree;
-use lash_kernel_state::paged::{
-    AllocationCensus, BindingRecord, BoundRecord, CarryRoots, EditEpoch, FunctionRecord,
-    HeapLifecycle, HeapWriteError, KeyedRoot, NameRef, PageSource, SemanticHeap, SessionRoot,
-    SiteRef,
-};
+use lash_kernel_state::paged::run::directory::Directory;
+use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
+use lash_kernel_state::paged::run::objects::{Record, RunValue};
+use lash_kernel_state::paged::run::session::{self, RunFunction, RunSession};
+use lash_kernel_state::paged::{PageSource, SessionRoot};
 use lash_kernel_value::names::Name;
+
+use crate::data::CopyError;
+use crate::heap::slots::SlotHeap;
+use crate::heap::{Heap, LoadError};
+use crate::vm::{Flow, Run, fault};
 
 mod preview;
 
@@ -44,11 +48,36 @@ pub enum SessionValue {
     },
 }
 
+/// A saved function the session holds: its record, its object, and the
+/// callable a relink gives it.
+struct Saved {
+    function: RunFunction,
+    value: Value,
+    object: ObjectId,
+    relinked: Option<Relinked>,
+}
+
+/// What a saved function's object runs once the session is sealed: a
+/// callable under another Link and, for a succession onto a rewritten
+/// document, where its creation site went.
+struct Relinked {
+    callable: lash_kernel_value::CallableId,
+    sites: Option<lash_kernel_doc::Correspondence>,
+}
+
 /// A carried session opened for its host.
 pub struct SessionEditor {
-    heap: PagedHeap,
-    bindings: Tree<BindingRecord>,
-    functions: KeyedRoot,
+    heap: SlotHeap,
+    bindings: BTreeMap<Name, Value>,
+    /// Each binding's sealed value as the session came, while the host
+    /// has not set or removed it.
+    sealed: BTreeMap<Name, RunValue>,
+    /// The session's saved functions (`K-SES-004`).
+    saved: Vec<Saved>,
+    /// The session page the editor opened, whose rows a seal edits.
+    page: Option<lash_kernel_doc::heap::PageRef>,
+    /// The deepest value a copy out reads (`K-VAL-034`).
+    depth: usize,
     changed: bool,
 }
 
@@ -58,131 +87,187 @@ impl SessionEditor {
     ///
     /// # Errors
     ///
-    /// The heap's faults reading the session's header.
+    /// The heap's faults reading the session's root; a session in a
+    /// retired form.
     pub fn open(
         session: Option<&SessionRoot>,
         source: Box<dyn PageSource>,
     ) -> Result<Self, HeapFault> {
-        let mut heap = match session {
-            Some(session) => PagedHeap::open_header(
-                lash_kernel_state::kernel_internals::session_heap(session),
-                source,
-                EditEpoch(0),
-            )?,
-            None => PagedHeap::fresh(source, EditEpoch(0)),
-        };
-        let census = Census::restore(heap.certificate())
-            .map_err(|fault| HeapFault::Malformed(format!("the session's census: {fault}")))?;
-        heap.set_census(Box::new(census))?;
-        heap.set_family_base(Box::new(FrozenBase::default()));
-        let (bindings, functions) = match session {
-            Some(session) => (
-                Tree::of_keyed(&heap.adopt(session)?),
-                lash_kernel_state::kernel_internals::session_functions(session),
+        let page = session.map(SessionRoot::page);
+        let (heap, bindings, sealed, saved) = match session {
+            None => (
+                SlotHeap::durable(
+                    u64::MAX,
+                    crate::heap::open::Durable {
+                        directory: Directory::new(source),
+                        high_water: HighWater(0),
+                    },
+                ),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                Vec::new(),
             ),
-            None => (Tree::new(false), KeyedRoot::Empty),
+            Some(session) => {
+                let (session, directory) = session::open(source, session.page())?;
+                let (heap, values) =
+                    SlotHeap::open(u64::MAX, &session.heap, directory).map_err(loaded)?;
+                let bound = session.names.len();
+                let mut values = values.into_iter();
+                let bindings = session.names.iter().cloned().zip(&mut values).collect();
+                let sealed = session
+                    .names
+                    .iter()
+                    .cloned()
+                    .zip(session.heap.roots.iter().cloned())
+                    .collect();
+                let saved = session
+                    .functions
+                    .into_iter()
+                    .zip(values)
+                    .zip(session.heap.roots.get(bound..).unwrap_or_default())
+                    .map(|((function, value), root)| {
+                        Ok(Saved {
+                            function,
+                            value,
+                            object: root.id().ok_or_else(|| {
+                                HeapFault::Malformed("a saved function's root is no object".into())
+                            })?,
+                            relinked: None,
+                        })
+                    })
+                    .collect::<Result<_, HeapFault>>()?;
+                (heap, bindings, sealed, saved)
+            }
         };
         Ok(Self {
             heap,
             bindings,
-            functions,
+            sealed,
+            saved,
+            page,
+            depth: lash_kernel_value::data_limits::KernelDataLimits::standard().value_depth(),
             changed: false,
         })
     }
 
-    /// Every binding's name, in name order. Reads every page of the
-    /// bindings: a host keeps what it read.
+    /// Every binding's name, in name order.
     ///
     /// # Errors
     ///
-    /// The heap's faults.
+    /// None: the names are the session root's.
     pub fn names(&self) -> Result<BTreeSet<Name>, HeapFault> {
-        let mut names = Vec::new();
-        self.bindings.visit(self.heap.pages(), &mut |_, record| {
-            names.push(record.name.clone());
-            true
-        })?;
-        names
-            .iter()
-            .map(|name| name.resolve(self.heap.pages()))
-            .collect()
+        Ok(self.bindings.keys().cloned().collect())
     }
 
     /// The names whose bindings differ between `older` and `newer`, two
     /// versions of one session (`older` none for a session that held
-    /// nothing), each with whether `older` and `newer` bind it: read over
-    /// only the pages the two do not share.
+    /// nothing), each with whether `older` and `newer` bind it.
+    ///
+    /// Conservative: a binding is reported when its value is another
+    /// object or immutable, and when any object its value reaches in
+    /// `newer` has another row than in `older`. An object mutated in place
+    /// is reported under every binding that reaches it, even where the
+    /// change is not one the binding's reader would see; a binding is
+    /// never left out when it differs.
     ///
     /// # Errors
     ///
-    /// The heap's faults.
+    /// The heap's faults reading either root or a row; a session in a
+    /// retired form.
     pub fn changed(
         &self,
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, (bool, bool)>, HeapFault> {
-        let older = Tree::<BindingRecord>::of_keyed(&older.map_or(KeyedRoot::Empty, |older| {
-            lash_kernel_state::kernel_internals::session_bindings(older)
-        }));
-        let newer = Tree::<BindingRecord>::of_keyed(
-            &lash_kernel_state::kernel_internals::session_bindings(newer),
-        );
-        let mut changed = Vec::new();
-        older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
-            if let Some(record) = new.or(old) {
-                changed.push((record.name.clone(), (old.is_some(), new.is_some())));
+        let access = self.directory()?.access();
+        let older = older.map(|older| self.read(older)).transpose()?;
+        let newer = self.read(newer)?;
+        let bound = |session: &RunSession| -> BTreeMap<Name, RunValue> {
+            session
+                .names
+                .iter()
+                .cloned()
+                .zip(session.heap.roots.iter().cloned())
+                .collect()
+        };
+        let old_bindings = older.as_ref().map(bound).unwrap_or_default();
+        let new_bindings = bound(&newer);
+        let rows = older.as_ref().map(|older| {
+            (
+                Directory::over(older.heap.directory, access.clone()),
+                Directory::over(newer.heap.directory, access.clone()),
+            )
+        });
+        let same_rows = older
+            .as_ref()
+            .is_some_and(|older| older.heap.directory == newer.heap.directory);
+        let mut dirty = BTreeMap::new();
+        let mut changed = BTreeMap::new();
+        for name in old_bindings.keys().chain(new_bindings.keys()) {
+            if changed.contains_key(name) {
+                continue;
             }
-        })?;
-        changed
-            .into_iter()
-            .map(|(name, held)| Ok((name.resolve(self.heap.pages())?, held)))
-            .collect()
+            let (old, new) = (old_bindings.get(name), new_bindings.get(name));
+            let differs = match (old, new, &rows) {
+                (Some(old), Some(new), Some((old_rows, new_rows))) if old == new => {
+                    !same_rows
+                        && match new.id() {
+                            Some(id) => mutated(id, old_rows, new_rows, &mut dirty)?,
+                            None => false,
+                        }
+                }
+                _ => old != new,
+            };
+            if differs {
+                changed.insert(name.clone(), (old.is_some(), new.is_some()));
+            }
+        }
+        Ok(changed)
+    }
+
+    /// The run session `session` names.
+    fn read(&self, session: &SessionRoot) -> Result<RunSession, HeapFault> {
+        session::read(self.directory()?.access(), session.page())
+    }
+
+    fn directory(&self) -> Result<&Directory, HeapFault> {
+        self.heap
+            .directory()
+            .ok_or_else(|| HeapFault::Malformed("a session heap has no directory".into()))
     }
 
     /// The saved functions whose records differ between `older` and
-    /// `newer`, two versions of one session (`older` none for a session
-    /// that held nothing), by declared name: each with its description in
-    /// `newer`, none for one `newer` does not hold. Reads only the pages
-    /// the two do not share.
+    /// `newer`, by declared name, each with its description in `newer`, or
+    /// none where `newer` holds no function of that name.
     ///
     /// # Errors
     ///
-    /// The heap's faults, and a description that is not bytes.
+    /// The heap's faults reading either root; a session in a retired form.
     pub fn changed_functions(
         &self,
         older: Option<&SessionRoot>,
         newer: &SessionRoot,
     ) -> Result<BTreeMap<Name, Option<Vec<u8>>>, HeapFault> {
-        let older = Tree::<FunctionRecord>::of_keyed(&older.map_or(KeyedRoot::Empty, |older| {
-            lash_kernel_state::kernel_internals::session_functions(older)
-        }));
-        let newer = Tree::<FunctionRecord>::of_keyed(
-            &lash_kernel_state::kernel_internals::session_functions(newer),
-        );
-        let mut changed = Vec::new();
-        older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
-            if let Some(record) = new.or(old) {
-                changed.push((record.name.clone(), new.cloned()));
+        let described = |session: RunSession| -> BTreeMap<Name, Vec<u8>> {
+            session
+                .functions
+                .into_iter()
+                .map(|function| (function.name, function.description))
+                .collect()
+        };
+        let old = older
+            .map(|older| self.read(older))
+            .transpose()?
+            .map(described)
+            .unwrap_or_default();
+        let new = described(self.read(newer)?);
+        let mut changed = BTreeMap::new();
+        for name in old.keys().chain(new.keys()) {
+            if old.get(name) != new.get(name) {
+                changed.insert(name.clone(), new.get(name).cloned());
             }
-        })?;
-        changed
-            .into_iter()
-            .map(|(name, record)| {
-                let name = name.resolve(self.heap.pages())?;
-                let meta = record.map(|record| self.meta(&name, &record)).transpose()?;
-                Ok((name, meta))
-            })
-            .collect()
-    }
-
-    fn meta(&self, name: &Name, record: &FunctionRecord) -> Result<Vec<u8>, HeapFault> {
-        match crate::data::copy_page_out(&self.heap, &record.meta) {
-            Ok(Datum::Bytes(meta)) => Ok(meta.as_slice().to_vec()),
-            Err(crate::data::CopyError::Heap(fault)) => Err(fault),
-            Ok(_) | Err(crate::data::CopyError::Raised(_)) => Err(HeapFault::Malformed(format!(
-                "saved function `{name}`'s description is not bytes"
-            ))),
         }
+        Ok(changed)
     }
 
     /// The binding `name`'s value, copied out as data.
@@ -191,135 +276,77 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn get(&mut self, name: &Name) -> Result<Option<SessionValue>, HeapFault> {
-        let Some(record) = self.bindings.get(&metadata_key(name), self.heap.pages())? else {
+        let Some(value) = self.bindings.get(name).copied() else {
             return Ok(None);
         };
-        let value = match record.value {
-            BoundRecord::Value(value) => value,
-            BoundRecord::Shared(id) => self.heap.variable_get(id)?,
-            BoundRecord::Captured(_) => {
-                return Err(HeapFault::Malformed(
-                    "borrowed frame capture in a session binding".into(),
-                ));
-            }
-        };
-        Ok(Some(match crate::data::copy_page_out(&self.heap, &value) {
-            Ok(datum) => SessionValue::Data(datum),
-            Err(crate::data::CopyError::Heap(fault)) => return Err(fault),
-            Err(crate::data::CopyError::Raised(_)) => SessionValue::Opaque,
-        }))
-    }
-
-    /// Whether the value bound to `binding` refers to the saved function
-    /// `function` anywhere in it: what a cell start asks before dropping
-    /// the binding that held a function saved under a generated name.
-    ///
-    /// # Errors
-    ///
-    /// The heap's faults.
-    pub fn refers(
-        &self,
-        binding: &Name,
-        environment: &lash_kernel_doc::heap::EntityId,
-    ) -> Result<bool, HeapFault> {
-        use lash_kernel_doc::heap::{Element, PageReader as _};
-        use lash_kernel_doc::snapshot::members;
-        let Some(record) = self
-            .bindings
-            .get(&metadata_key(binding), self.heap.pages())?
-        else {
-            return Ok(false);
-        };
-        let mut pending = vec![match record.value {
-            BoundRecord::Value(value) => value,
-            BoundRecord::Shared(id) => self.heap.variable_get(id)?,
-            BoundRecord::Captured(_) => {
-                return Err(HeapFault::Malformed(
-                    "borrowed frame capture in a session binding".into(),
-                ));
-            }
-        }];
-        let mut objects = BTreeSet::new();
-        while let Some(value) = pending.pop() {
-            match &value {
-                PageValue::Closure(id) => {
-                    if id == environment {
-                        return Ok(true);
-                    }
-                    if objects.insert(*id) {
-                        let closure = self.heap.closure(*id)?;
-                        let mut cells = Vec::new();
-                        closure
-                            .captures
-                            .visit(self.heap.pages(), &mut |_, capture| {
-                                cells.push(capture.1);
-                                true
-                            })?;
-                        for cell in cells {
-                            pending.push(self.heap.variable_get(cell)?);
-                        }
-                    }
-                }
-                PageValue::Tuple(tuple) => pending.extend(members(&self.heap, tuple)?),
-                PageValue::List(id)
-                | PageValue::Map(id)
-                | PageValue::Set(id)
-                | PageValue::Record(id)
-                    if objects.insert(*id) =>
-                {
-                    self.heap.visit(*id, &mut |element| {
-                        match element {
-                            Element::Item(item) => pending.push(item.clone()),
-                            Element::Entry { key, value } => {
-                                pending.push(key.clone());
-                                pending.push(value.clone());
-                            }
-                            Element::Field { value, .. } => pending.push(value.clone()),
-                        }
-                        std::ops::ControlFlow::Continue(())
-                    })?;
-                }
-                _ => {}
+        let depth = self.depth;
+        match self.warm(value, |arena| crate::data::copy_out(arena, depth, &value)) {
+            Ok(datum) => Ok(Some(SessionValue::Data(datum))),
+            Err(CopyError::Raised(_)) => Ok(Some(SessionValue::Opaque)),
+            Err(CopyError::Heap(fault)) => Err(fault),
+            Err(CopyError::Cold { .. }) => {
+                Err(HeapFault::Malformed("a loaded chunk is still cold".into()))
             }
         }
-        Ok(false)
     }
 
-    /// Binds `name` to `value`, declared at `main` of no cell.
+    /// Runs `read` over the arena, loading each chunk it finds cold, with
+    /// `value` and the bindings kept through any collection a load makes.
+    fn warm<T>(
+        &mut self,
+        value: Value,
+        mut read: impl FnMut(&Arena) -> Result<T, CopyError>,
+    ) -> Result<T, CopyError> {
+        loop {
+            match read(self.heap.arena()) {
+                Err(CopyError::Cold { object, chunk }) => {
+                    let bindings = &self.bindings;
+                    self.heap
+                        .load(object, chunk, &mut |visit| {
+                            visit(&value);
+                            bindings.values().for_each(&mut *visit);
+                        })
+                        .map_err(|error| CopyError::Heap(loaded(error)))?;
+                }
+                other => return other,
+            }
+        }
+    }
+
+    /// Whether the value bound to `binding` reaches the saved function
+    /// `function`'s object. A value the host set is data and reaches none.
     ///
     /// # Errors
     ///
-    /// The heap's faults, and a value the heap refuses.
+    /// The heap's faults reading a row.
+    pub fn refers(&self, binding: &Name, function: &Name) -> Result<bool, HeapFault> {
+        let (Some(value), Some(saved)) = (
+            self.sealed.get(binding),
+            self.saved
+                .iter()
+                .find(|saved| saved.function.name == *function),
+        ) else {
+            return Ok(false);
+        };
+        Ok(match value.id() {
+            Some(id) => self.directory()?.reached([id])?.contains(&saved.object),
+            None => false,
+        })
+    }
+
+    /// Binds `name` to `value`.
+    ///
+    /// # Errors
+    ///
+    /// A value the heap refuses.
     pub fn set(&mut self, name: &Name, value: &Datum) -> Result<(), HeapFault> {
-        let frozen = self.heap.freeze_datum(value).map_err(write_fault)?;
-        let value: PageValue = self.heap.instantiate(&frozen).map_err(write_fault)?;
-        let record = BindingRecord {
-            name: NameRef::new(name, self.heap.pages())?,
-            declared: SiteRef::new(
-                &lash_kernel_value::sites::Site::new(
-                    lash_kernel_value::sites::Unit::Main,
-                    Vec::new(),
-                ),
-                self.heap.pages(),
-            )?,
-            value: BoundRecord::Value(value.clone()),
+        let mut host = Host {
+            heap: &mut self.heap,
+            held: Vec::new(),
         };
-        self.bindings
-            .write(metadata_key(name), record, self.heap.pages())?;
-        let store = self.heap.logical_ledger();
-        let mut ledger = store.borrow_mut();
-        let owner = Owner::session(name);
-        let inputs = if ledger.holding(owner, self.heap.pages())?.is_some() {
-            vec![owner]
-        } else {
-            Vec::new()
-        };
-        ledger.transfer_source(
-            &mut Arena::new(),
-            &self.heap,
-            &inputs,
-            &[(owner, RootValue::Page(&value))],
-        )?;
+        let value = crate::vm::datum::copy_in(&mut host, value).map_err(refused)?;
+        self.bindings.insert(name.clone(), value);
+        self.sealed.remove(name);
         self.changed = true;
         Ok(())
     }
@@ -328,20 +355,10 @@ impl SessionEditor {
     ///
     /// # Errors
     ///
-    /// The heap's faults.
+    /// None.
     pub fn remove(&mut self, name: &Name) -> Result<bool, HeapFault> {
-        let removed = self
-            .bindings
-            .remove(&metadata_key(name), self.heap.pages())?
-            .is_some();
-        if removed {
-            self.heap.logical_ledger().borrow_mut().transfer_source(
-                &mut Arena::new(),
-                &self.heap,
-                &[Owner::session(name)],
-                &[],
-            )?;
-        }
+        let removed = self.bindings.remove(name).is_some();
+        self.sealed.remove(name);
         self.changed |= removed;
         Ok(removed)
     }
@@ -351,121 +368,94 @@ impl SessionEditor {
     ///
     /// # Errors
     ///
-    /// The heap's faults, and a description that is not bytes.
+    /// None.
     pub fn functions(&self) -> Result<BTreeMap<Name, Vec<u8>>, HeapFault> {
-        let mut records = Vec::new();
-        Tree::<FunctionRecord>::of_keyed(&self.functions).visit(
-            self.heap.pages(),
-            &mut |_, record| {
-                records.push(record.clone());
-                true
-            },
-        )?;
-        let mut functions = BTreeMap::new();
-        for record in records {
-            let name = record.name.resolve(self.heap.pages())?;
-            let meta = self.meta(&name, &record)?;
-            functions.insert(name, meta);
-        }
-        Ok(functions)
+        Ok(self
+            .saved
+            .iter()
+            .map(|saved| {
+                (
+                    saved.function.name.clone(),
+                    saved.function.description.clone(),
+                )
+            })
+            .collect())
     }
 
-    /// Rewrites the saved function `name` as relinked against its next cell's
-    /// Namespaces (K-LIB-009): its description, now `description`, and
-    /// the execution closure its code calls into, now `closure`. Its
-    /// captures, token and binding stay as they are. Answers whether the
+    /// Rewrites the saved function `name` as relinked against its next
+    /// cell's Namespaces (K-LIB-009): `callable` under its new Link, the
+    /// same object, described by `description`. Answers whether the
     /// session held it.
     ///
     /// # Errors
     ///
-    /// The heap's faults.
+    /// None.
     pub fn relink_function(
         &mut self,
         name: &Name,
         description: &[u8],
-        closure: lash_kernel_doc::heap::PageRef,
         callable: lash_kernel_value::CallableId,
     ) -> Result<bool, HeapFault> {
-        self.rewrite_function(name, description, closure, callable, None)
+        let Some(saved) = self
+            .saved
+            .iter_mut()
+            .find(|saved| saved.function.name == *name)
+        else {
+            return Ok(false);
+        };
+        saved.function.description = description.to_vec();
+        saved.relinked = Some(Relinked {
+            callable,
+            sites: None,
+        });
+        self.changed = true;
+        Ok(true)
     }
 
-    /// Carry a saved function's representation through a proved kernel rewrite.
-    /// Frozen captures and environment identities stay intact; only this session's
-    /// COW heap changes, independently of any parked frame holding the old value.
+    /// Carries the saved function `name` through a proved kernel rewrite
+    /// of its document: `callable` under the successor Link, the same
+    /// object, its creation site carried by `correspondence`, described by
+    /// `description`. Answers whether the session held it.
     ///
     /// # Errors
     ///
-    /// A missing site correspondence or the heap's faults.
+    /// None here; [`seal`](Self::seal) refuses a creation site
+    /// `correspondence` does not carry.
     pub fn succeed_function(
         &mut self,
         name: &Name,
         description: &[u8],
-        closure: lash_kernel_doc::heap::PageRef,
         callable: lash_kernel_value::CallableId,
         correspondence: &lash_kernel_doc::Correspondence,
     ) -> Result<bool, HeapFault> {
-        self.rewrite_function(name, description, closure, callable, Some(correspondence))
-    }
-
-    fn rewrite_function(
-        &mut self,
-        name: &Name,
-        description: &[u8],
-        closure: lash_kernel_doc::heap::PageRef,
-        callable: lash_kernel_value::CallableId,
-        correspondence: Option<&lash_kernel_doc::Correspondence>,
-    ) -> Result<bool, HeapFault> {
-        let mut functions = Tree::<FunctionRecord>::of_keyed(&self.functions);
-        let key = metadata_key(name);
-        let Some(mut record) = functions.get(&key, self.heap.pages())? else {
+        let Some(saved) = self
+            .saved
+            .iter_mut()
+            .find(|saved| saved.function.name == *name)
+        else {
             return Ok(false);
         };
-        let origin = self.heap.closure(record.environment)?;
-        let site = origin.site.resolve(self.heap.pages())?;
-        let site = match correspondence {
-            Some(proof) => proof.successor(&site).ok_or_else(|| {
-                HeapFault::Malformed("saved closure has no successor site".into())
-            })?,
-            None => &site,
-        };
-        let site = SiteRef::new(site, self.heap.pages())?;
-        self.heap
-            .replace_closure_code(record.environment, callable, site)
-            .map_err(write_fault)?;
-        record.callable = callable;
-        record.meta = PageValue::Bytes(self.heap.bytes(description)?);
-        record.closure = closure;
-        functions.write(key, record, self.heap.pages())?;
-        self.functions = sealed(functions, &mut self.heap)?;
+        saved.function.description = description.to_vec();
+        saved.relinked = Some(Relinked {
+            callable,
+            sites: Some(correspondence.clone()),
+        });
         self.changed = true;
         Ok(true)
     }
 
-    /// Drops the saved function `name` and the binding of its name: what a
-    /// cell start does with one its Namespaces cannot fulfil
-    /// (RELINK-CLOSURE). Answers whether the session held it.
+    /// Drops the saved function `name` (RELINK-CLOSURE). Answers whether
+    /// the session held it.
     ///
     /// # Errors
     ///
-    /// The heap's faults.
+    /// None.
     pub fn drop_function(&mut self, name: &Name) -> Result<bool, HeapFault> {
-        let mut functions = Tree::<FunctionRecord>::of_keyed(&self.functions);
-        if functions
-            .remove(&metadata_key(name), self.heap.pages())?
-            .is_none()
-        {
-            return Ok(false);
-        }
-        self.functions = sealed(functions, &mut self.heap)?;
-        self.heap.logical_ledger().borrow_mut().transfer_source(
-            &mut Arena::new(),
-            &self.heap,
-            &[Owner::saved(name)],
-            &[],
-        )?;
-        self.remove(name)?;
-        self.changed = true;
-        Ok(true)
+        let before = self.saved.len();
+        self.saved.retain(|saved| saved.function.name != *name);
+        let dropped = self.saved.len() != before;
+        self.changed |= dropped;
+        Ok(dropped)
     }
 
     /// Whether an edit changed the session.
@@ -480,36 +470,148 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn seal(mut self) -> Result<SessionRoot, HeapFault> {
-        let mut work = lash_kernel_state::kernel_internals::tree::SealWork::new(
-            lash_kernel_state::paged::SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
+        let (names, mut values): (Vec<Name>, Vec<Value>) =
+            std::mem::take(&mut self.bindings).into_iter().unzip();
+        let saved = std::mem::take(&mut self.saved);
+        values.extend(saved.iter().map(|saved| saved.value));
+        let mut heap = self.heap.seal(&values).map_err(|error| match error {
+            crate::paged::SealError::Heap(fault) => fault,
+            other => HeapFault::Malformed(other.to_string()),
+        })?;
+        let relinked: Vec<(ObjectId, &Relinked)> = heap.roots[names.len()..]
+            .iter()
+            .zip(&saved)
+            .filter_map(|(root, saved)| Some((root.id()?, saved.relinked.as_ref()?)))
+            .collect();
+        if !relinked.is_empty() {
+            let mut rows = Directory::over(heap.directory, self.directory()?.access().clone());
+            for (id, relinked) in relinked {
+                let callable = relinked.callable;
+                let mut row = rows
+                    .get(id)?
+                    .ok_or_else(|| HeapFault::Malformed(format!("object {} has no row", id.0)))?;
+                match &mut row.record {
+                    Record::Closure { code, .. } => {
+                        if let Some(sites) = &relinked.sites {
+                            code.site = sites.successor(&code.site).cloned().ok_or_else(|| {
+                                HeapFault::Malformed(format!(
+                                    "the succession carries no successor of object {}'s creation site",
+                                    id.0
+                                ))
+                            })?;
+                        }
+                        code.callable = callable;
+                        code.link = callable.link;
+                    }
+                    Record::Function(held) => *held = callable,
+                    _ => {
+                        return Err(HeapFault::Malformed(format!(
+                            "saved object {} is no function",
+                            id.0
+                        )));
+                    }
+                }
+                rows.put(id, row)?;
+            }
+            heap.directory = rows.seal()?;
+        }
+        let functions = saved.into_iter().map(|saved| saved.function).collect();
+        let page = session::write(
+            self.directory()?.access(),
+            &RunSession {
+                heap,
+                names,
+                functions,
             },
-        );
-        self.bindings.seal(self.heap.pages(), &mut work)?;
-        let bindings = self.bindings.keyed_root()?;
-        self.heap.carry(CarryRoots {
-            bindings,
-            functions: self.functions,
-        })
+            self.page,
+        )?;
+        Ok(SessionRoot::run(page))
     }
 }
 
-/// `tree` sealed, as the root a session names.
-fn sealed(mut tree: Tree<FunctionRecord>, heap: &mut PagedHeap) -> Result<KeyedRoot, HeapFault> {
-    let mut work = lash_kernel_state::kernel_internals::tree::SealWork::new(
-        lash_kernel_state::paged::SealBudget {
-            pages: u64::MAX,
-            bytes: u64::MAX,
-        },
-    );
-    tree.seal(heap.pages(), &mut work)?;
-    tree.keyed_root()
+/// The session's heap as a datum is built in it: unbounded, as the host's
+/// own edits are, and never collected while it builds.
+struct Host<'a> {
+    heap: &'a mut SlotHeap,
+    held: Vec<Value>,
 }
 
-fn write_fault(error: HeapWriteError) -> HeapFault {
+impl crate::vm::datum::Build for Host<'_> {
+    fn held(&mut self) -> &mut Vec<Value> {
+        &mut self.held
+    }
+    fn admit(&mut self, units: u64) -> Run<()> {
+        self.heap
+            .admit(units)
+            .map_err(|refused| fault(format!("{refused:?}")))
+    }
+    fn alloc(&mut self, object: lash_kernel_doc::arena::native::NewObject) -> Run<Value> {
+        self.admit(crate::heap::slots::schedule(&object))?;
+        self.heap
+            .create(object)
+            .map_err(|error| fault(error.to_string()))
+    }
+    fn host_handle(&mut self, handle: &lash_kernel_doc::Handle, units: u64) -> Run<Value> {
+        let value = self.heap.arena_mut().host_handle(handle.clone());
+        if let Some(placed) = value.handle() {
+            self.heap.settle(placed, units);
+        }
+        Ok(value)
+    }
+    fn new_error(&mut self, kind: &str, message: &str, data: Value) -> Run<Value> {
+        let units = self
+            .heap
+            .error_units(kind, message, data)
+            .map_err(|error| fault(error.to_string()))?;
+        self.admit(units)?;
+        self.heap
+            .error(kind, message, data)
+            .map_err(|error| fault(error.to_string()))
+    }
+}
+
+/// Whether any object `id` reaches in `newer` has another row than in
+/// `older`, or none there; `dirty` keeps each id's answer across bindings.
+fn mutated(
+    id: ObjectId,
+    older: &Directory,
+    newer: &Directory,
+    dirty: &mut BTreeMap<ObjectId, bool>,
+) -> Result<bool, HeapFault> {
+    let mut work = vec![id];
+    let mut seen = BTreeSet::new();
+    while let Some(id) = work.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(row) = newer.get(id)? else {
+            continue;
+        };
+        let differs = match dirty.get(&id) {
+            Some(differs) => *differs,
+            None => {
+                let differs = older.get(id)?.as_ref() != Some(&row);
+                dirty.insert(id, differs);
+                differs
+            }
+        };
+        if differs {
+            return Ok(true);
+        }
+        work.extend(newer.edges(&row)?);
+    }
+    Ok(false)
+}
+
+fn loaded(error: LoadError) -> HeapFault {
     match error {
-        HeapWriteError::Fault(fault) => fault,
-        other => HeapFault::Malformed(format!("the session refused a host value: {other}")),
+        LoadError::Store(fault) => fault,
+        LoadError::Memory(refused) => {
+            HeapFault::Malformed(format!("a session heap refused a load: {refused:?}"))
+        }
     }
+}
+
+fn refused(flow: Flow) -> HeapFault {
+    HeapFault::Malformed(format!("the session refused a host value: {flow:?}"))
 }

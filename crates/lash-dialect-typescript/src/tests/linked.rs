@@ -143,17 +143,38 @@ pub(super) fn program(
     library: lash_kernel_vm::PreparedLibrary,
 ) -> lash_kernel_vm::Program {
     let (content, root) = content(&document, library.helpers().as_ref());
-    let mut program = lash_kernel_vm::Program::prepare(
+    let program = lash_kernel_vm::Program::prepare(
         root,
         BTreeMap::from([(document.identity(), Arc::clone(&document))]),
         &content.links,
         super::pages::CLOSURE,
         library,
-        lash_kernel_doc::Selection::Fresh,
     )
     .unwrap_or_else(|error| panic!("linked fixture admission: {error:?}"));
     // A worker/custom helper compiler may install a narrower closed build image.
-    program.selection = lash_kernel_doc::Selection::Fresh;
+    #[cfg(test)]
+    {
+        let compile = |entry| {
+            lash_kernel_vm::testing::compile_document(
+                &document,
+                program.library.registry(),
+                root,
+                entry,
+            )
+            .unwrap_or_else(|error| {
+                panic!("{error}\n{}", lash_kernel_doc::print_document(&document))
+            });
+        };
+        if document.main.is_some() {
+            compile(None);
+        }
+        for export in document.exports.values() {
+            if let lash_kernel_doc::Export::Function(export) = export {
+                compile(Some(export));
+            }
+        }
+    }
+
     OPERATIONS.with(|operations| {
         let mut operations = operations.borrow_mut();
         for (link, instance) in &program.instances {

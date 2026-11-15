@@ -66,6 +66,7 @@ impl InjectionAdmin {
         let parent = producer.parent();
         let cause = lash_core::TraceCause::from(parent.clone());
         let accepted = async {
+            self.context.refuse_retired().await?;
             let mut selected = true;
             let mut head = None;
             for input in messages {

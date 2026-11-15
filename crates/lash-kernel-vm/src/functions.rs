@@ -8,7 +8,7 @@
 //! identity.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use lash_kernel_doc::{
     Formula, FunctionDefinition, FunctionRegistry, Implementation, KERNEL_VERSION, NativeCall,
@@ -53,14 +53,6 @@ pub struct MachineFunctions {
     /// or a closure in it, the call is written in; absent in a document's
     /// own code (`K-LIB-010`). A package value records its constructor's.
     pub brand_built: FunctionId,
-}
-
-/// The identity of `brand.built` under this build's kernel version: the
-/// lowering answers a call of it where the call is written.
-pub(crate) fn brand_built() -> FunctionId {
-    static BRAND_BUILT: LazyLock<FunctionId> =
-        LazyLock::new(|| definition(MachineFunction::BrandBuilt, KERNEL_VERSION).identity());
-    *BRAND_BUILT
 }
 
 #[expect(

@@ -300,18 +300,14 @@ impl Backend {
         &self.inner.config
     }
 
-    /// This backend retiring the sets of the build before it, whose process
-    /// engine state was in `format` and whose actors also held `previous`
-    /// (ADR 0115 §3.5): its nodes neither decode nor carry them forward, and
-    /// do not start while an actor is still in one. `sweep` is the operator
-    /// command that has a node of that build carry one forward.
+    /// This backend retiring the sets an earlier build that wrote
+    /// `earlier` wrote (ADR 0115 §8): each of its sets with every surface
+    /// `earlier` names at the version named there. Its nodes neither decode
+    /// nor carry one forward, and do not start while an unfinished actor is
+    /// in one. `sweep` is the operator command that has a node of that
+    /// build carry one forward, when there is one.
     #[must_use]
-    pub fn retiring(
-        &self,
-        format: &crate::EngineStateFormat,
-        previous: &[lash_durable::FormatSurface],
-        sweep: &str,
-    ) -> Self {
+    pub fn retiring(&self, earlier: &[lash_durable::FormatSurface], sweep: Option<&str>) -> Self {
         let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
         Self {
             inner: Arc::new(BackendInner {
@@ -321,7 +317,7 @@ impl Backend {
                 retention: self.inner.retention,
                 max_ingress_bytes: self.inner.max_ingress_bytes,
 
-                formats: self.inner.formats.clone().retiring(format, previous, sweep),
+                formats: self.inner.formats.clone().retiring(earlier, sweep),
                 engines: self.inner.engines.clone(),
                 status_projections: self.inner.status_projections.clone(),
 
@@ -403,9 +399,58 @@ impl Backend {
         tx: lash_durable::MailTx,
         label: lash_durable::CommitLabel,
     ) -> Result<lash_durable::MailCommit, DurableError> {
-        let commit = self.durable().commit_mail(tx, label).await?;
+        let commit = self
+            .durable()
+            .commit_mail(self.fence_mail(tx), label)
+            .await?;
         self.hint_woken(&commit);
         Ok(commit)
+    }
+
+    /// Refuse to admit work for `actor` while it is unfinished in a format
+    /// set this build retires (ADR 0115 §8): no node of this build serves
+    /// it, so what is admitted would be stranded. It only reads. An actor
+    /// enters a retired set only by an earlier build's write, never this
+    /// one's, so a read that finds it outside one stays true while the
+    /// admission commits.
+    ///
+    /// # Errors
+    ///
+    /// [`DurableError::RetiredStateRemains`] naming `actor` and its set;
+    /// the store's.
+    pub async fn refuse_retired(&self, actor: &lash_durable::ActorKey) -> Result<(), DurableError> {
+        let formats = self.formats();
+        if formats.retired().is_empty() {
+            return Ok(());
+        }
+        let Some(row) = self.durable().actor(actor).await? else {
+            return Ok(());
+        };
+        if row.state == lash_durable::ActorState::Terminal {
+            return Ok(());
+        }
+        let Some(set) = formats.retired().iter().find(|set| **set == row.formats) else {
+            return Ok(());
+        };
+        Err(DurableError::RetiredStateRemains {
+            remaining: 1,
+            found: vec![lash_durable::RetiredActor {
+                actor: actor.clone(),
+                formats: set.clone(),
+            }],
+            remedy: formats.sweep().map(str::to_owned),
+        })
+    }
+
+    /// `tx`, refused at commit when an actor it wakes is in a format set
+    /// this build retires (ADR 0115 §8): this build never serves it, so
+    /// mail to it would be stranded. Every mailbox commit this backend
+    /// makes goes through it, whether or not a node serves.
+    #[must_use]
+    pub fn fence_mail(&self, mut tx: lash_durable::MailTx) -> lash_durable::MailTx {
+        let formats = self.formats();
+        tx.refusing_retired(formats.retired(), formats.sweep());
+        tx
     }
 
     /// Hand every actor `commit` woke to this node's runner, as
@@ -434,7 +479,7 @@ impl Backend {
         let mut tx = lash_durable::MailTx::new();
         tx.wake(actor);
         self.durable()
-            .commit_mail(tx, lash_durable::CommitLabel::MAIL_SESSION)
+            .commit_mail(self.fence_mail(tx), lash_durable::CommitLabel::MAIL_SESSION)
             .await
             .map(|_| ())
     }
@@ -453,7 +498,7 @@ impl Backend {
         let mut tx = lash_durable::MailTx::new();
         tx.wake(actor);
         self.durable()
-            .commit_mail(tx, lash_durable::CommitLabel::MAIL_PROCESS)
+            .commit_mail(self.fence_mail(tx), lash_durable::CommitLabel::MAIL_PROCESS)
             .await?;
         Ok(())
     }
@@ -506,7 +551,10 @@ impl Backend {
                 requester: requester.to_owned(),
             },
         ));
-        let commit = self.durable().commit_mail(tx, label).await?;
+        let commit = self
+            .durable()
+            .commit_mail(self.fence_mail(tx), label)
+            .await?;
         Ok(commit.answers.iter().any(|answer| {
             matches!(
                 answer,

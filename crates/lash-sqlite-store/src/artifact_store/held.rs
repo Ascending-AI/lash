@@ -38,6 +38,31 @@ lash_store_sql::statements! {
                    AND edge.referrer_kind = ?3 AND edge.referrer_id = ?4
              )";
 
+        /// Each reference of JSON `?2` in namespace `?1` that referrer
+        /// `?3`/`?4` does not reach: through its own edges, or through what
+        /// those artifacts hold (FIG-7700).
+        select_unreached = "WITH RECURSIVE reach AS (
+                 SELECT namespace, artifact_ref FROM artifact_referrer_edges
+                 WHERE referrer_kind = ?3 AND referrer_id = ?4
+                 UNION
+                 SELECT held.namespace, held.artifact_ref FROM artifact_dependency_edges AS held
+                 JOIN reach ON held.holder_namespace = reach.namespace AND held.holder_ref = reach.artifact_ref
+             ) SELECT value FROM json_each(?2) AS wanted
+             WHERE NOT EXISTS (SELECT 1 FROM reach
+                 WHERE reach.namespace = ?1 AND reach.artifact_ref = wanted.value)";
+
+        /// Holder `?3`/`?4` keeps each reference of JSON `?2` in namespace
+        /// `?1`.
+        insert_dependency_edges = "INSERT INTO artifact_dependency_edges
+             (namespace, artifact_ref, holder_namespace, holder_ref)
+             SELECT ?1, value, ?3, ?4 FROM json_each(?2) WHERE true
+             ON CONFLICT DO NOTHING";
+
+        /// What each reference of JSON `?2` in namespace `?1` holds, by holder.
+        select_held_targets = "SELECT holder_ref, namespace, artifact_ref
+             FROM artifact_dependency_edges
+             WHERE holder_namespace = ?1 AND holder_ref IN (SELECT value FROM json_each(?2))";
+
         /// Point each `[reference, blob]` of JSON `?2` in namespace `?1`. An
         /// artifact is immutable: a pointer already there is kept.
         insert_pointers = "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
@@ -57,9 +82,10 @@ lash_store_sql::statements! {
              WHERE namespace = ?1 AND artifact_ref IN (SELECT value FROM json_each(?2))";
 
         /// Delete the pointer of each reference of JSON `?2` in namespace
-        /// `?1` that no edge holds, and answer the blob it pointed at.
-        /// `NOT EXISTS` is the whole safety argument: a referrer acquired
-        /// after the edges were read keeps its pointer.
+        /// `?1` that no referrer edge and no dependency edge holds, and
+        /// answer it with the blob it pointed at. `NOT EXISTS` is the whole
+        /// safety argument: a referrer acquired after the edges were read
+        /// keeps its pointer.
         delete_unreferenced = "DELETE FROM artifact_refs AS doomed
              WHERE doomed.namespace = ?1
                AND doomed.artifact_ref IN (SELECT value FROM json_each(?2))
@@ -68,7 +94,12 @@ lash_store_sql::statements! {
                    WHERE edge.namespace = doomed.namespace
                      AND edge.artifact_ref = doomed.artifact_ref
                )
-             RETURNING (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref";
+               AND NOT EXISTS (
+                   SELECT 1 FROM artifact_dependency_edges AS held
+                   WHERE held.namespace = doomed.namespace
+                     AND held.artifact_ref = doomed.artifact_ref
+               )
+             RETURNING artifact_ref, (SELECT hash FROM blobs WHERE id = blob_ref) AS blob_ref";
     }
 }
 
@@ -340,17 +371,50 @@ impl SqliteStore {
                 unreferenced.push(artifact_ref);
             }
         }
-        if unreferenced.is_empty() {
-            return Ok(());
-        }
         // Each pointer was its blob's root: peel the blobs and what only
-        // they reached.
-        let blobs: BTreeSet<String> = tx
-            .statement(HELD_SQL.held.delete_unreferenced.sql())?
-            .query_map(params![namespace, json_set(&unreferenced)?], |row| {
-                crate::codec::hash_column(row, 0)
-            })?
-            .collect::<rusqlite::Result<_>>()?;
+        // they reached. A deleted artifact's dependency edges go with it
+        // (the holder key cascades), so what it held that nothing keeps now
+        // is reclaimed next, round by round (FIG-7700).
+        let mut round = BTreeMap::from([(namespace.to_owned(), unreferenced)]);
+        let mut blobs = BTreeSet::new();
+        while !round.is_empty() {
+            let mut freed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for (namespace, references) in round {
+                if references.is_empty() {
+                    continue;
+                }
+                let wanted = json_set(&references)?;
+                let mut holds: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+                {
+                    let mut statement = tx.statement(HELD_SQL.held.select_held_targets.sql())?;
+                    let mut rows = statement.query(params![namespace, wanted])?;
+                    while let Some(row) = rows.next()? {
+                        holds
+                            .entry(row.get(0)?)
+                            .or_default()
+                            .push((row.get(1)?, row.get(2)?));
+                    }
+                }
+                let deleted: Vec<(String, String)> = tx
+                    .statement(HELD_SQL.held.delete_unreferenced.sql())?
+                    .query_map(params![namespace, wanted], |row| {
+                        Ok((row.get(0)?, crate::codec::hash_column(row, 1)?))
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                for (artifact_ref, blob) in deleted {
+                    blobs.insert(blob);
+                    for (target_namespace, target) in
+                        holds.remove(&artifact_ref).unwrap_or_default()
+                    {
+                        let next = freed.entry(target_namespace).or_default();
+                        if !next.contains(&target) {
+                            next.push(target);
+                        }
+                    }
+                }
+            }
+            round = freed;
+        }
         crate::durable::peel(tx, blobs)?;
         Ok(())
     }

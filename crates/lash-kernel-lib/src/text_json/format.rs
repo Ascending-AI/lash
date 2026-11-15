@@ -142,7 +142,7 @@ fn fixed(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     };
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(text.len() as u64);
-    Ok(call.new.text(&text))
+    Ok(call.new.text(text))
 }
 
 fn scientific(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

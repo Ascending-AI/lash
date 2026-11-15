@@ -35,6 +35,546 @@ fn assert_envelope(body: &Value, command: &str, has_result: bool, has_error: boo
     assert_eq!(!body["error"].is_null(), has_error);
 }
 
+fn recovery_commands() -> [&'static [&'static str]; 5] {
+    [
+        &["kernel-migration", "list"],
+        &["kernel-migration", "run"],
+        &["stranded", "list"],
+        &["stalled", "list", "artifact_cleanup"],
+        &["deployment-status", "--accepting-new-work", "false"],
+    ]
+}
+
+fn read_commands() -> [&'static [&'static str]; 5] {
+    [
+        &["deployment-status", "--accepting-new-work", "false"],
+        &["stalled", "list", "artifact_cleanup"],
+        &["kernel-migration", "list"],
+        &["stranded", "list"],
+        &["version"],
+    ]
+}
+
+async fn pending_cleanups(stores: &dyn lash::StoreSet) {
+    for _ in 0..16 {
+        stores
+            .artifact_cleanup()
+            .arm_cleanup(
+                &lash_core_store::artifact_referrer::ArtifactCleanup::ended(
+                    lash_core_store::artifact_referrer::ArtifactReferrer::HostPin(
+                        lash_core_store::artifact_referrer::HostArtifactPin::mint(),
+                    ),
+                    Vec::new(),
+                    None,
+                ),
+                1,
+            )
+            .await
+            .expect("pending cleanup");
+    }
+}
+
+fn read_at(
+    args: &[&str],
+    cwd: &std::path::Path,
+    sqlite: Option<&std::path::Path>,
+    postgres: Option<&str>,
+) -> Value {
+    let binary = std::fs::canonicalize(env!("CARGO_BIN_EXE_lashctl")).expect("operator binary");
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .arg("--json")
+        .current_dir(cwd)
+        .env_remove("LASH_SQLITE_PATH")
+        .env_remove("LASH_POSTGRES_DATABASE_URL");
+    if let Some(path) = sqlite.filter(|_| args[0] != "version") {
+        command.arg("--sqlite-path").arg(path);
+    }
+    if let Some(url) = postgres {
+        command.env("LASH_POSTGRES_DATABASE_URL", url);
+    }
+    let output = command.output().expect("operator read");
+    let body: Value = serde_json::from_slice(&output.stdout).expect("operator JSON");
+    assert!(output.status.success(), "{args:?}: {body}");
+    body
+}
+
+fn sqlite_rows(
+    connection: &rusqlite::Connection,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let tables: Vec<String> = connection
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+        .expect("table inventory")
+        .query_map([], |r| r.get(0))
+        .expect("tables")
+        .collect::<Result<_, _>>()
+        .expect("table names");
+    tables
+        .into_iter()
+        .map(|table| {
+            let mut statement = connection
+                .prepare(&format!("SELECT * FROM \"{}\"", table.replace('"', "\"\"")))
+                .expect("read every row");
+            let count = statement.column_count();
+            let mut rows: Vec<String> = statement
+                .query_map([], |row| {
+                    let values: Vec<rusqlite::types::Value> =
+                        (0..count).map(|i| row.get(i)).collect::<Result<_, _>>()?;
+                    Ok(format!("{values:?}"))
+                })
+                .expect("all rows")
+                .collect::<Result<_, _>>()
+                .expect("row values");
+            rows.sort();
+            (table, rows)
+        })
+        .collect()
+}
+
+fn operator_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(path) = pending.pop() {
+        for entry in std::fs::read_dir(path).expect("file inventory") {
+            let entry = entry.expect("entry");
+            if entry.file_type().expect("file type").is_dir() {
+                pending.push(entry.path());
+            } else {
+                files.push(entry.path());
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// A documented read must not run cleanup or create files, even with due
+/// obligations waiting for a serving node.
+#[test]
+fn sqlite_operator_reads_never_claim_obligations_or_create_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-read-{}", uuid::Uuid::new_v4()));
+    let cwd = root.join("work");
+    std::fs::create_dir_all(&cwd).expect("scratch cwd");
+    let database = root.join("lash.db");
+    let runtime = tokio::runtime::Runtime::new().expect("fixture runtime");
+    let stores = runtime
+        .block_on(lash::sqlite::SqliteStoreSet::open(
+            &database,
+            lash::sqlite::SqliteSynchronous::Normal,
+        ))
+        .expect("fixture store");
+    runtime.block_on(pending_cleanups(&stores));
+    let connection = rusqlite::Connection::open(&database).expect("observe all rows");
+    for args in read_commands() {
+        let before = sqlite_rows(&connection);
+        let files = operator_files(&root);
+        read_at(args, &cwd, Some(&database), None);
+        let after = sqlite_rows(&connection);
+        let changed: Vec<_> = before
+            .keys()
+            .filter(|table| before.get(*table) != after.get(*table))
+            .collect();
+        assert!(
+            before == after && files == operator_files(&root),
+            "{args:?}: changed tables {changed:?}; files before {files:?}, after {:?}",
+            operator_files(&root)
+        );
+    }
+    drop(connection);
+    drop(stores);
+    drop(runtime);
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// An operator read cannot provision a missing deployment, including its
+/// journal and liveness files.
+#[test]
+fn sqlite_operator_reads_refuse_absent_stores_without_creating_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-absent-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).expect("scratch cwd");
+    let database = root.join("absent.db");
+    for args in read_commands()
+        .into_iter()
+        .filter(|args| args[0] != "version")
+    {
+        let binary = std::fs::canonicalize(env!("CARGO_BIN_EXE_lashctl")).expect("binary");
+        let output = Command::new(binary)
+            .args(args)
+            .arg("--json")
+            .arg("--sqlite-path")
+            .arg(&database)
+            .current_dir(&root)
+            .env_remove("LASH_SQLITE_PATH")
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .output()
+            .expect("operator read");
+        let body: Value = serde_json::from_slice(&output.stdout).expect("JSON");
+        assert_eq!(output.status.code(), Some(4), "{args:?}: {body}");
+        assert_eq!(
+            body["error"]["code"], "incompatible_store",
+            "{args:?}: {body}"
+        );
+        assert_eq!(
+            body["error"]["refusal"],
+            json!({"refusal": "unstamped", "component": "sqlite-core"}),
+            "{args:?}: {body}"
+        );
+        assert!(
+            operator_files(&root).is_empty(),
+            "{args:?} created {:?}",
+            operator_files(&root)
+        );
+    }
+    // Hosts can use the same public passive entry point directly, without
+    // lashctl. The condition must already be typed before CLI rendering.
+    let runtime = tokio::runtime::Runtime::new().expect("passive runtime");
+    let Err(error) = runtime.block_on(lash::sqlite::SqliteStoreSet::open_existing_readonly(
+        &database,
+    )) else {
+        panic!("absent store accepted");
+    };
+    assert!(
+        matches!(error, lash_core_store::store::StoreError::Incompatible {
+        refusal: lash_core_store::compat::CompatRefusal::Unstamped { ref component, writing_release: None }
+    } if component == "sqlite-core"),
+        "{error:?}"
+    );
+    assert!(
+        operator_files(&root).is_empty(),
+        "passive API created files"
+    );
+    drop(runtime);
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// Closing the last writer must not turn a status read into a journal opener.
+/// Byte comparisons also cover the compatibility stamp and every stored row.
+#[test]
+fn sqlite_operator_reads_closed_stores_without_changing_bytes_or_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-closed-{}", uuid::Uuid::new_v4()));
+    let cwd = root.join("work");
+    std::fs::create_dir_all(&cwd).expect("scratch cwd");
+    let database = root.join("lash.db");
+    {
+        let runtime = tokio::runtime::Runtime::new().expect("fixture runtime");
+        let stores = runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &database,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("fixture store");
+        runtime.block_on(pending_cleanups(&stores));
+        drop(stores);
+        drop(runtime);
+    }
+    // A synchronous final connection checkpoints and closes before the
+    // observation. No observing SQLite handle keeps WAL/SHM files alive.
+    let connection = rusqlite::Connection::open(&database).expect("finish fixture");
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .expect("checkpoint fixture");
+    connection.close().expect("close fixture");
+    let files = operator_files(&root);
+    let bytes: Vec<_> = files
+        .iter()
+        .map(|path| std::fs::read(path).expect("fixture bytes"))
+        .collect();
+    for args in read_commands() {
+        read_at(args, &cwd, Some(&database), None);
+        assert_eq!(
+            files,
+            operator_files(&root),
+            "{args:?} changed file inventory"
+        );
+        let after: Vec<_> = files
+            .iter()
+            .map(|path| std::fs::read(path).expect("read bytes"))
+            .collect();
+        assert_eq!(bytes, after, "{args:?} changed stored bytes");
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+/// The synthetic successor has a supported migration from the production
+/// schema. A read reports it without backing up or advancing the store.
+#[cfg(feature = "synthetic-next")]
+#[test]
+fn sqlite_operator_reads_report_pending_migration_without_changing_bytes_or_files() {
+    let root = std::env::temp_dir().join(format!("lashctl-pending-{}", uuid::Uuid::new_v4()));
+    let cwd = root.join("work");
+    std::fs::create_dir_all(&cwd).expect("scratch cwd");
+    let database = root.join("lash.db");
+    {
+        let runtime = tokio::runtime::Runtime::new().expect("fixture runtime");
+        let stores = runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &database,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("successor fixture");
+        runtime.block_on(pending_cleanups(&stores));
+        drop(stores);
+        drop(runtime);
+    }
+    // Undo precisely the synthetic catalog's additive step to recover the
+    // production schema, which this successor can migrate on a writable open.
+    let connection = rusqlite::Connection::open(&database).expect("fixture stamp");
+    connection
+        .execute_batch("DROP INDEX idx_lash_synthetic_next_note; DROP TABLE lash_synthetic_next;")
+        .expect("production shape");
+    let version = lash_core_store::compat::SQLITE_CORE_SCHEMA_VERSION;
+    connection
+        .execute(
+            "UPDATE lash_compat SET version = ?1, min_reader = ?1",
+            [version],
+        )
+        .expect("production stamp");
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .expect("checkpoint fixture");
+    connection.close().expect("close fixture");
+    let files = operator_files(&root);
+    let bytes: Vec<_> = files
+        .iter()
+        .map(|path| std::fs::read(path).expect("fixture bytes"))
+        .collect();
+    for args in read_commands()
+        .into_iter()
+        .filter(|args| args[0] != "version")
+    {
+        let binary = std::fs::canonicalize(env!("CARGO_BIN_EXE_lashctl")).expect("binary");
+        let output = Command::new(binary)
+            .args(args)
+            .arg("--json")
+            .arg("--sqlite-path")
+            .arg(&database)
+            .current_dir(&cwd)
+            .env_remove("LASH_SQLITE_PATH")
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .output()
+            .expect("operator read");
+        let body: Value = serde_json::from_slice(&output.stdout).expect("JSON");
+        assert_eq!(output.status.code(), Some(4), "{args:?}: {body}");
+        assert_eq!(
+            body["error"]["refusal"]["refusal"], "migration_pending",
+            "{body}"
+        );
+        assert_eq!(body["error"]["refusal"]["found"], version, "{body}");
+        assert_eq!(body["error"]["refusal"]["target"], version + 1, "{body}");
+        assert_eq!(
+            files,
+            operator_files(&root),
+            "{args:?} changed file inventory"
+        );
+        let after: Vec<_> = files
+            .iter()
+            .map(|path| std::fs::read(path).expect("read bytes"))
+            .collect();
+        assert_eq!(bytes, after, "{args:?} changed stored bytes");
+    }
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
+async fn postgres_rows(
+    connection: &mut sqlx::PgConnection,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let tables: Vec<String> = sqlx::query_scalar("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'")
+        .fetch_all(&mut *connection).await.expect("all tables");
+    let mut rows = std::collections::BTreeMap::new();
+    for table in tables {
+        let values: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT to_jsonb(t)::text FROM \"{}\" AS t ORDER BY 1",
+            table.replace('"', "\"\"")
+        ))
+        .fetch_all(&mut *connection)
+        .await
+        .expect("every table row");
+        rows.insert(table, values);
+    }
+    rows
+}
+
+/// The PostgreSQL operator also must not invent an attachment database in cwd.
+#[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
+async fn postgres_operator_reads_never_claim_obligations_or_create_files() {
+    use sqlx::Connection as _;
+    let url = lash_postgres_store::testing::required_database_url();
+    let schema = format!("lashctl_read_{}", uuid::Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(&url).await.expect("admin");
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&mut admin)
+        .await
+        .expect("schema");
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let scratch_url = format!("{url}{separator}options=-csearch_path%3D{schema}");
+    let (code, body) = run(&["migrate", "--json"], Some(&scratch_url));
+    assert_eq!(code, 0, "{body}");
+    let storage = lash::postgres::PostgresStorage::connect(
+        &lash::postgres::PostgresEndpoints::from_url(&scratch_url).expect("endpoints"),
+        &lash::postgres::PostgresHostConfig::standard(),
+        Default::default(),
+    )
+    .await
+    .expect("store");
+    let attachments = lash::sqlite::SqliteStoreSet::memory()
+        .await
+        .expect("memory attachments");
+    let stores = lash::postgres::PostgresStoreSet::new(&storage, attachments.attachment_store());
+    pending_cleanups(&stores).await;
+    let mut connection = sqlx::PgConnection::connect(&scratch_url)
+        .await
+        .expect("observe rows");
+    // An ordinary admitted open stamps an unstamped deployment. A status
+    // read must not claim this release has written it.
+    sqlx::query("DELETE FROM lash_release_stamp")
+        .execute(&mut connection)
+        .await
+        .expect("unstamped release fixture");
+    let cwd = std::env::temp_dir().join(format!("lashctl-read-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&cwd).expect("scratch cwd");
+    for args in read_commands()
+        .into_iter()
+        .chain([&["preflight"][..], &["migrate", "--dry-run"][..]])
+    {
+        let before = postgres_rows(&mut connection).await;
+        read_at(args, &cwd, None, Some(&scratch_url));
+        let after = postgres_rows(&mut connection).await;
+        let files = operator_files(&cwd);
+        let changed: Vec<_> = before
+            .keys()
+            .filter(|table| before.get(*table) != after.get(*table))
+            .collect();
+        assert!(
+            before == after && files.is_empty(),
+            "{args:?}: changed tables {changed:?}; created files {files:?}"
+        );
+    }
+    connection.close().await.expect("close observer");
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&mut admin)
+        .await
+        .expect("drop schema");
+    admin.close().await.expect("close admin");
+    std::fs::remove_dir_all(cwd).expect("remove cwd");
+}
+
+fn assert_too_old(
+    code: i32,
+    body: &Value,
+    component: lash_core_store::compat::ComponentId,
+    found: u32,
+) {
+    let reads = lash_core_store::compat::descriptor(component)
+        .expect("the store component is declared")
+        .reads;
+    assert_eq!(code, 4, "{body}");
+    assert_eq!(body["error"]["code"], "incompatible_store", "{body}");
+    assert_eq!(
+        body["error"]["refusal"],
+        json!({
+            "refusal": "too_old", "component": component.as_str(), "found": found,
+            "reads": reads,
+            "writing_release": env!("CARGO_PKG_VERSION")
+        })
+    );
+}
+
+/// L57 D1: every recovery entry point must report an old store as the same
+/// typed format refusal that store admission returned, with exit 4.
+#[test]
+fn recovery_preserves_old_sqlite_store_refusals() {
+    let root = std::env::temp_dir().join(format!("lashctl-old-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).expect("scratch directory");
+    let path = root.join("lash.db");
+    let runtime = tokio::runtime::Runtime::new().expect("store runtime");
+    drop(
+        runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &path,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("create current store"),
+    );
+    let connection = rusqlite::Connection::open(&path).expect("stamp predecessor");
+    connection
+        .execute("UPDATE lash_compat SET version = 24, min_reader = 24", [])
+        .expect("main's old schema stamp");
+    for args in recovery_commands() {
+        let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
+            .args(args)
+            .args(["--json", "--sqlite-path"])
+            .arg(&path)
+            .env_remove("LASH_POSTGRES_DATABASE_URL")
+            .env_remove("LASH_SQLITE_PATH")
+            .output()
+            .expect("run old-store recovery");
+        let body: Value = serde_json::from_slice(&output.stdout).expect("JSON refusal");
+        assert_too_old(
+            output.status.code().expect("exit code"),
+            &body,
+            lash_core_store::compat::ComponentId::SQLITE_CORE,
+            24,
+        );
+    }
+    let found: u32 = connection
+        .query_row("SELECT version FROM lash_compat", [], |r| r.get(0))
+        .expect("read unchanged stamp");
+    assert_eq!(found, 24);
+    drop(connection);
+    std::fs::remove_dir_all(root).expect("remove scratch store");
+}
+
+/// The PostgreSQL half of L57 D1 uses the same operator entry points.
+#[tokio::test]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a with-service.sh pg gate"]
+async fn recovery_preserves_old_postgres_store_refusals() {
+    use sqlx::Connection as _;
+    let url = lash_postgres_store::testing::required_database_url();
+    let schema = format!("lashctl_old_{}", uuid::Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(&url)
+        .await
+        .expect("scratch admin");
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&mut admin)
+        .await
+        .expect("scratch schema");
+    let separator = if url.contains('?') { '&' } else { '?' };
+    let scratch_url = format!("{url}{separator}options=-csearch_path%3D{schema}");
+    let (code, seeded) = run(&["migrate", "--json"], Some(&scratch_url));
+    assert_eq!(code, 0, "{seeded}");
+    let mut scratch = sqlx::PgConnection::connect(&scratch_url)
+        .await
+        .expect("scratch catalog");
+    sqlx::query("UPDATE lash_schema_versions SET version = 37, min_reader = 37 WHERE component = 'lash-postgres-store'")
+        .execute(&mut scratch).await.expect("main's old schema stamp");
+    for args in recovery_commands() {
+        let mut args = args.to_vec();
+        args.push("--json");
+        let (code, body) = run(&args, Some(&scratch_url));
+        assert_too_old(
+            code,
+            &body,
+            lash_core_store::compat::ComponentId::POSTGRES,
+            37,
+        );
+    }
+    let found: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&mut scratch)
+    .await
+    .expect("unchanged stamp");
+    assert_eq!(found, 37);
+    scratch.close().await.expect("close scratch");
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&mut admin)
+        .await
+        .expect("drop scratch schema");
+    admin.close().await.expect("close admin");
+}
+
 #[test]
 fn operator_json_contract() {
     let (code, version) = run(&["version", "--json"], None);
@@ -268,6 +808,18 @@ fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
     let path = std::env::temp_dir()
         .join(format!("lashctl-recovery-{}", uuid::Uuid::new_v4()))
         .join("lash.db");
+    // Recovery reads inspect an existing deployment; fixture setup owns
+    // provisioning, rather than the first stalled-list call.
+    std::fs::create_dir_all(path.parent().expect("store directory")).expect("fixture directory");
+    let runtime = tokio::runtime::Runtime::new().expect("recovery store setup runtime");
+    drop(
+        runtime
+            .block_on(lash::sqlite::SqliteStoreSet::open(
+                &path,
+                lash::sqlite::SqliteSynchronous::Normal,
+            ))
+            .expect("provision the selected store"),
+    );
     let invoke = |args: &[&str]| {
         let output = Command::new(env!("CARGO_BIN_EXE_lashctl"))
             .args(args)
@@ -306,7 +858,6 @@ fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
     assert_eq!(unknown["error"]["code"], "usage");
 
     // Two stalled cleanups, seeded through the store's own ports.
-    let runtime = tokio::runtime::Runtime::new().expect("recovery store setup runtime");
     let ids = runtime.block_on(async {
         use lash::StoreSet as _;
         use lash_core_store::store::{

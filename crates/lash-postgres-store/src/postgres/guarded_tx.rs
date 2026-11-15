@@ -906,44 +906,113 @@ where
         .map_err(Attempt::into_error)
 }
 
-/// `attempt`, one registry write from its guarded `BEGIN` through its
-/// `COMMIT`, run again while the database rolls it back for contention,
-/// under the storage's store retry policy and within the ordinary profile's
-/// operation deadline, as [`guarded`] runs its body (FIG-5855). The caller
-/// fixes the write's inputs before the first attempt, so every attempt is
-/// the identical write, and an attempt rolls a failed transaction back
-/// before it answers. A `COMMIT` whose answer was lost is not contention:
-/// it is never run again. After the policy's attempts the contention is the
-/// caller's.
-pub(crate) async fn retry_contended<T, F, Fut>(
+/// An error that can say a transaction was rolled back for contention, and
+/// give that answer when an operation's deadline cuts its retries off.
+pub(crate) trait Contention {
+    fn is_contended(&self) -> bool;
+    fn contended() -> Self;
+}
+
+impl Contention for StoreError {
+    fn is_contended(&self) -> bool {
+        matches!(self, StoreError::Contended)
+    }
+    fn contended() -> Self {
+        StoreError::Contended
+    }
+}
+
+impl Contention for lash_execution_contracts::plugin_error::PluginError {
+    fn is_contended(&self) -> bool {
+        matches!(
+            self,
+            Self::StoreUnavailable {
+                fault: lash_core_store::store::StoreFault::Contended,
+            }
+        )
+    }
+    fn contended() -> Self {
+        Self::StoreUnavailable {
+            fault: lash_core_store::store::StoreFault::Contended,
+        }
+    }
+}
+
+impl Contention for lash_execution_contracts::module_artifacts::ArtifactStoreError {
+    fn is_contended(&self) -> bool {
+        matches!(
+            self,
+            Self::StoreFault(lash_core_store::store::StoreFault::Contended)
+        )
+    }
+    fn contended() -> Self {
+        Self::StoreFault(lash_core_store::store::StoreFault::Contended)
+    }
+}
+
+impl Contention for lash_core_store::tool_run::MaterialRetentionError {
+    fn is_contended(&self) -> bool {
+        matches!(self, Self::Store(StoreError::Contended))
+    }
+    fn contended() -> Self {
+        Self::Store(StoreError::Contended)
+    }
+}
+
+/// `attempt`, one store write from its guarded `BEGIN` through its
+/// `COMMIT`, run again while the database rolls it back for contention
+/// (FIG-5855, FIG-7700). Every transaction that can take artifact locks
+/// runs this way: after them it waits for no lock longer than the sealed
+/// `lock_timeout`, and never for an advisory lock, and answers contention
+/// instead ([`crate::advisory_lock`]). Contention is deadlock (`40P01`),
+/// lock-not-available (`55P03`) and serialization failure (`40001`).
+/// - Policy: the storage's store retry policy ([`RetryPolicy::run`]). A
+///   wait that expires after the seal does not spend one of its attempts;
+///   any other contention does.
+/// - Deadline: the store profile's whole-operation deadline
+///   ([`crate::host::TransactionPrelude::bounded`]), the bound [`guarded`]
+///   runs its body under. It bounds the loop, attempts included: an
+///   attempt started just before the deadline is cut off at it, and the
+///   write answers its contention ([`Contention::contended`]).
+///
+/// The caller fixes the write's inputs before the first attempt, except
+/// the clock: an attempt may read the time itself (an ordinary artifact or
+/// standalone head write stamps its own `now`), and only the successful
+/// attempt's timestamp persists. An attempt rolls a failed transaction
+/// back before it answers. A `COMMIT` whose answer was lost is not
+/// contention: it is never run again. Once the policy gives up, the
+/// contention is the caller's. Each attempt runs boxed, so the loop's own
+/// future stays small whatever transaction it retries.
+///
+/// What the deadline does not prove: cancelling an attempt at the deadline
+/// while its `COMMIT` is in flight leaves the server's outcome unknown, so
+/// the contention answered then does not show the transaction aborted. A
+/// side effect the caller runs after this returns (the direct registrar's
+/// wake) runs at most once, after an acknowledged commit: a commit whose
+/// acknowledgement was lost gives no wake although its rows may be
+/// committed, and the ready actor stays pollable.
+pub(crate) async fn retry_contended<T, E, F, Fut>(
     fence: &WriterFence,
-    attempt: F,
-) -> Result<T, lash_execution_contracts::plugin_error::PluginError>
+    mut attempt: F,
+) -> Result<T, E>
 where
+    E: Contention,
     F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, lash_execution_contracts::plugin_error::PluginError>>,
+    Fut: Future<Output = Result<T, E>>,
 {
-    let deadline = fence
-        .state
-        .prelude
+    let prelude = &fence.state.prelude;
+    let deadline = prelude
         .deadline()
         .map(|deadline| tokio::time::Instant::now() + deadline);
-    fence
-        .state
-        .retry
-        .run(
-            deadline,
-            |error: &lash_execution_contracts::plugin_error::PluginError| {
-                matches!(
-                    error,
-                    lash_execution_contracts::plugin_error::PluginError::StoreUnavailable {
-                        fault: lash_core_store::store::StoreFault::Contended,
-                    }
-                )
-            },
-            attempt,
+    prelude
+        .bounded(
+            fence
+                .state
+                .retry
+                .run(deadline, E::is_contended, || Box::pin(attempt())),
         )
         .await
+        .unwrap_or_else(|_| Err(E::contended()))
 }
 
 /// A store refusal as an attempt's failure: contention rolled the attempt

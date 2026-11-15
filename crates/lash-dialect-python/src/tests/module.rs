@@ -346,9 +346,7 @@ fn saved_handle(
             let closure = lash_kernel_doc::snapshot::closure_at(
                 &lowered.document,
                 site,
-                lash_kernel_value::LinkId::from_bytes([1; 32]),
                 machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh,
             )?;
             (lowered.written[site]
                 .signature_origin
@@ -375,6 +373,7 @@ fn saved_handle(
         token: None,
         signature_origin: lowered.written[site].signature_origin.clone(),
         implicit_text_conversions: lowered.written[site].implicit_text_conversions.clone(),
+        declared_locals: lowered.written[site].declared_locals.clone(),
     };
     let wire = serde_json::to_string(&value).unwrap();
     let value: lash_kernel_doc::FunctionValue = serde_json::from_str(&wire).unwrap();
@@ -426,11 +425,7 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
         );
         let (document, value) = saved_handle(source);
         let lash_kernel_doc::FunctionValueRefusal::SignatureRequired { source: saved } = value
-            .entry_export(
-                &document,
-                machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh,
-            )
+            .entry_export(&document, machine::installed().prepared.helpers())
             .expect_err("saved promotion needs annotations")
         else {
             panic!("typed saved refusal")
@@ -524,11 +519,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
     let (document, value) = saved_handle(source);
     assert_eq!(
         value
-            .entry_export(
-                &document,
-                machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh
-            )
+            .entry_export(&document, machine::installed().prepared.helpers(),)
             .unwrap()
             .signature,
         expected
@@ -597,11 +588,7 @@ async def handle(event: Event, metadata: dict[str, Any]) -> Event:
         );
         let (document, value) = saved_handle(source);
         let lash_kernel_doc::FunctionValueRefusal::EntryAnnotation { source: saved } = value
-            .entry_export(
-                &document,
-                machine::installed().prepared.helpers(),
-                &lash_kernel_doc::Selection::Fresh,
-            )
+            .entry_export(&document, machine::installed().prepared.helpers())
             .expect_err("same saved refusal")
         else {
             panic!("typed saved resolution fact")
@@ -705,11 +692,7 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
         let (document, value) = saved_handle(&source);
         assert_eq!(
             value
-                .entry_export(
-                    &document,
-                    machine::installed().prepared.helpers(),
-                    &lash_kernel_doc::Selection::Fresh
-                )
+                .entry_export(&document, machine::installed().prepared.helpers(),)
                 .unwrap()
                 .signature,
             signature
@@ -943,10 +926,15 @@ fn for_bindings_keep_the_guest_namespace_when_printed() {
         .expect("loop binding map");
 }
 
-/// FIG-7352: a saved callable's packed token has an ordinary Python spelling.
-#[test]
-fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
-    use lash_kernel_doc::{CaptureValue, Datum, Expr, Literal, Node};
+/// The opened workflow of the saved callable `handle` that `source` defines,
+/// with `captures` as its frozen environment and its value as `saved`
+/// leaves it.
+fn materialized_handle(
+    source: &str,
+    captures: BTreeMap<Name, lash_kernel_doc::CaptureValue>,
+    saved: impl FnOnce(lash_kernel_doc::FunctionValue) -> lash_kernel_doc::FunctionValue,
+) -> lash_kernel_package::MaterializedWorkflow {
+    use lash_kernel_doc::{Datum, Expr, Literal, Node};
     fn data(expr: &Expr, callable: &Name) -> Datum {
         match expr {
             Expr::Literal(Literal::Null) => Datum::Null,
@@ -960,9 +948,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
             _ => panic!("literal token data: {expr:?}"),
         }
     }
-    let lowered =
-        machine::lower("offset = 7\nasync def handle(x: int) -> int:\n    return x + offset\n")
-            .unwrap();
+    let lowered = machine::lower(source).unwrap();
     let (site, written) = lowered
         .written
         .iter()
@@ -991,39 +977,50 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         document: document.identity(),
         fills: Default::default(),
     };
-    let function = lash_kernel_doc::FunctionValue {
+    let function = saved(lash_kernel_doc::FunctionValue {
         written_signature: None,
         signature_origin: written.signature_origin.clone(),
         implicit_text_conversions: written.implicit_text_conversions.clone(),
+        declared_locals: written.declared_locals.clone(),
         callable: lash_kernel_value::CallableId {
             link: link.identity(),
             function: closure.function,
         },
-        captures: [(
-            Name::new("offset"),
-            CaptureValue::Data(Datum::Int(7.into())),
-        )]
-        .into(),
+        captures,
         signature: presentation.signature.clone(),
         convention: presentation.convention.clone(),
         representation: presentation.representation.clone(),
-        captions: lowered.captions,
+        captions: lowered.captions.clone(),
         creation: Some(site.clone()),
         token: Some(token),
-    };
+    });
     let content = lash_kernel_package::LinkedContent {
         documents: [(document.identity(), document.into())].into(),
         links: [(link.identity(), link)].into(),
         ..Default::default()
     };
-    let opened = lash_kernel_package::materialize_workflow(
+    lash_kernel_package::materialize_workflow(
         &content,
         &lash_kernel_doc::WorkflowReference::Callable(function.callable),
         Some(&function),
         None,
         machine::installed().prepared.helpers(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+/// FIG-7352: a saved callable's packed token has an ordinary Python spelling.
+#[test]
+fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
+    let opened = materialized_handle(
+        "offset = 7\nasync def handle(x: int) -> int:\n    return x + offset\n",
+        [(
+            Name::new("offset"),
+            lash_kernel_doc::CaptureValue::Data(lash_kernel_doc::Datum::Int(7.into())),
+        )]
+        .into(),
+        |function| function,
+    );
     crate::print(
         &opened.document,
         None,
@@ -1031,6 +1028,72 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         Default::default(),
     )
     .expect("materialized callable has an exact authored Python readback");
+}
+
+/// FIG-7708: a trusted local annotation chooses its operations (`total: int`
+/// makes `+` the native `add`, `label: str` makes it `text.concat`, and
+/// `cursor: str = None` checks the name). The annotation is source evidence
+/// beside the callable, keyed by its binding: the module and the saved
+/// callable print it and read back exactly, again after the value is stored
+/// and reloaded, and refuse without the evidence.
+#[test]
+fn declared_local_annotations_print_from_their_evidence() {
+    use lash_kernel_doc::{CaptureValue, Datum};
+    let cases: [(&str, BTreeMap<Name, CaptureValue>); 3] = [
+        (
+            "async def handle(x: int) -> int:\n    total: int = 0\n    total = total + x\n    return total\n",
+            BTreeMap::new(),
+        ),
+        (
+            "label: str = 'a'\nasync def handle(x: str) -> str:\n    return x + label\n",
+            [(
+                Name::new("label"),
+                CaptureValue::Data(Datum::Text("a".into())),
+            )]
+            .into(),
+        ),
+        (
+            "async def handle(x: str) -> str:\n    cursor: str = None\n    cursor = x\n    return cursor + '!'\n",
+            BTreeMap::new(),
+        ),
+    ];
+    let prints = |document: &lash_kernel_doc::Document| {
+        crate::print(document, None, machine::library(), Default::default())
+    };
+    for (source, captures) in cases {
+        let lowered = machine::lower(source).unwrap();
+        if let Err(error) = prints(lowered.document.document()) {
+            panic!("module: {error}\n{source}");
+        }
+        let opened = materialized_handle(source, captures.clone(), |function| function);
+        if let Err(error) = prints(&opened.document) {
+            panic!("callable: {error}\n{source}");
+        }
+        let stored = materialized_handle(source, captures.clone(), |function| {
+            let stored: lash_kernel_doc::FunctionValue = lash_kernel_value::tokens::decode_body(
+                &lash_kernel_value::tokens::encode_body(&function),
+            )
+            .unwrap();
+            assert_eq!(stored, function);
+            stored
+        });
+        if let Err(error) = prints(&stored.document) {
+            panic!("stored callable: {error}\n{source}");
+        }
+        let bare = materialized_handle(source, captures, |mut function| {
+            assert!(!function.declared_locals.is_empty(), "{source}");
+            function.declared_locals.clear();
+            function
+        });
+        let refused = prints(&bare.document);
+        assert!(
+            matches!(
+                refused,
+                Err(lash_kernel_dialect::PrintError::Unprintable { .. })
+            ),
+            "{source}: {refused:?}"
+        );
+    }
 }
 
 /// FIG-7664: syntax helpers must retain an authored spelling and exact readback.
@@ -1091,4 +1154,782 @@ fn syntax_lowered_helpers_have_source_spellings() {
     }
     println!("{} emitted syntax helpers checked", inventory.len());
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// FIG-7711: every admitted statement and expression form has a faithful
+/// source spelling in a cell and in module main. Refused inputs are listed
+/// separately and never counted as successful round trips.
+#[test]
+fn enumerated_statements_and_expressions_print_and_relower() {
+    let library = machine::library();
+    let namespaces = Default::default();
+    let environment = Environment::new(library, &namespaces);
+    let forms = flat_source_forms();
+    let mut refused = Vec::new();
+    let mut failures = Vec::new();
+    let mut admitted = 0;
+    for (name, body) in forms {
+        for module in [false, true] {
+            let context = if module { "module" } else { "cell" };
+            let source = if module {
+                format!("async def entry() -> int:\n    return 1\n{body}\n")
+            } else {
+                body.into()
+            };
+            let mode = if module {
+                Mode::Module
+            } else {
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            };
+            let lowered = match crate::lower(&source, &environment, mode) {
+                Ok(lowered) => lowered,
+                Err(error) => {
+                    refused.push(format!("{context} {name}: {error}"));
+                    continue;
+                }
+            };
+            admitted += 1;
+            let printed = match crate::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                lash_kernel_dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(printed) => printed,
+                Err(error) => {
+                    failures.push(format!("{context} {name}: print: {error}"));
+                    continue;
+                }
+            };
+            match crate::lower(&printed.source, &environment, mode) {
+                Ok(read)
+                    if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
+                {
+                    printed
+                        .source_map
+                        .unwrap()
+                        .validate(&lowered.document, &printed.source)
+                        .unwrap();
+                }
+                Ok(read) => failures.push(format!(
+                    "{context} {name}: different document; private {:?} -> {:?}; source {}",
+                    lowered.document.private_bindings,
+                    read.document.private_bindings,
+                    printed.source
+                )),
+                Err(error) => failures.push(format!("{context} {name}: lower print: {error}")),
+            }
+        }
+    }
+    eprintln!(
+        "Python enumerated: admitted={admitted}, passed={}, failed={}, refused={}\nREFUSED:\n{}",
+        admitted - failures.len(),
+        failures.len(),
+        refused.len(),
+        refused.join("\n")
+    );
+    assert_eq!(admitted, 292, "admitted forms must not disappear");
+    let mut refused_forms = refused
+        .iter()
+        .map(|failure| failure.split(':').next().unwrap())
+        .collect::<Vec<_>>();
+    refused_forms.sort_unstable();
+    let mut expected = [
+        "attribute assignment",
+        "return",
+        "break",
+        "continue",
+        "class",
+        "async for",
+    ]
+    .into_iter()
+    .flat_map(|name| [format!("cell {name}"), format!("module {name}")])
+    .collect::<Vec<_>>();
+    expected.sort_unstable();
+    assert_eq!(
+        refused_forms, expected,
+        "lower-refused forms must be explicit"
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn flat_source_forms() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("pass", "pass"),
+        ("block", "if True:\n    x=1"),
+        ("assign", "x=1\ny=x"),
+        ("chained assignment", "x=y=1"),
+        ("annotated", "x:int=1"),
+        ("annotation only", "x:int"),
+        ("tuple assignment", "x,y=(1,2)"),
+        ("starred assignment", "x,*rest=[1,2,3]"),
+        ("nested assignment", "x,(y,z)=(1,(2,3))"),
+        ("attribute assignment", "obj={\"x\":1}\nobj.x=2"),
+        ("item assignment", "xs=[1,2]\nxs[0]=3"),
+        ("slice assignment", "xs=[1,2,3]\nxs[1:]=[4]"),
+        ("delete name", "x=1\ndel x"),
+        ("delete item", "xs=[1,2]\ndel xs[0]"),
+        ("delete slice", "xs=[1,2,3]\ndel xs[1:]"),
+        ("if", "x=1\nif x:\n    x=2"),
+        (
+            "elif else",
+            "x=1\nif x==0:\n    x=2\nelif x==1:\n    x=3\nelse:\n    x=4",
+        ),
+        ("while", "x=0\nwhile x<2:\n    x+=1"),
+        ("while else", "x=0\nwhile x<2:\n    x+=1\nelse:\n    x=3"),
+        (
+            "while exits",
+            "x=0\nwhile True:\n    x+=1\n    if x==1:\n        continue\n    break",
+        ),
+        ("for", "for x in [1,2]:\n    y=x"),
+        ("for destructuring", "for x,y in [(1,2)]:\n    z=x+y"),
+        ("for starred", "for x,*rest in [(1,2,3)]:\n    z=rest"),
+        ("for else", "for x in [1,2]:\n    y=x\nelse:\n    y=3"),
+        (
+            "nested for exits",
+            "for x in [1,2]:\n    for y in [3,4]:\n        if y==3:\n            continue\n        break",
+        ),
+        (
+            "function",
+            "def local(x:int)->int:\n    return x+1\nresult=local(2)",
+        ),
+        (
+            "async function",
+            "async def local(x:int)->int:\n    return x+1\nresult=await local(2)",
+        ),
+        ("bare return function", "def local()->None:\n    return"),
+        ("return", "return 1"),
+        ("break", "break"),
+        ("continue", "continue"),
+        ("raise", "raise ValueError(\"bad\")"),
+        ("assert", "assert True,\"message\""),
+        (
+            "global",
+            "x=1\ndef local()->int:\n    global x\n    x=2\n    return x",
+        ),
+        (
+            "nonlocal",
+            "def outer()->int:\n    x=1\n    def local():\n        nonlocal x\n        x=2\n    local()\n    return x",
+        ),
+        ("lambda", "f=lambda x:x+1\nresult=f(2)"),
+        ("class", "class Box:\n    x:int=1"),
+        ("with", "resource=None\nwith resource as x:\n    result=x"),
+        (
+            "with two",
+            "resource=None\nwith resource as x, resource as y:\n    result=x",
+        ),
+        (
+            "async with",
+            "resource=None\nasync with resource as x:\n    result=x",
+        ),
+        ("async for", "xs=[]\nasync for x in xs:\n    result=x"),
+        ("import", "import math\nresult=math.sqrt(4)"),
+        ("from import", "from math import sqrt\nresult=sqrt(4)"),
+        ("type alias", "type Scalar=int\nx:Scalar=1"),
+        (
+            "match literal",
+            "x=1\nmatch x:\n    case 1:\n        result=2\n    case _:\n        result=3",
+        ),
+        (
+            "match sequence",
+            "x=[1,2]\nmatch x:\n    case [first,*rest]:\n        result=rest",
+        ),
+        (
+            "match mapping",
+            "x={\"a\":1,\"b\":2}\nmatch x:\n    case {\"a\":a,**rest}:\n        result=rest",
+        ),
+        (
+            "match guard",
+            "x=1\nmatch x:\n    case value if value>0:\n        result=value\n    case _:\n        result=0",
+        ),
+        (
+            "try bare else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2",
+        ),
+        (
+            "try bare else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try bare else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try bare else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2",
+        ),
+        (
+            "try ValueError else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try ValueError else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2",
+        ),
+        (
+            "try (ValueError,TypeError) else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try (ValueError,TypeError) else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError):\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError as error else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2",
+        ),
+        (
+            "try ValueError as error else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try ValueError as error else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try ValueError as error else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept ValueError as error:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=False finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=True finally=False",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2\nelse:\n    result=3",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=False finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2\nfinally:\n    result+=1",
+        ),
+        (
+            "try (ValueError,TypeError) as error else=True finally=True",
+            "result=0\ntry:\n    raise ValueError(\"bad\")\nexcept (ValueError,TypeError) as error:\n    result=2\nelse:\n    result=3\nfinally:\n    result+=1",
+        ),
+        (
+            "try finally",
+            "result=0\ntry:\n    result=1\nfinally:\n    result=2",
+        ),
+        ("augmented x +", "x=2\nx+=1"),
+        ("augmented xs[0] +", "xs=[2]\nxs[0]+=1"),
+        ("augmented x -", "x=2\nx-=1"),
+        ("augmented xs[0] -", "xs=[2]\nxs[0]-=1"),
+        ("augmented x *", "x=2\nx*=1"),
+        ("augmented xs[0] *", "xs=[2]\nxs[0]*=1"),
+        ("augmented x /", "x=2\nx/=1"),
+        ("augmented xs[0] /", "xs=[2]\nxs[0]/=1"),
+        ("augmented x //", "x=2\nx//=1"),
+        ("augmented xs[0] //", "xs=[2]\nxs[0]//=1"),
+        ("augmented x %", "x=2\nx%=1"),
+        ("augmented xs[0] %", "xs=[2]\nxs[0]%=1"),
+        ("augmented x **", "x=2\nx**=1"),
+        ("augmented xs[0] **", "xs=[2]\nxs[0]**=1"),
+        ("augmented x <<", "x=2\nx<<=1"),
+        ("augmented xs[0] <<", "xs=[2]\nxs[0]<<=1"),
+        ("augmented x >>", "x=2\nx>>=1"),
+        ("augmented xs[0] >>", "xs=[2]\nxs[0]>>=1"),
+        ("augmented x &", "x=2\nx&=1"),
+        ("augmented xs[0] &", "xs=[2]\nxs[0]&=1"),
+        ("augmented x |", "x=2\nx|=1"),
+        ("augmented xs[0] |", "xs=[2]\nxs[0]|=1"),
+        ("augmented x ^", "x=2\nx^=1"),
+        ("augmented xs[0] ^", "xs=[2]\nxs[0]^=1"),
+        (
+            "expression none",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=None",
+        ),
+        (
+            "expression bool",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=True",
+        ),
+        (
+            "expression int",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=1",
+        ),
+        (
+            "expression float",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=1.5",
+        ),
+        (
+            "expression text",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=\"text\"",
+        ),
+        (
+            "expression bytes",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=b\"text\"",
+        ),
+        (
+            "expression ellipsis",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=...",
+        ),
+        (
+            "expression tuple",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=(x,y)",
+        ),
+        (
+            "expression list",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=[1,*xs]",
+        ),
+        (
+            "expression dict",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={\"a\":x,**obj}",
+        ),
+        (
+            "expression set",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={x,*xs}",
+        ),
+        (
+            "expression slice",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=xs[1:3:2]",
+        ),
+        (
+            "expression attribute",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=obj.a",
+        ),
+        (
+            "expression index",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=xs[x]",
+        ),
+        (
+            "expression conditional",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=x if x else y",
+        ),
+        (
+            "expression walrus",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=(z:=x)",
+        ),
+        (
+            "expression lambda",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=lambda z:z+1",
+        ),
+        (
+            "expression call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(x)",
+        ),
+        (
+            "expression starred call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(*xs)",
+        ),
+        (
+            "expression keyword call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(z=x)",
+        ),
+        (
+            "expression double starred call",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f(**{\"z\":x})",
+        ),
+        (
+            "expression fstring",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=f\"value {x}\"",
+        ),
+        (
+            "expression list comprehension",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=[v+1 for v in xs if v]",
+        ),
+        (
+            "expression dict comprehension",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={v:v+1 for v in xs}",
+        ),
+        (
+            "expression set comprehension",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult={v+1 for v in xs}",
+        ),
+        (
+            "expression generator",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=(v+1 for v in xs)",
+        ),
+        (
+            "expression await",
+            "x=1\ny=2\nxs=[1,2,3]\nobj={\"a\":1}\nf=lambda z:z\nresult=await f(x)",
+        ),
+        (
+            "authored local suffix",
+            "def f() -> int:\n    x=1\n    x_local1=2\n    return x+x_local1\nresult=f()",
+        ),
+        (
+            "authored parameter suffix",
+            "def f(x_local1: int) -> int:\n    x=2\n    return x+x_local1\nresult=f(1)",
+        ),
+        (
+            "authored suffix beside rebound local",
+            "def outer() -> int:\n    x=1\n    x_local1=2\n    def inner():\n        nonlocal x\n        x=3\n    inner()\n    return x+x_local1\nresult=outer()",
+        ),
+        (
+            "authored suffix rebound local",
+            "def outer() -> int:\n    x_local1=1\n    def inner():\n        nonlocal x_local1\n        x_local1=2\n    inner()\n    return x_local1\nresult=outer()",
+        ),
+        ("binary +", "x=1\ny=2\nresult=x + y"),
+        ("binary -", "x=1\ny=2\nresult=x - y"),
+        ("binary *", "x=1\ny=2\nresult=x * y"),
+        ("binary /", "x=1\ny=2\nresult=x / y"),
+        ("binary //", "x=1\ny=2\nresult=x // y"),
+        ("binary %", "x=1\ny=2\nresult=x % y"),
+        ("binary **", "x=1\ny=2\nresult=x ** y"),
+        ("binary <<", "x=1\ny=2\nresult=x << y"),
+        ("binary >>", "x=1\ny=2\nresult=x >> y"),
+        ("binary &", "x=1\ny=2\nresult=x & y"),
+        ("binary |", "x=1\ny=2\nresult=x | y"),
+        ("binary ^", "x=1\ny=2\nresult=x ^ y"),
+        ("binary <", "x=1\ny=2\nresult=x < y"),
+        ("binary <=", "x=1\ny=2\nresult=x <= y"),
+        ("binary >", "x=1\ny=2\nresult=x > y"),
+        ("binary >=", "x=1\ny=2\nresult=x >= y"),
+        ("binary ==", "x=1\ny=2\nresult=x == y"),
+        ("binary !=", "x=1\ny=2\nresult=x != y"),
+        ("binary is", "x=1\ny=2\nresult=x is y"),
+        ("binary is not", "x=1\ny=2\nresult=x is not y"),
+        ("binary in", "x=1\ny=2\nresult=x in y"),
+        ("binary not in", "x=1\ny=2\nresult=x not in y"),
+        ("binary and", "x=1\ny=2\nresult=x and y"),
+        ("binary or", "x=1\ny=2\nresult=x or y"),
+        ("unary +", "x=1\nresult=+x"),
+        ("unary -", "x=1\nresult=-x"),
+        ("unary ~", "x=1\nresult=~x"),
+        ("unary not", "x=1\nresult=not x"),
+    ]
+}
+
+fn review_source_forms() -> Vec<(String, String)> {
+    vec![
+        ("review py-148 with nested".into(), "resource=None\nwith resource as (x,y):\n    with resource as z:\n        result=x+y+z".into()),
+        ("review py-149 with await".into(), "async def f() -> int:\n    async with None as x:\n        return await x\n".into()),
+        ("review py-150 match nested".into(), "match [1,2]:\n    case [x,y] if x:\n        match y:\n            case 2:\n                result=x\n    case _:\n        result=0".into()),
+        ("review py-151 comp multiple filters".into(), "result=[x+y for x in [1,2] if x>0 for y in [3,4] if y>3 if x+y>4]".into()),
+        ("review py-152 comp tuple".into(), "result=[x+y for x,y in [(1,2)] if x>0]".into()),
+        ("review py-153 comp nested".into(), "result=[[y for y in [1,2] if y>x] for x in [0,1] if x<2]".into()),
+        ("review py-154 try else finally".into(), "result=0\ntry:\n    result=1\nexcept ValueError as e:\n    result=2\nelse:\n    result+=3\nfinally:\n    result+=4".into()),
+        ("review py-155 catch shadow".into(), "e=1\ntry:\n    raise ValueError(\"x\")\nexcept ValueError as e:\n    result=str(e)\n".into()),
+        ("review py-156 global read write".into(), "x=1\ndef f() -> int:\n    global x\n    x+=1\n    return x\nresult=f()".into()),
+        ("review py-157 nonlocal nested".into(), "def f() -> int:\n    x=1\n    def g() -> int:\n        nonlocal x\n        x+=1\n        return x\n    return g()\nresult=f()".into()),
+        ("review py-158 authored local suffix".into(), "def f() -> int:\n    x=1\n    x_local1=2\n    return x+x_local1\nresult=f()".into()),
+        ("review py-159 parameter local suffix".into(), "def f(x_local1: int) -> int:\n    x=2\n    return x_local1+x\nresult=f(1)".into()),
+        ("review py-160 nested unpack star".into(), "x,(y,*z)=(1,(2,3,4))\nresult=x+y+len(z)".into()),
+        ("review py-161 match mapping".into(), "match {\"a\":1,\"b\":2}:\n    case {\"a\":x,**rest}:\n        result=x+len(rest)".into()),
+        ("review py-162 await comp".into(), "async def g(x: int) -> int:\n    return x\nasync def h(x: int) -> bool:\n    return x>0\nasync def f() -> object:\n    return [await g(x) for x in [1,2] if await h(x)]".into()),
+        ("review py-163 await while".into(), "async def g(x: int) -> bool:\n    return x<2\nasync def h(x: int) -> int:\n    return 1\nasync def f() -> int:\n    x=0\n    while await g(x):\n        x+=await h(x)\n    return x".into()),
+    ]
+}
+
+/// PRINT-ROUNDTRIP over admitted control and expression compositions.
+/// Known failures stay explicit; a fixed case must leave the list.
+#[test]
+fn enumerated_compositions_print_and_relower() {
+    use lash_kernel_dialect::{Environment, Mode};
+    let started = std::time::Instant::now();
+    let identities = |text: &'static str| {
+        let identities = text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .collect::<Vec<_>>();
+        assert!(
+            identities.windows(2).all(|pair| pair[0] < pair[1]),
+            "identity lists must be sorted and unique"
+        );
+        identities
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let mut known_failures = identities(include_str!("known_print_failures.txt"));
+    let expected_refusals = identities(include_str!("composition_lowering_refusals.txt"));
+    let mut seen = std::collections::BTreeSet::new();
+    let library = machine::library();
+    let namespaces = Default::default();
+    let environment = Environment::new(library, &namespaces);
+    let mut forms = flat_source_forms()
+        .into_iter()
+        .map(|(name, body)| (format!("flat {name}"), body.to_owned()))
+        .collect::<Vec<_>>();
+    forms.extend(review_source_forms());
+    forms.extend(composed_control_forms());
+    forms.extend(composed_expression_forms());
+    let mut refused = Vec::new();
+    let mut failures = Vec::new();
+    let mut counts = std::collections::BTreeMap::<String, [usize; 4]>::new();
+    for (name, body) in forms {
+        for module in [false, true] {
+            let context = if module { "module" } else { "cell" };
+            let identity = format!("{name}/{context}");
+            assert!(seen.insert(identity.clone()), "duplicate case: {identity}");
+            let mode = if module {
+                Mode::Module
+            } else {
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            };
+            let source = if module {
+                format!("async def entry() -> int:\n    return 1\n{body}\n")
+            } else {
+                body.clone()
+            };
+            let count = counts
+                .entry(name.split_whitespace().next().unwrap().to_owned())
+                .or_default();
+            let lowered = match crate::lower(&source, &environment, mode) {
+                Ok(lowered) => lowered,
+                Err(_) => {
+                    count[3] += 1;
+                    refused.push(identity.clone());
+                    continue;
+                }
+            };
+            count[0] += 1;
+            let printed = match crate::print(
+                &lowered.document,
+                Some(&lowered.captions),
+                library,
+                lash_kernel_dialect::PrintOptions {
+                    source_map: true,
+                    ..Default::default()
+                },
+            ) {
+                Ok(printed) => printed,
+                Err(error) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!("{identity}: print: {error}\nORIGINAL:\n{source}"));
+                    }
+                    continue;
+                }
+            };
+            match crate::lower(&printed.source, &environment, mode) {
+                Ok(read)
+                    if read.document.canonical_bytes() == lowered.document.canonical_bytes() =>
+                {
+                    count[1] += 1;
+                    printed
+                        .source_map
+                        .as_ref()
+                        .unwrap()
+                        .validate(&lowered.document, &printed.source)
+                        .unwrap();
+                }
+                Ok(_) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!(
+                            "{identity}: document mismatch\nORIGINAL:\n{source}\nPRINT:\n{}",
+                            printed.source
+                        ));
+                    }
+                }
+                Err(error) => {
+                    count[2] += 1;
+                    if !known_failures.remove(identity.as_str()) {
+                        failures.push(format!(
+                            "{identity}: lower print: {error}\nORIGINAL:\n{source}\nPRINT:\n{}",
+                            printed.source
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("COMPOSITION COUNTS [admitted, equal, known-failed, lower-refused]: {counts:?}");
+    eprintln!("COMPOSITION ELAPSED: {:?}", started.elapsed());
+    assert_eq!(
+        counts
+            .iter()
+            .map(|(group, count)| (group.clone(), [count[0], count[3]]))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        std::collections::BTreeMap::from([
+            ("control".to_owned(), [1537, 7]),
+            ("flat".to_owned(), [292, 12]),
+            ("position".to_owned(), [1430, 0]),
+            ("review".to_owned(), [31, 1])
+        ]),
+        "admission counts must not silently shrink"
+    );
+    assert_eq!(
+        refused
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected_refusals,
+        "lowering refusals must remain explicit"
+    );
+    assert!(
+        failures.is_empty() && known_failures.is_empty(),
+        "UNLISTED PRINT FAILURES: {}\n{}\nKNOWN PRINT FAILURES THAT NOW PASS OR ARE NO LONGER ADMITTED: {}\n{}",
+        failures.len(),
+        failures.join("\n"),
+        known_failures.len(),
+        known_failures.into_iter().collect::<Vec<_>>().join("\n")
+    );
+}
+
+fn composed_control_forms() -> Vec<(String, String)> {
+    let controls = [
+        ("if", "if result<2:\n    $BODY", 0u8, 4usize),
+        (
+            "if-else",
+            "if result<2:\n    $BODY\nelse:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        ("while", "while result<2:\n    $BODY", 3u8, 4usize),
+        (
+            "while-else",
+            "while result<2:\n    $BODY\nelse:\n    result+=1",
+            3u8,
+            4usize,
+        ),
+        ("for", "for x$N in [1,2]:\n    $BODY", 3u8, 4usize),
+        (
+            "for-pattern",
+            "for x$N,y$N in [(1,2)]:\n    $BODY",
+            3u8,
+            4usize,
+        ),
+        (
+            "for-else",
+            "for x$N in [1,2]:\n    $BODY\nelse:\n    result+=1",
+            3u8,
+            4usize,
+        ),
+        (
+            "try-except",
+            "try:\n    $BODY\nexcept ValueError as error$N:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        (
+            "try-except-none",
+            "try:\n    $BODY\nexcept:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        (
+            "try-finally",
+            "try:\n    $BODY\nfinally:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        (
+            "try-except-else-finally",
+            "try:\n    $BODY\nexcept ValueError:\n    result+=1\nelse:\n    result+=1\nfinally:\n    result+=1",
+            0u8,
+            4usize,
+        ),
+        ("with", "with None as x$N:\n    $BODY", 0u8, 4usize),
+        (
+            "with-pattern",
+            "with None as (x$N,y$N):\n    $BODY",
+            0u8,
+            4usize,
+        ),
+        (
+            "async-with",
+            "async with None as x$N:\n    $BODY",
+            8u8,
+            4usize,
+        ),
+        (
+            "match",
+            "match result:\n    case 0:\n        $BODY\n    case _:\n        pass",
+            0u8,
+            8usize,
+        ),
+        (
+            "closure",
+            "def nested$N() -> int:\n    $BODY\n    return result\nnested$N()",
+            4u8,
+            4usize,
+        ),
+    ];
+    fn nest(template: &str, body: &str, depth: &str, indent: usize) -> String {
+        template.replace("$N", depth).replace(
+            "$BODY",
+            &body.replace('\n', &format!("\n{}", " ".repeat(indent))),
+        )
+    }
+    let mut forms = Vec::new();
+    for (outer_name, outer, outer_role, outer_indent) in controls {
+        for (inner_name, inner, inner_role, inner_indent) in controls {
+            let mut exits = vec![("plain", "result+=1"), ("return", "return result")];
+            if inner_role & 4 == 0 && (inner_role & 2 != 0 || outer_role & 6 == 2) {
+                exits.push(("break", "break"));
+            }
+            if inner_role & 4 == 0 && (inner_role & 1 != 0 || outer_role & 5 == 1) {
+                exits.push(("continue", "continue"));
+            }
+            for (exit, payload) in exits {
+                let inner = nest(inner, payload, "1", inner_indent);
+                let outer_template = if outer_name == "closure" && inner_role & 8 != 0 {
+                    "async def nested$N() -> int:\n    $BODY\n    return result\nawait nested$N()"
+                } else {
+                    outer
+                };
+                let outer = nest(outer_template, &inner, "0", outer_indent);
+                let asynchronous = outer_role & 8 != 0 || inner_role & 8 != 0;
+                let body = if exit == "return" || asynchronous {
+                    format!(
+                        "{}def run() -> int:\n    result=0\n    {}\n    return result\nresult={}run()",
+                        if asynchronous { "async " } else { "" },
+                        outer.replace('\n', "\n    "),
+                        if asynchronous { "await " } else { "" }
+                    )
+                } else {
+                    format!("result=0\n{outer}")
+                };
+                forms.push((format!("control {outer_name}/{inner_name}/{exit}"), body));
+            }
+        }
+    }
+    forms
+}
+
+fn composed_expression_forms() -> Vec<(String, String)> {
+    let positions = [
+        ("variable-rhs", "target=$EXPR"),
+        ("index-rhs", "box[0]=$EXPR"),
+        ("slice-rhs", "arr[:]=[$EXPR]"),
+        ("pattern-rhs", "target,=[$EXPR]"),
+        ("compound-rhs", "target+=$EXPR"),
+        ("assignment-key", "box[$EXPR]=1"),
+        ("compound-key", "box[$EXPR]+=1"),
+        ("call-callee", "($EXPR)(1)"),
+        ("call-argument", "sink($EXPR)"),
+        ("call-receiver", "($EXPR).get(1)"),
+        ("call-keyword", "sink(value=$EXPR)"),
+        ("call-spread", "sink(*($EXPR))"),
+        ("call-keyword-spread", "sink(**($EXPR))"),
+    ];
+    let mut forms = Vec::new();
+    for (name, body) in flat_source_forms() {
+        if !(name.starts_with("expression ")
+            || name.starts_with("binary ")
+            || name.starts_with("unary "))
+        {
+            continue;
+        }
+        let Some((prefix, expression)) = body.rsplit_once("result=") else {
+            panic!("expression form without result: {name}");
+        };
+        for (position, template) in positions {
+            let body = format!(
+                "{prefix}target=0\nbox={{0:1}}\narr=[0]\nsink=lambda value:value\n{}",
+                template.replace("$EXPR", &format!("({expression})"))
+            );
+            forms.push((format!("position {name}/{position}"), body));
+        }
+    }
+    forms
 }

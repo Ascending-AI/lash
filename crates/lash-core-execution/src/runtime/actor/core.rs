@@ -1346,6 +1346,10 @@ impl ActorContext {
         tx: lash_durable::MailTx,
         label: CommitLabel,
     ) -> Result<lash_durable::MailCommit, DurableError> {
+        let tx = match &self.inner.backend {
+            Some(backend) => backend.fence_mail(tx),
+            None => tx,
+        };
         let commit = self.durable()?.commit_mail(tx, label).await?;
         if let Some(backend) = &self.inner.backend {
             backend.hint_woken(&commit);

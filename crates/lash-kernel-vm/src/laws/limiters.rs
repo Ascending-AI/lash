@@ -2,6 +2,10 @@
 //! bound, its host's limiter grows the limit or refuses; a grown limit is
 //! saved with the run, and a run resumed from before the save asks again.
 
+mod kinds;
+mod lookup;
+mod negated_member;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -106,21 +110,10 @@ fn sealed_and_resumed(
     which: Which,
     limiter: Option<&Scripted>,
 ) -> (Trace, Option<(u64, usize)>) {
-    sealed_in_layout(text, bounds, which, limiter, crate::Layout::default())
-}
-
-fn sealed_in_layout(
-    text: &str,
-    bounds: Bounds,
-    which: Which,
-    limiter: Option<&Scripted>,
-    layout: crate::Layout,
-) -> (Trace, Option<(u64, usize)>) {
     let mut embedder = Embedder::with(
         text,
         Setup {
             bounds,
-            layout,
             probes: Some(if text == super::layout::HELPERS {
                 super::layout::helper_probes
             } else {
@@ -136,7 +129,7 @@ fn sealed_in_layout(
             Step::Ended(end) => return (trace(&embedder, end), saved),
             Step::Slice => {}
             Step::Parked(_) => {
-                let root = embedder.reopen(layout, true);
+                let root = embedder.reopen(true);
                 let limit = match which {
                     Which::Charge => root.limits.charge,
                     Which::Memory => root.limits.memory.expect("memory is metered"),
@@ -221,8 +214,7 @@ fn grown_charge(text: &str) {
         let (expected, _) = sealed_and_resumed(text, started, Which::Charge, None);
         assert_eq!(grown, expected, "limit {limit}");
         if text.contains("flat.") {
-            let (reference, _) =
-                sealed_in_layout(text, started, Which::Charge, None, crate::Layout(0));
+            let (reference, _) = sealed_and_resumed(text, started, Which::Charge, None);
             assert_eq!(grown, reference, "typed boundary {limit}");
         }
         let asked = limiter.asked();
@@ -313,13 +305,13 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
         },
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let (root, certificate) = embedder.checkpoint();
+    let root = embedder.checkpoint();
     assert_eq!(root.limits.charge, total / 2);
     let pending = embedder.pending.clone();
     let mut attempts = Vec::new();
     for _ in 0..2 {
         let limiter = Scripted::answering([LimitDecision::Grow(GROW)]);
-        embedder.open_at(&root, certificate, crate::Layout::default(), true);
+        embedder.open_at(&root, true);
         limited(&mut embedder, Which::Charge, Some(&limiter));
         embedder.pending = pending.clone();
         embedder.world.printed.clear();
@@ -343,16 +335,6 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
 }
 
 fn refused(text: &str, bounds: Bounds, which: Which, limiter: Option<&Scripted>) -> (Trace, End) {
-    refused_in_layout(text, bounds, which, limiter, crate::Layout(0))
-}
-
-fn refused_in_layout(
-    text: &str,
-    bounds: Bounds,
-    which: Which,
-    limiter: Option<&Scripted>,
-    layout: crate::Layout,
-) -> (Trace, End) {
     let mut embedder = Embedder::with(
         text,
         Setup {
@@ -363,7 +345,6 @@ fn refused_in_layout(
             } else {
                 None
             },
-            layout,
             bounds,
             ..Setup::default()
         },
@@ -480,10 +461,8 @@ fn literal_return_refusals() {
 #[test]
 fn allocating_refusals() {
     let source = super::layout::ALLOCATING;
-    let source_layout = crate::Layout(0);
-    let (whole, end) = refused_in_layout(source, ROOMY, Which::Charge, None, source_layout);
+    let (whole, end) = refused(source, ROOMY, Which::Charge, None);
     assert!(matches!(end, End::Finished(_)));
-    assert_eq!(refused(source, ROOMY, Which::Charge, None).0, whole);
     for limit in 0..whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
@@ -491,7 +470,7 @@ fn allocating_refusals() {
         };
         let limiter = Scripted::default();
         let (asked, end) = refused(source, bounds, Which::Charge, Some(&limiter));
-        let (reference, _) = refused_in_layout(source, bounds, Which::Charge, None, source_layout);
+        let (reference, _) = refused(source, bounds, Which::Charge, None);
         assert_eq!(asked, reference, "allocating bound {limit}");
         assert!(matches!(end, End::Error(RunError::Bound(_))));
         assert!(whole.asked.starts_with(&asked.asked));
@@ -501,28 +480,21 @@ fn allocating_refusals() {
 }
 
 /// K-CHG-001: a loop and closure document refused at every charge, with a
-/// limiter in the register layout, leaves what the source layout's default
-/// refusal leaves, across its park.
+/// limiter, leaves what the default refusal leaves, across its park.
 #[test]
 fn control_refusals() {
     let source = super::layout::control_document(
         "let bump = call make() let one = apply bump() let value = call loops([1, 2], 3, true) print value return flat.add(one, apply bump())",
     );
-    let (whole, _) = sealed_in_layout(&source, ROOMY, Which::Charge, None, crate::Layout(0));
+    let (whole, _) = sealed_and_resumed(&source, ROOMY, Which::Charge, None);
     for limit in 0..=whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
             ..ROOMY
         };
         let limiter = Scripted::default();
-        let actual = sealed_in_layout(
-            &source,
-            bounds,
-            Which::Charge,
-            Some(&limiter),
-            crate::Layout(0),
-        );
-        let reference = sealed_in_layout(&source, bounds, Which::Charge, None, crate::Layout(0));
+        let actual = sealed_and_resumed(&source, bounds, Which::Charge, Some(&limiter));
+        let reference = sealed_and_resumed(&source, bounds, Which::Charge, None);
         assert_eq!(actual.0, reference.0, "control refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));
@@ -535,11 +507,10 @@ fn control_refusals() {
 fn scheduler_refusals() {
     for cancel in [false, true] {
         let source = super::scheduler::document(cancel);
-        let run = |layout: crate::Layout, limit, ask: bool| {
+        let run = |limit, ask: bool| {
             let mut embedder = Embedder::with(
                 &source,
                 Setup {
-                    layout,
                     bounds: Bounds {
                         charge_limit: limit,
                         ..ROOMY
@@ -554,10 +525,10 @@ fn scheduler_refusals() {
 
             (trace(&embedder, end), limiter.asked())
         };
-        let (whole, _) = run(crate::Layout(0), ROOMY.charge_limit, false);
+        let (whole, _) = run(ROOMY.charge_limit, false);
         for limit in 0..=whole.charged.unwrap() + 1 {
-            let (actual, questions) = run(crate::Layout(0), limit, true);
-            let reference = run(crate::Layout(0), limit, false).0;
+            let (actual, questions) = run(limit, true);
+            let reference = run(limit, false).0;
             assert_eq!(
                 actual, reference,
                 "scheduler refusal {limit}, cancel={cancel}"
@@ -573,23 +544,1235 @@ fn scheduler_refusals() {
 #[test]
 fn helper_refusals() {
     let source = super::layout::HELPERS;
-    let (whole, _) = sealed_in_layout(source, ROOMY, Which::Charge, None, crate::Layout(0));
+    let (whole, _) = sealed_and_resumed(source, ROOMY, Which::Charge, None);
     for limit in 0..=whole.charged.unwrap() {
         let bounds = Bounds {
             charge_limit: limit,
             ..ROOMY
         };
         let limiter = Scripted::default();
-        let actual = sealed_in_layout(
-            source,
-            bounds,
-            Which::Charge,
-            Some(&limiter),
-            crate::Layout(0),
-        );
-        let reference = sealed_in_layout(source, bounds, Which::Charge, None, crate::Layout(0));
+        let actual = sealed_and_resumed(source, bounds, Which::Charge, Some(&limiter));
+        let reference = sealed_and_resumed(source, bounds, Which::Charge, None);
         assert_eq!(actual.0, reference.0, "helper refusal {limit}");
         assert!(whole.asked.starts_with(&actual.0.asked));
         assert!(whole.printed.starts_with(&actual.0.printed));
+    }
+}
+
+/// How a core run ended, what it was charged and what it printed.
+type CoreTrace = (String, Option<u64>, Vec<lash_kernel_doc::Datum>);
+
+/// Runs `text` on the bytecode core under charge limit `limit` in slices
+/// of `slice`, `limiter` answering at the bound. `exact` records the
+/// charges, which runs every block event by event: the contract's
+/// reference path (cutover contract §3).
+fn core_run(
+    text: &str,
+    limit: u64,
+    slice: u64,
+    exact: bool,
+    limiter: Option<&Scripted>,
+) -> CoreTrace {
+    let seen = drive(
+        text,
+        Drive {
+            limit,
+            slice,
+            exact,
+            limiter,
+            ..Drive::default()
+        },
+    );
+    (seen.end, seen.charged, seen.printed)
+}
+
+/// How a law drives a core run.
+#[derive(Clone, Copy)]
+struct Drive<'a> {
+    limit: u64,
+    slice: u64,
+    /// Records the charges: every block runs event by event.
+    exact: bool,
+    limiter: Option<&'a Scripted>,
+    /// A limiter of the run's own that grows the limit once by this much.
+    grow: Option<u64>,
+    charge: crate::Charge,
+    /// Pages every object out at each statement boundary.
+    cold: bool,
+    /// Cancellation is latched from the start.
+    cancel: bool,
+    memory: u64,
+    typed: bool,
+    probes: Option<super::embedder::Probes>,
+}
+
+impl Default for Drive<'_> {
+    fn default() -> Self {
+        Self {
+            limit: ROOMY.charge_limit,
+            slice: u64::MAX,
+            exact: false,
+            limiter: None,
+            grow: None,
+            charge: ROOMY.charge,
+            cold: false,
+            cancel: false,
+            memory: ROOMY.memory,
+            typed: false,
+            probes: None,
+        }
+    }
+}
+
+/// What a core run showed its host: its end, charge, output, recorded
+/// charges, the charge at each slice's return, the requests it handed
+/// out, the questions its limiter was asked and how often its natives ran.
+#[derive(Debug, PartialEq)]
+struct Observed {
+    end: String,
+    charged: Option<u64>,
+    printed: Vec<lash_kernel_doc::Datum>,
+    tape: Option<Vec<crate::Weight>>,
+    slices: Vec<Option<u64>>,
+    requests: Vec<Vec<lash_kernel_doc::Datum>>,
+    asked: Vec<(u64, u64)>,
+    natives: u64,
+}
+
+fn drive(text: &str, how: Drive<'_>) -> Observed {
+    let bounds = Bounds {
+        charge: how.charge,
+        charge_limit: how.limit,
+        memory: how.memory,
+        ..ROOMY
+    };
+    let started = if how.typed {
+        lookup::machine(text, bounds)
+    } else {
+        super::embedder::core_machine(text, bounds, Some(how.probes.unwrap_or(huge_charges)))
+    };
+    let mut machine = match started {
+        Ok(machine) => machine,
+        Err(refused) => {
+            return Observed {
+                end: format!("{refused:?}"),
+                charged: None,
+                printed: Vec::new(),
+                tape: None,
+                slices: Vec::new(),
+                requests: Vec::new(),
+                asked: Vec::new(),
+                natives: 0,
+            };
+        }
+    };
+    let tape = how.exact.then(|| {
+        let tape = crate::ChargeTape::new();
+        machine.record_charges(tape.clone());
+        tape
+    });
+    if how.cold {
+        machine.force_cold();
+    }
+    let limiter = how.limiter.cloned().or_else(|| {
+        how.grow
+            .map(|grow| Scripted::answering([LimitDecision::Grow(grow)]))
+    });
+    machine.set_options(MachineOptions {
+        charge_limiter: limiter
+            .clone()
+            .map(|limiter| Box::new(limiter) as Box<dyn ChargeLimiter>),
+        ..MachineOptions::default()
+    });
+    let mut world = super::embedder::World {
+        cancel: how.cancel,
+        ..super::embedder::World::default()
+    };
+    let (mut slices, mut requests) = (Vec::new(), Vec::new());
+    NATIVE_CALLS.set(0);
+    let end = loop {
+        match machine.run(&mut world, how.slice).unwrap() {
+            Step::Ended(End::Finished(finished)) => break format!("{:?}", finished.result),
+            Step::Ended(other) => break format!("{other:?}"),
+            Step::Slice => slices.push(machine.meters().charged),
+            Step::Parked(park) => {
+                for request in &park.requests {
+                    let crate::Request::Effect(effect) = request;
+                    requests.push(effect.args.clone());
+                    machine
+                        .deliver(
+                            super::embedder::wait_of(request),
+                            super::embedder::answer(request),
+                        )
+                        .unwrap();
+                }
+            }
+        }
+    };
+    Observed {
+        end,
+        charged: machine.meters().charged,
+        printed: world.printed,
+        tape: tape.map(|tape| tape.steps()),
+        slices,
+        requests,
+        asked: limiter.map_or_else(Vec::new, |limiter| limiter.asked.borrow().clone()),
+        natives: NATIVE_CALLS.get(),
+    }
+}
+
+/// Documents whose blocks hold every kind of charge site: fixed events,
+/// atomic constructions, completion fees of natives and of a library
+/// call, a raise in mid-block and its catch. The third calls covered
+/// bodies the inline pass expands: `law.deep` returning with a fee that
+/// reads its argument deeply and its result, `law.pick` on its guard path
+/// and, below 2, off it into a call of `law.raises` whose raise escapes
+/// both, `law.oops` returning or raising from inside its region, and
+/// `law.at`, whose guard path folds to one list read: past the end of its
+/// list the fold declines and its region raises. `law.get`'s folds to a
+/// membership answer and one map read: on a key the map lacks its guard
+/// does not hold and the region returns 0. `law.str` folds both ways
+/// of its numeric guard: an integer's digits below 1000, a constant
+/// from 1000.
+const EVENT_CONTRACT: [&str; 3] = [
+    r#"definition "function sq(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return num.add(x, x) }"
+main {
+  let s = ""
+  let total = 0
+  let i = 0
+  while num.lt(i, 12) {
+    set s = text.concat(s, "ab")
+    let q = call sq(i)
+    set total = num.add(total, q)
+    let held = [i, total, (i, s)]
+    set i = num.add(i, 1)
+  }
+  print total
+  return s
+}"#,
+    r#"main {
+  let caught = 0
+  let i = 0
+  while num.lt(i, 8) {
+    try {
+      let x = num.add(i, 1)
+      let bad = text.concat(x, "x")
+      set caught = num.add(caught, 100)
+    } catch e {
+      set caught = num.add(caught, 1)
+    }
+    set i = num.add(i, 1)
+  }
+  print caught
+  return caught
+}"#,
+    r#"main {
+  let total = 0
+  let i = 0
+  while num.lt(i, 4) {
+    let d = invoke law.deep(map{"a": [i, i]})
+    try {
+      set total = num.add(total, invoke law.pick(i))
+    } catch e {
+      set total = num.add(total, 10)
+    }
+    try {
+      let bad = invoke law.oops(i)
+    } catch e {
+      set total = num.add(total, 100)
+    }
+    let s = invoke law.oops("ab")
+    set total = num.add(total, list.len(d))
+    set total = num.add(total, invoke law.at([5, 6, 7], i))
+    set total = num.add(total, invoke law.get(map{1: 20, 2: 30}, i))
+    let up = invoke law.str(num.add(i, 998))
+    let down = invoke law.str(num.add(i, -2))
+    print (up, down)
+    try {
+      set total = num.add(total, invoke law.at([5], i))
+    } catch e {
+      set total = num.add(total, 1000)
+    }
+    set i = num.add(i, 1)
+  }
+  print total
+  return total
+}"#,
+];
+
+/// `drive` with every covered body called through its frame: the inline
+/// pass's reference (`bytecode::inline`).
+fn reference(text: &str, how: Drive<'_>) -> Observed {
+    crate::bytecode::inline::disabled(|| drive(text, how))
+}
+
+/// `drive`, asserting that the inline pass expanded a body of `text`.
+fn inlined(text: &str, how: Drive<'_>) -> Observed {
+    let before = crate::bytecode::inline::added();
+    let seen = drive(text, how);
+    assert!(
+        crate::bytecode::inline::added() > before,
+        "no body of the law's document was expanded"
+    );
+    seen
+}
+
+/// Contract §3: at every charge limit the run can reach, a prepaid run
+/// refuses at the same event with the same total as the event-by-event
+/// run, whether its fixed costs were reserved, cancelled by a dynamic fee
+/// or a raise, or stopped short by a slice; a slice of any size, a fee
+/// on top of a reservation included, returns at the charge the
+/// event-by-event run's slice does; and a limiter that grows the
+/// limit at the refused event resumes it there, as a run started with the
+/// grown limit runs. A limit at and next to `u64::MAX` reserves without
+/// overflow. Where covered bodies run inline, every limit refuses at the
+/// same event, with the same tape, function and site, as the run calling
+/// them through their frames, and a growing limiter is asked the same.
+#[test]
+fn the_prepaid_and_exact_paths_refuse_at_the_same_event_with_the_same_total() {
+    let held = crate::vm::inline::held();
+    let inline = EVENT_CONTRACT[2];
+    for text in EVENT_CONTRACT {
+        let whole = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        let total = whole.1.expect("charge is metered");
+        assert!(
+            whole.0.starts_with("Int") || whole.0.starts_with("Text"),
+            "{whole:?}"
+        );
+        for slice in 1..=total {
+            let sliced = |exact| {
+                let seen = drive(
+                    text,
+                    Drive {
+                        slice,
+                        exact,
+                        ..Drive::default()
+                    },
+                );
+                (seen.end, seen.charged, seen.printed, seen.slices)
+            };
+            assert_eq!(sliced(false), sliced(true), "slice {slice}");
+        }
+        for limit in 0..=total + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}"
+            );
+            assert_eq!(
+                core_run(text, limit, 7, false, None),
+                exact,
+                "limit {limit}, sliced"
+            );
+            let grow = total / 3 + 1;
+            let started = core_run(text, limit + grow, u64::MAX, true, None);
+            for exact_path in [false, true] {
+                let limiter = Scripted::answering([LimitDecision::Grow(grow)]);
+                let grown = core_run(text, limit, u64::MAX, exact_path, Some(&limiter));
+                assert_eq!(grown, started, "limit {limit} grown, exact {exact_path}");
+            }
+            if text == inline {
+                for how in [
+                    Drive {
+                        limit,
+                        exact: true,
+                        ..Drive::default()
+                    },
+                    Drive {
+                        limit,
+                        slice: 7,
+                        ..Drive::default()
+                    },
+                    Drive {
+                        limit,
+                        grow: Some(grow),
+                        ..Drive::default()
+                    },
+                    Drive {
+                        limit,
+                        exact: true,
+                        charge: crate::Charge::Off,
+                        slice: 3,
+                        ..Drive::default()
+                    },
+                ] {
+                    assert_eq!(
+                        inlined(text, how),
+                        reference(text, how),
+                        "inline, limit {limit}, exact {}, slice {}, {:?}",
+                        how.exact,
+                        how.slice,
+                        how.charge
+                    );
+                }
+            }
+        }
+        for limit in [u64::MAX - 1, u64::MAX] {
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                whole,
+                "limit {limit}"
+            );
+        }
+    }
+    assert!(crate::vm::inline::held() > held, "no region's fold held");
+}
+
+thread_local! {
+    /// How many times `law.wide` and `law.sized` ran on this thread.
+    static NATIVE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `law.wide`, whose completion formula saturates on any argument of size
+/// 3 or more; `law.sized`, a native whose fee reads its argument deeply;
+/// and two kernel-bodied library functions billing at completion,
+/// `law.deep` returning and `law.fails` raising out of the covered
+/// `law.raises` it calls, whose own native calls are covered; `law.pick`,
+/// whose guard returns at once or calls `law.raises`; `law.oops`, which
+/// raises unless its argument is text, billing its deep size; and
+/// `law.at`, reading a list below 3 and billing its result's size; and
+/// `law.first`, reading its first argument's first member and billing
+/// its second's deep size; `law.holds`, `map.contains` declaring its
+/// inline answer; `law.get`, reading a map under a key it holds;
+/// `law.digits`, `num.to_text` declaring its inline answer; and
+/// `law.str`, spelling an integer below 1000 and billing its result's
+/// size.
+fn huge_charges(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    ids: &std::collections::BTreeMap<&'static str, lash_kernel_value::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_value::FunctionId)> {
+    struct Nothing;
+    impl lash_kernel_doc::NativeFunction for Nothing {
+        fn call(
+            &self,
+            _: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            NATIVE_CALLS.set(NATIVE_CALLS.get() + 1);
+            Ok(lash_kernel_doc::Value::Null)
+        }
+    }
+    /// `map.contains` over the native views, declaring its inline
+    /// membership answer as the library's does.
+    struct Holds;
+    impl lash_kernel_doc::NativeFunction for Holds {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::Membership(lash_kernel_doc::plan::Table::Map),
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            let [target, key] = call.args.values() else {
+                return Err(lash_kernel_doc::NativeError::Malformed(
+                    "law.holds takes two",
+                ));
+            };
+            let Some(table) = call.args.table(target)? else {
+                return Err(lash_kernel_doc::NativeError::Malformed(
+                    "law.holds takes a map",
+                ));
+            };
+            Ok(lash_kernel_doc::Value::Bool(
+                call.args.lookup(table, key)?.is_some(),
+            ))
+        }
+    }
+    /// `num.to_text` over words whose digits a short text holds, spelled
+    /// by the standard formatter, declaring its inline answer as the
+    /// library's does.
+    struct Digits;
+    impl lash_kernel_doc::NativeFunction for Digits {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            use lash_kernel_doc::arena::native::{
+                InlineNative, InlineOperation, IntegerTextDomain,
+            };
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::IntegerText(IntegerTextDomain::Decimal),
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            let [lash_kernel_doc::Value::Int(word)] = call.args.values() else {
+                return Err(lash_kernel_doc::NativeError::Malformed(
+                    "law.digits takes a word",
+                ));
+            };
+            lash_kernel_doc::arena::ShortText::new(&word.to_string())
+                .map(lash_kernel_doc::Value::Text)
+                .ok_or(lash_kernel_doc::NativeError::Malformed(
+                    "law.digits spells short words",
+                ))
+        }
+    }
+    struct Length;
+    impl lash_kernel_doc::NativeFunction for Length {
+        fn specialization(&self) -> lash_kernel_doc::NativeSpecialization {
+            use lash_kernel_doc::arena::native::{InlineNative, InlineOperation};
+            lash_kernel_doc::NativeSpecialization {
+                inline: Some(InlineNative {
+                    native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
+                    operation: InlineOperation::Length(lash_kernel_doc::plan::Collection::List),
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn call(
+            &self,
+            call: lash_kernel_doc::NativeCall<'_, '_>,
+        ) -> Result<lash_kernel_doc::Value, lash_kernel_doc::NativeError> {
+            use lash_kernel_doc::arena::native::InlineOperation;
+            InlineOperation::Length(lash_kernel_doc::plan::Collection::List)
+                .answer_read(call.args)?
+                .ok_or_else(|| lash_kernel_doc::NativeError::refused("type_error", "expected list"))
+        }
+    }
+    let (definition, native) = lash_kernel_lib::numbers()
+        .into_iter()
+        .find(|(definition, _)| definition.name.as_str() == "le")
+        .unwrap();
+    let mut registered = vec![("le", registry.register(definition, Some(native)).unwrap())];
+    for (name, source, native) in [
+        (
+            "law.length",
+            "function law.length(xs: Any) -> Int\nkernel 1\ncharge 1\nnative\n",
+            true,
+        ),
+        (
+            "law.wide",
+            "function law.wide(x: Any) -> Any\nkernel 1\ncharge product(size(x), 9223372036854775807)\nnative\n",
+            true,
+        ),
+        (
+            "law.sized",
+            "function law.sized(xs: Any) -> Any\nkernel 1\ncharge sum(1, deep(xs))\nnative\n",
+            true,
+        ),
+        (
+            "law.deep",
+            "function law.deep(xs: Any) -> Any\nkernel 1\ncharge sum(3, deep(xs), size(result))\n{uses}body { let n = list.len(xs[\"a\"]) return [n, xs] }",
+            false,
+        ),
+        (
+            "law.raises",
+            "function law.raises(xs: Any) -> Any\nkernel 1\ncharge 0\n{uses}body { let n = law.sized(1) let bad = text.concat(1, \"x\") return bad }",
+            false,
+        ),
+        (
+            "law.fails",
+            "function law.fails(xs: Any) -> Any\nkernel 1\ncharge sum(5, deep(xs), size(result))\n{uses}body { let n = list.len(xs) let bad = invoke law.raises(xs) return bad }",
+            false,
+        ),
+        (
+            "law.pick",
+            "function law.pick(x: Any) -> Any\nkernel 1\ncharge sum(2, size(x), size(result))\n{uses}body { if num.lt(x, 2) { let r = invoke law.raises(x) return r } return num.add(x, 1) }",
+            false,
+        ),
+        (
+            "law.oops",
+            "function law.oops(x: Any) -> Any\nkernel 1\ncharge sum(4, deep(x))\n{uses}body { let t = text.concat(x, \"!\") return t }",
+            false,
+        ),
+        (
+            "law.at",
+            "function law.at(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(2, size(result))\n{uses}body { if num.lt(i, 3) { return xs[i] } return i }",
+            false,
+        ),
+        (
+            "law.first",
+            "function law.first(xs: Any, ys: Any) -> Any\nkernel 1\ncharge sum(2, deep(ys))\n{uses}body { return xs[0] }",
+            false,
+        ),
+        (
+            "law.holds",
+            "function law.holds(m: Any, k: Any) -> Bool\nkernel 1\ncharge 1\nnative\n",
+            true,
+        ),
+        (
+            "law.digits",
+            "function law.digits(x: Any) -> Text\nkernel 1\ncharge size(result)\nnative\n",
+            true,
+        ),
+        (
+            "law.str",
+            "function law.str(x: Any) -> Any\nkernel 1\ncharge sum(8, deep(x), size(result))\n{uses}body { if num.lt(x, 1000) { return law.digits(x) } return \"big\" }",
+            false,
+        ),
+        (
+            "law.get",
+            "function law.get(m: Any, k: Any) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return 0 }",
+            false,
+        ),
+        (
+            "law.word",
+            "function law.word(a: Any, b: Any, pad0?: Any, pad1?: Any, pad2?: Any, pad3?: Any, pad4?: Any, pad5?: Any, pad6?: Any, pad7?: Any, pad8?: Any, pad9?: Any, pad10?: Any, pad11?: Any, pad12?: Any, pad13?: Any, pad14?: Any, pad15?: Any) -> Any\nkernel 1\ncharge sum(4, size(a), size(b))\nnative\n{uses}body { return num.add(a, b) }",
+            false,
+        ),
+        (
+            "law.lookup",
+            "function law.lookup(m: Map(Any, Any), k: Text) -> Any\nkernel 1\ncharge sum(6, deep(k), size(result))\n{uses}body { if law.holds(m, k) { return m[k] } return invoke law.oops(m) }",
+            false,
+        ),
+        (
+            "law.strict_lookup",
+            "function law.strict_lookup(m: Map(Int, Int), k: Text) -> Any\nkernel 1\ncharge sum(6, deep(k))\n{uses}body { if law.holds(m, k) { return m[k] } return invoke law.oops(m) }",
+            false,
+        ),
+        (
+            "law.magnitude_lookup",
+            "function law.magnitude_lookup(m: Any, k: Any) -> Any\nkernel 1\ncharge magnitude(result)\n{uses}body { if law.holds(m, k) { return m[k] } return invoke law.oops(m) }",
+            false,
+        ),
+        (
+            "law.element",
+            "function law.element(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(6, deep(i), size(result))\n{uses}body { if le(0, i) { if num.lt(i, law.length(xs)) { return xs[i] } } return -9 }",
+            false,
+        ),
+        (
+            "law.nonzero_element",
+            "function law.nonzero_element(xs: Any, i: Any) -> Any\nkernel 1\ncharge sum(6, deep(i), size(result))\n{uses}body { if le(1, i) { if num.lt(i, law.length(xs)) { return xs[i] } } return -9 }",
+            false,
+        ),
+    ] {
+        let mut uses = format!(
+            "use list.len = @{}\nuse text.concat = @{}\nuse num.add = @{}\nuse num.lt = @{}\n",
+            ids["list.len"], ids["text.concat"], ids["num.add"], ids["num.lt"]
+        );
+        for (name, id) in &registered {
+            uses.push_str(&format!("use {name} = @{id}\n"));
+        }
+        let source = source.replace("{uses}", &uses);
+        let definition = lash_kernel_doc::parse_definition(&source).unwrap();
+        let native =
+            native.then(|| match name {
+                "law.length" => std::sync::Arc::new(Length)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+                "law.holds" => std::sync::Arc::new(Holds)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+                "law.digits" => std::sync::Arc::new(Digits)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+                _ => std::sync::Arc::new(Nothing)
+                    as std::sync::Arc<dyn lash_kernel_doc::NativeFunction>,
+            });
+        registered.push((name, registry.register(definition, native).unwrap()));
+    }
+    kinds::register(registry, &mut registered);
+    registered
+}
+
+/// Contract §3 and `K-CHG-003` at the top of `u64`. A `metered u64::MAX`
+/// loop test shares its block with one-unit events, so the block's fixed
+/// sum passes `u64::MAX` and the block runs event by event: at every limit
+/// it refuses where the exact path does. `law.wide("abc")`'s formula
+/// saturates to `u64::MAX` (a wrapping one is `2^63 - 3`, which fits), so
+/// it too refuses at every limit below `u64::MAX`. A run ends at the
+/// charge that passed its bound (`K-CHG-008`): one past the limit at a
+/// one-unit event, the saturated `u64::MAX` at either wide one. Each
+/// refusal stands in its statement: the loop, main's second, and the
+/// `do`, its first. A run's charge saturates as its formulas do, so a run
+/// bounded at `u64::MAX` is never refused: it finishes at charge
+/// `u64::MAX`, as the protocol corpus's `K-CHG-006` case "magnitude of
+/// 18446744073709551616 is 18446744073709551615" does.
+#[test]
+fn a_block_past_u64_and_a_saturating_fee_refuse_where_the_exact_path_does() {
+    // The bound names the function whose event passed it: `main` at its
+    // loop test, the library call the guest made at its wide fee.
+    let refused = |limit: u64, at: u32, function: &str| {
+        format!(
+            "Error(Bound(BoundExceeded {{ bound: Charge, limit: {limit}, function: Some(FunctionName(\"{function}\")), site: Some(Site {{ unit: Main, path: [{at}] }}) }}))"
+        )
+    };
+    let documents = [
+        (
+            "main {\n  let n = 0\n  while num.lt(n, 2) metered 18446744073709551615 {\n    set n = num.add(n, 1)\n  }\n  return n\n}",
+            1,
+            "main",
+            "Int(Integer(2))",
+        ),
+        (
+            "main {\n  do invoke law.wide(\"abc\")\n  return 4\n}",
+            0,
+            "law.wide",
+            "Int(Integer(4))",
+        ),
+    ];
+    for (text, at, function, finished) in documents {
+        // The charge that precedes the wide event: the least limit it
+        // refuses at.
+        let pre = (0..10)
+            .find(|&limit| core_run(text, limit, u64::MAX, true, None).1 == Some(u64::MAX))
+            .expect("the wide event follows a few one-unit events");
+        for limit in (0..=pre + 1).chain([1_000, 1 << 63, u64::MAX - 1, u64::MAX]) {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            let (end, charged) = if limit < pre {
+                (exact.0.clone(), limit + 1)
+            } else if limit == u64::MAX {
+                (finished.to_owned(), u64::MAX)
+            } else {
+                (refused(limit, at, function), u64::MAX)
+            };
+            assert_eq!(exact, (end, Some(charged), Vec::new()), "limit {limit}");
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}"
+            );
+            assert_eq!(
+                core_run(text, limit, 1, false, None),
+                exact,
+                "limit {limit}, sliced"
+            );
+        }
+    }
+}
+
+/// A run over mutable lists and maps that a cold run faults on again and
+/// again: index and loop reads, a native fee and two library completions
+/// reading cold sizes, a raise unwinding through an uncovered completion,
+/// and a two-argument `perform` copying both out. `law.deep` and
+/// `law.oops` run inline: a cold index inside the region, a cold return
+/// fee and a cold fee of a raise leaving it. `law.at`'s fold reads a cold
+/// element, declines, and its region reads it again. `law.first`'s fold
+/// holds over the list its statement loaded, and its completion reads the
+/// cold map: the completion runs again at the region's leave. `law.get`'s
+/// fold reads the cold map, declines, and its region reads it again.
+const COLD_CONTRACT: &str = r#"import 3 operation host.pair(a: Any, b: Any) -> Any
+main {
+  let xs = [1, 2, 3]
+  let m = map{"a": xs, "b": [4, 5]}
+  let total = 0
+  let i = 0
+  while num.lt(i, 3) {
+    let n = law.sized(m)
+    let d = invoke law.deep(m)
+    set total = num.add(total, num.add(xs[1], list.len(m["b"])))
+    set total = num.add(total, invoke law.at(xs, 1))
+    set total = num.add(xs[0], invoke law.first(xs, m))
+    set total = num.add(total, list.len(invoke law.get(m, "b")))
+    for x in m["b"] { set total = num.add(total, x) }
+    try {
+      let bad = invoke law.fails(m)
+    } catch e {
+      set total = num.add(total, list.len(d))
+    }
+    try {
+      let bad = invoke law.oops(m)
+    } catch e {
+      set total = num.add(total, 1)
+    }
+    set i = num.add(i, 1)
+  }
+  let echoed = perform 3(xs, m) as Any
+  print (total, echoed)
+  return [total, xs, m]
+}"#;
+
+/// One folded read site of `law.get` sees two maps whose key `"a"`
+/// stands at different positions, the first map's entry removed, read
+/// missing and written back at another position, and the second's value
+/// overwritten in place. The fold reads each through one lookup, which
+/// keeps a position proof for its next run: each read answers its own
+/// map's current entry, as the run calling `law.get` through its frame
+/// does, resident, cold and in slices.
+const LOOKUP_CONTRACT: &str = r#"main {
+  let t = map{"a": 1, "b": 2}
+  let u = map{"b": 7, "a": 8}
+  let i = 0
+  while num.lt(i, 3) {
+    for w in [t, u] { print invoke law.get(w, "a") }
+    remove t["a"]
+    for w in [t, u, t] { print invoke law.get(w, "a") }
+    set t["a"] = num.add(i, 40)
+    set u["a"] = num.add(i, 60)
+    set i = num.add(i, 1)
+  }
+  return [t, u]
+}"#;
+
+#[test]
+fn a_folded_map_read_answers_each_maps_current_entry_at_its_site() {
+    let held = crate::vm::inline::held();
+    for how in [
+        Drive::default(),
+        Drive {
+            exact: true,
+            ..Drive::default()
+        },
+        Drive {
+            slice: 3,
+            ..Drive::default()
+        },
+        Drive {
+            cold: true,
+            ..Drive::default()
+        },
+    ] {
+        let seen = inlined(LOOKUP_CONTRACT, how);
+        assert_eq!(
+            seen,
+            reference(LOOKUP_CONTRACT, how),
+            "exact {}, slice {}, cold {}",
+            how.exact,
+            how.slice,
+            how.cold
+        );
+        // Each trip: both maps' entries, then the first map missing it
+        // around the second's.
+        let trips = [(1, 8), (40, 60), (41, 61)];
+        let expected: Vec<_> = trips
+            .iter()
+            .flat_map(|&(t, u)| [t, u, 0, u, 0])
+            .map(super::embedder::int)
+            .collect();
+        assert_eq!(seen.printed, expected, "{seen:?}");
+    }
+    assert!(crate::vm::inline::held() > held, "no region's fold held");
+}
+
+#[test]
+fn a_folded_element_keeps_its_bounds_current_value_and_completion_events() {
+    let text = r#"main {
+  let xs = [10, 20]
+  for i in [-1, 0, 1, 2, 9223372036854775807, -9223372036854775808] {
+    print invoke law.element(xs, i)
+  }
+  print invoke law.nonzero_element(xs, 0)
+  print invoke law.element(xs, 0)
+  set xs[0] = 30
+  print invoke law.element(xs, 0)
+  remove xs[1]
+  print invoke law.element(xs, 1)
+  for xs in [[], [40], [[70, 71]], (50,), map{0: 60}, null] {
+    try { print invoke law.element(xs, 0) } catch e { print "caught" }
+  }
+  for i in [0.0, true, "x", 9223372036854775808] {
+    try { print invoke law.element(xs, i) } catch e { print "caught" }
+  }
+  return xs
+}"#;
+    let whole = inlined(text, Drive::default());
+    let expected = [-9, 10, 20, -9, -9, -9, -9, 10, 30, -9];
+    assert_eq!(&whole.printed[..expected.len()], expected.map(int));
+    let total = whole.charged.unwrap();
+    for cold in [false, true] {
+        for exact in [false, true] {
+            for slice in [u64::MAX, 1, 7] {
+                let how = Drive {
+                    cold,
+                    exact,
+                    slice,
+                    ..Drive::default()
+                };
+                assert_eq!(inlined(text, how), reference(text, how));
+            }
+        }
+        for limit in 0..=total {
+            let how = Drive {
+                cold,
+                limit,
+                ..Drive::default()
+            };
+            assert_eq!(
+                inlined(text, how),
+                reference(text, how),
+                "limit {limit}, cold {cold}"
+            );
+        }
+        for memory in (800..8000).step_by(97) {
+            let how = Drive {
+                cold,
+                memory,
+                ..Drive::default()
+            };
+            assert_eq!(
+                inlined(text, how),
+                reference(text, how),
+                "memory {memory}, cold {cold}"
+            );
+        }
+    }
+}
+
+/// Astra cold path, items 1-10: a run whose objects are paged out at
+/// every statement boundary shows its host what the resident run does,
+/// on the prepaid and exact paths, under Exact and Off, at every charge
+/// limit, in slices, when a limiter grows a refused dynamic fee and with
+/// cancellation latched across every load. Each fault loads and re-runs
+/// only what was not committed: no event, fee, slice test or step twice.
+/// Its covered bodies run inline, and both runs show what the run calling
+/// them through their frames does.
+#[test]
+fn a_run_paged_out_at_every_statement_shows_its_host_what_a_resident_run_does() {
+    let held = crate::vm::inline::held();
+    let both = |how: Drive<'_>| {
+        let resident = inlined(COLD_CONTRACT, how);
+        let cold = drive(COLD_CONTRACT, Drive { cold: true, ..how });
+        assert_eq!(
+            cold, resident,
+            "cold, exact {}, {:?}",
+            how.exact, how.charge
+        );
+        assert_eq!(
+            reference(COLD_CONTRACT, Drive { cold: true, ..how }),
+            resident,
+            "framed, exact {}, {:?}",
+            how.exact,
+            how.charge
+        );
+        resident
+    };
+    for charge in [crate::Charge::Exact, crate::Charge::Off] {
+        for exact in [true, false] {
+            for slice in [u64::MAX, 7, 1] {
+                for cancel in [false, true] {
+                    both(Drive {
+                        exact,
+                        charge,
+                        slice,
+                        cancel,
+                        ..Drive::default()
+                    });
+                }
+            }
+        }
+    }
+    let whole = both(Drive {
+        exact: true,
+        ..Drive::default()
+    });
+    assert!(whole.end.starts_with("List"), "{whole:?}");
+    assert_eq!(whole.requests.len(), 1, "{whole:?}");
+    let total = whole.charged.expect("charge is metered");
+    let grow = total / 3 + 1;
+    for limit in 0..=total + 1 {
+        for exact in [true, false] {
+            both(Drive {
+                limit,
+                exact,
+                ..Drive::default()
+            });
+            both(Drive {
+                limit,
+                exact,
+                slice: 7,
+                ..Drive::default()
+            });
+            both(Drive {
+                limit,
+                exact,
+                grow: Some(grow),
+                ..Drive::default()
+            });
+        }
+    }
+    assert!(crate::vm::inline::held() > held, "no region's fold held");
+}
+
+/// Astra cold path, item 10: a cold load the memory bound refuses, after
+/// the collection that frees the run's garbage, refuses at the load's own
+/// event with exactly the charge before it, on the exact and the prepaid
+/// path: the block's reservation is cancelled once.
+///
+/// `xs` and `ys` fit one at a time, each beside the other's proxy, but
+/// loading `xs` back beside `ys`'s proxy does not fit, at some bound. A
+/// bound refuses that load where the same run reading `ys` instead, which
+/// fits wherever `let ys` did, finishes.
+/// By `K-CHG-002` the run has charged, up to and including the index
+/// node that loads `xs`:
+/// `let xs` 1 + 9 nodes + 8 members = 18; `let ys` 1 + 3 + 2 = 6;
+/// `let junk` 1 + 4 + 3 = 8; `set junk` 1 + 1 = 2; then `let n`'s
+/// statement 1, `xs` 1, `0` 1 and the index 1: 38.
+#[test]
+fn a_cold_load_refused_for_memory_refuses_at_its_event_with_the_charge_before_it() {
+    const BODY: &str = r#"main {
+  let xs = [1, 2, 3, 4, 5, 6, 7, 8]
+  let ys = [1, 2]
+  let junk = [1, 2, 3]
+  set junk = 0
+  let n = READ
+  return [n, ys]
+}"#;
+    let (text, unread) = (BODY.replace("READ", "xs[0]"), BODY.replace("READ", "ys[0]"));
+    let mut refused = 0;
+    for memory in 0..=16384 {
+        let how = Drive {
+            memory,
+            cold: true,
+            ..Drive::default()
+        };
+        if !drive(&unread, how).end.starts_with("List") {
+            continue;
+        }
+        let exact = drive(&text, Drive { exact: true, ..how });
+        let prepaid = drive(&text, how);
+        if exact.end.starts_with("List") {
+            assert_eq!(
+                prepaid,
+                Observed {
+                    tape: None,
+                    ..exact
+                },
+                "memory {memory}"
+            );
+            continue;
+        }
+        assert!(
+            exact.end.contains("bound: Memory"),
+            "memory {memory}: {exact:?}"
+        );
+        assert_eq!(exact.charged, Some(38), "exact, memory {memory}: {exact:?}");
+        assert_eq!(prepaid.end, exact.end, "prepaid, memory {memory}");
+        assert_eq!(
+            prepaid.charged,
+            Some(38),
+            "prepaid, memory {memory}: {prepaid:?}"
+        );
+        refused += 1;
+    }
+    assert!(refused > 0, "no bound refuses the load");
+}
+
+/// The perf rows' loops in core text: Python's on words, TypeScript's on
+/// floats, with a real multiply, an inline call, a closure and a property
+/// read in their bodies.
+const FLOOR_ROWS: [&str; 8] = [
+    r#"main {
+  let j = 0
+  while num.lt(j, 6) {
+    set j = num.add(j, 1)
+  }
+  return 0
+}"#,
+    r#"main {
+  let acc = 0
+  let j = 0
+  while num.lt(j, 3) {
+    let value = 0
+    let i = 0
+    while num.lt(i, 6) {
+      set value = num.add(value, num.mul(i, 3))
+      set i = num.add(i, 1)
+    }
+    set acc = num.add(acc, value)
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"definition "function f(a: Any) -> Any\nkernel 1\nmetering statements\nbody { return 1 }"
+main {
+  let acc = 0
+  let j = 0
+  while num.lt(j, 3) {
+    let p = j
+    let q = p
+    let r = q
+    set acc = num.add(acc, call f(r))
+    set acc = num.add(acc, call f(j))
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"main {
+  let acc = 0
+  let f = fn(a) { set acc = num.add(acc, 1) return 0 }
+  let j = 0
+  while num.lt(j, 3) {
+    let p = j
+    let q = p
+    let r = q
+    do apply f(r)
+    do apply f(j)
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"main {
+  let obj = map{"a": 1, "b": 2}
+  let acc = 0
+  let j = 0
+  while num.lt(j, 3) {
+    let p = j
+    let q = p
+    let r = q
+    set acc = num.add(acc, obj["a"])
+    set acc = num.add(acc, obj["b"])
+    set j = num.add(j, 1)
+  }
+  return acc
+}"#,
+    r#"main {
+  let j = 0.0
+  while real.lt(j, 6.0) {
+    set j = real.add(j, 1.0)
+  }
+  return 0
+}"#,
+    r#"main {
+  let acc = 0.0
+  let j = 0.0
+  while real.lt(j, 3.0) {
+    let value = 0.0
+    let i = 0.0
+    while real.lt(i, 6.0) {
+      set value = real.add(value, real.add(i, i))
+      set i = real.add(i, 1.0)
+    }
+    set acc = real.add(acc, value)
+    set j = real.add(j, 1.0)
+  }
+  return 0
+}"#,
+    // A float counter against a word bound and a word step: mixed pairs
+    // the word micro-op answers, and a word past 2^53 against the counter,
+    // which only the native's call answers.
+    r#"main {
+  let n = 6
+  let big = 9007199254740993
+  let seen = 0.0
+  let j = 0.0
+  while real.lt(j, n) {
+    if real.lt(big, j) {
+      set seen = real.add(seen, 1)
+    }
+    set seen = real.add(seen, 2)
+    set j = real.add(j, 1)
+  }
+  return 0
+}"#,
+];
+
+/// The micro-ops a run of `text` took on its traces.
+fn traced(text: &str, limit: u64, exact: bool) -> u64 {
+    let before = crate::vm::trace::ran();
+    core_run(text, limit, u64::MAX, exact, None);
+    crate::vm::trace::ran() - before
+}
+
+/// A trace bills, refuses, slices and grows exactly as the event-by-event
+/// path does (cutover contract §3), at every slice and every limit, with
+/// the guard each trace takes failing at a different op: a block's
+/// prepay or slice test, a fused run's prepay, an inline call's exact
+/// state and a recorded charge's watch.
+#[test]
+fn floor_rows_refuse_and_slice_alike_on_the_prepaid_and_exact_paths() {
+    for (text, probes) in negated_member::rows(FLOOR_ROWS) {
+        let run = |limit, slice, exact, limiter: Option<&Scripted>| {
+            let seen = drive(
+                text,
+                Drive {
+                    limit,
+                    slice,
+                    exact,
+                    limiter,
+                    probes,
+                    ..Drive::default()
+                },
+            );
+            (seen.end, seen.charged, seen.printed)
+        };
+
+        let whole = run(ROOMY.charge_limit, u64::MAX, true, None);
+        let total = whole.1.expect("charge is metered");
+        assert!(whole.0.starts_with("Int"), "{whole:?}");
+        let before = crate::vm::trace::ran();
+        assert_eq!(run(ROOMY.charge_limit, u64::MAX, false, None), whole);
+        assert!(crate::vm::trace::ran() > before, "no trace ran: {text}");
+        for slice in 1..=total {
+            let sliced = |exact| {
+                let seen = drive(
+                    text,
+                    Drive {
+                        slice,
+                        exact,
+                        probes,
+                        ..Drive::default()
+                    },
+                );
+                (seen.end, seen.charged, seen.printed, seen.slices)
+            };
+            assert_eq!(sliced(false), sliced(true), "slice {slice}: {text}");
+        }
+        for limit in 0..=total + 1 {
+            let exact = run(limit, u64::MAX, true, None);
+            assert_eq!(run(limit, u64::MAX, false, None), exact, "limit {limit}");
+            assert_eq!(run(limit, 7, false, None), exact, "limit {limit}, sliced");
+            let grow = total / 3 + 1;
+            let started = run(limit + grow, u64::MAX, true, None);
+            for exact_path in [false, true] {
+                let limiter = Scripted::answering([LimitDecision::Grow(grow)]);
+                let grown = run(limit, u64::MAX, exact_path, Some(&limiter));
+                assert_eq!(grown, started, "limit {limit} grown, exact {exact_path}");
+            }
+        }
+    }
+}
+
+/// A fused condition whose answer is not a boolean raises after its call
+/// and the call's fee, once: the trace that ran the call does not hand it
+/// back to be run and billed again.
+#[test]
+fn a_fused_condition_that_is_no_boolean_bills_its_call_once() {
+    for text in [
+        "main { let j = 0 while num.add(j, 1) { set j = 1 } return 0 }",
+        "main { let j = 0 if num.add(j, 1) { set j = 1 } return 0 }",
+    ] {
+        let exact = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        assert!(exact.0.starts_with("Error(Uncaught"), "{exact:?}");
+        assert!(
+            traced(text, ROOMY.charge_limit, false) > 0,
+            "no trace ran: {text}"
+        );
+        for limit in 0..=exact.1.unwrap() + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}: {text}"
+            );
+        }
+    }
+}
+
+/// An operand outside a fused run's words, and an answer its native's
+/// entry declines, give the run back to the dispatcher before any effect:
+/// the native's own call raises, billed as on the exact path.
+#[test]
+fn a_fused_operand_off_its_words_runs_the_native_call() {
+    for text in [
+        "main { let big = 9223372036854775807 let j = 0 while num.lt(j, 2) { set j = num.add(j, 1) } return num.add(big, j) }",
+        "main { let j = 0 let big = 4611686018427387904 while num.lt(j, 2) { set j = num.add(j, 1) } set j = num.mul(big, j) return j }",
+        "main { let j = 0 while num.lt(j, 2) { set j = num.add(j, 1) } return num.add(j, 0.5) }",
+        "main { let j = 0.0 let x = 1 while real.lt(j, 4.0) { set j = real.add(j, x) if real.lt(2.0, j) { set x = \"x\" } } return 0 }",
+    ] {
+        let exact = core_run(text, ROOMY.charge_limit, u64::MAX, true, None);
+        assert!(exact.0.starts_with("Error(Uncaught"), "{exact:?}");
+        assert!(
+            traced(text, ROOMY.charge_limit, false) > 0,
+            "no trace ran: {text}"
+        );
+        for limit in 0..=exact.1.unwrap() + 1 {
+            let exact = core_run(text, limit, u64::MAX, true, None);
+            assert_eq!(
+                core_run(text, limit, u64::MAX, false, None),
+                exact,
+                "limit {limit}: {text}"
+            );
+        }
     }
 }

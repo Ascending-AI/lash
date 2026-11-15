@@ -156,6 +156,45 @@ fn float_answer<T>(
     }
 }
 
+/// 2^53: every word at most this in magnitude is exactly a binary64.
+const EXACT: u64 = 1 << 53;
+
+/// `op` on a word and a float, in either order: the float kernel over the
+/// word as a binary64, where the word is one exactly (at most 2^53 in
+/// magnitude). A number's general path converts a word rounding to
+/// nearest and orders a word against a float exactly, and both agree with
+/// the exact conversion; a longer word is the general path's.
+#[inline(always)]
+pub fn mixed(op: ScalarOp, a: Value, b: Value) -> Option<Value> {
+    let exact = |word: i64| (word.unsigned_abs() <= EXACT).then(|| Float::new(word as f64));
+    match (a, b) {
+        (Value::Int(a), Value::Float(b)) => floats(op, exact(a)?, b),
+        (Value::Float(a), Value::Int(b)) => floats(op, a, exact(b)?),
+        _ => None,
+    }
+}
+
+/// Comparison `op` on two inline texts, by their UTF-8 bytes, which order
+/// them by code point (the kernel's own text order, unlike [`texts`]);
+/// `None` for arithmetic.
+#[inline(always)]
+pub fn byte_texts(
+    op: ScalarOp,
+    a: &crate::arena::ShortText,
+    b: &crate::arena::ShortText,
+) -> Option<Value> {
+    let order = a.as_bytes().cmp(b.as_bytes());
+    let truth = match op {
+        ScalarOp::Eq => order.is_eq(),
+        ScalarOp::Lt => order.is_lt(),
+        ScalarOp::Le => order.is_le(),
+        ScalarOp::Gt => order.is_gt(),
+        ScalarOp::Ge => order.is_ge(),
+        _ => return None,
+    };
+    Some(Value::Bool(truth))
+}
+
 /// `op` on two word integers, where the answer fits a word.
 #[inline(always)]
 pub fn ints(op: ScalarOp, a: i64, b: i64) -> Option<Value> {

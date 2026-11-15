@@ -43,6 +43,12 @@ pub fn enable_work() {
     lash_kernel_state::kernel_internals::perf_witness::enable_work();
 }
 
+/// Whether this thread currently collects diagnostic work.
+#[inline(always)]
+pub(crate) fn work_enabled() -> bool {
+    WORK.get().is_some()
+}
+
 /// The counts since the last call, resetting them, or `None` when counting
 /// is not enabled on this thread.
 pub fn take_work() -> Option<Work> {
@@ -50,29 +56,6 @@ pub fn take_work() -> Option<Work> {
     counts.heap =
         lash_kernel_state::kernel_internals::perf_witness::take_work().unwrap_or_default();
     Some(counts)
-}
-
-#[inline(always)]
-pub(crate) fn enabled() -> bool {
-    WORK.with(|work| work.get().is_some())
-}
-
-pub(crate) fn step() {
-    WORK.with(|work| {
-        if let Some(mut counts) = work.get() {
-            counts.vm_steps += 1;
-            work.set(Some(counts));
-        }
-    });
-}
-
-pub(crate) fn publish() {
-    WORK.with(|work| {
-        if let Some(mut counts) = work.get() {
-            counts.root_publishes += 1;
-            work.set(Some(counts));
-        }
-    });
 }
 
 /// Stop diagnostics on this thread, including heap diagnostics.
@@ -115,55 +98,25 @@ pub trait Profiling {
     fn guest_symbols(&self) -> GuestSymbols;
 }
 
-impl Profiling for crate::KernelMachine {
-    fn count_work(&mut self) {
-        crate::KernelMachine::count_work(self);
-    }
-    fn work(&self) -> Option<WorkReport> {
-        crate::KernelMachine::work(self)
-    }
-    fn publish_context(&mut self, context: std::sync::Arc<GuestContext>) {
-        crate::KernelMachine::publish_context(self, context);
-    }
-    fn guest_symbols(&self) -> GuestSymbols {
-        crate::KernelMachine::guest_symbols(self)
-    }
-}
-
-/// The site of the statement the first ready task of the sealed `root`
-/// runs next, read through `source`: where a profiler places a run that
-/// parked. None when no task is ready.
+/// Where the first ready task of the sealed `checkpoint` stands, read
+/// through `source`: a statement or an action nested in one (`K-SITE-001`),
+/// where a profiler places a run that parked. None when no task is ready.
 ///
 /// # Errors
 ///
-/// The heap's faults reading the root's tables.
+/// The heap's faults reading the run's record.
 pub fn next_ready_statement(
     checkpoint: &lash_kernel_state::paged::Checkpoint,
     source: Box<dyn lash_kernel_state::paged::PageSource>,
 ) -> Result<Option<lash_kernel_value::sites::Site>, lash_kernel_doc::heap::HeapFault> {
     let root = lash_kernel_state::kernel_internals::checkpoint_root(checkpoint);
-    use lash_kernel_state::kernel_internals::PagedHeap;
-    use lash_kernel_state::kernel_internals::directory::ordinal_key;
-    use lash_kernel_state::kernel_internals::tree::Tree;
-    use lash_kernel_state::paged::{EditEpoch, FrameRecord, TaskRecord};
-    let heap = PagedHeap::open_header(root.heap, source, EditEpoch(1))?;
-    let ready = Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready);
-    let Some((_, next)) = ready.rank_get(0, heap.pages())? else {
-        return Ok(None);
-    };
-    let tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
-    let Some(task) = tasks.get(&ordinal_key(next.0), heap.pages())? else {
-        return Ok(None);
-    };
-    let Some(top) = task.frames.len().checked_sub(1) else {
-        return Ok(None);
-    };
-    let Some((_, frame)) = task.frames.rank_get(top, heap.pages())? else {
-        return Ok(None);
-    };
-    let frame: FrameRecord = frame;
-    let site = frame.statement.resolve(heap.pages())?;
-    Ok(Some(lash_kernel_value::sites::Site::clone(&site)))
+    let (run, _) = lash_kernel_state::paged::run::continuation::open(source, root.heap)?;
+    Ok(run
+        .ready
+        .first()
+        .and_then(|task| run.tasks.get(*task as usize))
+        .and_then(|task| task.frames.last())
+        .map(|frame| frame.site.clone()))
 }
 
 /// A first-use library compilation boundary. A callback body's compilation
@@ -188,15 +141,6 @@ pub fn observe_preparation(observer: Option<Box<dyn FnMut(Preparation)>>) {
     PREPARATION.with(|slot| *slot.borrow_mut() = observer);
 }
 
-#[cfg(feature = "perf-witness")]
-pub(crate) fn preparation(event: Preparation) {
-    PREPARATION.with(|slot| {
-        if let Some(observer) = slot.borrow_mut().as_mut() {
-            observer(event);
-        }
-    });
-}
-
 /// The run's logical balance, observed at machine verdict points.
 pub type MemoryObserver = fn(u64);
 thread_local! {
@@ -205,7 +149,4 @@ thread_local! {
 /// Installs or removes the calling thread's diagnostic memory observer.
 pub fn observe_memory(observer: Option<MemoryObserver>) {
     MEMORY_OBSERVER.set(observer);
-}
-pub(crate) fn memory_observer() -> Option<MemoryObserver> {
-    MEMORY_OBSERVER.get()
 }

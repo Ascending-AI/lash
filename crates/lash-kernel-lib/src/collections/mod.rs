@@ -111,9 +111,7 @@ fn raise(kind: &'static str, message: impl Into<String>) -> lash_kernel_doc::Nat
 /// No kernel text is constructed or parsed on this path.
 pub fn implement_collections(registry: &mut FunctionRegistry) -> Result<(), CollectionError> {
     let functions = native::functions(None, |name, _| {
-        registry
-            .named(name)
-            .next()
+        crate::current_definition(registry, name)
             .ok_or_else(|| CollectionError::MissingDefinition(name.to_owned()))
     })?;
     for (function, native) in functions {

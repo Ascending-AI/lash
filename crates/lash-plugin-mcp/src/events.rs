@@ -3,7 +3,7 @@
 //! Enabling transport registers no process engine or model tools.
 pub(crate) mod client;
 mod config;
-#[cfg(feature = "testing")]
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub(crate) mod wire;
 

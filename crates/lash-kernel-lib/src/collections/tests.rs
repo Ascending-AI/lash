@@ -53,12 +53,7 @@ fn program(source: &str) -> Program {
     )
 }
 fn machine(source: &str) -> KernelMachine {
-    crate::testsupport::start(
-        program(source),
-        BOUNDS,
-        lash_kernel_vm::kernel_internals::Layout::default(),
-    )
-    .unwrap()
+    crate::testsupport::start(program(source), BOUNDS).unwrap()
 }
 fn run(source: &str) -> End {
     let mut machine = machine(source);
@@ -210,6 +205,11 @@ fn k_col_005_membership_and_missing_values_are_distinct() {
     );
     assert_eq!(error("return map.get(map{}, 0)"), "key_missing");
     assert_eq!(error("return set.contains(set{}, [])"), "invalid_key");
+    // A record's key is a text: an integer key is refused, never answered `false`.
+    assert_eq!(
+        error("let r = {x: 1} let k = list.get_or([1], 0) return record.contains(r, k)"),
+        "type_error"
+    );
     assert_eq!(
         body(
             "return (list.contains([[1]], [1.0]), tuple.index_of((1, 2, 1), 1.0), tuple.contains((), 1))"
@@ -554,7 +554,6 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
                     charge_limit: 1_000_000_000,
                     ..BOUNDS
                 },
-                lash_kernel_vm::kernel_internals::Layout::default(),
             )
             .unwrap();
             let Step::Ended(End::Finished(done)) =
@@ -670,7 +669,6 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                 charge_limit: 1_000_000_000,
                 ..BOUNDS
             },
-            lash_kernel_vm::kernel_internals::Layout::default(),
         )
         .unwrap();
         let Step::Ended(End::Finished(done)) =
@@ -694,7 +692,7 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                     _ => 0,
                 })
                 .collect();
-            for representation in 0..4 {
+            for representation in 0..5 {
                 let utf16 = representation == 3;
                 let sort = if utf16 {
                     "list.sort_by_utf16_keys"
@@ -704,6 +702,22 @@ fn sort_by_keys_merges_as_the_comparator_sort_and_bills_its_comparisons() {
                 let keys: Vec<String> = ranks
                     .iter()
                     .map(|rank| match representation {
+                        // Inline keys need a length tie-breaker after zero padding:
+                        // "" precedes "\0", and "a" precedes "a\0".
+                        4 => serde_json::to_string(
+                            &[
+                                "",
+                                "\0",
+                                "a",
+                                "a\0",
+                                "😀",
+                                "\u{e000}",
+                                "abcdefghijklm",
+                                "abcdefghijklmn",
+                            ][rank % 8],
+                        )
+                        .unwrap()
+                        .replace("\\u0000", "\\u{0}"),
                         1 => format!("({}, {rank})", rank % 3),
                         2 => format!("[{}, {rank}]", rank % 3),
                         3 => serde_json::to_string(
@@ -872,7 +886,7 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
     let mut warm = None;
     for cold in [false, true] {
         let pages = crate::testsupport::Source::default();
-        let mut machine = lash_kernel_vm::kernel_internals::start_with_layout(
+        let mut machine = <lash_kernel_vm::KernelMachine as lash_kernel_vm::Machine>::start(
             prepare(),
             BOUNDS,
             lash_kernel_vm::CellStart {
@@ -883,7 +897,6 @@ fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
                 modes: Default::default(),
                 host: Vec::new(),
             },
-            lash_kernel_vm::kernel_internals::Layout::default(),
             Box::new(pages.clone()),
         )
         .unwrap();
@@ -1295,12 +1308,7 @@ fn recorded_iteration(shard: &str) {
             Arc::new(document),
             lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         );
-        let mut machine = crate::testsupport::start(
-            program,
-            BOUNDS,
-            lash_kernel_vm::kernel_internals::Layout::default(),
-        )
-        .unwrap();
+        let mut machine = crate::testsupport::start(program, BOUNDS).unwrap();
         let mut world = World::default();
         let Step::Ended(End::Finished(done)) = machine.run(&mut world, u64::MAX).unwrap() else {
             panic!("self-contained iteration case did not finish")
@@ -1535,12 +1543,7 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
         exercised.insert(*id);
         let program = program(&format!("main {{ return {name}({args}) }}"));
         for temperature in ["cold", "warm"] {
-            let mut machine = crate::testsupport::start(
-                program.clone(),
-                BOUNDS,
-                lash_kernel_vm::kernel_internals::Layout::default(),
-            )
-            .unwrap();
+            let mut machine = crate::testsupport::start(program.clone(), BOUNDS).unwrap();
             let Step::Ended(end) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
                 panic!("{name} must end")
             };

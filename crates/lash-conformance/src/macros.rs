@@ -256,6 +256,7 @@ macro_rules! process_registry_tests {
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
                 (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
+                (the_terminal_event_reads_releases_and_prunes_like_any_event, "terminal-event-reads"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (an_unstamped_cancelled_terminal_replay_coalesces, "unstamped-cancelled-terminal-replay"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),
@@ -693,6 +694,29 @@ macro_rules! process_prune_reclaim_tests {
     };
 }
 
+/// Register the packed process-row laws (FIG-7701). The fixture yields
+/// `(guard, process registry, process-row probe)`.
+#[macro_export]
+macro_rules! process_row_packing_tests {
+    ($fixture:block) => {
+        $crate::process_row_packing_tests!(@catalogue $fixture; [
+            a_start_failed_cancel_keeps_its_kind_on_the_row,
+            packing_and_reclaim_leave_the_feed_and_state_revision,
+            a_late_child_racing_close_prune_and_reclaim_is_refused_until_the_plan_expires,
+            a_prune_failing_at_plan_write_back_keeps_the_plan,
+        ]);
+    };
+    (@catalogue $fixture:block; [$($law:ident),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, registry, probe) = $fixture;
+                $crate::$law(registry, probe).await;
+            }
+        )*
+    };
+}
+
 /// Register the process-prune referrer law. The fixture yields
 /// `(guard, process registry, process-environment store)`.
 #[macro_export]
@@ -900,6 +924,12 @@ macro_rules! artifact_referrer_tests {
             (process_env_carry_retains_exact_origin, "process-env-origin-retention"),
             (attachment_only_referrers_cannot_acquire_artifacts, "artifact-referrer-kind-refusal"),
             (captured_environments_are_shared_until_the_last_referrer_ends, "captured-environment-referrers"),
+            (process_env_spellings_read_back_exactly, "process-env-exact-spellings"),
+            (environment_holders_answer_package_authority_as_direct_holders, "process-env-package-authority"),
+            (environment_retention_survives_a_cut_at_every_step, "process-env-crash-cuts"),
+            (module_share_outlives_environment_share_in_either_order, "module-share-end-orders"),
+            (module_share_survives_a_cut_between_its_ends, "module-share-crash-cuts"),
+            (carried_environments_refuse_in_the_callers_order, "process-env-carry-refusal-order"),
             (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
             (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
         ]);

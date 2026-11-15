@@ -79,6 +79,18 @@ pub struct Args {
     pub dqts_hibernate: Option<PathBuf>,
     #[arg(long)]
     pub dqts_script: Option<PathBuf>,
+    /// The machine lash rows run on: the base machine, or the bytecode core
+    /// beside it until the cutover. The core seals and observes nothing, so it
+    /// takes no checkpoint, history, observation or profile.
+    #[arg(long, value_enum, default_value_t = LashEngine::Base,
+          conflicts_with_all = ["history", "observe", "profile"])]
+    pub engine: LashEngine,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum LashEngine {
+    Base,
+    Core,
 }
 
 impl Args {
@@ -96,7 +108,11 @@ impl Args {
                 } else {
                     lash_kernel_vm::MemoryMeter::On
                 },
-            ))
+            )
+            .with_engine(match self.engine {
+                LashEngine::Base => kernel::Engine::Base,
+                LashEngine::Core => kernel::Engine::Core,
+            }))
     }
 }
 
@@ -358,8 +374,10 @@ fn lash(
             python,
         )
         .map_err(anyhow::Error::from_boxed)?;
-    let (diagnostic_sample, diagnostic) = kernel::execute(&diagnostic_program, true, args.observe)
-        .map_err(anyhow::Error::from_boxed)?;
+    let checkpoint = args.engine == LashEngine::Base;
+    let (diagnostic_sample, diagnostic) =
+        kernel::execute(&diagnostic_program, checkpoint, args.observe)
+            .map_err(anyhow::Error::from_boxed)?;
     phases.extend(diagnostic);
     phases.insert("library_preparation_inclusive".into(), preparation.get());
     phases.insert("embedding_process_once".into(), kernel.setup_ns);
@@ -440,7 +458,7 @@ pub fn run(args: &Args) -> Result<()> {
         cpu,
         load_before: load(),
         load_after: String::new(),
-        geometry: serde_json::json!({"version":2,"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":if args.no_charge {"off"} else {"exact"},"memory_meter":if args.no_memory_meter {"off"} else {"on"},"memory_bytes":if args.no_memory_meter {None} else {Some(512_u64<<20)},"charge_limit":if args.no_charge {None} else {Some(10_000_000_000_u64)},"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","reference_instructions":"paired perf stat instructions:u whole processes, unscaled >=99% running; fixed low-count warmups; startup/parse/teardown cancel to first order; low/high order alternates","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":"separate fresh machine; first checkpoint before run; preparation inclusive"}),
+        geometry: serde_json::json!({"version":2,"engine":match args.engine { LashEngine::Base => "base", LashEngine::Core => "core" },"state":"fresh in-memory cell; no persisted history or state input","instructions":if args.instructions { "instructions:u around fresh cell construction/run/drop/result validation; preparation/diagnostics/driver I/O excluded" } else { "off" },"observation":if args.observe { "work/context/path/counts/sites" } else { "off" },"factor":args.factor,"runs":args.runs,"warmups":args.warmups,"charge":if args.no_charge {"off"} else {"exact"},"memory_meter":if args.no_memory_meter {"off"} else {"on"},"memory_bytes":if args.no_memory_meter {None} else {Some(512_u64<<20)},"charge_limit":if args.no_charge {None} else {Some(10_000_000_000_u64)},"lash":"fresh cell start+run; lower/link/drop/result validation excluded","reference":"resident interpreter; function call; process startup/JSON transport excluded","reference_instructions":"paired perf stat instructions:u whole processes, unscaled >=99% running; fixed low-count warmups; startup/parse/teardown cancel to first order; low/high order alternates","minimum":"two-point fit of per-count minima","median":"two-point fit of per-count medians","diagnostic":if args.engine == LashEngine::Base { "separate fresh machine; first checkpoint before run; preparation inclusive" } else { "separate fresh machine; no checkpoint; preparation inclusive" }}),
         rows: Vec::new(),
         errors: Vec::new(),
         unsupported: Vec::new(),

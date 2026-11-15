@@ -22,9 +22,17 @@ impl Lifter<'_> {
         let statements = matches!(value, k::Expr::Tuple(initial) if initial.len() == 3)
             && matches!(block.get(1), Some(k::Stmt::If { condition, .. }) if nullish_name(self, condition).is_some());
         let first_projection = if statements { 2 } else { 1 };
-        if !statements
-            && !matches!(value, k::Expr::Let { body, .. } if matches!(body.as_ref(), k::Expr::If { cond, .. } if nullish_name(self, cond).is_some()))
-        {
+        let mut pending = vec![k::Node::Expr(value)];
+        let mut guarded = false;
+        while let Some(node) = pending.pop() {
+            if matches!(node, k::Node::Expr(k::Expr::If { cond, .. }) if nullish_name(self, cond).is_some())
+            {
+                guarded = true;
+                break;
+            }
+            pending.extend(node.children());
+        }
+        if !statements && !guarded {
             return Ok(None);
         }
         let rest = &block[first_projection..];
@@ -59,7 +67,45 @@ impl Lifter<'_> {
             self.optional_value(value)
         };
         self.substitutions = saved;
-        Ok(Some((projections.remove(0), result?, first_projection + 3)))
+        let mut result = result?;
+        let mut taken = first_projection + 3;
+        while let Some(k::Stmt::Let {
+            name: pack,
+            value: k::Rhs::Expr(k::Expr::Tuple(parts)),
+        }) = block.get(taken)
+        {
+            if *parts
+                != projections
+                    .iter()
+                    .cloned()
+                    .map(k::Expr::Variable)
+                    .collect::<Vec<_>>()
+            {
+                break;
+            }
+            let mut next = Vec::new();
+            for (index, statement) in block[taken + 1..].iter().take(3).enumerate() {
+                let k::Stmt::Let {
+                    name,
+                    value: k::Rhs::Expr(k::Expr::Member(member)),
+                } = statement
+                else {
+                    break;
+                };
+                if !matches!(&**member, k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Float(at)) } if target == pack && at.get() == index as f64)
+                {
+                    break;
+                }
+                next.push(name.clone());
+            }
+            if next.len() != 3 {
+                break;
+            }
+            projections = next;
+            taken += 4;
+            result = Expr::Grouped(Box::new(result));
+        }
+        Ok(Some((projections.remove(0), result, taken)))
     }
 
     fn optional_statements(&mut self, block: &[k::Stmt], site: &Site, first: usize) -> Lift<()> {
@@ -71,6 +117,9 @@ impl Lifter<'_> {
                 continue;
             }
             match &block[index] {
+                k::Stmt::Do {
+                    value: k::Expr::Call { function, .. },
+                } if self.is(function, "ts.require_object_coercible") => {}
                 k::Stmt::Let {
                     name,
                     value: k::Rhs::Expr(value),
@@ -120,6 +169,9 @@ impl Lifter<'_> {
         match value {
             k::Expr::Tuple(parts) if parts.len() == 3 => self.optional_value(&parts[0]),
             k::Expr::Let { name, value, body } => {
+                if reference_repack(name, body) {
+                    return Ok(Expr::Grouped(Box::new(self.optional_value(value)?)));
+                }
                 if let Some(call) = self.call(name, value, body)? {
                     return Ok(call);
                 }
@@ -171,4 +223,21 @@ fn nullish_name<'a>(lifter: &Lifter<'_>, condition: &'a k::Expr) -> Option<&'a N
         return None;
     };
     lifter.nullish(condition, name).then_some(name)
+}
+
+fn reference_repack(pack: &Name, body: &k::Expr) -> bool {
+    let mut rest = body;
+    let mut names = Vec::new();
+    for index in 0..3 {
+        let k::Expr::Let { name, value, body } = rest else {
+            return false;
+        };
+        if !matches!(&**value, k::Expr::Member(member) if matches!(&**member, k::Member::Index { target: k::Expr::Variable(target), index: k::Expr::Literal(k::Literal::Float(at)) } if target == pack && at.get() == f64::from(index)))
+        {
+            return false;
+        }
+        names.push(k::Expr::Variable(name.clone()));
+        rest = body;
+    }
+    matches!(rest, k::Expr::Let { name, value, body } if matches!(&**value, k::Expr::Tuple(parts) if *parts == names) && **body == k::Expr::Variable(name.clone()))
 }

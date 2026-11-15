@@ -88,6 +88,11 @@ impl GraphRefusal {
                 kind: kind.unwrap_or(0),
                 reason,
             },
+            TokenError::Retired(state) => Self::RetiredFormat {
+                node,
+                kind: kind.unwrap_or(0),
+                format: state.format(),
+            },
         }
     }
 }

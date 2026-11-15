@@ -1,28 +1,28 @@
 kernel 1
 numbers float
 import 0 operation corpus.capture(input: Record{list: List(Any)}) -> Union(Null, Record{list: List(Json), ..Json})
-library @046de301d4f3d74628812702e4ac953586b06a6fb9fb5dc9bb7e74bd0c6b6298
-library @290c2a119db07edc3375464564aa3444f3cc1263ae2d25326c8a5595579d3bf7
+library @002a1807381cf3e407329f93ec5b486ebfbb3d9179f1dc4a75775b337d35e398
+library @3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501
+library @3e93433d30f07d986484123b20326aa7174fa4902fe07a21fa0bf5b90b5cd070
 library @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e
+library @7e3ace0d3d0473cdad08cc218f189817922abeb015ef508eb4eef8e9b2702f00
 library @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a
-library @a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260
-library @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586
+library @a69c99950b0751ec8da367956ada16faf384828023880b9a11931991d6de6d5d
 library @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc
 library @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5
 library @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d
 library @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4
-library @d9d85a923bf226f3c66cba1cfa4d71a65572cb7efc4e69924e0c956513c43914
 library @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef
 library @e75ddd242f0401b6fc0b7b277a97321ada9698966ae57716c7a988ccc6e3c64f
 library @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a
-definition "function add(this1: Any, args1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse num.lt = @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nuse ts.add = @290c2a119db07edc3375464564aa3444f3cc1263ae2d25326c8a5595579d3bf7\nuse ts.get_numeric = @d9d85a923bf226f3c66cba1cfa4d71a65572cb7efc4e69924e0c956513c43914\nuse ts.number.checked = @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5\nuse ts.pad = @e75ddd242f0401b6fc0b7b277a97321ada9698966ae57716c7a988ccc6e3c64f\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let t1 = if(num.lt(list.len(args1), 1.0), ts.pad(args1, 1.0), args1)\n  let x = t1[0.0]\n  let t4 = num.add(ts.number.checked(x), limit)\n  let t3 = absent\n  if num.lt(0.0, list.len(shared)) {\n    set t3 = shared[0.0]\n    if same(t3, ()) {\n      set t3 = absent\n    }\n  } else {\n    set t3 = invoke ts.get_numeric(shared, 0.0)\n  }\n  return ts.add(t4, t3) via ts.promise.adopt\n}\n"
-definition "function add(this2: Any, args2: Any) -> Any\nkernel 1\nmetering statements\nuse add = @3e004ffd3c9efa9a200f7d0d6c24806c111ae5515b60d7c889cb221f4a1caa0d\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn add, this2, list.copy(args2))\n}\n"
+definition "function add(this2: Any, args2: Any) -> Any\nkernel 1\nmetering statements\nuse add = @85362d589f835de4dbd92e7b796e1942c9270126060588b6fe8118733eae4251\nuse list.copy = @f85733b57c0a4c0e73d65645f423a20edbd33e87e41612a61a570c8b4808bd1a\nuse ts.promise.start = @7e683e160d3315f1eb576ecf2b9eae7180a71f5482c269c369b4793f5faa179a\nbody {\n  return invoke ts.promise.start(fn add, this2, list.copy(args2))\n}\n"
+definition "function add(this1: Any, args1: Any) -> Any\nkernel 1\nmetering statements\nuse list.len = @d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4\nuse num.add = @e174ac476b52d754448cd13e6908afe49f85b6868855d39b43ed64c4e74a6aef\nuse num.lt = @affe893d7cf7b032d12e87bcc75f87eeb0babc2ba7e682262bb830b7618cb3fc\nuse same = @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d\nuse ts.add = @3e93433d30f07d986484123b20326aa7174fa4902fe07a21fa0bf5b90b5cd070\nuse ts.get_numeric = @002a1807381cf3e407329f93ec5b486ebfbb3d9179f1dc4a75775b337d35e398\nuse ts.number.checked = @b4ef6f4bb1d0867cc9d9a74016e26a43f3e4ea5479a0772c23916f015f2c18b5\nuse ts.pad = @e75ddd242f0401b6fc0b7b277a97321ada9698966ae57716c7a988ccc6e3c64f\nuse ts.promise.adopt = @77305f1f6fe3e345f7c5c7a652e2e4617e81031fc3330659495a589c535fde5e\nbody {\n  let t1 = if(num.lt(list.len(args1), 1.0), ts.pad(args1, 1.0), args1)\n  let x = t1[0.0]\n  let t4 = num.add(ts.number.checked(x), limit)\n  let t3 = absent\n  if num.lt(0.0, list.len(shared)) {\n    set t3 = shared[0.0]\n    if same(t3, ()) {\n      set t3 = absent\n    }\n  } else {\n    set t3 = invoke ts.get_numeric(shared, 0.0)\n  }\n  return ts.add(t4, t3) via ts.promise.adopt\n}\n"
 main {
   let limit = 3.0
   let shared = [1.0]
-  let add = ("ts.function", "", "add", 1.0, fn @c38e7a539e5391ad25a988d27a4cf916efcf052b8b395a1a60633203cf7b6e8d presentation(x: Number) -> Any token("ts.function", 4) ts_args(@a1fd2420d7bf52ba5b4e6ebc417c24c4cf1b3ae956ecf00bc155e7d2c7d35260, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
-  do perform 0(invoke @a97e37194c0241c37971f32bcbd39897b186526a2dd62a676aa618e53a4ee586({list: [1.0, add]}, absent)) as Union(Null, Record{list: List(Json), ..Json}) then yield
-  do invoke @046de301d4f3d74628812702e4ac953586b06a6fb9fb5dc9bb7e74bd0c6b6298(shared, 0.0, 9.0)
+  let add = ("ts.function", "", "add", 1.0, fn @52f25886f9e04ec9e7adafc1036c23a9075521074def21a8bb2b83d3ae324055 presentation(x: Number) -> Any token("ts.function", 4) ts_args(@3c007d5369228121295d3badd2d6961213d2274f12692d407367fbabb2691501, @c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d), {})
+  do perform 0(invoke @7e3ace0d3d0473cdad08cc218f189817922abeb015ef508eb4eef8e9b2702f00({list: [1.0, add]}, absent)) as Union(Null, Record{list: List(Json), ..Json}) then yield
+  do invoke @a69c99950b0751ec8da367956ada16faf384828023880b9a11931991d6de6d5d(shared, 0.0, 9.0)
 }
 
 unit Main: statements=16 scopes=7 sites=21

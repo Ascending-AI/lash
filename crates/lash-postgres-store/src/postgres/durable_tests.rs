@@ -235,12 +235,17 @@ async fn lo_fence_path(explicit: bool) {
     ))
     .await;
     outcome.unwrap_or_else(|broken| panic!("{broken}"));
+    // A parked release commits in the one call (f4a1ac2e3a), so the stale
+    // park meets the function fence on both paths.
     if explicit {
-        // Takeover reaches the function; park and root-lease work select
-        // the explicit path.
-        assert_eq!(refused, 1, "only takeover reaches the function fence");
+        // The stale draft's admission-root lease selects the explicit path;
+        // park and takeover reach the function.
+        assert_eq!(refused, 2, "park and takeover reach the function fence");
     } else {
-        assert_eq!(refused, 2, "stale graph and takeover each raised LX003");
+        assert_eq!(
+            refused, 3,
+            "stale graph, park and takeover each raised LX003"
+        );
     }
     let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs WHERE hash = $1")
         .bind(lo_fence_staged_hash())
@@ -1228,6 +1233,30 @@ async fn lo_process_receipt_when_configured() {
     )
     .unwrap();
     lash_core_execution::runtime::actor::process_laws::lo_process_receipt_is_exact(&backend)
+        .await
+        .unwrap();
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_process_terminal_settles_when_configured() {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    let backend = lash_execution_contracts::backend::Backend::assemble(
+        lash_execution_contracts::backend::BackendParts {
+            formats: Vec::new(),
+            stores: Arc::new(crate::PostgresStoreSet::new(
+                &storage,
+                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+            )),
+            settings: lash_core_execution::runtime::actor::process_laws::settings(),
+            engines: Vec::new(),
+        },
+    )
+    .unwrap();
+    lash_core_execution::runtime::actor::process_laws::lo_process_terminal_settles_on_its_locked_row(&backend)
         .await
         .unwrap();
 }

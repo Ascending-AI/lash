@@ -1,5 +1,8 @@
 //! `parent_end_plans`: one row per ended parent scope.
 //!
+//! A process scope's plan lives on its `processes` row while that row exists
+//! (FIG-7701); a prune moves it here unless retention reclaims it.
+//!
 //! Process, operation and session scopes retain their typed close plans.
 //! Turn scopes instead use their retained session_runs terminal; joined input
 //! aliases resolve through the input row's retained admitted_run column.
@@ -19,9 +22,21 @@ crate::statements! {
         ///
         /// Shared conflict clause: both backends need it, because the terminal
         /// append that records the plan can be replayed.
+        /// A process scope `?5` whose row exists keeps its plan on that row
+        /// instead ([`pack`](Self::pack)); `?5` is `NULL` for other scopes.
         insert_if_absent = "INSERT INTO parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms)
-             VALUES (?1, ?2, ?3, ?4)
+             SELECT ?1, ?2, ?3, ?4
+             WHERE NOT EXISTS (SELECT 1 FROM processes WHERE process_id = ?5)
              ON CONFLICT (parent_kind, parent_id) DO NOTHING";
+
+        /// Record process `?1`'s own scope `?2` ended at `?4` with payload
+        /// `?3` on its row (FIG-7701), unless a plan for it is already
+        /// recorded on the row or in the table: the first stamp stands.
+        pack = "UPDATE processes SET end_plan_scope_id = ?2, end_plan_payload = ?3,
+                 end_plan_ended_at_ms = ?4
+             WHERE process_id = ?1 AND end_plan_scope_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM parent_end_plans
+                   WHERE parent_kind = 'process' AND parent_id = ?2)";
 
         /// A turn's terminal, including a joined input's turn alias. No
         /// independently stored close plan exists for a turn.
@@ -51,11 +66,19 @@ crate::statements! {
                        AND lifetime_scope_id = ?3 AND cancel_requested_at_ms IS NULL
                        AND status IN ('running', 'waiting')) AS has_until";
 
-        exists = "SELECT 1 FROM parent_end_plans WHERE parent_kind = ?1 AND parent_id = ?2";
+        /// `?3` names the process whose row may hold the plan, `NULL` for
+        /// scopes that are not processes.
+        exists = "SELECT 1 FROM parent_end_plans WHERE parent_kind = ?1 AND parent_id = ?2
+             UNION ALL
+             SELECT 1 FROM processes WHERE process_id = ?3 AND end_plan_scope_id = ?2";
 
         /// Scope `?1` / `?2`'s typed payload and end instant.
+        /// `?3` as in [`exists`](Self::exists).
         select_stamps = "SELECT parent_payload, ended_at_ms
              FROM parent_end_plans
-             WHERE parent_kind = ?1 AND parent_id = ?2";
+             WHERE parent_kind = ?1 AND parent_id = ?2
+             UNION ALL
+             SELECT end_plan_payload, end_plan_ended_at_ms
+             FROM processes WHERE process_id = ?3 AND end_plan_scope_id = ?2";
     }
 }

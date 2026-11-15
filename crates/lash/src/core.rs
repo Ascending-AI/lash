@@ -1394,6 +1394,7 @@ impl LashCoreBuilder {
         // The artifact-cleanup outbox's due pass (ADR 0132 §12): a cleanup
         // whose producer died before its immediate attempt is delivered here.
         cleanup.start(
+            backend.clone(),
             Arc::new(
                 lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
                     &backend,

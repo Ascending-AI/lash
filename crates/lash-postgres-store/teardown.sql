@@ -1,4 +1,4 @@
--- lash-postgres-store teardown, component version 37.
+-- lash-postgres-store teardown, component version 51.
 --
 -- Generated artifact. These bytes are exactly the DDL a host applies to drop
 -- everything this component owns at the reject-and-recreate boundary;
@@ -86,6 +86,8 @@ DROP TABLE IF EXISTS lash_abandoned_consumer_holds CASCADE;
 
 DROP TABLE IF EXISTS lash_process_events CASCADE;
 
+DROP VIEW IF EXISTS lash_process_event_log CASCADE;
+
 DROP TABLE IF EXISTS lash_process_event_horizons CASCADE;
 
 DROP TABLE IF EXISTS lash_process_observers CASCADE;
@@ -103,6 +105,8 @@ DROP TABLE IF EXISTS lash_lash_vm_artifacts CASCADE;
 DROP TABLE IF EXISTS lash_package_labels CASCADE;
 
 DROP TABLE IF EXISTS lash_artifact_referrer_edges CASCADE;
+
+DROP TABLE IF EXISTS lash_artifact_dependency_edges CASCADE;
 
 DROP TABLE IF EXISTS lash_referrer_fences CASCADE;
 
@@ -147,6 +151,7 @@ DROP TABLE IF EXISTS lash_prompt_prefixes CASCADE;
 DROP TABLE IF EXISTS lash_turn_phases CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_namespaces CASCADE;
+
 DROP TABLE IF EXISTS lash_turn_journal CASCADE;
 
 DROP TABLE IF EXISTS lash_waits CASCADE;
@@ -171,9 +176,27 @@ DROP TABLE IF EXISTS lash_owner_commit_latches CASCADE;
 
 DROP FUNCTION IF EXISTS lash_owner_commit CASCADE;
 
+DROP FUNCTION IF EXISTS lash_advisory_xact_lock CASCADE;
+
+DROP FUNCTION IF EXISTS lash_advisory_xact_lock_pair CASCADE;
+
+DROP FUNCTION IF EXISTS lash_lock_artifacts CASCADE;
+
 DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
 
+DROP FUNCTION IF EXISTS lash_artifact_lock_plan CASCADE;
+
+DROP FUNCTION IF EXISTS lash_lock_referrer CASCADE;
+
+DROP FUNCTION IF EXISTS lash_acquire_holds CASCADE;
+
+DROP FUNCTION IF EXISTS lash_acquire_env CASCADE;
+
+DROP FUNCTION IF EXISTS lash_publish_env_over_stored_body CASCADE;
+
 DROP FUNCTION IF EXISTS lash_node_renew CASCADE;
+
+DROP FUNCTION IF EXISTS lash_register_process_execution CASCADE;
 
 DROP FUNCTION IF EXISTS lash_graph_peel_plan CASCADE;
 

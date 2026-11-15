@@ -539,6 +539,7 @@ PACKAGE_DEPS = {
     "lash-internal-core-store": {
         "build": {},
         "dev": {
+            "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
@@ -657,7 +658,14 @@ PACKAGE_DEPS = {
     },
     "lash-internal-execution-contracts": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_core_effect": "//crates/lash-core-effect:lash-core-effect",
+            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
+            "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
+            "lash_trace": "//crates/lash-trace:lash-trace"
+        },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "lash_core_effect": "//crates/lash-core-effect:lash-core-effect",
@@ -932,6 +940,7 @@ PACKAGE_DEPS = {
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
+            "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
@@ -1568,7 +1577,8 @@ PACKAGE_DEPS = {
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
             "lash_kernel_services": "//crates/lash-kernel-services:lash-kernel-services",
-            "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view"
+            "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
         "normal": {
             "arbitrary": "//third-party/rust:p0012",
@@ -1580,7 +1590,6 @@ PACKAGE_DEPS = {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
-            "lash_kernel_exec": "//crates/lash-kernel-exec:lash-kernel-exec",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_releases": "//crates/lash-kernel-releases:lash-kernel-releases",
@@ -1659,13 +1668,6 @@ PACKAGE_DEPS = {
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
-            "thiserror": "//third-party/rust:p0369"
-        }
-    },
-    "lash-kernel-exec": {
-        "build": {},
-        "dev": {},
-        "normal": {
             "thiserror": "//third-party/rust:p0369"
         }
     },
@@ -1825,7 +1827,6 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
-            "lash_kernel_exec": "//crates/lash-kernel-exec:lash-kernel-exec",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_value": "//crates/lash-kernel-value:lash-kernel-value",
@@ -2044,6 +2045,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash": "//crates/lash:lash",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "rusqlite": "//third-party/rust:p0289",
             "sqlx": "//third-party/rust:p0338",
             "uuid": "//third-party/rust:p0411"
         },

@@ -30,14 +30,7 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
             .await
             .map_err(ArtifactStoreError::from)?;
         let referrer = claim.referrer();
-        lock_session_artifact_owner_tx(&mut tx, &referrer).await?;
-        lock_referrer_tx(&mut tx, &referrer)
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &referrer).await?;
-        if is_fenced_tx(&mut tx, &referrer).await? {
-            return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
-        }
+        lock_admitted_referrer_tx(&mut tx, &referrer).await?;
         let references: BTreeMap<_, _> = keys
             .iter()
             .map(|key| {
@@ -49,7 +42,9 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
             .collect();
         let wanted: Vec<_> = references.keys().cloned().collect();
         let missing: BTreeSet<String> =
-            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_unheld.sql())
+            // Held means reached: through the referrer's own edges, or what
+            // those artifacts hold (FIG-7700).
+            crate::observed_sql::query_scalar(artifact_sql().postgres.select_unreached.sql())
                 .bind(MODULE_ARTIFACT_NAMESPACE)
                 .bind(&wanted)
                 .bind(referrer.kind().as_str())
@@ -70,19 +65,15 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         referrer: &ArtifactReferrer,
     ) -> Result<bool, lash_durable::DurableError> {
         let mut tx = self.pool.acquire().await.map_err(backend)?;
-        let held = crate::observed_sql::query(
-            artifact_sql()
-                .edges
-                .select_referrer_edges_in_namespace
-                .sql(),
+        let held: bool = crate::observed_sql::query_scalar(
+            artifact_sql().dependencies.select_reaches_namespace.sql(),
         )
         .bind(MODULE_ARTIFACT_NAMESPACE)
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
-        .map_err(backend)?
-        .is_some();
+        .map_err(backend)?;
         Ok(!held && is_fenced_tx(&mut tx, referrer).await?)
     }
     async fn put_package_labels(
@@ -92,44 +83,41 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         digest: &[u8; 32],
         json: &str,
     ) -> Result<(), lash_durable::DurableError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(ArtifactStoreError::from)?;
-        let referrer = claim.referrer();
-        lock_session_artifact_owner_tx(&mut tx, &referrer).await?;
-        lock_referrer_tx(&mut tx, &referrer)
-            .await
-            .map_err(backend)?;
-        admit_artifact_owner_tx(&mut tx, &referrer).await?;
-        if is_fenced_tx(&mut tx, &referrer).await? {
-            return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
-        }
-        lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
-        let sql = lash_store_sql::durable::packages::PackageStatements::render(Dialect::postgres());
-        let held = crate::observed_sql::query(sql.labels_held.sql())
-            .bind(MODULE_ARTIFACT_NAMESPACE)
-            .bind(reference)
-            .bind(referrer.kind().as_str())
-            .bind(referrer.canonical_id())
-            .fetch_optional(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(backend)?
-            .is_some();
-        if !held {
-            return Err(ArtifactStoreError::ArtifactMissing {
-                artifact_ref: reference.to_owned(),
+        crate::guarded_tx::retry_contended::<_, ArtifactStoreError, _, _>(&self.fence, || async {
+            let mut tx = begin_guarded(&self.pool, &self.fence)
+                .await
+                .map_err(ArtifactStoreError::from)?;
+            let referrer = claim.referrer();
+            lock_admitted_referrer_tx(&mut tx, &referrer).await?;
+            lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
+            let held: bool =
+                crate::observed_sql::query_scalar(artifact_sql().dependencies.select_reaches.sql())
+                    .bind(MODULE_ARTIFACT_NAMESPACE)
+                    .bind(referrer.kind().as_str())
+                    .bind(referrer.canonical_id())
+                    .bind(reference)
+                    .fetch_one(crate::observed_sql::executor(&mut **tx))
+                    .await
+                    .map_err(backend)?;
+            if !held {
+                return Err(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: reference.to_owned(),
+                });
             }
-            .into());
-        }
-        crate::observed_sql::query(sql.insert_labels.sql())
-            .bind(MODULE_ARTIFACT_NAMESPACE)
-            .bind(reference)
-            .bind(digest.as_slice())
-            .bind(json)
-            .execute(crate::observed_sql::executor(&mut **tx))
-            .await
-            .map_err(backend)?;
-        tx.commit().await.map_err(backend).map_err(Into::into)
+            let sql =
+                lash_store_sql::durable::packages::PackageStatements::render(Dialect::postgres());
+            crate::observed_sql::query(sql.insert_labels.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(reference)
+                .bind(digest.as_slice())
+                .bind(json)
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(backend)?;
+            tx.commit().await.map_err(backend)
+        })
+        .await
+        .map_err(Into::into)
     }
     async fn package_labels(
         &self,
@@ -153,6 +141,28 @@ impl lash_durable::packages::PackageStorage for PostgresLashVmArtifactStore {
         self.get_module_artifact(reference)
             .await
             .map_err(Into::into)
+    }
+    async fn load_package_records(
+        &self,
+        references: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, lash_durable::DurableError> {
+        let wanted: Vec<&str> = references
+            .iter()
+            .map(String::as_str)
+            .filter(|reference| crate::namespace::is_valid_opaque_key(reference))
+            .collect();
+        if wanted.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        let rows: Vec<(String, Vec<u8>)> =
+            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_records.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(&wanted)
+                .fetch_all(crate::observed_sql::executor(&self.pool))
+                .await
+                .map_err(backend)
+                .map_err(lash_durable::DurableError::from)?;
+        Ok(rows.into_iter().collect())
     }
     async fn end_package_records(
         &self,

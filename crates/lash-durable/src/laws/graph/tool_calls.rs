@@ -122,6 +122,24 @@ pub async fn tool_call_publications_are_atomic_retained_and_keyed(
         selected.rows.len() == 1,
         "a keyed read included unrelated calls"
     );
+    // Admission order is member order here, and "directory-10" sorts before
+    // "directory-2" by id, so a read in key or request order differs.
+    let ordered = peer
+        .tool_calls(
+            &logical,
+            &ToolCallSelection::Calls(vec![
+                calls[10].0.clone(),
+                calls[2].0.clone(),
+                calls[31].0.clone(),
+                calls[2].0.clone(),
+            ]),
+        )
+        .await?;
+    ensure!(
+        ordered.rows.iter().map(|row| &row.call).collect::<Vec<_>>()
+            == vec![&calls[2].0, &calls[10].0, &calls[31].0],
+        "a keyed read did not return its rows in admission order"
+    );
     ensure!(
         selected
             .graph

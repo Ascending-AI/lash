@@ -389,8 +389,18 @@ async fn turn_witness(store: Store, failure_law: bool) {
     .await
     .expect("turn deadline")
     .expect("turn completes during stalled discovery");
-    let output_tool_calls =
-        lash::testing::tool_calls_for_activity(&session, &output.activities).await;
+    let turn_id = output
+        .activities
+        .iter()
+        .find_map(|activity| match &activity.event {
+            lash::TurnEvent::TurnStarted { run_id, .. } => Some(run_id.turn_id().clone()),
+            _ => None,
+        })
+        .expect("test observed the turn admission");
+    let output_tool_calls = session
+        .read_turn_tool_calls(&turn_id)
+        .await
+        .expect("read recorded tool calls");
     assert_eq!(
         output_tool_calls.len(),
         if failure_law { 2 } else { 1 },

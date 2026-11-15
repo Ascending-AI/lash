@@ -88,7 +88,7 @@ impl SqliteStore {
     pub async fn open(
         path: &Path,
         synchronous: crate::SqliteSynchronous,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             StoreOptions::standard(synchronous),
@@ -102,7 +102,7 @@ impl SqliteStore {
         path: &Path,
         synchronous: crate::SqliteSynchronous,
         clock: Arc<dyn lash_core_ids::clock::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             StoreOptions::standard(synchronous),
@@ -112,10 +112,7 @@ impl SqliteStore {
         .await
     }
 
-    pub async fn open_with_options(
-        path: &Path,
-        options: StoreOptions,
-    ) -> tokio_rusqlite::Result<Self> {
+    pub async fn open_with_options(path: &Path, options: StoreOptions) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             options,
@@ -129,7 +126,7 @@ impl SqliteStore {
         path: &Path,
         options: StoreOptions,
         clock: Arc<dyn lash_core_ids::clock::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
+    ) -> Result<Self, StoreError> {
         Self::open_direct(
             path,
             options,
@@ -144,8 +141,9 @@ impl SqliteStore {
         options: StoreOptions,
         clock: Arc<dyn lash_core_ids::clock::Clock>,
         constructor: &'static str,
-    ) -> tokio_rusqlite::Result<Self> {
-        let location = crate::location::file_location(path, constructor)?;
+    ) -> Result<Self, StoreError> {
+        let location =
+            crate::location::file_location(path, constructor).map_err(sqlite_async_error)?;
         Self::open_at(
             &DatabaseLocation::in_backend(&location, None),
             options,
@@ -155,6 +153,7 @@ impl SqliteStore {
             crate::testing::ConnectionHooks::default(),
         )
         .await
+        .map_err(sqlite_async_error)
     }
 
     /// Open the database file at `path` admitting `writable` as the opening
@@ -223,6 +222,49 @@ impl SqliteStore {
             conn,
             location: core.clone(),
             readers: crate::conn::ReadPool::new(readers),
+            decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
+            decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
+            windows: Arc::default(),
+            encoded_images: Arc::default(),
+            configs,
+            clock,
+            options,
+            commit_count: AtomicU64::new(commit_count_entropy_seed()),
+        })
+    }
+
+    pub(crate) async fn open_passive(
+        core: &DatabaseLocation,
+        options: StoreOptions,
+        clock: Arc<dyn lash_core_ids::clock::Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
+        let conn =
+            SqliteConnection::open_passive(core.target(), options.connection_policy.operational)
+                .await?;
+        let fleet = conn
+            .call(|c| {
+                // Admit before reporting a supported migration, so retired or
+                // malformed formats retain their more precise typed refusal.
+                let (_, fleet) =
+                    crate::compat::admit(c, lash_core_store::store::FleetFormat::writable())?;
+                crate::compat::refuse_unmigrated(c)?;
+                if crate::compat::read(c)?.is_none() {
+                    return Err(crate::sqlite_conversion_error(StoreError::Incompatible {
+                        refusal: lash_core_store::compat::CompatRefusal::Unstamped {
+                            component: crate::schema::COMPONENT.as_str().to_owned(),
+                            writing_release: crate::compat::writing_release(c),
+                        },
+                    }));
+                }
+                Ok(fleet)
+            })
+            .await?;
+        conn.observe_passive_fleet(fleet);
+        let configs = Arc::clone(conn.configs());
+        Ok(Self {
+            readers: crate::conn::ReadPool::new(vec![conn.clone()]),
+            conn,
+            location: core.clone(),
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             windows: Arc::default(),

@@ -503,6 +503,52 @@ impl HostArtifacts {
         })
     }
 
+    /// Read the whole stored environment this process was started under.
+    ///
+    /// Returns `None` for an unknown or pruned process, a session-turn process
+    /// without an engine environment, or an environment no longer stored.
+    ///
+    /// Completion ends the execution's shares through the cleanup relay, but
+    /// the process record keeps its environment head until prune. The head
+    /// keeps the shared body. A normally finished, unpruned process therefore
+    /// still has its environment. If its record's environment share is also
+    /// ended, the bytes remain only while another holder, such as a publisher's
+    /// pin, keeps the head; after the last holder ends, this returns `None`.
+    /// The module share ends separately and does not keep the head alive.
+    ///
+    /// This uncached snapshot read acquires no hold or lock and reads no
+    /// referrer edges. PostgreSQL answers it in one round trip. It is intended
+    /// for inspection, outside hot paths. The returned value can be passed to
+    /// [`Self::link_process_env`] when the `codemode` feature is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Store faults, corrupt bytes, a content-address mismatch, or an
+    /// environment this build cannot decode, as for the registry's reader.
+    pub async fn get_process_env(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Result<Option<ProcessEnv>> {
+        let row = match self
+            .core
+            .backend()
+            .process_authority_reads()
+            .process_authority(process)
+            .await
+        {
+            Ok(row) => row,
+            Err(lash_core::StoreError::ProcessAuthorityPruned { .. }) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let Some((record, Some(bytes))) = row else {
+            return Ok(None);
+        };
+        let Some(reference) = record.env_ref() else {
+            return Ok(None);
+        };
+        crate::process_admin::decode_environment(reference, &bytes).map(Some)
+    }
+
     /// Select routes for the complete retained execution from an explicitly prepared
     /// namespace. Ambiguous providers require a selection keyed by OperationUse.
     /// `Definition` reads the engine-owned descriptor, preserving callable captures

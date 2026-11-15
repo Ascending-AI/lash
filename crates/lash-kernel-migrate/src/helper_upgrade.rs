@@ -207,3 +207,43 @@ fn constructor(
     }
     Ok(())
 }
+
+/// Whether the parked run whose code is `live` may move to `upgrade`'s
+/// helpers: branded data a changed helper built, or code the run holds
+/// that a changed helper defines, refuses; a resume point that still
+/// runs a changed helper defers until it has returned.
+///
+/// # Errors
+///
+/// [`HelperUpgradeRefusal::BrandedData`] and
+/// [`HelperUpgradeRefusal::RetainedCallable`].
+pub fn check_run_upgrade(
+    live: &lash_kernel_state::paged::run::rewrite::LiveCode,
+    upgrade: &HelperUpgrade,
+) -> Result<lash_kernel_doc::HelperUpgradeSafety, HelperUpgradeRefusal> {
+    if let Some(function) = live.built.intersection(&upgrade.changed).next() {
+        return Err(HelperUpgradeRefusal::BrandedData {
+            function: *function,
+        });
+    }
+    // The held callable itself where it is a changed helper's, else the
+    // changed helper held code may call.
+    if let Some(function) = live
+        .callables
+        .iter()
+        .map(|callable| &callable.function)
+        .chain(&live.held_code)
+        .find(|function| upgrade.changed.contains(*function))
+    {
+        return Err(HelperUpgradeRefusal::RetainedCallable {
+            function: *function,
+        });
+    }
+    let functions: std::collections::BTreeSet<_> =
+        live.pins.intersection(&upgrade.changed).copied().collect();
+    Ok(if functions.is_empty() {
+        lash_kernel_doc::HelperUpgradeSafety::Safe
+    } else {
+        lash_kernel_doc::HelperUpgradeSafety::Deferred { functions }
+    })
+}

@@ -5,15 +5,17 @@
 //! Each `kernel_run` step parks its machine and seals a CheckpointRoot in
 //! its activation's spool; the step's outcome publishes that root with its
 //! run fact in one fenced commit. The matrix cuts every `step.outcome`
-//! commit under fail-before, abort, ack-hidden and commit-then-abort,
-//! recovers on the other node, and checks:
+//! commit under fail-before, abort, ack-hidden, zombie and
+//! commit-then-abort, recovers on the other node, and checks:
 //!
 //! - a step whose outcome committed never runs again: every later outcome
 //!   commit of the process lands, none refused as a repeat;
 //! - a step whose outcome did not commit runs again, and the process
 //!   commits exactly the uncut run's outcomes and one terminal;
 //! - nothing staged is left behind: no spool outlives its activation, and
-//!   no stored page is unreachable from a root.
+//!   no stored page is unreachable from a root;
+//! - a zombie that lost the process is fenced: every owner write it
+//!   attempts from its cut on is refused `OwnershipLost`.
 //!
 //! A second process parks inside expressions (`K-EVAL-008`): at a `sleep`
 //! nested in a list (`Waiting`), then in a callee called inside it, its
@@ -22,6 +24,10 @@
 //!
 //! Another parks at the same places inside a `while` condition, which
 //! resumes in the evaluation it stood in.
+//!
+//! A race withdraws its loser's sleep before that sleep's deadline and
+//! the entry sleeps past it: every cut ends as the uncut run, the late
+//! outcome never delivered.
 //!
 //! A third parks at the same places on `then yield` waits: each step that
 //! delivers an outcome leaves its task delivered, owing one more turn
@@ -102,6 +108,26 @@ main {
   let n = true
   while if(n, [perform 0(5) as Null, apply inner(true)][1], false) { set n = false }
   return ["b", n]
+}
+"#;
+
+/// A race whose loser's wait is withdrawn while its deadline is still
+/// ahead: the fast task wins at 5 ms, the slow task's 20 ms sleep is
+/// cancelled, and the entry then sleeps to 30 ms, past the withdrawn
+/// deadline. The withdrawn wait's late outcome is never delivered: it
+/// neither wakes the entry's sleep nor changes the race's value.
+const WITHDRAWN: &str = r#"kernel 1
+numbers float
+import 0 operation typescript.sleep(milliseconds: Int) -> Null
+main {
+  let fast = fn() { do perform 0(5) as Null return "fast" }
+  let slow = fn() { do perform 0(20) as Null return "slow" }
+  let w = spawn apply fast()
+  let l = spawn apply slow()
+  let hs = [w, l]
+  let first = join race hs
+  do perform 0(30) as Null
+  return first
 }
 "#;
 
@@ -447,8 +473,34 @@ impl Scenario for KernelSteps {
                 .iter()
                 .position(|write| write.cut == Some(cut.fault) && write.node == cut.node)
         });
+        // A zombie keeps running after it lost its actors: every owner write
+        // it attempts from its cut on is fenced, so its candidate machine
+        // never publishes.
+        let zombie = cut.filter(|cut| cut.fault == Fault::Zombie);
+        if let Some(cut) = zombie {
+            match trace.iter().position(|write| {
+                write.node == cut.node && write.point == cut.point && write.cut == Some(cut.fault)
+            }) {
+                None => violations.push("the zombie's cut write is not in the trace".to_owned()),
+                Some(from) => {
+                    for write in trace[from..].iter().filter(|write| {
+                        write.node == cut.node && write.kind == lash_durable_test::WriteKind::Actor
+                    }) {
+                        if !matches!(
+                            write.stored,
+                            lash_durable_test::Stored::Refused(
+                                lash_durable::DurableError::OwnershipLost(_)
+                            )
+                        ) {
+                            violations.push(format!("zombie write {write} was {:?}", write.stored));
+                        }
+                    }
+                }
+            }
+        }
         for (at, write) in outcomes.iter().enumerate() {
-            if !write.committed() && Some(at) != cut_at {
+            let fenced = zombie.is_some_and(|cut| write.node == cut.node);
+            if !write.committed() && Some(at) != cut_at && !fenced {
                 violations.push(format!("a step outcome did not land: {write}"));
             }
         }
@@ -515,6 +567,7 @@ async fn a_kernel_steps_outcome_publishes_its_pages_once_across_a_cut() {
             Fault::FailBefore,
             Fault::Abort,
             Fault::AckHidden,
+            Fault::Zombie,
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
@@ -577,6 +630,32 @@ async fn a_run_parked_in_a_while_condition_resumes_exactly_across_a_cut() {
     let ended = uncut.iter().find(|(source, _)| *source == WHILE_CONDITION);
     assert!(
         ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
+        "{ended:?}"
+    );
+}
+
+/// A race's withdrawn wait, cut at every step outcome, never delivers its
+/// late outcome to the process: every cut ends as the uncut run, whose
+/// value is the winner's.
+#[tokio::test]
+async fn a_withdrawn_race_wait_never_delivers_its_late_outcome_across_a_cut() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::Abort,
+            Fault::AckHidden,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| KernelSteps::new(WITHDRAWN))
+        .await;
+    eprintln!("withdrawn race kernel steps: {} cells", report.cells.len());
+    report.assert_held();
+    let uncut = UNCUT.lock_recover();
+    let ended = uncut.iter().find(|(source, _)| *source == WITHDRAWN);
+    assert!(
+        ended.is_some_and(|(_, output)| output.contains(r#""fast""#)),
         "{ended:?}"
     );
 }

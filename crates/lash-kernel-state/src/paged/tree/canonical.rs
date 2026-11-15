@@ -1,16 +1,23 @@
 //! The canonical page constructor (seam H). A sealed tree's pages are a
 //! function of its rows, whatever history built them.
 //!
-//! Every level is cut into chunks by one rule, read from the chunk's own
-//! start: a chunk ends after the item that reaches its count cap or
-//! [`PAGE_TARGET_BYTES`] packing bytes, and a keyed chunk also ends after
-//! an item whose boundary hash has its low bits zero. Sequences cut by
-//! position only: leaf `k` holds cells `64k ..< 64(k+1)` unless a cell run
-//! reaches the byte cap first. A boundary therefore depends only on the
-//! items since the previous one, so a seal rebuilds a dirty region and
-//! reuses a clean page as soon as the cut before it falls where it did.
+//! Every level is cut into chunks by one rule. A keyed chunk ends after an
+//! item whose boundary hash falls under its weight: one in the level's
+//! mean, or the item's share of [`PAGE_TARGET_BYTES`] when that is more,
+//! so a chunk holds about the mean's items or the target's bytes, and
+//! where it ends depends on that item alone. Only the caps read from the
+//! chunk's start (its count cap, or [`HARD_BYTES`] packing bytes), and
+//! they rarely bind, so an edit re-cuts its own chunk and no run of chunks
+//! after it. Sequences cut by position only: leaf `k` holds cells
+//! `64k ..< 64(k+1)` unless a cell run reaches [`PAGE_TARGET_BYTES`]
+//! first. A seal rebuilds a dirty region and reuses a clean page as soon
+//! as the cut before it falls where it did.
 use super::super::source::SEQUENCE_LEAF_CELLS;
 use super::*;
+
+/// The packing bytes past which a keyed chunk always ends: four times the
+/// target, under the format's absolute node bound.
+const HARD_BYTES: u64 = 4 * PAGE_TARGET_BYTES;
 
 /// Packing bytes an index entry counts beside its first key: its summary,
 /// family and child reference.
@@ -54,16 +61,32 @@ pub(crate) fn boundary_hash(level: u64, key: &[u8]) -> u64 {
 }
 
 /// Whether a chunk at `level` (0 for leaves) holding `count` items of
-/// `bytes` packing bytes ends after its last item, keyed `last`.
-fn ends(sequence: bool, level: u64, count: usize, bytes: u64, last: &[u8]) -> bool {
+/// `bytes` packing bytes ends after its last item, keyed `last`, of
+/// `size` packing bytes.
+fn ends(sequence: bool, level: u64, count: usize, bytes: u64, size: u64, last: &[u8]) -> bool {
     let (cap, mean) = if level == 0 {
         (leaf_cap(sequence), KEYED_LEAF_ROWS)
     } else {
         (index_cap(sequence), INDEX_FANOUT)
     };
-    count >= cap
-        || bytes >= PAGE_TARGET_BYTES
-        || (!sequence && boundary_hash(level, last) & (mean - 1) == 0)
+    if count >= cap {
+        return true;
+    }
+    if sequence {
+        return bytes >= PAGE_TARGET_BYTES;
+    }
+    bytes >= HARD_BYTES || boundary_hash(level, last) <= weight(size, mean)
+}
+
+/// The boundary hash at or under which an item of `size` packing bytes
+/// ends its keyed chunk: a share `max(1 / mean, size / PAGE_TARGET_BYTES)`
+/// of the hash range.
+fn weight(size: u64, mean: u64) -> u64 {
+    if size.saturating_mul(mean) <= PAGE_TARGET_BYTES {
+        u64::MAX / mean
+    } else {
+        (u64::MAX / PAGE_TARGET_BYTES).saturating_mul(size)
+    }
 }
 
 /// A leaf row's packing bytes: its encoded row tokens.
@@ -91,7 +114,7 @@ pub(super) fn cut<I>(
         let (size, key) = measure(i, item);
         count += 1;
         bytes += size;
-        if i + 1 < items.len() && ends(sequence, level, count, bytes, key) {
+        if i + 1 < items.len() && ends(sequence, level, count, bytes, size, key) {
             cuts.push(i + 1);
             count = 0;
             bytes = 0;
@@ -111,11 +134,13 @@ pub(super) fn leaf_page<T: Cell>(rows: &[(Key, T)], sequence: bool) -> (Vec<u8>,
     let body = tokens.len();
     let mut chunk = !rows.is_empty();
     for (at, (key, cell)) in rows.iter().enumerate() {
+        let start = tokens.len();
         tokens.seq(2);
         key.encode(&mut tokens);
         cell.encode(&mut tokens);
         let bytes = (tokens.len() - body) as u64;
-        chunk &= ends(sequence, 0, at + 1, bytes, key.as_slice()) == (at + 1 == rows.len());
+        let size = (tokens.len() - start) as u64;
+        chunk &= ends(sequence, 0, at + 1, bytes, size, key.as_slice()) == (at + 1 == rows.len());
     }
     (tokens.into_bytes(), chunk)
 }
@@ -330,12 +355,14 @@ impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
         self.tokens.seq(2);
         key.encode(&mut self.tokens);
         cell.encode(&mut self.tokens);
-        self.leaf.bytes += (self.tokens.len() - start) as u64;
+        let size = (self.tokens.len() - start) as u64;
+        self.leaf.bytes += size;
         self.leaf.ended = ends(
             self.sequence,
             0,
             self.leaf.items.len() + 1,
             self.leaf.bytes,
+            size,
             key.as_slice(),
         );
         self.leaf.items.push((key, cell));
@@ -352,12 +379,14 @@ impl<'s, 'a, T: Cell> Builder<'s, 'a, T> {
         }
         let sequence = self.sequence;
         let open = &mut self.index[at];
-        open.bytes += entry_bytes(&branch.first);
+        let size = entry_bytes(&branch.first);
+        open.bytes += size;
         open.ended = ends(
             sequence,
             level,
             open.items.len() + 1,
             open.bytes,
+            size,
             branch.first.as_slice(),
         );
         open.items.push(branch);

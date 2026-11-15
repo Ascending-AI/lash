@@ -8,7 +8,7 @@ use lash_kernel_value::sites::Site;
 use lash_kernel_value::sites::Unit;
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
-use crate::{CellStart, End, Layout, Machine, Target};
+use crate::{CellStart, End, Machine, Target};
 
 fn list<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::List(items.to_vec())
@@ -169,11 +169,10 @@ fn an_uncaught_throw_preserves_collections_and_errors() {
 /// `finally` held names its `try`.
 #[test]
 fn an_uncaught_raise_names_the_document_site_that_raised_it() {
-    let site = |body: &str, layout: Layout, native_twice: bool| {
+    let site = |body: &str, native_twice: bool| {
         let mut run = Embedder::with(
             body,
             Setup {
-                layout,
                 native_twice,
                 ..Setup::default()
             },
@@ -208,20 +207,15 @@ fn an_uncaught_raise_names_the_document_site_that_raised_it() {
             main(&[1]),
         ),
     ] {
-        for layout in [Layout(0), Layout(1)] {
-            for native_twice in [true, false] {
-                let actual = site(body, layout, native_twice);
-                let expected = expected.clone().map(|site| match site.unit {
-                    Unit::Function(name) => {
-                        Site::new(super::embedder::function_unit(name.as_str()), site.path)
-                    }
-                    _ => site,
-                });
-                assert_eq!(
-                    actual, expected,
-                    "{body} in {layout:?}, native {native_twice}"
-                );
-            }
+        for native_twice in [true, false] {
+            let actual = site(body, native_twice);
+            let expected = expected.clone().map(|site| match site.unit {
+                Unit::Function(name) => {
+                    Site::new(super::embedder::function_unit(name.as_str()), site.path)
+                }
+                _ => site,
+            });
+            assert_eq!(actual, expected, "{body}, native {native_twice}");
         }
     }
 }
@@ -622,7 +616,10 @@ fn charges_follow_the_cost_table() {
             #[cfg(feature = "synthetic-next")]
             lash_kernel_doc::KernelVersion::SyntheticNext => 12,
         };
-        for limit in [expected - 1, expected, expected + 1] {
+        let test_price = (expected - 6) / 3;
+        // All limits after constructing the iterable distinguish a test
+        // billed atomically from two separately billed one-unit events.
+        for limit in 6..=expected + 1 {
             let mut embedder = Embedder::with(
                 "main { for x in (1, 2) { } }",
                 Setup {
@@ -635,7 +632,12 @@ fn charges_follow_the_cost_table() {
                 },
             );
             let end = embedder.run_to_end(&[]);
-            assert_eq!(embedder.machine.meters().charged, Some(expected));
+            let billed = if limit < expected {
+                6 + ((limit - 6) / test_price + 1) * test_price
+            } else {
+                expected
+            };
+            assert_eq!(embedder.machine.meters().charged, Some(billed));
             if limit < expected {
                 assert!(
                     matches!(

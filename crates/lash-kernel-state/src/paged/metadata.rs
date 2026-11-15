@@ -1,5 +1,5 @@
 //! Bounded semantic metadata; ancestry shares immutable parent nodes.
-use super::directory::ordinal_key;
+
 use super::payload::{build, visit};
 use super::tree::{Access, Cell, SealWork, Tree, grant};
 use super::{PageKind, SealBudget};
@@ -85,7 +85,7 @@ impl NameRef {
                 Name::new(self.text.body.resident().expect("resident text").to_owned())
             }
             TextPayload::Paged(page) => {
-                if let Some(name) = access.projected_name(**page, self.text.summary) {
+                if let Some(name) = access.projected_name(page.page, self.text.summary) {
                     return Ok(name);
                 }
                 let mut bytes = Vec::new();
@@ -108,7 +108,7 @@ impl NameRef {
         if name.as_str().len() <= IMMUTABLE_INLINE_MAX as usize {
             let _ = self.cached.set(name.clone());
         } else if let TextPayload::Paged(page) = &self.text.body {
-            access.retain_projected_name(**page, self.text.summary, &name);
+            access.retain_projected_name(page.page, self.text.summary, &name);
         }
         Ok(name)
     }
@@ -135,7 +135,7 @@ impl NameRef {
             return false;
         }
         match (&self.text.body, &other.text.body) {
-            (TextPayload::Paged(a), TextPayload::Paged(b)) => a.id == b.id,
+            (TextPayload::Paged(a), TextPayload::Paged(b)) => a.page.id == b.page.id,
             _ if self.text.body.resident().is_some() => {
                 self.text.body.resident() == other.text.body.resident()
             }
@@ -144,12 +144,12 @@ impl NameRef {
     }
     pub fn children(&self, out: &mut Vec<PageRef>) {
         if let TextPayload::Paged(page) = &self.text.body {
-            out.push(**page);
+            out.push(page.page);
         }
     }
     pub fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         if let TextPayload::Paged(page) = &mut self.text.body {
-            grant(Arc::make_mut(page), children)?;
+            grant(&mut Arc::make_mut(page).page, children)?;
         }
         Ok(())
     }
@@ -258,7 +258,7 @@ impl SiteRef {
         };
         let mut path = Tree::new(true);
         for (index, step) in site.path.iter().enumerate() {
-            path.write(ordinal_key(index as u64), *step, access)?;
+            path.write((index as u64).to_be_bytes(), *step, access)?;
         }
         path.seal_nested(access, &mut budget())?;
         let cached = OnceLock::new();

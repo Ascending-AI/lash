@@ -19,8 +19,8 @@ mod omission_null;
 mod omission_null_tests;
 mod typed_output;
 pub use typed_output::{
-    LASH_TYPE_KEY, OutputSchemaError, OutputSchemaLimits, SchemaScalarKind, parse_output_schema,
-    parse_output_schema_with_limits,
+    LASH_TYPE_KEY, LASH_TYPE_SCHEMA_DEFINITION, OutputSchemaError, OutputSchemaLimits,
+    SchemaScalarKind, declare_output_witness, parse_output_schema, parse_output_schema_with_limits,
 };
 
 mod ref_inline;

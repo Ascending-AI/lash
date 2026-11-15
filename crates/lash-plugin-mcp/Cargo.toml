@@ -66,7 +66,7 @@ libc = { workspace = true }
 [dev-dependencies]
 axum = "0.8"
 rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
-lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["testing", "codemode", "workflow-authoring", "rlm"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
 lash-core = { package = "lash-internal-core", path = "../lash-core", features = ["testing"] }
 tempfile = { workspace = true }

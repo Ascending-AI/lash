@@ -114,7 +114,7 @@ workflow-view = [
 ]
 # Editing a document (`lash::workflow::edit`, `lash::workflow::authoring`):
 # drafts, edits, transactions and authoring operations, over the view.
-workflow-authoring = ["dep:lash-dialect-conventions", "workflow-view", "dep:lash-kernel-edit"]
+workflow-authoring = ["dep:lash-dialect-conventions", "workflow-view", "dep:lash-kernel-edit", "dep:lash-kernel-dialect"]
 
 # The dialects a host's sessions and processes are written in, each off by
 # default: a host names the ones it runs, and there is no dialect it gets

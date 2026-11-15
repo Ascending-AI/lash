@@ -107,6 +107,17 @@ impl IdentifiedDocument {
         &self.body
     }
 
+    /// The document with `evidence` as its source evidence, which is outside
+    /// its identity: its body and identity stay as they are.
+    #[must_use]
+    pub fn with_source_evidence(
+        mut self,
+        evidence: std::collections::BTreeMap<crate::FunctionId, crate::SourceEvidence>,
+    ) -> Self {
+        Arc::make_mut(&mut self.document).source_evidence = evidence;
+        self
+    }
+
     /// The document, without cloning it when this is its only holder.
     #[must_use]
     pub fn into_document(self) -> Document {

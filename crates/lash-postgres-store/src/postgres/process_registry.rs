@@ -216,32 +216,59 @@ impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegi
         let initial_resolutions = prepared.initial_resolutions.clone();
         let (registration, observers, process_id, retained, now) = prepared.into_commit();
         let unprepared = registration.clone();
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        match apply_registration_tx(
-            &mut tx,
-            registration,
-            observers,
-            process_id,
-            retained,
-            now,
-            self.fence.fleet(),
-        )
-        .await?
-        {
-            AppliedRegistration::Created(record) => {
-                crate::durable::packages::register_process_execution(
+        // Every attempt applies the same prepared registration. Its
+        // environment's artifact locks seal the transaction, so contention
+        // rolls the attempt back and runs it again, under the store's retry
+        // policy and whole-operation deadline (FIG-7700).
+        let applied = crate::guarded_tx::retry_contended(&self.fence, || {
+            let registration = registration.clone();
+            let observers = observers.clone();
+            let process_id = process_id.clone();
+            async {
+                let mut tx = begin_guarded(&self.pool, &self.fence)
+                    .await
+                    .map_err(plugin_store_error)?;
+                let applied = apply_registration_tx(
                     &mut tx,
-                    &record.id,
-                    execution.as_ref(),
-                    &initial_resolutions,
+                    registration,
+                    observers,
+                    process_id,
+                    retained,
+                    now,
+                    self.fence.fleet(),
                 )
-                .await
-                .map_err(lash_execution_contracts::plugin_error::registry_error)?;
-                tx.commit().await.map_err(plugin_sqlx_error)?;
+                .await?;
+                match &applied {
+                    AppliedRegistration::Created(record) => {
+                        crate::durable::packages::register_process_execution(
+                            &mut tx,
+                            &record.id,
+                            execution.as_ref(),
+                            &initial_resolutions,
+                        )
+                        .await
+                        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                        tx.commit().await.map_err(plugin_sqlx_error)?;
+                    }
+                    AppliedRegistration::Retained { .. } => {
+                        tx.commit().await.map_err(plugin_sqlx_error)?;
+                    }
+                    // The rollback takes the staged row and the observer rows
+                    // with it, so the loser adds no event and no `change_seq`
+                    // of its own (ADR 0046), and the caller gets the
+                    // sequential answer — the winner's process.
+                    AppliedRegistration::LostRace { .. } => {
+                        tx.rollback().await.map_err(plugin_sqlx_error)?;
+                    }
+                }
+                Ok::<_, lash_execution_contracts::plugin_error::PluginError>(applied)
+            }
+        })
+        .await?;
+        match applied {
+            AppliedRegistration::Created(record) => {
                 // The process's actor committed ready: its node hears of it
-                // now, not at its claim poll (FIG-7044).
+                // now, not at its claim poll (FIG-7044), once.
                 if let Ok(actor) = lash_durable::ActorKey::process(record.id.as_str()) {
                     self.wakes.wake(&lash_durable::Woken {
                         actor,
@@ -252,16 +279,10 @@ impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegi
                 Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::created(record))
             }
             AppliedRegistration::Retained { record } => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
                 lash_execution_contracts::process::check_retained_start(&unprepared, &record)?;
                 Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::existing(record))
             }
-            // The rollback takes the staged row and the observer rows with
-            // it, so the loser adds no event and no `change_seq` of its own
-            // (ADR 0046), and the caller gets the sequential answer — the
-            // winner's process.
             AppliedRegistration::LostRace { winner } => {
-                tx.rollback().await.map_err(plugin_sqlx_error)?;
                 lash_execution_contracts::process::check_retained_start(&unprepared, &winner)?;
                 Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::existing(winner))
             }
@@ -928,6 +949,34 @@ impl lash_execution_contracts::process::ProcessRegistryTestSupport for PostgresP
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(receipts)
     }
+
+    async fn stored_event_sequences_for_testing(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(Option<u64>, Vec<u64>), PluginError> {
+        let packed: Option<i64> = sqlx::query_scalar(
+            "SELECT terminal_event_sequence FROM lash_processes WHERE process_id = $1",
+        )
+        .bind(process_id.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let rows: Vec<i64> = sqlx::query_scalar(
+            "SELECT sequence FROM lash_process_events WHERE process_id = $1 ORDER BY sequence",
+        )
+        .bind(process_id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let sequence = |value: i64| {
+            u64::try_from(value)
+                .map_err(|_| PluginError::Session(format!("a negative event sequence {value}")))
+        };
+        Ok((
+            packed.map(sequence).transpose()?,
+            rows.into_iter().map(sequence).collect::<Result<_, _>>()?,
+        ))
+    }
 }
 
 #[async_trait::async_trait]
@@ -947,8 +996,9 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
         .fetch_optional(crate::observed_sql::executor(&self.pool))
         .await
         .map_err(store_sqlx_error)?;
-        row.map(|row| row.try_get(0).map_err(store_sqlx_error))
+        row.map(|row| stored_environment_bytes(&row, 0, 1))
             .transpose()
+            .map(Option::flatten)
     }
 
     async fn process_authority(
@@ -966,7 +1016,7 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
             if let Some(record) = record {
                 let record = serde_json::from_str(&record)
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
-                Ok((record, row.get(1)))
+                Ok((record, stored_environment_bytes(&row, 1, 4)?))
             } else {
                 Err(StoreError::ProcessAuthorityPruned {
                     terminal_label: row.get(2),
@@ -977,4 +1027,22 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
         })
         .transpose()
     }
+}
+
+/// A missing head is absent; a stored head must splice into complete bytes.
+fn stored_environment_bytes(
+    row: &sqlx::postgres::PgRow,
+    bytes_at: usize,
+    head_at: usize,
+) -> Result<Option<Vec<u8>>, StoreError> {
+    if !row.try_get::<bool, _>(head_at).map_err(store_sqlx_error)? {
+        return Ok(None);
+    }
+    row.try_get::<Option<Vec<u8>>, _>(bytes_at)
+        .map_err(store_sqlx_error)?
+        .ok_or_else(|| StoreError::StoredDataCorrupt {
+            record_kind: "process environment",
+            message: "artifact points at a missing blob".into(),
+        })
+        .map(Some)
 }

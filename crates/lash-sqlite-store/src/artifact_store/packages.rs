@@ -3,12 +3,10 @@ use super::*;
 
 lash_store_sql::statements! {
     struct PackageReadStatements @ "package_reads_sqlite" {
-        /// An opaque package record and every referrer edge in one snapshot.
+        /// An opaque package record's body, and no referrer edge, so the
+        /// read does not grow with the record's referrers (FIG-7701).
         /// Package records have no graph children; documents use the node reader.
-        record = "SELECT body.content, body.encoding,
-                (SELECT json_group_array(json_array(edge.referrer_kind, edge.referrer_id))
-                 FROM artifact_referrer_edges AS edge
-                 WHERE edge.namespace = refs.namespace AND edge.artifact_ref = refs.artifact_ref)
+        record = "SELECT body.content, body.encoding
              FROM artifact_refs AS refs
              LEFT JOIN blobs AS body ON body.id = refs.blob_ref
              WHERE refs.namespace = ?1 AND refs.artifact_ref = ?2";
@@ -64,7 +62,9 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                 let wanted = serde_json::to_string(&references.keys().collect::<Vec<_>>())
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
                 let missing: std::collections::BTreeSet<String> = tx
-                    .statement(held::HELD_SQL.held.select_unheld.sql())?
+                    // Held means reached: through the referrer's own edges,
+                    // or what those artifacts hold (FIG-7700).
+                    .statement(held::HELD_SQL.held.select_unreached.sql())?
                     .query_map(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
@@ -91,23 +91,16 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         let referrer = referrer.clone();
         self.conn
             .call(move |tx| {
-                let held = tx
-                    .statement(
-                        artifact_sql()
-                            .edges
-                            .select_referrer_edges_in_namespace
-                            .sql(),
-                    )?
+                let held: bool = tx
+                    .statement(artifact_sql().dependencies.select_reaches_namespace.sql())?
                     .query_row(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
                             referrer.kind().as_str(),
                             referrer.canonical_id()
                         ],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
+                        |row| row.get(0),
+                    )?;
                 Ok(!held && artifact_fenced_tx(tx, &referrer)?)
             })
             .await
@@ -137,19 +130,17 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
                 let sql = lash_store_sql::durable::packages::PackageStatements::render(
                     crate::schema_layout::MAIN,
                 );
-                let held = tx
-                    .statement(sql.labels_held.sql())?
+                let held: bool = tx
+                    .statement(artifact_sql().dependencies.select_reaches.sql())?
                     .query_row(
                         params![
                             MODULE_ARTIFACT_NAMESPACE,
-                            reference,
                             referrer.kind().as_str(),
-                            referrer.canonical_id()
+                            referrer.canonical_id(),
+                            reference
                         ],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
+                        |row| row.get(0),
+                    )?;
                 if !held {
                     return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
                         artifact_ref: reference,
@@ -202,35 +193,36 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
         }
         let reference = reference.to_owned();
         self.read_connection()
+            .call(move |conn| package_record_conn(conn, &reference))
+            .await
+            .map_err(artifact_sqlite_error)
+            .map_err(Into::into)
+    }
+    async fn load_package_records(
+        &self,
+        references: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Vec<u8>>, lash_durable::DurableError> {
+        let wanted: Vec<String> = references
+            .iter()
+            .filter(|reference| {
+                lash_durable::packages::is_package_reference(reference)
+                    && crate::namespace::is_valid_opaque_key(reference)
+            })
+            .cloned()
+            .collect();
+        if wanted.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        // A record whose own read would answer otherwise is left to it.
+        self.read_connection()
             .call(move |conn| {
-                let stored: Option<(Option<Vec<u8>>, Option<i64>, String)> = conn
-                    .statement(PACKAGE_READ_SQL.record.sql())?
-                    .query_row(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
-                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok(wanted
+                    .into_iter()
+                    .filter_map(|reference| match package_record_conn(conn, &reference) {
+                        Ok(Some(bytes)) => Some((reference, bytes)),
+                        _ => None,
                     })
-                    .optional()?;
-                let Some((body, encoding, edges)) = stored else {
-                    return Ok(None);
-                };
-                let edges: Vec<(String, String)> =
-                    serde_json::from_str(&edges).map_err(|error| {
-                        sqlite_conversion_error(stored_data_corrupt(
-                            "package referrer edges",
-                            error,
-                        ))
-                    })?;
-                for (kind, id) in edges {
-                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
-                }
-                let body = body.filter(|_| encoding == Some(0)).ok_or_else(|| {
-                    sqlite_conversion_error(stored_data_corrupt(
-                        "package record",
-                        "missing opaque body",
-                    ))
-                })?;
-                crate::codec::decode_artifact_blob(&body)
-                    .map(Some)
-                    .map_err(sqlite_conversion_error)
+                    .collect())
             })
             .await
             .map_err(artifact_sqlite_error)
@@ -244,4 +236,26 @@ impl lash_durable::packages::PackageStorage for SqliteStore {
             .await
             .map_err(Into::into)
     }
+}
+
+/// An opaque package record's bytes.
+fn package_record_conn(
+    conn: &rusqlite::Connection,
+    reference: &str,
+) -> rusqlite::Result<Option<Vec<u8>>> {
+    let stored: Option<(Option<Vec<u8>>, Option<i64>)> = conn
+        .statement(PACKAGE_READ_SQL.record.sql())?
+        .query_row(params![MODULE_ARTIFACT_NAMESPACE, reference], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .optional()?;
+    let Some((body, encoding)) = stored else {
+        return Ok(None);
+    };
+    let body = body.filter(|_| encoding == Some(0)).ok_or_else(|| {
+        sqlite_conversion_error(stored_data_corrupt("package record", "missing opaque body"))
+    })?;
+    crate::codec::decode_artifact_blob(&body)
+        .map(Some)
+        .map_err(sqlite_conversion_error)
 }

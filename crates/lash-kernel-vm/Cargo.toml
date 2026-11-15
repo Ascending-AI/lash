@@ -36,7 +36,6 @@ lash-kernel-value = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-package = { workspace = true }
-lash-kernel-exec = { workspace = true }
 lash-kernel-state = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }

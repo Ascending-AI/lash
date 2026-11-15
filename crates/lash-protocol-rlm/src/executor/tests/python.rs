@@ -453,3 +453,30 @@ async fn builtin_shadowing_never_selects_a_static_fast_path() {
         );
     }
 }
+
+/// K-SES-001: a cell's added bindings are the names its source binds at
+/// module level. A name the lowering invents, such as a tuple target's
+/// temporary or a comprehension's renamed variable, is not one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cell_adds_only_the_names_its_source_binds() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = state();
+    let cell = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools),
+        &python_services(),
+        "pairs = [(1, 2)]\nfor a, b in pairs:\n    pass\ntotal = sum([x * 2 for x in pairs[0]])\nfirst, *rest = [1, 2, 3]",
+    )
+    .await;
+    assert!(cell.error().is_none(), "{:?}", cell.error());
+    assert_eq!(
+        *cell.bindings,
+        lash_core::BindingChanges {
+            added: ["a", "b", "first", "pairs", "rest", "total"]
+                .map(String::from)
+                .to_vec(),
+            ..Default::default()
+        }
+    );
+}

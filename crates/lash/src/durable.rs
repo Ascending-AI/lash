@@ -124,8 +124,8 @@ impl DurableBackendBuilder {
         if self.host_settings && self.overridden {
             return Err(DurableBuildError::SettingsOwnedByHost);
         }
-        #[cfg(feature = "codemode")]
-        let retired = self.retired_kernel_version();
+        #[cfg(all(feature = "codemode", feature = "synthetic-next"))]
+        let closing_window = self.closing_window;
         let surfaces = self.surfaces();
         let backend = Backend::assemble(BackendParts {
             stores: self.stores,
@@ -133,13 +133,16 @@ impl DurableBackendBuilder {
             engines: self.engines,
             formats: surfaces.clone(),
         })?;
-        // A build that retires the kernel version before its own does not
-        // decode what that version's build wrote, and its node does not
-        // start while a process or session is still in it.
-        #[cfg(feature = "codemode")]
-        let backend = match retired {
-            Some(kernel) => crate::kernel_migration::retiring(&backend, kernel),
-            None => backend,
+        // This build retires the sets the build deployed before it wrote: it
+        // does not decode them, and its node does not start while an
+        // unfinished actor is in one (ADR 0115 §8).
+        let backend = backend.retiring(&crate::formats::retired_build_surfaces(), None);
+        // The build after the synthetic successor closes the window that
+        // successor opened: it retires the kernel version before it.
+        #[cfg(all(feature = "codemode", feature = "synthetic-next"))]
+        let backend = match lash_vm_runtime::previous_kernel_version() {
+            Some(kernel) if closing_window => crate::kernel_migration::retiring(&backend, kernel),
+            _ => backend,
         };
         Ok(backend)
     }
@@ -151,17 +154,6 @@ impl DurableBackendBuilder {
             return crate::formats::previous_actor_state_surfaces();
         }
         crate::formats::actor_state_surfaces()
-    }
-
-    /// The kernel version this build no longer interprets, whose window is
-    /// closed.
-    #[cfg(feature = "codemode")]
-    fn retired_kernel_version(&self) -> Option<u32> {
-        #[cfg(feature = "synthetic-next")]
-        if self.closing_window {
-            return lash_vm_runtime::previous_kernel_version();
-        }
-        crate::kernel_migration::retired_kernel_version()
     }
 }
 

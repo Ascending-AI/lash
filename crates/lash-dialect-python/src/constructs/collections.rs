@@ -38,6 +38,7 @@ pub(crate) struct Comprehension<'a> {
     pub via: Option<&'a k::Protocol>,
     pub value: &'a Rhs,
     pub key: Option<&'a Expr>,
+    pub filters: Vec<&'a Expr>,
     pub collection: Collection,
     pub rest: &'a [Stmt],
 }
@@ -77,7 +78,23 @@ impl ComprehensionRecipe {
         if !else_block.is_empty() {
             return None;
         }
-        let (key, body) = match (collection, body.as_slice()) {
+        let mut body = body.as_slice();
+        let mut filters = Vec::new();
+        while let [
+            Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            },
+        ] = body
+        {
+            if !else_block.is_empty() {
+                return None;
+            }
+            filters.push(condition);
+            body = then_block;
+        }
+        let (key, body) = match (collection, body) {
             (Collection::List, body) => (None, body),
             (
                 _,
@@ -131,6 +148,7 @@ impl ComprehensionRecipe {
             via: via.as_ref(),
             value,
             key,
+            filters,
             collection,
             rest,
         })

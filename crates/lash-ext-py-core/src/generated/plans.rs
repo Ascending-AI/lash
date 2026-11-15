@@ -25,6 +25,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_UNPACK_STAR_PLAN,
     &PY_METHOD_ISDISJOINT_PLAN,
     &PY_SLICE_VALUE_PLAN,
+    &PY_GETATTR_PLAN,
     &PY_SETSLICE_PLAN,
     &PY_TYPE_NAME_PLAN,
     &PY_METHOD_CONJUGATE_PLAN,
@@ -34,7 +35,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_ZFILL_PLAN,
     &PY_NEG_PLAN,
     &PY_CALL_PLAN,
-    &PY_GETITEM_PLAN,
     &PY_TEXT_ALPHA_PLAN,
     &PY_MATH_REMAINDER_PLAN,
     &PY_MATCH_MAPPING_PLAN,
@@ -68,21 +68,18 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_JSON_DUMPS_PLAN,
     &PY_METHOD_TITLE_PLAN,
     &PY_FOR_IN_ITEMS_PLAN,
+    &PY_MODULE_JSON_PLAN,
     &PY_METHOD_EXTEND_PLAN,
-    &PY_METHOD_FORMAT_MAP_PLAN,
     &PY_SETITEM_PLAN,
     &PY_EXC_NAME_PLAN,
     &PY_FORMAT_PLAN,
     &PY_FORMAT_READ_COUNT_PLAN,
     &PY_SLICE_STEP_PLAN,
     &LIST_CLEAR_PLAN,
-    &PY_MODULE_MATH_PLAN,
     &PY_UNPACK_PLAN,
     &PY_FOR_IN_OPEN_PLAN,
     &BRAND_OF_PLAN,
     &PY_MATH_POW_PLAN,
-    &PY_PERCENT_PLAN,
-    &PY_HASATTR_PLAN,
     &PY_VALUE_ATTRIBUTE_PLAN,
     &PY_INDEX_PLAN,
     &PY_BYTES_TEXT_PLAN,
@@ -97,7 +94,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_MATH_ASINH_PLAN,
     &PY_TEXT_IDENTIFIER_CONTINUE_PLAN,
     &PY_FAIL_PLAN,
-    &PY_ATTRIBUTE_PLAN,
     &PY_MATH_LOG1P_PLAN,
     &PY_LENGTH_PLAN,
     &PY_POW_PLAN,
@@ -111,16 +107,16 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SAME_PLAN,
     &PY_MATCH_REST_PLAN,
     &PY_IADD_PLAN,
-    &PY_METHOD_TRANSLATE_PLAN,
     &PY_MATH_ISNAN_PLAN,
     &PY_TEXT_TITLECASE_PLAN,
     &PY_METHOD_RSPLIT_PLAN,
     &PY_FORMAT_EXPONENT_PLAN,
     &PY_FORMAT_SPEC_PLAN,
     &PY_FOR_IN_ITEM_PLAN,
-    &PY_DIVMOD_PLAN,
     &PY_JSON_DUMP_PLAN,
     &PY_MATH_FACTORIAL_PLAN,
+    &PY_ATTRIBUTE_PLAN,
+    &PY_MOD_PLAN,
     &PY_FOR_IN_VALUE_PLAN,
     &PY_METHOD_UPPER_PLAN,
     &PY_DICT_PLAN,
@@ -134,6 +130,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_CASE_PLAN,
     &PY_ISINSTANCE_PLAN,
     &PY_SEALED_PLAN,
+    &PY_TUPLE_GETITEM_PLAN,
     &PY_POW_MOD_PLAN,
     &PY_TEXT_PAD_PLAN,
     &PY_METHOD_CLEAR_PLAN,
@@ -159,7 +156,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_MATH_SQRT_PLAN,
     &PY_METHOD_INDEX_PLAN,
     &PY_METHOD_ISSUPERSET_PLAN,
-    &PY_MOD_PLAN,
     &PY_ROUND_PLAN,
     &PY_METHOD_SWAPCASE_PLAN,
     &PY_MATH_LOG2_PLAN,
@@ -167,7 +163,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_VARS_PLAN,
     &PY_KW_PUT_PLAN,
     &PY_METHOD_ISASCII_PLAN,
-    &PY_TYPE_VALUE_PLAN,
     &MAP_CLEAR_PLAN,
     &PY_FORMAT_PARSE_PLAN,
     &PY_MATH_ATAN_PLAN,
@@ -185,11 +180,12 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_PRINT_TEXT_PLAN,
     &PY_METHOD_ISDECIMAL_PLAN,
     &PY_MATH_NEXTAFTER_PLAN,
+    &PY_MODULE_MATH_PLAN,
     &PY_BIN_PLAN,
     &PY_TO_DICT_PLAN,
     &PY_METHOD_RFIND_PLAN,
-    &PY_METHOD_UNION_PLAN,
     &PY_LIST_GETITEM_PLAN,
+    &PY_METHOD_UNION_PLAN,
     &PY_METHOD_INTERSECTION_PLAN,
     &PY_TEXT_OF_PLAN,
     &PY_METHOD_ISSUBSET_PLAN,
@@ -201,9 +197,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TEXT_PREDICATE_PLAN,
     &PY_OPERAND_ERROR_PLAN,
     &PY_MAP_PLAN,
+    &PY_PERCENT_PLAN,
     &PY_METHOD_RPARTITION_PLAN,
     &PY_MATH_FLOOR_PLAN,
     &PY_METHOD_ISNUMERIC_PLAN,
+    &PY_DIVMOD_PLAN,
     &PY_TEXT_PARTITION_PLAN,
     &PY_TEXT_SIGMA_PLAN,
     &PY_METHOD_ADD_PLAN,
@@ -215,6 +213,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_EXC_MATCHES_PLAN,
     &PY_TOKEN_PLAN,
     &PY_REVERSED_PLAN,
+    &PY_NUMBER_FLOORDIV_PLAN,
     &PY_ITER_PLAN,
     &PY_METHOD_RJUST_PLAN,
     &PY_METHOD_INSERT_PLAN,
@@ -229,13 +228,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_EXC_CHECK_CAUSE_PLAN,
     &PY_METHOD_REMOVEPREFIX_PLAN,
     &PY_METHOD_GET_PLAN,
+    &PY_BIND_PLAN,
     &PY_SLICE_BOUNDS_PLAN,
     &PY_MATH_ISINF_PLAN,
     &PY_TEXT_REPR_PLAN,
     &PY_METHOD_KEYS_PLAN,
     &PY_FOR_IN_VALUES_PLAN,
     &PY_MATH_TRUNC_PLAN,
-    &PY_GETATTR_PLAN,
     &PY_JSON_LOADS_PLAN,
     &PY_METHOD_SYMMETRIC_DIFFERENCE_PLAN,
     &PY_TEXT_NUMERIC_PLAN,
@@ -244,6 +243,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SHOW_PLAN,
     &PY_METHOD_DIFFERENCE_PLAN,
     &PY_NUMBER_IADD_PLAN,
+    &PY_GETITEM_PLAN,
     &PY_SUB_PLAN,
     &PY_METHOD_COPY_PLAN,
     &PY_TO_LIST_PLAN,
@@ -254,9 +254,11 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_BYTES_ITEMS_PLAN,
     &PY_SLICE_PLAN,
     &PY_ADD_PLAN,
+    &PY_METHOD_TRANSLATE_PLAN,
     &SET_CLEAR_PLAN,
     &PY_MATH_ERFC_PLAN,
     &PY_EXTREME_PLAN,
+    &PY_NUMBER_MOD_PLAN,
     &PY_MATH_CBRT_PLAN,
     &PY_ARGS_APPEND_PLAN,
     &PY_DICT_EXTEND_PLAN,
@@ -274,11 +276,13 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_VALUES_PLAN,
     &PY_MATH_SIN_PLAN,
     &PY_MATH_LGAMMA_PLAN,
+    &PY_METHOD_FORMAT_PLAN,
     &PY_TEXT_DIGIT_PLAN,
     &PY_METHOD_ISPRINTABLE_PLAN,
     &PY_TEXT_SPLIT_PLAN,
     &PY_MATH_COSH_PLAN,
     &PY_DICT_GETITEM_PLAN,
+    &PY_HASATTR_PLAN,
     &PY_NAME_PLAN,
     &PY_ITERATOR_STEP_PLAN,
     &PY_INT_PLAN,
@@ -290,9 +294,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FOR_IN_CHECK_PLAN,
     &PY_LIST_SETITEM_PLAN,
     &PY_FLOAT_TEXT_PLAN,
-    &PY_METHOD_FORMAT_PLAN,
     &PY_ARGS_EXTEND_PLAN,
-    &PY_TUPLE_GETITEM_PLAN,
     &PY_MATH_ACOSH_PLAN,
     &COLLECTION_RANGE_PLAN,
     &PY_METHOD_CAPITALIZE_PLAN,
@@ -307,8 +309,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &LIST_INSERT_PLAN,
     &PY_RANGE_PLAN,
     &PY_CONTAINS_PLAN,
-    &PY_MODULE_JSON_PLAN,
-    &PY_BIND_PLAN,
+    &PY_NUMBER_TRUEDIV_PLAN,
     &PY_METHOD_POP_PLAN,
     &PY_BYTES_REPR_PLAN,
     &PY_METHOD_REMOVE_PLAN,
@@ -322,6 +323,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_TO_TUPLE_PLAN,
     &PY_FORMAT_ATTRIBUTE_PLAN,
     &PY_METHOD_ISDIGIT_PLAN,
+    &PY_TYPE_VALUE_PLAN,
     &PY_METHOD_BIT_COUNT_PLAN,
     &PY_TEXT_WHITESPACE_PLAN,
     &PY_REPLY_PLAN,
@@ -330,6 +332,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_METHOD_APPEND_PLAN,
     &PY_MATH_HYPOT_PLAN,
     &PY_SORTED_PLAN,
+    &PY_METHOD_FORMAT_MAP_PLAN,
     &PY_MATH_ATAN2_PLAN,
     &PY_METHOD_ISALNUM_PLAN,
     &PY_TEXT_IGNORABLE_PLAN,
@@ -6869,6 +6872,76 @@ fn py_mul(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
     Ok(ctx.take(0))
 }
 
+const PY_NUMBER_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.truediv",
+    function: p::function("db28f098c4f72c818b08be983b155bff8e4a43e9b8d9c43840c47eff3fe125f9"),
+    callees: &[
+        p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"),
+        p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
+        p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
+        p::function("b96f274d69ccc9d982a4064bbeae6b5f952fd8d1d4aaff8eabdfd112ebfc68ba"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("ZeroDivisionError"),
+        p::PlanLiteral::Text("division by zero"),
+        p::PlanLiteral::Text("float division by zero"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_truediv,
+    template: None,
+};
+
+/// `py.number.truediv`.
+fn py_number_truediv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
 const PY_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.truediv",
     function: p::function("8365ade18145fbd529c751c2580b3fc271e03a3d619d5753ff6c3f41c698dcc9"),
@@ -6966,6 +7039,76 @@ fn py_truediv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     Ok(ctx.take(0))
 }
 
+const PY_NUMBER_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.floordiv",
+    function: p::function("90c9670975db592ce0f9bb3f8169857934852c65805901f02a76cd305ce931ec"),
+    callees: &[
+        p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"),
+        p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
+        p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
+        p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("ZeroDivisionError"),
+        p::PlanLiteral::Text("integer division or modulo by zero"),
+        p::PlanLiteral::Text("float floor division by zero"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_floordiv,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"), ], heap: None, forwards: p::Forwards { floats: None, ints: Some(1), texts: None, identity: None } }),
+};
+
+/// `py.number.floordiv`.
+fn py_number_floordiv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
 const PY_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.floordiv",
     function: p::function("3b31bcd890cc9c278aeb855c3d2a07b7b589fd65c38be344c5e2d01577fc1094"),
@@ -7060,6 +7203,76 @@ fn py_floordiv(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.local(0, 0)?;
     ctx.local(1, 1)?;
     ctx.call(7, 0, 2)?;
+    Ok(ctx.take(0))
+}
+
+const PY_NUMBER_MOD_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.number.mod",
+    function: p::function("b4439b0b2b7203798525fc3fdf4a4b9ba16b2e8089a8e7e46142f48a3a892d05"),
+    callees: &[
+        p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"),
+        p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
+        p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
+        p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"),
+    ],
+    literals: &[
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("ZeroDivisionError"),
+        p::PlanLiteral::Text("integer modulo by zero"),
+        p::PlanLiteral::Text("float modulo"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "left", path: &[] },
+        p::PlanLocal { name: "right", path: &[] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_number_mod,
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), ], heap: None, forwards: p::Forwards { floats: None, ints: Some(1), texts: None, identity: None } }),
+};
+
+/// `py.number.mod`.
+fn py_number_mod(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.adopt(1, 1)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(0, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(1, 0, 1)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(1, 0, 1)?;
+            ctx.literal(1, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.literal(2, 0)?;
+                ctx.literal(3, 1)?;
+                ctx.call(3, 0, 2)?;
+            }
+        }
+        ctx.begin()?;
+        ctx.literal(2, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(3, 0, 2)?;
+    }
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.local(1, 1)?;
+    ctx.call(4, 0, 2)?;
     Ok(ctx.take(0))
 }
 
@@ -11848,10 +12061,11 @@ fn py_contains(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Pla
 
 const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getitem",
-    function: p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"),
+    function: p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
+        p::function("da55bc48ab9378d5c3b8f673647a242760eac9b44f5305b51a8d8fa6eb0a6f5a"),
         p::function("908b4e12ff07ed43c8d6dd7b2e7fb9767b5b730630f95298ac78f6e66b58a128"),
         p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
         p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"),
@@ -11861,7 +12075,6 @@ const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("30983f652e0065b06e4c79323510e906d9640d5c4503918a237fb813206abade"),
         p::function("45e1ade27a4fe7c9450d71dd8718539e5b3f0cd77475b4108f62c24ae5bbb673"),
         p::function("58710d2567c00e176b0640b9b6d5138484b8123d08dfd53a42d88cfc81b72bd9"),
-        p::function("da55bc48ab9378d5c3b8f673647a242760eac9b44f5305b51a8d8fa6eb0a6f5a"),
         p::function("32eacfc27d310f316a722dcd969531145bf4ca545c780fb6de06e38832b50292"),
         p::function("395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1"),
         p::function("6e9ee931768c0f4c5bde848ffbd908ebe1f1d2e029f5199fba47e7bdd7edf255"),
@@ -11872,6 +12085,7 @@ const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("5b4b849e6a6cf18d97f8d72a6a887d19dac1b28fe4f4da2c37fad1a05a79adb4"),
     ],
     literals: &[
+        p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("py.iterator"),
         p::PlanLiteral::Text("TypeError"),
@@ -11887,7 +12101,6 @@ const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Int("3"),
         p::PlanLiteral::Text("bytes"),
         p::PlanLiteral::Text(""),
-        p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("record"),
         p::PlanLiteral::Bool(true),
         p::PlanLiteral::Bool(false),
@@ -11906,29 +12119,29 @@ const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "target", path: &[] },
         p::PlanLocal { name: "index", path: &[] },
         p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "iterator_token", path: &[1, 1, 0] },
-        p::PlanLocal { name: "callable_token", path: &[1, 1, 2] },
-        p::PlanLocal { name: "slice_token", path: &[1, 1, 3] },
-        p::PlanLocal { name: "sliced", path: &[2, 1, 0, 1, 0, 1, 0] },
-        p::PlanLocal { name: "length", path: &[3, 1, 0] },
-        p::PlanLocal { name: "position", path: &[3, 1, 1] },
-        p::PlanLocal { name: "mapping", path: &[4] },
-        p::PlanLocal { name: "present", path: &[6, 1, 0] },
-        p::PlanLocal { name: "shown", path: &[6, 1, 3] },
-        p::PlanLocal { name: "hoisted10", path: &[7, 1, 0] },
-        p::PlanLocal { name: "position", path: &[7, 1, 1] },
-        p::PlanLocal { name: "hoisted11", path: &[8, 1, 0] },
+        p::PlanLocal { name: "iterator_token", path: &[2, 1, 0] },
+        p::PlanLocal { name: "callable_token", path: &[2, 1, 2] },
+        p::PlanLocal { name: "slice_token", path: &[2, 1, 3] },
+        p::PlanLocal { name: "sliced", path: &[3, 1, 0, 1, 0, 1, 0] },
+        p::PlanLocal { name: "length", path: &[4, 1, 0] },
+        p::PlanLocal { name: "position", path: &[4, 1, 1] },
+        p::PlanLocal { name: "mapping", path: &[5] },
+        p::PlanLocal { name: "present", path: &[7, 1, 0] },
+        p::PlanLocal { name: "shown", path: &[7, 1, 3] },
+        p::PlanLocal { name: "hoisted10", path: &[8, 1, 0] },
         p::PlanLocal { name: "position", path: &[8, 1, 1] },
-        p::PlanLocal { name: "hoisted12", path: &[9, 1, 0] },
+        p::PlanLocal { name: "hoisted11", path: &[9, 1, 0] },
         p::PlanLocal { name: "position", path: &[9, 1, 1] },
-        p::PlanLocal { name: "name", path: &[10] },
-        p::PlanLocal { name: "hoisted13", path: &[11] },
+        p::PlanLocal { name: "hoisted12", path: &[10, 1, 0] },
+        p::PlanLocal { name: "position", path: &[10, 1, 1] },
+        p::PlanLocal { name: "name", path: &[11] },
+        p::PlanLocal { name: "hoisted13", path: &[12] },
     ],
     closures: &[
     ],
     sites: &[
         p::PlanSite {
-            path: &[6, 1, 3, 0],
+            path: &[7, 1, 3, 0],
             call: p::SiteCall::Invoke(13),
             dst: 0,
             roles: &[],
@@ -11958,43 +12171,70 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.local(0, 0)?;
+            ctx.local(1, 0)?;
+            ctx.call(0, 0, 1)?;
             ctx.literal(1, 1)?;
-            ctx.call(2, 0, 2)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.local(0, 0)?;
+                ctx.local(1, 1)?;
+                ctx.call(2, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(0, 0)?;
+                    ctx.local(1, 1)?;
+                    ctx.index(0)?;
+                    return Ok(ctx.take(0));
+                }
+            }
+        }
+    }
+    if r == 0 {
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(3, 0, 2)?;
             ctx.bind(3, 0)?;
             ctx.begin()?;
             ctx.local(3, 0)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(2, 0)?;
-                ctx.literal(3, 1)?;
-                ctx.call(3, 0, 2)?;
+                ctx.literal(3, 0)?;
+                ctx.literal(4, 1)?;
+                ctx.call(4, 0, 2)?;
             }
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.literal(4, 1)?;
-            ctx.call(2, 0, 2)?;
+            ctx.literal(5, 1)?;
+            ctx.call(3, 0, 2)?;
             ctx.bind(4, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.literal(5, 1)?;
-            ctx.call(2, 0, 2)?;
+            ctx.literal(6, 1)?;
+            ctx.call(3, 0, 2)?;
             ctx.bind(5, 0)?;
             ctx.begin()?;
             ctx.local(4, 0)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(2, 0)?;
-                ctx.literal(6, 1)?;
-                ctx.call(3, 0, 2)?;
+                ctx.literal(3, 0)?;
+                ctx.literal(7, 1)?;
+                ctx.call(4, 0, 2)?;
             }
             ctx.begin()?;
             ctx.local(5, 0)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
-                ctx.literal(2, 0)?;
-                ctx.literal(7, 1)?;
-                ctx.call(3, 0, 2)?;
+                ctx.literal(3, 0)?;
+                ctx.literal(8, 1)?;
+                ctx.call(4, 0, 2)?;
             }
             ctx.unbind(5);
             ctx.unbind(4);
@@ -12005,34 +12245,34 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.call(0, 0, 1)?;
-        ctx.literal(0, 1)?;
+        ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(1, 0)?;
-            ctx.call(4, 0, 1)?;
-            ctx.literal(8, 1)?;
-            ctx.call(5, 0, 2)?;
+            ctx.call(5, 0, 1)?;
+            ctx.literal(9, 1)?;
+            ctx.call(6, 0, 2)?;
             if ctx.test(0, p::Test::If)? {
                 ctx.begin()?;
                 ctx.local(1, 0)?;
-                ctx.literal(9, 1)?;
+                ctx.literal(10, 1)?;
                 ctx.index(0)?;
-                ctx.literal(5, 1)?;
+                ctx.literal(6, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
                     ctx.local(1, 1)?;
-                    ctx.literal(10, 2)?;
+                    ctx.literal(11, 2)?;
                     ctx.index(1)?;
                     ctx.local(1, 2)?;
-                    ctx.literal(11, 3)?;
+                    ctx.literal(12, 3)?;
                     ctx.index(2)?;
                     ctx.local(1, 3)?;
-                    ctx.literal(12, 4)?;
+                    ctx.literal(13, 4)?;
                     ctx.index(3)?;
-                    ctx.call(6, 0, 4)?;
+                    ctx.call(7, 0, 4)?;
                     ctx.bind(6, 0)?;
                     ctx.begin()?;
                     ctx.local(6, 0)?;
@@ -12044,31 +12284,31 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(13, 1)?;
+        ctx.literal(14, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(7, 0, 1)?;
+            ctx.call(8, 0, 1)?;
             ctx.bind(7, 0)?;
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.local(7, 1)?;
-            ctx.literal(13, 2)?;
-            ctx.literal(14, 3)?;
-            ctx.call(8, 0, 4)?;
+            ctx.literal(14, 2)?;
+            ctx.literal(15, 3)?;
+            ctx.call(9, 0, 4)?;
             ctx.bind(8, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
             ctx.local(8, 1)?;
-            ctx.call(9, 0, 2)?;
+            ctx.call(10, 0, 2)?;
             return Ok(ctx.take(0));
         }
     }
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(15, 1)?;
+        ctx.literal(0, 1)?;
         ctx.call(1, 0, 2)?;
         ctx.bind(9, 0)?;
     }
@@ -12080,7 +12320,7 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(10, 0, 1)?;
+            ctx.call(11, 0, 1)?;
             if ctx.test(0, p::Test::If)? {
             } else {
                 ctx.begin()?;
@@ -12104,13 +12344,13 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             if r == 0 {
                 ctx.begin()?;
                 ctx.local(2, 0)?;
-                ctx.literal(15, 1)?;
+                ctx.literal(0, 1)?;
                 ctx.call(1, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.begin()?;
                     ctx.local(0, 0)?;
                     ctx.local(1, 1)?;
-                    ctx.call(11, 0, 2)?;
+                    ctx.call(2, 0, 2)?;
                     ctx.assign(10, 0)?;
                 } else {
                     ctx.begin()?;
@@ -12171,8 +12411,8 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             ctx.local(1, 0)?;
             ctx.local(12, 1)?;
             ctx.literal(22, 2)?;
-            ctx.literal(14, 3)?;
-            ctx.call(8, 0, 4)?;
+            ctx.literal(15, 3)?;
+            ctx.call(9, 0, 4)?;
             ctx.bind(13, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
@@ -12184,19 +12424,19 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(0, 1)?;
+        ctx.literal(1, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
             ctx.local(0, 0)?;
-            ctx.call(4, 0, 1)?;
+            ctx.call(5, 0, 1)?;
             ctx.bind(14, 0)?;
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.local(14, 1)?;
-            ctx.literal(0, 2)?;
-            ctx.literal(14, 3)?;
-            ctx.call(8, 0, 4)?;
+            ctx.literal(1, 2)?;
+            ctx.literal(15, 3)?;
+            ctx.call(9, 0, 4)?;
             ctx.bind(15, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
@@ -12219,8 +12459,8 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             ctx.local(1, 0)?;
             ctx.local(16, 1)?;
             ctx.literal(23, 2)?;
-            ctx.literal(14, 3)?;
-            ctx.call(8, 0, 4)?;
+            ctx.literal(15, 3)?;
+            ctx.call(9, 0, 4)?;
             ctx.bind(17, 0)?;
             ctx.begin()?;
             ctx.local(0, 0)?;
@@ -12241,15 +12481,15 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         ctx.local(18, 1)?;
         ctx.literal(25, 2)?;
         ctx.list(0, 3)?;
-        ctx.literal(14, 1)?;
+        ctx.literal(15, 1)?;
         ctx.call(19, 0, 2)?;
         ctx.bind(19, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(2, 0)?;
+        ctx.literal(3, 0)?;
         ctx.local(19, 1)?;
-        ctx.call(3, 0, 2)?;
+        ctx.call(4, 0, 2)?;
     }
     if r == 0 {
         ctx.begin()?;
@@ -12265,12 +12505,12 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 
 const PY_LIST_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.list_getitem",
-    function: p::function("7f6dead6140534c052bec7fd8b5b0a597100aaef33f580a6b5a1836e932a8e9f"),
+    function: p::function("7e9daa007a0ce4512613a76f306b6d1565c542da58cf2cb03f087b7d6a7fd6ba"),
     callees: &[
         p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"),
         p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
         p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"),
-        p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"),
+        p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -12295,7 +12535,7 @@ const PY_LIST_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_list_getitem,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::ReadInt, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), fact: p::NativeFact::IntegerPair(lash_kernel_doc::scalar::ScalarOp::Le) },p::NativeRequirement { function: p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), fact: p::NativeFact::IntegerPair(lash_kernel_doc::scalar::ScalarOp::Lt) },] }), record_write: None, callees: &[p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: Some(p::ElementPath { operation: p::Element::ReadInt, depth: 2, room: 2, requires: &[p::NativeRequirement { function: p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), fact: p::NativeFact::IntegerPair(lash_kernel_doc::scalar::ScalarOp::Le) },p::NativeRequirement { function: p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), fact: p::NativeFact::IntegerPair(lash_kernel_doc::scalar::ScalarOp::Lt) },] }), record_write: None, callees: &[p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `py.list_getitem`.
@@ -12343,12 +12583,12 @@ fn py_list_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p:
 
 const PY_TUPLE_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.tuple_getitem",
-    function: p::function("cf8603da7a642649b4e38e555c42468444ef38bd21507a3c48f6aeb4983a60f7"),
+    function: p::function("598ab0400ca8879e9919baa55dc5bc57013e845a519e87f7e9923eca74a94578"),
     callees: &[
         p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"),
         p::function("76b207258f4db9e5b389f80eac252362bf993339c4a5c8f45af4e50bbedb6927"),
         p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"),
-        p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"),
+        p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -12373,7 +12613,7 @@ const PY_TUPLE_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_tuple_getitem,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("7666ab5584ff6923c18a9e021caf9acaa07bb2d6fef6759d251247a0c37fe63e"), p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `py.tuple_getitem`.
@@ -15364,7 +15604,7 @@ fn py_kw_extend(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
 
 const PY_BIND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.bind",
-    function: p::function("ddacf6d00c7a3e010bce65245e6b875ca68b8fa235639dae18cf8010c6f465ec"),
+    function: p::function("9b167dd5e036923cc5c0347482914a43312ab693def49516c3f9c75979093a6b"),
     callees: &[
         p::function("14522f92ae87ad59a5af2bf56300daeca2ca943e7547367afb1529b638cdcd6b"),
         p::function("d3ac1889f701821910fe4014b3f1384d007debfb9c62035742528324d74aa7e4"),
@@ -15376,13 +15616,14 @@ const PY_BIND_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
         p::function("7e4093890155165cb9b59b889c5818b9ff79346da20208dd6d11db10f09833f3"),
         p::function("ec31630535a9f5b261ef85e0cb440f2e51d91bfc807ae3817833ce99061f8bbf"),
+        p::function("e877fa9a089bfeb44bb065d4e70400545a78558ebe5775fd287214201f3a8851"),
         p::function("694bd4bf8994d12f0a599c280a59e08a3ade8bdbc5d60f3f647155bafd75c926"),
         p::function("da01d33037d73b0e344334f78f1d4fd6ad44b1fe71259066df83744164ddbc9f"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
-        p::PlanLiteral::Bool(false),
         p::PlanLiteral::Absent,
+        p::PlanLiteral::Bool(false),
         p::PlanLiteral::Int("1"),
         p::PlanLiteral::Int("2"),
         p::PlanLiteral::Text("TypeError"),
@@ -15417,9 +15658,9 @@ const PY_BIND_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "mode", path: &[5, 1, 2] },
         p::PlanLocal { name: "rest", path: &[5, 1, 3, 2, 0, 2, 0, 1, 1] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "key", path: &[5, 1, 3, 2, 0, 2, 0, 2, 0, 1, 2, 1] },
+        p::PlanLocal { name: "key", path: &[5, 1, 3, 2, 0, 2, 0, 2, 0, 1, 2, 1, 0, 1] },
         p::PlanLocal { name: "", path: &[] },
-        p::PlanLocal { name: "key", path: &[7, 1, 0, 1] },
+        p::PlanLocal { name: "key", path: &[7, 1, 0, 1, 0, 1] },
     ],
     closures: &[
     ],
@@ -15464,22 +15705,21 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
         ctx.charge(p::FormCharge::Statement)?;
         ctx.begin()?;
         ctx.charge(p::FormCharge::Expression)?;
-        ctx.charge(p::FormCharge::Construction(0))?;
-        ctx.map(0, 0)?;
+        ctx.literal(1, 0)?;
         ctx.bind(7, 0)?;
     }
     if r == 0 {
         ctx.charge(p::FormCharge::Statement)?;
         ctx.begin()?;
         ctx.charge(p::FormCharge::Expression)?;
-        ctx.literal(1, 0)?;
+        ctx.literal(2, 0)?;
         ctx.bind(8, 0)?;
     }
     if r == 0 {
         ctx.charge(p::FormCharge::Statement)?;
         ctx.begin()?;
         ctx.charge(p::FormCharge::Expression)?;
-        ctx.literal(1, 0)?;
+        ctx.literal(2, 0)?;
         ctx.bind(9, 0)?;
     }
     if r == 0 || matches!(r, 1) {
@@ -15497,7 +15737,7 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                 ctx.charge(p::FormCharge::Statement)?;
                 ctx.begin()?;
                 ctx.charge(p::FormCharge::Expression)?;
-                ctx.literal(2, 0)?;
+                ctx.literal(1, 0)?;
                 ctx.bind(12, 0)?;
             }
             if r == 0 {
@@ -15593,7 +15833,7 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                                 ctx.charge(p::FormCharge::Expression)?;
                                 ctx.local(12, 0)?;
                                 ctx.charge(p::FormCharge::Expression)?;
-                                ctx.literal(2, 1)?;
+                                ctx.literal(1, 1)?;
                                 ctx.call(3, 0, 2)?;
                                 ctx.call(5, 0, 1)?;
                                 if ctx.test(0, p::Test::If)? {
@@ -15626,6 +15866,22 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                                 ctx.local(13, 1)?;
                                 ctx.index(0)?;
                                 ctx.assign(12, 0)?;
+                                ctx.charge(p::FormCharge::Statement)?;
+                                ctx.begin()?;
+                                ctx.charge(p::FormCharge::Expression)?;
+                                ctx.charge(p::FormCharge::Expression)?;
+                                ctx.local(7, 0)?;
+                                ctx.charge(p::FormCharge::Expression)?;
+                                ctx.literal(1, 1)?;
+                                ctx.call(3, 0, 2)?;
+                                if ctx.test(0, p::Test::If)? {
+                                    ctx.charge(p::FormCharge::Statement)?;
+                                    ctx.begin()?;
+                                    ctx.charge(p::FormCharge::Expression)?;
+                                    ctx.charge(p::FormCharge::Construction(0))?;
+                                    ctx.map(0, 0)?;
+                                    ctx.assign(7, 0)?;
+                                }
                                 ctx.charge(p::FormCharge::Statement)?;
                                 ctx.begin()?;
                                 ctx.charge(p::FormCharge::Expression)?;
@@ -15672,6 +15928,22 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                                     ctx.local(13, 1)?;
                                     ctx.index(0)?;
                                     ctx.assign(12, 0)?;
+                                    ctx.charge(p::FormCharge::Statement)?;
+                                    ctx.begin()?;
+                                    ctx.charge(p::FormCharge::Expression)?;
+                                    ctx.charge(p::FormCharge::Expression)?;
+                                    ctx.local(7, 0)?;
+                                    ctx.charge(p::FormCharge::Expression)?;
+                                    ctx.literal(1, 1)?;
+                                    ctx.call(3, 0, 2)?;
+                                    if ctx.test(0, p::Test::If)? {
+                                        ctx.charge(p::FormCharge::Statement)?;
+                                        ctx.begin()?;
+                                        ctx.charge(p::FormCharge::Expression)?;
+                                        ctx.charge(p::FormCharge::Construction(0))?;
+                                        ctx.map(0, 0)?;
+                                        ctx.assign(7, 0)?;
+                                    }
                                     ctx.charge(p::FormCharge::Statement)?;
                                     ctx.begin()?;
                                     ctx.charge(p::FormCharge::Expression)?;
@@ -15755,46 +16027,70 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                                             ctx.begin()?;
                                             ctx.charge(p::FormCharge::Expression)?;
                                             ctx.charge(p::FormCharge::Expression)?;
-                                            ctx.local(3, 0)?;
-                                            ctx.call(10, 0, 1)?;
-                                            let c1 = ctx.open(0, 16)?;
-                                            'l1: loop {
-                                                ctx.charge(p::FormCharge::LoopTest)?;
-                                                ctx.meter(2)?;
-                                                if !ctx.next(c1, 0)? {
-                                                    break 'l1;
-                                                }
-                                                ctx.bind(17, 0)?;
+                                            ctx.literal(0, 0)?;
+                                            ctx.charge(p::FormCharge::Expression)?;
+                                            ctx.charge(p::FormCharge::Expression)?;
+                                            ctx.local(3, 1)?;
+                                            ctx.call(10, 1, 1)?;
+                                            ctx.call(0, 0, 2)?;
+                                            if ctx.test(0, p::Test::If)? {
                                                 ctx.charge(p::FormCharge::Statement)?;
                                                 ctx.begin()?;
                                                 ctx.charge(p::FormCharge::Expression)?;
                                                 ctx.charge(p::FormCharge::Expression)?;
-                                                ctx.charge(p::FormCharge::Expression)?;
-                                                ctx.local(7, 0)?;
-                                                ctx.charge(p::FormCharge::Expression)?;
-                                                ctx.local(17, 1)?;
-                                                ctx.call(4, 0, 2)?;
-                                                ctx.call(5, 0, 1)?;
-                                                if ctx.test(0, p::Test::If)? {
+                                                ctx.local(3, 0)?;
+                                                ctx.call(11, 0, 1)?;
+                                                let c1 = ctx.open(0, 16)?;
+                                                'l1: loop {
+                                                    ctx.charge(p::FormCharge::LoopTest)?;
+                                                    ctx.meter(2)?;
+                                                    if !ctx.next(c1, 0)? {
+                                                        break 'l1;
+                                                    }
+                                                    ctx.bind(17, 0)?;
                                                     ctx.charge(p::FormCharge::Statement)?;
                                                     ctx.begin()?;
                                                     ctx.charge(p::FormCharge::Expression)?;
                                                     ctx.charge(p::FormCharge::Expression)?;
-                                                    ctx.local(3, 0)?;
                                                     ctx.charge(p::FormCharge::Expression)?;
-                                                    ctx.local(17, 1)?;
-                                                    ctx.index(0)?;
-                                                    ctx.pin(0)?;
+                                                    ctx.local(7, 0)?;
                                                     ctx.charge(p::FormCharge::Expression)?;
-                                                    ctx.local(12, 1)?;
-                                                    ctx.charge(p::FormCharge::Expression)?;
-                                                    ctx.local(17, 2)?;
-                                                    ctx.set_index(1, 0)?;
+                                                    ctx.literal(1, 1)?;
+                                                    ctx.call(3, 0, 2)?;
+                                                    if ctx.test(0, p::Test::If)? {
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.literal(9, 0)?;
+                                                    } else {
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.local(7, 0)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.local(17, 1)?;
+                                                        ctx.call(4, 0, 2)?;
+                                                        ctx.call(5, 0, 1)?;
+                                                    }
+                                                    if ctx.test(0, p::Test::If)? {
+                                                        ctx.charge(p::FormCharge::Statement)?;
+                                                        ctx.begin()?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.local(3, 0)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.local(17, 1)?;
+                                                        ctx.index(0)?;
+                                                        ctx.pin(0)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.local(12, 1)?;
+                                                        ctx.charge(p::FormCharge::Expression)?;
+                                                        ctx.local(17, 2)?;
+                                                        ctx.set_index(1, 0)?;
+                                                    }
+                                                    ctx.unbind(17);
+                                                    ctx.begin()?;
                                                 }
-                                                ctx.unbind(17);
-                                                ctx.begin()?;
+                                                ctx.close(c1);
                                             }
-                                            ctx.close(c1);
                                         }
                                     }
                                 }
@@ -15810,7 +16106,7 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                 ctx.charge(p::FormCharge::Expression)?;
                 ctx.local(12, 0)?;
                 ctx.charge(p::FormCharge::Expression)?;
-                ctx.literal(2, 1)?;
+                ctx.literal(1, 1)?;
                 ctx.call(3, 0, 2)?;
                 if ctx.test(0, p::Test::If)? {
                     ctx.charge(p::FormCharge::Statement)?;
@@ -15841,7 +16137,7 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
                             ctx.local(0, 1)?;
                             ctx.charge(p::FormCharge::Expression)?;
                             ctx.literal(12, 2)?;
-                            ctx.call(11, 1, 2)?;
+                            ctx.call(12, 1, 2)?;
                             ctx.call(7, 0, 2)?;
                         }
                     }
@@ -15911,51 +16207,75 @@ fn py_bind(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
             ctx.begin()?;
             ctx.charge(p::FormCharge::Expression)?;
             ctx.charge(p::FormCharge::Expression)?;
-            ctx.local(3, 0)?;
-            ctx.call(10, 0, 1)?;
-            let c0 = ctx.open(0, 18)?;
-            'l0: loop {
-                ctx.charge(p::FormCharge::LoopTest)?;
-                ctx.meter(2)?;
-                if !ctx.next(c0, 0)? {
-                    break 'l0;
-                }
-                ctx.bind(19, 0)?;
+            ctx.literal(0, 0)?;
+            ctx.charge(p::FormCharge::Expression)?;
+            ctx.charge(p::FormCharge::Expression)?;
+            ctx.local(3, 1)?;
+            ctx.call(10, 1, 1)?;
+            ctx.call(0, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
                 ctx.charge(p::FormCharge::Statement)?;
                 ctx.begin()?;
                 ctx.charge(p::FormCharge::Expression)?;
                 ctx.charge(p::FormCharge::Expression)?;
-                ctx.charge(p::FormCharge::Expression)?;
-                ctx.local(7, 0)?;
-                ctx.charge(p::FormCharge::Expression)?;
-                ctx.local(19, 1)?;
-                ctx.call(4, 0, 2)?;
-                ctx.call(5, 0, 1)?;
-                if ctx.test(0, p::Test::If)? {
+                ctx.local(3, 0)?;
+                ctx.call(11, 0, 1)?;
+                let c0 = ctx.open(0, 18)?;
+                'l0: loop {
+                    ctx.charge(p::FormCharge::LoopTest)?;
+                    ctx.meter(2)?;
+                    if !ctx.next(c0, 0)? {
+                        break 'l0;
+                    }
+                    ctx.bind(19, 0)?;
                     ctx.charge(p::FormCharge::Statement)?;
                     ctx.begin()?;
                     ctx.charge(p::FormCharge::Expression)?;
                     ctx.charge(p::FormCharge::Expression)?;
-                    ctx.literal(5, 0)?;
                     ctx.charge(p::FormCharge::Expression)?;
+                    ctx.local(7, 0)?;
                     ctx.charge(p::FormCharge::Expression)?;
-                    ctx.charge(p::FormCharge::Expression)?;
-                    ctx.literal(14, 1)?;
-                    ctx.charge(p::FormCharge::Expression)?;
-                    ctx.local(19, 2)?;
-                    ctx.charge(p::FormCharge::Expression)?;
-                    ctx.literal(7, 3)?;
-                    ctx.charge(p::FormCharge::Construction(3))?;
-                    ctx.list(1, 3)?;
-                    ctx.charge(p::FormCharge::Expression)?;
-                    ctx.literal(8, 2)?;
-                    ctx.call(6, 1, 2)?;
-                    ctx.call(7, 0, 2)?;
+                    ctx.literal(1, 1)?;
+                    ctx.call(3, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.literal(9, 0)?;
+                    } else {
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.local(7, 0)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.local(19, 1)?;
+                        ctx.call(4, 0, 2)?;
+                        ctx.call(5, 0, 1)?;
+                    }
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.charge(p::FormCharge::Statement)?;
+                        ctx.begin()?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.literal(5, 0)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.literal(14, 1)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.local(19, 2)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.literal(7, 3)?;
+                        ctx.charge(p::FormCharge::Construction(3))?;
+                        ctx.list(1, 3)?;
+                        ctx.charge(p::FormCharge::Expression)?;
+                        ctx.literal(8, 2)?;
+                        ctx.call(6, 1, 2)?;
+                        ctx.call(7, 0, 2)?;
+                    }
+                    ctx.unbind(19);
+                    ctx.begin()?;
                 }
-                ctx.unbind(19);
-                ctx.begin()?;
+                ctx.close(c0);
             }
-            ctx.close(c0);
         }
     }
     if r == 0 {
@@ -34231,11 +34551,11 @@ fn py_method_conjugate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
 
 const PY_METHOD_TRANSLATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.translate",
-    function: p::function("40daef9d0e1d65bdacd1bda24abd432daa30de218a0615553f25cd74db33c7d8"),
+    function: p::function("b1b6203a3fb442c8ad311d211fe6405a28bba2f564c5b7153b9d233ca6b9e8fa"),
     callees: &[
         p::function("802c685a7e1c28c27af9285e8e58d82cb856217712668f8d1df88a12d6ed05c5"),
         p::function("a12a172f7a664721b2a0c87c4b149aede97c1f09639f10e4ca0ff018ebe92a46"),
-        p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"),
+        p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"),
         p::function("2149f1fec2600c9c1022d9d4bd259a24d57094284553fc228fa9a8b32f84b267"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
         p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),
@@ -38899,7 +39219,7 @@ fn py_format_spec(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const PY_PERCENT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.percent",
-    function: p::function("2ade3ced9e11d4f14c651c30ec2e0dc0302924ff3328a578e3eab958d35ff345"),
+    function: p::function("85cce7c79c46573de278b4c7203d8471c8d4159c9570ec977ad30961475961e6"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
@@ -38918,7 +39238,7 @@ const PY_PERCENT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("f2a97fd0f49d77b077378e267a95572faf0718aa49258406dbe3b5f32f68fa21"),
         p::function("25a633f333cdfddf775308348d8d44fae2d5c4266af5ba8629283cb1d595ec06"),
         p::function("ccc421c1d760ed15c04062bf0fcb00987da56c0374eb8f7a6c3ad7089c5039de"),
-        p::function("0df5aa6c0c5f27f2a20bfcaf2f49cab8ea9a3d7720f8eeb75311d3a64f9cd3d4"),
+        p::function("a7e943bbd523ecba99d0d2fe08e942231d58d98b1930a0108c624bbc201085ad"),
         p::function("bb5ce3f1d3a63246ea4d1795996ce341e86efb987bb1193178859d7680be896b"),
         p::function("395d658a4d5e27cdf57fe865cbce90db97ac6cdf0a03fe8fd1c4533b5c2a3fe1"),
         p::function("62947bdae2724873911778aaaaed3a38d41ebe1213bea6e394e10c56edd05a95"),
@@ -40227,11 +40547,11 @@ fn py_percent(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 
 const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mod",
-    function: p::function("6ac0b7baaaf2b6fc921beb7f9a8bb3c8fb35826e5009e40b4fda2fe0cf9826b6"),
+    function: p::function("4f6839988a6903b834842a5314820205786b560776ce4d0ed79002be2ffbb239"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
-        p::function("2ade3ced9e11d4f14c651c30ec2e0dc0302924ff3328a578e3eab958d35ff345"),
+        p::function("85cce7c79c46573de278b4c7203d8471c8d4159c9570ec977ad30961475961e6"),
         p::function("81727539ca94c0e9484a4358dafa4fc2b09288c564e164a768d94accb8089468"),
         p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),
         p::function("84707a79df12b82390756e599b034235c85c10d87fda73b56cd4c58abaee2e94"),
@@ -40269,7 +40589,7 @@ const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_mod,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("81727539ca94c0e9484a4358dafa4fc2b09288c564e164a768d94accb8089468"), p::function("2ade3ced9e11d4f14c651c30ec2e0dc0302924ff3328a578e3eab958d35ff345"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ] }), forwards: p::Forwards { floats: None, ints: Some(1), texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 2, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("81727539ca94c0e9484a4358dafa4fc2b09288c564e164a768d94accb8089468"), p::function("85cce7c79c46573de278b4c7203d8471c8d4159c9570ec977ad30961475961e6"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), ] }), forwards: p::Forwards { floats: None, ints: Some(1), texts: None, identity: None } }),
 };
 
 /// `py.mod`.
@@ -40374,10 +40694,10 @@ fn py_mod(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExit
 
 const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.divmod",
-    function: p::function("4d5b049c8d4e20a0ba5298307e6e14a5ca7afdd5f0a3a40b2b6169ef4b20624c"),
+    function: p::function("8726564ece73f31e89f0f1b7139f34eb72ab8aecc2bf81762d0890b575388690"),
     callees: &[
         p::function("3b31bcd890cc9c278aeb855c3d2a07b7b589fd65c38be344c5e2d01577fc1094"),
-        p::function("6ac0b7baaaf2b6fc921beb7f9a8bb3c8fb35826e5009e40b4fda2fe0cf9826b6"),
+        p::function("4f6839988a6903b834842a5314820205786b560776ce4d0ed79002be2ffbb239"),
     ],
     literals: &[],
     fields: &[],
@@ -40402,7 +40722,7 @@ const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_divmod,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("3b31bcd890cc9c278aeb855c3d2a07b7b589fd65c38be344c5e2d01577fc1094"), p::function("6ac0b7baaaf2b6fc921beb7f9a8bb3c8fb35826e5009e40b4fda2fe0cf9826b6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[p::function("4755c96339d2708255e9ea5b4cf46dcdd425cf575734cb206a2e915943b43153"), p::function("d0eb1383f284522c3b53569ea87675c73bca1816115fb1d3d49486a9643ec7af"), p::function("d3d17259cf801a9129b03a38c97dcfce11a7747e1b2c355c5228569367634869"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("3b31bcd890cc9c278aeb855c3d2a07b7b589fd65c38be344c5e2d01577fc1094"), p::function("4f6839988a6903b834842a5314820205786b560776ce4d0ed79002be2ffbb239"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `py.divmod`.
@@ -42132,7 +42452,7 @@ fn py_type_construct(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, 
 
 const PY_TYPE_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.type.value",
-    function: p::function("6f1d03bd22c0be06b258e97830bca34dd701adee8b91195afa0213f062a80d45"),
+    function: p::function("eca61842f5238a2abe9be617f82a3bc97500bc951c9c07add3527ebd31f47f7f"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Absent,
@@ -43879,7 +44199,7 @@ fn py_format_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Valu
 
 const PY_METHOD_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.format",
-    function: p::function("ce096affdd73b2ffbd330c3d3f659849a0c9b67e44a1aadc1dfab6123761f788"),
+    function: p::function("c1f10f3ee103f6880a497053df8e0604a53bf2918f2c9ee618d975367814ef95"),
     callees: &[
         p::function("802c685a7e1c28c27af9285e8e58d82cb856217712668f8d1df88a12d6ed05c5"),
     ],
@@ -43978,13 +44298,13 @@ fn py_method_format(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const PY_METHOD_FORMAT_MAP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.format_map",
-    function: p::function("205acaf8adb199ff3956a3015b8bbff7a7770677659385d45e04820450a5295b"),
+    function: p::function("f53bd1953327123b97c426b7ee1875cfb8a6c3ae22b2bf1b83089902d15d4a76"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
         p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),
         p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
-        p::function("ce096affdd73b2ffbd330c3d3f659849a0c9b67e44a1aadc1dfab6123761f788"),
+        p::function("c1f10f3ee103f6880a497053df8e0604a53bf2918f2c9ee618d975367814ef95"),
         p::function("2149f1fec2600c9c1022d9d4bd259a24d57094284553fc228fa9a8b32f84b267"),
     ],
     literals: &[
@@ -44018,7 +44338,7 @@ const PY_METHOD_FORMAT_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_format_map,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("ce096affdd73b2ffbd330c3d3f659849a0c9b67e44a1aadc1dfab6123761f788"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("c1f10f3ee103f6880a497053df8e0604a53bf2918f2c9ee618d975367814ef95"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `py.method.format_map`.
@@ -45431,7 +45751,7 @@ fn py_dir(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.attribute",
-    function: p::function("382eafffcd7938a773f27f0c89e0cc22ca04a3ccccd803d83c5b09dbed3c66c5"),
+    function: p::function("4ed483d4c4bef2d49209c5a664aa20035ba2049509977e6733f4402baf7e6867"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("07baf5c231d8abc239e0187960035d4325d6b29c5de3a45a79cef0bda1ae4a85"),
@@ -47944,13 +48264,13 @@ fn py_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
 
 const PY_GETATTR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getattr",
-    function: p::function("9d0bf230a3ffdbec01e45217602c4bed4f2ecb18dda7b63c5abee236d92e87e1"),
+    function: p::function("05d485f504a2c4e8c4032f4327d546185a519a5d45cb3c22dbf7d53a264a95a6"),
     callees: &[
         p::function("e73e955fedec6f9d4408621ecb4457dfc3d0ed5fc83533aa3a2ded4759f6c795"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
         p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"),
         p::function("3821617c79aee3142b3c6bb76ef43fa66ffe3d10093eb9bb92ee129de0d689bb"),
-        p::function("382eafffcd7938a773f27f0c89e0cc22ca04a3ccccd803d83c5b09dbed3c66c5"),
+        p::function("4ed483d4c4bef2d49209c5a664aa20035ba2049509977e6733f4402baf7e6867"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -47969,7 +48289,7 @@ const PY_GETATTR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_getattr,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 3, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("382eafffcd7938a773f27f0c89e0cc22ca04a3ccccd803d83c5b09dbed3c66c5"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 3, callees: &[p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"), p::function("00556f15d22b83574aa474cee58e403240d8801c53d1b7c96b0a304686d8d873"), ], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("4ed483d4c4bef2d49209c5a664aa20035ba2049509977e6733f4402baf7e6867"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `py.getattr`.
@@ -47999,9 +48319,9 @@ fn py_getattr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
 
 const PY_HASATTR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.hasattr",
-    function: p::function("2cc8e26322ebdd0640e049e7580edd54ea7fd248bc164af5dc4dc3a31e5ffce1"),
+    function: p::function("c51bad29e927b8bb9993a8a14d1c21196ffc0fae7f5832f0fa88c5c3ea30f48c"),
     callees: &[
-        p::function("9d0bf230a3ffdbec01e45217602c4bed4f2ecb18dda7b63c5abee236d92e87e1"),
+        p::function("05d485f504a2c4e8c4032f4327d546185a519a5d45cb3c22dbf7d53a264a95a6"),
         p::function("c8071cf274a8aeba66033223731e55018120dee4774a4933291633999430a09d"),
     ],
     literals: &[
@@ -48023,7 +48343,7 @@ const PY_HASATTR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_hasattr,
-    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("9d0bf230a3ffdbec01e45217602c4bed4f2ecb18dda7b63c5abee236d92e87e1"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
+    template: Some(p::HelperTemplate { entry: None, metered: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: None, depth: 2, writes: false, copy: None, element: None, record_write: None, callees: &[p::function("05d485f504a2c4e8c4032f4327d546185a519a5d45cb3c22dbf7d53a264a95a6"), ] }), forwards: p::Forwards { floats: None, ints: None, texts: None, identity: None } }),
 };
 
 /// `py.hasattr`.
@@ -51927,7 +52247,7 @@ fn py_json_dumps(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::P
 
 const PY_MODULE_MATH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.module.math",
-    function: p::function("27e7ce63cb039c37b640e27de9cf9d76dad6a67e68db52937dec66f009e8c2ca"),
+    function: p::function("7ba437f82bfe4f1c59cc6c25149a24f0c9e84e1385ad66c0c84ac43a21f3bd31"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Text("math"),
@@ -52511,7 +52831,7 @@ fn py_module_math(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
 
 const PY_MODULE_JSON_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.module.json",
-    function: p::function("dc7e6de8d1b5d779cec19d32ef51863dfcdd5dd164a73177308c2fb811cc92c9"),
+    function: p::function("1f4ac72274435d1404eb036bc46574a63a15372e08dabc81e8003bb39d1f1adf"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Text("json"),

@@ -292,3 +292,49 @@ async fn a_deployment_over_the_server_capacity_is_refused_before_the_pools_open(
     .expect("read pg_stat_activity");
     assert_eq!(open, 0, "only the capacity probe's work connection opened");
 }
+
+/// A sealed lock timeout that is not below the server's `deadlock_timeout`
+/// is refused at open: a cycle through a sealed transaction must end in that
+/// transaction's own timeout and retry, before the deadlock detector picks a
+/// victim (FIG-7700).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sealed_lock_timeout_at_the_deadlock_timeout_is_refused_at_open() {
+    let Some(database) =
+        database("a_sealed_lock_timeout_at_the_deadlock_timeout_is_refused_at_open").await
+    else {
+        return;
+    };
+    let mut probe = sqlx::PgConnection::connect(database.url())
+        .await
+        .expect("connect the probe");
+    let server: String = sqlx::query_scalar("SELECT current_setting('deadlock_timeout')")
+        .fetch_one(&mut probe)
+        .await
+        .expect("read deadlock_timeout");
+    let deadlock_timeout = match server.strip_suffix("ms") {
+        Some(millis) => Duration::from_millis(millis.parse().expect("milliseconds")),
+        None => Duration::from_secs(
+            server
+                .strip_suffix('s')
+                .expect("deadlock_timeout in ms or s")
+                .parse()
+                .expect("seconds"),
+        ),
+    };
+    let mut config = crate::testing::fixture_config();
+    config.guards.sealed_lock_timeout = deadlock_timeout;
+    let endpoints = crate::PostgresEndpoints::from_url(database.url()).expect("parses");
+    let refused = crate::PostgresStorage::connect(&endpoints, &config, Default::default())
+        .await
+        .err();
+    assert!(
+        matches!(
+            refused,
+            Some(crate::PostgresHostError::SealedLockTimeoutNotBelowDeadlockTimeout {
+                sealed_lock_timeout,
+                deadlock_timeout: refused_at,
+            }) if sealed_lock_timeout == deadlock_timeout && refused_at == deadlock_timeout
+        ),
+        "{refused:?}"
+    );
+}

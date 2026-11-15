@@ -1,0 +1,208 @@
+//! Fusion: runs of a block's ops that dispatch at once on the prepaid
+//! path (cutover contract §3).
+//!
+//! A prepaid block bills no op on its own and tests no slice inside it,
+//! so a run of its ops may dispatch together. The pass fuses up to two
+//! local or constant pushes, the two-argument native call with an inline
+//! answer (R8) they feed, and the op that takes its answer: a scalar
+//! operation, or a same or membership test such as a helper's kind
+//! dispatch runs, unless the call is held to a contract (an import's
+//! signature). The fused call answers as the unfused call op does,
+//! and runs the native's call where it declines. The call's fee cancels the block, and
+//! the rest runs exact, so the taking op is fused only where the exact
+//! path bills, tests and sees nothing at it. The run's first op becomes
+//! `Op::Fused`; the exact path dispatches the first op alone, and the
+//! ops after it stay in place.
+//!
+//! It runs after validation, on validated code.
+
+use lash_kernel_doc::arena::native::InlineOperation;
+
+use super::op::Op;
+use super::program::{Callee, Fused, NegatedBranch, Operand, Program, Then, Unit, Words};
+
+/// Fuses the runs of every unit of `program`.
+/// Compiler::sealed and inline::expand admitted every pc and table coordinate.
+pub(crate) fn fuse(program: &mut Program) {
+    // A call held to a contract, an import's signature, checks its
+    // arguments first, as only the call op does.
+    let answered = |site: u32, unit: &Unit| {
+        let call = &unit.calls[site as usize];
+        let (Callee::Native { native, .. }, None) = (call.callee, &call.checked) else {
+            return false;
+        };
+        let entry = program.native(native);
+        call.argc == 2 && entry.params == 2 && entry.scalar.is_some()
+    };
+    // A native with no body is answered at its call with no frame, so
+    // the scalar pairs its domain names are answered and billed in place:
+    // two word ints by its word form, two floats or a word and a float by
+    // its number form. Body natives keep a separate number form, whose
+    // depth guard is read only after the unconditional form declines.
+    let form = |site: u32, unit: &Unit, words: bool, body: bool| {
+        let Callee::Native { native, charged } = unit.calls[site as usize].callee else {
+            return None;
+        };
+        let entry = program.native(native);
+        let Some(InlineOperation::Scalar { operation, domain }) = entry.scalar else {
+            return None;
+        };
+        let fee = match charged {
+            true => Some(program.charge(entry.charge).pairs()?),
+            false => None,
+        };
+        let named = match words {
+            true => domain.words(),
+            false => domain.floats(),
+        };
+        (entry.body.is_some() == body && named).then_some(Words {
+            operation,
+            domain,
+            fee,
+        })
+    };
+    let mut runs = Vec::new();
+    for (at, unit) in program.units.iter().enumerate() {
+        let mut pc = 0;
+        while pc < unit.ops.len() {
+            match run(unit, pc, &answered, &|n| program.readable(n)).map(|(mut fused, mut end)| {
+                fused.words = form(fused.site, unit, true, false);
+                fused.numbers = form(fused.site, unit, false, false);
+                fused.guarded_numbers = form(fused.site, unit, false, true);
+                let branch = negated_branch(program, unit, &fused);
+                if let Some(branch) = branch {
+                    end = branch.not as usize + 2;
+                }
+                (fused, end, branch)
+            }) {
+                Some((fused, end, branch)) => {
+                    runs.push((at, pc, fused, branch));
+                    pc = end;
+                }
+                None => pc += 1,
+            }
+        }
+    }
+    // Each disjoint run consumes an op of the admitted u32-length code.
+    // Fused/negated tables contain at most one entry per such run.
+    for (at, pc, mut fused, branch) in runs {
+        let unit = &mut program.units[at];
+        if let Some(branch) = branch {
+            fused.then = Then::NegatedBranch(unit.negated_branches.len() as u32);
+            unit.negated_branches.push(branch);
+        }
+
+        unit.ops[pc] = Op::Fused(unit.fused.len() as u32);
+        unit.fused.push(fused);
+    }
+}
+
+/// The run that starts at `pc`, and the op after it.
+/// A constant operand is one that reads without placing (`readable`).
+fn run(
+    unit: &Unit,
+    pc: usize,
+    answered: &impl Fn(u32, &Unit) -> bool,
+    readable: &impl Fn(u32) -> bool,
+) -> Option<(Fused, usize)> {
+    let operand = |op: Op| match op {
+        Op::Local(n) => Some(Operand::Local(n)),
+        Op::Const(n) if readable(n) => Some(Operand::Const(n)),
+        _ => None,
+    };
+    let mut operands = [Operand::Local(0); 2];
+    let mut pushes = 0;
+    let mut at = pc;
+    let site = loop {
+        match *unit.ops.get(at)? {
+            Op::Call(site) if answered(site, unit) => break site,
+            _ if pushes == 2 => return None,
+            op => {
+                operands[pushes] = operand(op)?;
+                pushes += 1;
+                at += 1;
+            }
+        }
+    };
+    let call = at;
+    // After the fee the rest of the block is exact: the op taking the
+    // answer is fused only where the exact path does nothing at it.
+    let quiet = |pc: usize| {
+        let event = unit.event[pc];
+        event.units == 0 && event.atomic == 0 && !unit.step[pc]
+    };
+    let taking = unit.ops.get(call + 1).copied().filter(|_| quiet(call + 1));
+    let (then, end) = match taking {
+        Some(Op::SetLocal(n)) => (Then::SetLocal(n), call + 2),
+        Some(Op::Pop) => (Then::Pop, call + 2),
+        Some(Op::JumpIfFalse(to)) => (Then::Branch { to, looping: false }, call + 2),
+        Some(Op::WhileFalse(to)) => (Then::Branch { to, looping: true }, call + 2),
+        // A lone call dispatches inline already.
+        _ if pushes == 0 => return None,
+        _ => (Then::Push, call + 1),
+    };
+    let fused = Fused {
+        first: unit.ops[pc],
+        operands,
+        // The operand buffer and run loop admit at most two pushes.
+        pushes: pushes as u8,
+        site,
+        call: call as u32,
+        entry: unit.calls[site as usize].entry,
+        then,
+        words: None,
+        numbers: None,
+        guarded_numbers: None,
+    };
+    Some((fused, end))
+}
+
+/// Keep the authored negation in the document and the exact ops. The plan
+/// alone may use its version-matched native certificate to branch directly.
+fn negated_branch(program: &Program, unit: &Unit, fused: &Fused) -> Option<NegatedBranch> {
+    if !matches!(fused.then, Then::Push) {
+        return None;
+    }
+    let Callee::Native { native, .. } = unit.calls[fused.site as usize].callee else {
+        return None;
+    };
+    if !matches!(
+        program.native(native).scalar,
+        Some(InlineOperation::Membership(_) | InlineOperation::Same)
+    ) {
+        return None;
+    }
+    let not = fused.call + 1;
+    let Op::Call(site) = *unit.ops.get(not as usize)? else {
+        return None;
+    };
+    let Op::JumpIfFalse(to) = *unit.ops.get(not as usize + 1)? else {
+        return None;
+    };
+    for pc in [not as usize, not as usize + 1] {
+        if unit.step[pc] || !unit.event[pc].is_none() {
+            return None;
+        }
+    }
+    let call = &unit.calls[site as usize];
+    let Callee::Native { native, charged } = call.callee else {
+        return None;
+    };
+    let entry = program.native(native);
+    if call.argc != 1
+        || call.checked.is_some()
+        || call.entry.is_some()
+        || entry.params != 1
+        || entry.body.is_some()
+        || entry.guard.is_some()
+        || entry.scalar != Some(InlineOperation::Not)
+    {
+        return None;
+    }
+    let fee = if charged {
+        program.charge(entry.charge).constant()?
+    } else {
+        0
+    };
+    Some(NegatedBranch { not, to, fee })
+}

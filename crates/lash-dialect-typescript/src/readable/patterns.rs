@@ -4,21 +4,125 @@ use lash_kernel_doc as k;
 use super::lift::{Lift, Lifter};
 use super::source::{Expr, Pattern};
 
+/// A pattern, the value it destructures, the statements it takes, and the
+/// operand spelling its reads name.
+type Destructured = (Pattern, k::Expr, usize, Option<&'static str>);
+
+/// The operand spelling `target`, a read's lifted target, names.
+fn operand_spelling(target: &Expr) -> Option<&'static str> {
+    let Expr::Call(callee, _) = target else {
+        return None;
+    };
+    let Expr::Ident(name) = &**callee else {
+        return None;
+    };
+    [
+        "value.operand",
+        "list.operand",
+        "record.operand",
+        "value.text_operand",
+    ]
+    .into_iter()
+    .find(|spelling| spelling == name)
+}
+
 impl Lifter<'_> {
+    pub(super) fn iteration_binding(
+        &mut self,
+        binding: &lash_kernel_value::Name,
+        body: &[k::Stmt],
+    ) -> Lift<(Pattern, usize, &'static str)> {
+        if super::lift::temporary(binding)
+            && let Some((pattern, taken)) = self.bound_pattern(body, binding)?
+        {
+            let assignment = self.pattern_is_assignment(&pattern, &body[..taken]);
+            let mutable = self.pattern_reassigned(&pattern, &body[..taken]);
+            return Ok((
+                pattern,
+                taken,
+                if assignment {
+                    ""
+                } else if mutable {
+                    "let"
+                } else {
+                    "const"
+                },
+            ));
+        }
+        Ok((
+            Pattern::Name(self.binding(binding)?),
+            0,
+            if self.reassigned(binding.as_str()) {
+                "let"
+            } else {
+                "const"
+            },
+        ))
+    }
+
+    pub(super) fn pattern_reassigned(&self, pattern: &Pattern, block: &[k::Stmt]) -> bool {
+        let names = super::lift::pattern_names(pattern);
+        let mut pending = vec![k::Node::Block(block)];
+        while let Some(node) = pending.pop() {
+            if let k::Node::Stmt(k::Stmt::Let { name, .. }) = node
+                && self.reassigned(name.as_str())
+                && self
+                    .binding(name)
+                    .is_ok_and(|source| names.contains(&source))
+            {
+                return true;
+            }
+            pending.extend(node.children());
+        }
+        false
+    }
+
+    pub(super) fn pattern_is_assignment(&self, pattern: &Pattern, block: &[k::Stmt]) -> bool {
+        let names = super::lift::pattern_names(pattern);
+        let mut pending = vec![k::Node::Block(block)];
+        while let Some(node) = pending.pop() {
+            if let k::Node::Stmt(k::Stmt::Assign {
+                place: k::Place::Variable(name),
+                ..
+            }) = node
+                && self
+                    .binding(name)
+                    .is_ok_and(|source| names.contains(&source))
+            {
+                return true;
+            }
+            pending.extend(node.children());
+        }
+        false
+    }
+
     pub(super) fn binding_pattern(
         &mut self,
         block: &[k::Stmt],
     ) -> Lift<Option<(Pattern, Expr, usize)>> {
+        let Some((pattern, value, taken, spelling)) = self.destructured(block)? else {
+            return Ok(None);
+        };
+        let value = match spelling {
+            Some(spelling) => self.operand(&value, spelling)?,
+            None => self.expr(&value)?,
+        };
+        Ok(Some((pattern, value, taken)))
+    }
+
+    /// An object or array pattern at the start of `block`, the value it
+    /// destructures, how many statements it takes, and the operand
+    /// spelling of the kind its reads take (see [`Lifter::operand`]).
+    fn destructured(&mut self, block: &[k::Stmt]) -> Lift<Option<Destructured>> {
         if let Some(found) = self.object_binding_pattern(block)? {
             return Ok(Some(found));
         }
-        self.array_binding_pattern(block)
+        Ok(self
+            .array_binding_pattern(block)?
+            .map(|(pattern, value, taken)| (pattern, value, taken, None)))
     }
 
-    fn object_binding_pattern(
-        &mut self,
-        block: &[k::Stmt],
-    ) -> Lift<Option<(Pattern, Expr, usize)>> {
+    fn object_binding_pattern(&mut self, block: &[k::Stmt]) -> Lift<Option<Destructured>> {
         let Some(k::Stmt::Do {
             value: k::Expr::Call { function, args },
         }) = block.first()
@@ -34,6 +138,7 @@ impl Lifter<'_> {
         let mut fields = Vec::new();
         let mut index = 1;
         let mut rest = None;
+        let mut spelling = None;
         while index < block.len() {
             if let k::Stmt::Let {
                 name,
@@ -50,10 +155,76 @@ impl Lifter<'_> {
                 index += taken;
                 continue;
             }
-            if let Some((temporary, read, count)) = self.read_ladder(&block[index..])? {
-                let Expr::Field(_, field) = read else {
-                    return Ok(None);
+            // A field of a value the source built as no record (a list, a
+            // text) is the read helper's, `ts.read(value, "field")`.
+            let text = matches!(value, k::Expr::Variable(name) if self.text_checked.contains(name));
+            let read_spelling = if text {
+                "value.text_operand"
+            } else {
+                "list.operand"
+            };
+            if let k::Stmt::Let { name, value: read } = &block[index]
+                && let Some(args) = self.helper_read(read, "ts.read")
+                && let [target, k::Expr::Literal(k::Literal::Text(field))] = args.as_slice()
+                && target == value
+            {
+                let (pattern, taken) = match self.default_pattern(&block[index + 1..], name)? {
+                    Some((pattern, taken)) => (pattern, taken + 1),
+                    None => (Pattern::Name(self.binding(name)?), 1),
                 };
+                fields.push((field.clone(), pattern));
+                spelling.get_or_insert(read_spelling);
+                index += taken;
+                continue;
+            }
+            // A nested pattern destructures the field read itself.
+            if let Some((pattern, read, taken)) = self.array_binding_pattern(&block[index..])? {
+                let field = match &read {
+                    k::Expr::Member(member) => match &**member {
+                        k::Member::Field { target, field } if target == value => {
+                            Some((field.clone(), None))
+                        }
+                        _ => None,
+                    },
+                    _ => self
+                        .helper_read(&k::Rhs::Expr(read.clone()), "ts.read")
+                        .and_then(|args| match args.as_slice() {
+                            [target, k::Expr::Literal(k::Literal::Text(field))]
+                                if target == value =>
+                            {
+                                Some((field.clone(), Some(read_spelling)))
+                            }
+                            _ => None,
+                        }),
+                };
+                if let Some((field, operand)) = field {
+                    fields.push((field, pattern));
+                    if let Some(operand) = operand {
+                        spelling.get_or_insert(operand);
+                    }
+                    index += taken;
+                    continue;
+                }
+            }
+            if let Some((temporary, read, count)) = self.read_ladder(&block[index..])? {
+                // The exact style reads a record's field by `record.field`
+                // and any other kind's through its operand spelling.
+                let (field, operand) = match read {
+                    Expr::Field(target, field) => (field, operand_spelling(&target)),
+                    Expr::Call(callee, mut args)
+                        if matches!(&*callee, Expr::Ident(name) if name == "record.field")
+                            && matches!(args.as_slice(), [_, Expr::Text(_)]) =>
+                    {
+                        let Some(Expr::Text(field)) = args.pop() else {
+                            return Ok(None);
+                        };
+                        (field, Some("record.operand"))
+                    }
+                    _ => return Ok(None),
+                };
+                if let Some(operand) = operand {
+                    spelling.get_or_insert(operand);
+                }
                 let Some((pattern, taken)) =
                     self.bound_pattern(&block[index + count..], &temporary)?
                 else {
@@ -93,12 +264,16 @@ impl Lifter<'_> {
         }
         Ok(Some((
             Pattern::Object(fields, rest),
-            self.expr(value)?,
+            value.clone(),
             index,
+            spelling,
         )))
     }
 
-    fn array_binding_pattern(&mut self, block: &[k::Stmt]) -> Lift<Option<(Pattern, Expr, usize)>> {
+    fn array_binding_pattern(
+        &mut self,
+        block: &[k::Stmt],
+    ) -> Lift<Option<(Pattern, k::Expr, usize)>> {
         let [
             k::Stmt::Let {
                 name: iterator,
@@ -175,26 +350,41 @@ impl Lifter<'_> {
         if elements.is_empty() && rest.is_none() {
             return Ok(None);
         }
-        Ok(Some((
-            Pattern::Array(elements, rest),
-            self.expr(value)?,
-            index,
-        )))
+        Ok(Some((Pattern::Array(elements, rest), value.clone(), index)))
     }
-    fn bound_pattern(
+    pub(super) fn bound_pattern(
         &mut self,
         block: &[k::Stmt],
         input: &lash_kernel_value::Name,
     ) -> Lift<Option<(Pattern, usize)>> {
-        let Some(k::Stmt::Let {
-            name,
-            value: k::Rhs::Expr(k::Expr::Variable(read)),
-        }) = block.first()
+        let Some(
+            k::Stmt::Let {
+                name,
+                value: k::Rhs::Expr(k::Expr::Variable(read)),
+            }
+            | k::Stmt::Assign {
+                place: k::Place::Variable(name),
+                value: k::Rhs::Expr(k::Expr::Variable(read)),
+                ..
+            },
+        ) = block.first()
         else {
-            return Ok(None);
+            // A nested pattern destructures the read itself.
+            return Ok(match self.destructured(block)? {
+                Some((pattern, k::Expr::Variable(read), taken, _)) if read == *input => {
+                    Some((pattern, taken))
+                }
+                _ => None,
+            });
         };
         if read != input {
             return Ok(None);
+        }
+        if let Some((pattern, k::Expr::Variable(read), taken, _)) =
+            self.destructured(&block[1..])?
+            && read == *name
+        {
+            return Ok(Some((pattern, taken + 1)));
         }
         if let Some((pattern, taken)) = self.default_pattern(&block[1..], name)? {
             return Ok(Some((pattern, taken + 1)));

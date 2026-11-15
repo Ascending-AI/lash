@@ -424,10 +424,8 @@ is covered when there is no result. Raises use result size zero, as before.
 | `ts.object.propertyIsEnumerable` | `sum(12, size(this), deep(args))` | `sum(12, size(this), deep(args))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.pad` | `sum(2, size(items), magnitude(count))` | `sum(2, size(items), magnitude(count))` | 1 × 2/test | The append loop's trip count is count's value, which magnitude(count) does not measure, so it pays 2 per test (FIG-6971); the copy loop is bounded by size(items). |
 
-`helper_plans::uri_decode_completion_price_bounds_delegated_work_on_return_and_raise`
-pins K-URI-WORK: delegated calls plus heap-accounting changes and
-reservations stay below the operation's completion price
-on successful and raised outcomes over growing escaped inputs, literal tails,
-reserved escapes, malformed percent sequences and invalid UTF-8. The fixed
-successful probe separately measures real work; a higher completion price
-alone cannot satisfy the performance proof.
+K-URI-WORK (delegated calls plus heap-accounting changes and reservations
+stay below the operation's completion price, on successful and raised
+outcomes) has no law on the bytecode core: its law read the previous
+engine's per-native work profile, which the core does not keep. The price
+a host is charged is the formula above, whichever engine runs it.

@@ -162,49 +162,43 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
     {
         lash_core_store::store::validate_session_id(session_id)
             .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
-        let mut tx = crate::begin_guarded(&self.pool, &self.fence)
+        // The deletion ends the frame's local artifact edges, so it seals
+        // (`lash_lock_artifacts`): a wait past that answers contention, and
+        // the whole deletion runs again as the identical transaction under
+        // the store's retry and operation deadline. The clock is read once
+        // before the first attempt; nothing leaves the transaction before it
+        // commits, and the window is forgotten after the acknowledged commit.
+        let now = self.clock.timestamp_ms();
+        let held = crate::guarded_tx::retry_contended(&self.fence, || async move {
+            let mut tx = crate::begin_guarded(&self.pool, &self.fence).await?;
+            crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, session_id)
+                .await?;
+            let live: bool = crate::observed_sql::query_scalar(
+                session_sql().meta_postgres.exists_materialized.sql(),
+            )
+            .bind(session_id.as_str())
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
-            .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
-        let mut report = lash_core_store::store::SessionBlobReclaimReport::default();
-        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, session_id)
-            .await
-            .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
-        let live: bool = crate::observed_sql::query_scalar(
-            session_sql().meta_postgres.exists_materialized.sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)
-        .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
-        if live {
-            crate::durable::bump_unclaimed_session(&mut tx, session_id, self.clock.timestamp_ms())
-                .await
-                .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
-        }
-        // The close's artifacts step's program: the session's rows, its
-        // frame's and its own cleanups, its terminal record.
-        match crate::durable::delete_session_rows(
-            &mut tx,
-            session_id,
-            lash_durable::DurableInstant(crate::support::clamp_epoch_ms(self.clock.timestamp_ms())),
-        )
-        .await
-        {
-            Ok(held) => report.held_root_count = held,
-            Err(error) => {
-                return Err(lash_core_store::store::MaintenanceFailure::failed(
-                    error, report,
-                ));
+            .map_err(store_sqlx_error)?;
+            if live {
+                crate::durable::bump_unclaimed_session(&mut tx, session_id, now).await?;
             }
-        }
-        if let Err(error) = tx.commit().await {
-            report.held_root_count = 0;
-            return Err(lash_core_store::store::MaintenanceFailure::failed(
-                store_sqlx_error(error),
-                report,
-            ));
-        }
+            // The close's artifacts step's program: the session's rows, its
+            // frame's and its own cleanups, its terminal record.
+            let held = crate::durable::delete_session_rows(
+                &mut tx,
+                session_id,
+                lash_durable::DurableInstant(crate::support::clamp_epoch_ms(now)),
+            )
+            .await?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(held)
+        })
+        .await
+        .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
+        let report = lash_core_store::store::SessionBlobReclaimReport {
+            held_root_count: held,
+        };
         self.windows.forget(session_id);
         Ok(report)
     }

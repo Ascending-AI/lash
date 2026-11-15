@@ -304,9 +304,13 @@ pub fn materialize_workflow(
                 Site::new(Unit::Library(*new), []),
             );
             document.functions.insert(*new, definition);
-            document
-                .source_evidence
-                .insert(*new, node.implicit_text_conversions.clone());
+            document.source_evidence.insert(
+                *new,
+                lash_kernel_doc::SourceEvidence {
+                    implicit_text_conversions: node.implicit_text_conversions.clone(),
+                    declared_locals: node.declared_locals.clone(),
+                },
+            );
         }
         let raw = ids.get(&node.callable.function).map_or_else(
             || Expr::Literal(Literal::Function(node.callable.function)),
@@ -471,8 +475,8 @@ pub fn materialize_workflow(
         Expr::Literal(Literal::Function(wrapper_id)),
     )]);
     let used_helpers: BTreeSet<_> = document
-        .units()
-        .flat_map(|(_, block)| Node::Block(block).functions_within())
+        .referenced_functions()
+        .into_iter()
         .filter(|id| helpers.contains(id))
         .collect();
     document.library.0.extend(used_helpers);

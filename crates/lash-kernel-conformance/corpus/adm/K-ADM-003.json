@@ -7,6 +7,20 @@
       "expected": {
         "end": "refused"
       }
+    },
+    {
+      "name": "a function reached only through a body must be registered",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0000000000000000000000000000000000000000000000000000000000000000\ndefinition \"function run() -> Any\\nkernel 1\\nmetering statements\\nuse list.len = @0000000000000000000000000000000000000000000000000000000000000000\\nbody { return list.len([1]) }\"\nmain {\n  finish call run()\n}\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "a reached function is refused before the run, even where it is never called",
+      "document": "kernel 1\nnumbers by_spelling\nnative @0000000000000000000000000000000000000000000000000000000000000000\nmain {\n  print 1\n  if false {\n    finish @0000000000000000000000000000000000000000000000000000000000000000(1)\n  }\n  finish null\n}\n",
+      "expected": {
+        "end": "refused"
+      }
     }
   ]
 }

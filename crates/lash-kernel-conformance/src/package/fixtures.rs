@@ -33,6 +33,16 @@ pub(crate) fn installed() -> (Arc<Document>, FunctionRegistry) {
     }
     lash_ext_ts_core::implement(&mut registry, ts.helpers).unwrap();
     lash_ext_py_core::implement(&mut registry, py.helpers).unwrap();
+    // The extension operations are declarations until a worker installs their
+    // natives; the core links every callee a program names when it starts.
+    let functions: Vec<_> = registry.iter().map(|(id, _)| *id).collect();
+    lash_ext_date_ecma::implement(&mut registry, functions.iter().copied()).unwrap();
+    lash_ext_url_whatwg::implement(&mut registry, functions).unwrap();
+    lash_ext_regex_ecma::implement(
+        &mut registry,
+        &Arc::new(lash_ext_regex_ecma::Engine::new(4)),
+    )
+    .unwrap();
     let mut document = Document::new(NumberPolicy::BySpelling, vec![]);
     document.main = None;
     document.functions = registry

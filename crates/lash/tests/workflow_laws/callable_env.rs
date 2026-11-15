@@ -221,6 +221,7 @@ async fn callable(
         written_signature: None,
         signature_origin: None,
         implicit_text_conversions: Vec::new(),
+        declared_locals: Vec::new(),
         callable: CallableId {
             link: start.link,
             function: export.function,

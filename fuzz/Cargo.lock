@@ -999,7 +999,6 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-exec",
  "lash-kernel-lib",
  "lash-kernel-package",
  "lash-kernel-state",
@@ -1037,13 +1036,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "thiserror",
-]
-
-[[package]]
-name = "lash-kernel-exec"
-version = "0.0.0-dev"
-dependencies = [
  "thiserror",
 ]
 
@@ -1121,7 +1113,6 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-exec",
  "lash-kernel-package",
  "lash-kernel-state",
  "lash-kernel-value",

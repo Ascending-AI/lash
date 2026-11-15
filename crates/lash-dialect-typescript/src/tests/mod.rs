@@ -13,13 +13,15 @@ mod array_callbacks;
 mod async_fn;
 mod builtin_values;
 mod controls;
+mod core;
 mod deviations;
 mod guarded_text;
+pub(crate) mod helper;
 mod hoisting;
 mod hot_helpers;
 mod json;
 mod language;
-mod machine;
+pub(crate) mod machine;
 mod module;
 mod naming;
 mod operands;
@@ -223,3 +225,57 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
 mod linked;
 mod linked_inspection;
 mod linked_reads;
+
+/// K-DOC-005: admitted TS output must also compile on the bytecode core.
+pub(super) fn compile_on_core(
+    document: &lash_kernel_doc::Document,
+    catalog: &dyn lash_kernel_doc::FunctionCatalog,
+) {
+    fn include(
+        id: lash_kernel_value::FunctionId,
+        document: &lash_kernel_doc::Document,
+        catalog: &dyn lash_kernel_doc::FunctionCatalog,
+        registry: &mut lash_kernel_doc::FunctionRegistry,
+        seen: &mut BTreeSet<lash_kernel_value::FunctionId>,
+    ) {
+        if document.functions.contains_key(&id) || registry.get(&id).is_some() || !seen.insert(id) {
+            return;
+        }
+        let definition = catalog
+            .definition(&id)
+            .expect("the fixture's library holds its dependency");
+        if let Some(body) = definition.body() {
+            for dependency in body.functions.keys() {
+                include(*dependency, document, catalog, registry, seen);
+            }
+        }
+        let native = catalog
+            .registered(&id)
+            .and_then(|registered| registered.native())
+            .cloned();
+        registry
+            .register(definition.clone(), native)
+            .expect("the fixture's dependency is valid");
+    }
+    let shipped = machine::registry();
+    let mut registry = std::borrow::Cow::Borrowed(shipped.as_ref());
+    let mut seen = BTreeSet::new();
+    for id in document.library.iter() {
+        if registry.get(id).is_none() && !document.functions.contains_key(id) {
+            include(*id, document, catalog, registry.to_mut(), &mut seen);
+        }
+    }
+    let link = lash_kernel_value::LinkId::from_bytes([0; 32]);
+    let compile = |entry| {
+        lash_kernel_vm::testing::compile_document(document, &registry, link, entry)
+            .unwrap_or_else(|error| panic!("{error}\n{}", print_document(document)));
+    };
+    if document.main.is_some() {
+        compile(None);
+    }
+    for export in document.exports.values() {
+        if let lash_kernel_doc::Export::Function(export) = export {
+            compile(Some(export));
+        }
+    }
+}

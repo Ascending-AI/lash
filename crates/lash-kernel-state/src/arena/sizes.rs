@@ -215,6 +215,10 @@ fn flat_member_size(objects: &(impl super::Bodies + ?Sized), value: &Value) -> O
         Value::Text(text) => text.as_bytes().len() as u64,
         Value::BigInt(handle) => match objects.get(*handle)? {
             Body::BigInt(integer) => integer.bits().div_ceil(64),
+            // A cold integer's head certifies its magnitude.
+            Body::Cold(lash_kernel_doc::arena::ColdImmutable::BigInt(summary)) => {
+                summary.bits.div_ceil(64)
+            }
             _ => return None,
         },
         Value::LongText(handle) => match objects.get(*handle)? {
@@ -257,43 +261,4 @@ pub(super) fn summarize_flat(
             let (size, nested) = flat_member_size(objects, value)?.parts();
             Some(FlatSize::new(sum.get() + size, sum.nested + nested))
         })
-}
-
-/// Update the derived flat-size summary from the one changed entry. Logical
-/// charge and holding admission remain the canonical ledger's responsibility.
-pub(super) fn edit_table_flat(
-    objects: &(impl super::Bodies + ?Sized),
-    mut sum: Option<FlatSize>,
-    old: Option<(Value, Value)>,
-    new: Option<(Value, Value)>,
-    set: bool,
-    record: bool,
-) -> Option<FlatSize> {
-    let mut update = |old: Option<Value>, new: Option<Value>| {
-        sum = sum.and_then(|sum| {
-            let (old_size, old_nested) = old
-                .map_or(Some(MemberSize::Leaf(0)), |value| {
-                    flat_member_size(objects, &value)
-                })?
-                .parts();
-            let (new_size, new_nested) = new
-                .map_or(Some(MemberSize::Leaf(0)), |value| {
-                    flat_member_size(objects, &value)
-                })?
-                .parts();
-            Some(FlatSize::new(
-                sum.get().checked_sub(old_size)?.checked_add(new_size)?,
-                sum.nested
-                    .checked_sub(old_nested)?
-                    .checked_add(new_nested)?,
-            ))
-        });
-    };
-    if !record {
-        update(old.map(|pair| pair.0), new.map(|pair| pair.0));
-    }
-    if !set {
-        update(old.map(|pair| pair.1), new.map(|pair| pair.1));
-    }
-    sum
 }

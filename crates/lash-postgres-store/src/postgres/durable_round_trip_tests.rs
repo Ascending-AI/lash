@@ -1137,20 +1137,45 @@ async fn an_execution_end_commits_in_one_call() {
         execution: execution.clone(),
         uses: Default::default(),
         referrer: lash_core_store::artifact_referrer::ArtifactReferrer::Execution(journal),
-        requirements: Default::default(),
+        requirements: lash_durable::ClaimRequirements {
+            machine: lash_kernel_value::claims::NodeRequirements {
+                kernels: [3].into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     });
     store
         .commit(tx, CommitLabel::CELL_SNAPSHOT)
         .await
         .expect("register the execution");
-    let mut tx = store
-        .begin(&owned.actor, owned.epoch, u64::MAX)
+    let debts = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM lash_execution_debts WHERE execution = $1",
+        )
+        .bind(&execution.0)
+        .fetch_one(owned.storage.pool())
         .await
-        .expect("open");
-    tx.end_execution(execution.clone());
-    let (ended, trips) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
-    ended.expect("the execution ends");
-    within("an execution's end", trips, 1);
+        .expect("count the execution's debt")
+    };
+    assert_eq!(debts().await, 1, "the registration owes its stable debt");
+    // A4: the authorized end deletes the debt in its own commit, and a
+    // replayed end with no debt left answers as the first did.
+    for attempt in ["first", "replayed"] {
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch, u64::MAX)
+            .await
+            .expect("open");
+        tx.end_execution(execution.clone());
+        let (ended, trips) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
+        ended.unwrap_or_else(|error| panic!("the {attempt} end answered {error:?}"));
+        within("an execution's end", trips, 1);
+        assert_eq!(
+            debts().await,
+            0,
+            "the {attempt} end left the execution's debt"
+        );
+    }
     let mut tx = store
         .begin(&owned.actor, owned.epoch, u64::MAX)
         .await
@@ -1945,4 +1970,652 @@ async fn a_reaper_commits_only_when_a_node_expired() {
     .await;
     assert!(answer.unwrap().is_empty());
     assert_eq!(commits(&empty), 0);
+}
+
+/// A publication over every link `execution` authors, published by `claim`:
+/// the settlement carries it, and carrying it expands its whole closure.
+async fn carried_publication(
+    store: &crate::PostgresLashVmArtifactStore,
+    claim: &lash_core_store::artifact_referrer::ReferrerClaim,
+    round: u8,
+    execution: &lash_core_store::tool_surface::ExecutionEnvironment,
+) -> String {
+    use lash_durable::packages::PackageStore as _;
+    use lash_kernel_value::package::{
+        PublicationContext, PublicationDomain, PublicationScope, PublisherInstance,
+    };
+    use lash_vocabulary::package::{PublicationRecord, PublishedContent};
+    let root = lash_kernel_value::names::Segment::new(format!("carried{round}")).expect("root");
+    let path = lash_kernel_value::names::PackagePath::parse(&format!("carried{round}"))
+        .expect("package path");
+    let members = execution
+        .authored
+        .iter()
+        .enumerate()
+        .map(|(index, link)| {
+            let member = lash_kernel_value::package::Member {
+                visibility: lash_kernel_value::package::Visibility::Public,
+                kind: lash_kernel_value::package::MemberKind::Export {
+                    link: *link,
+                    export: lash_kernel_value::names::ExportName {
+                        name: lash_kernel_value::names::Name::new("run"),
+                        member: None,
+                    },
+                },
+            };
+            let name = lash_kernel_value::names::Segment::new(format!("m{index}"));
+            (name.expect("member name"), member)
+        })
+        .collect();
+    let package = lash_kernel_value::package::Package {
+        path: path.clone(),
+        members,
+    };
+    let package = lash_core_store::packages::PackageRecord {
+        id: package.identity(),
+        package,
+    };
+    store.put_package(claim, &package).await.expect("package");
+    let publication = PublicationRecord {
+        context: PublicationContext {
+            domain: PublicationDomain("round-trips".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("pin".into()),
+            root,
+        },
+        path,
+        content: PublishedContent::Package(package.id),
+        code_links: execution.authored.clone(),
+        imported_publications: vec![],
+    };
+    let key = store
+        .publish(claim, &publication)
+        .await
+        .expect("publication");
+    lash_durable::packages::publication_reference(&key)
+}
+
+/// The round trips of a process start's environment acquisition and of its
+/// settlement (the record's acquisition of the environment, then the start's
+/// environment and module ends carrying the environment, a document and a
+/// publication over every link onto the record) for an environment authoring `links` links, each over its own
+/// document: `2 * links` package dependencies.
+async fn environment_retention_round_trips(
+    store: &crate::PostgresLashVmArtifactStore,
+    round: u8,
+    links: usize,
+) -> (u64, u64) {
+    use lash_core_store::artifact_referrer::{
+        ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreId, HostArtifactPin,
+        ReferrerClaim, ResolvedArtifactCleanup,
+    };
+    use lash_durable::packages::PackageStore as _;
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+    use lash_vocabulary::identity::ProcessId;
+
+    let pin = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let claim = ReferrerClaim::unguarded(pin.clone()).expect("pin claim");
+    let mut execution = lash_core_store::tool_surface::ExecutionEnvironment::empty(
+        lash_vocabulary::claims::RegistryKind::Process,
+    );
+    let mut carried_document = None;
+    for index in 0..links {
+        let mut id = [round; 32];
+        id[..8].copy_from_slice(&(index as u64).to_le_bytes());
+        let document = lash_kernel_value::names::DocumentId::from_bytes(id);
+        carried_document.get_or_insert_with(|| document.to_string());
+        store
+            .publish_module_artifact(&claim, &document.to_string(), b"dependency document")
+            .await
+            .expect("document");
+        let link = lash_kernel_value::package::Link {
+            helper_fills: Default::default(),
+            document,
+            fills: Default::default(),
+        };
+        let link = lash_core_store::packages::LinkRecord {
+            id: link.identity(),
+            link,
+        };
+        store.put_link(&claim, &link, &[]).await.expect("link");
+        execution.authored.insert(link.id);
+    }
+    let carried_publication = carried_publication(store, &claim, round, &execution).await;
+    let env = lash_core_store::process_env::ProcessEnv::builder(
+        lash_protocol_types::session_model::MaxToolCalls::new(1024),
+    )
+    .execution(execution)
+    .build()
+    .expect("environment");
+    let env_ref = env.stable_ref().expect("environment reference");
+    let bytes = env.to_store_bytes().expect("environment bytes");
+    store
+        .publish_process_env(&claim, &env_ref, &bytes)
+        .await
+        .expect("publish the environment");
+
+    let started = ProcessId::fixture(&format!("started-{round}"));
+    let (_, start) = round_trips(async {
+        let mut tx = crate::guarded_tx::begin_guarded(&store.pool, &store.fence)
+            .await
+            .expect("begin the start");
+        crate::artifact_store::acquire_process_env_tx(&mut tx, &env_ref, &started)
+            .await
+            .expect("the start acquires its environment");
+        tx.commit().await.expect("commit the start");
+    })
+    .await;
+
+    let record = ArtifactReferrer::ProcessRecord(ProcessId::fixture(&format!("settled-{round}")));
+    let record_claim = ReferrerClaim::unguarded(record.clone()).expect("record claim");
+    let (_, settle) = round_trips(async {
+        store
+            .acquire_process_env(&record_claim, &env_ref)
+            .await
+            .expect("the record holds the environment");
+        store
+            .end_process_env_referrer(&ResolvedArtifactCleanup {
+                referrer: pin.clone(),
+                carries: vec![ArtifactCarry {
+                    artifact: ArtifactName {
+                        store: ArtifactStoreId::ProcessEnv,
+                        artifact_ref: env_ref.as_str().into(),
+                    },
+                    to: record.clone(),
+                }],
+            })
+            .await
+            .expect("the settlement carries the environment");
+        store
+            .end_module_referrer(&ResolvedArtifactCleanup {
+                referrer: pin.clone(),
+                carries: [
+                    carried_document.clone().expect("a document"),
+                    carried_publication.clone(),
+                ]
+                .into_iter()
+                .map(|artifact_ref| ArtifactCarry {
+                    artifact: ArtifactName {
+                        store: ArtifactStoreId::KernelDocument,
+                        artifact_ref,
+                    },
+                    to: record.clone(),
+                })
+                .collect(),
+            })
+            .await
+            .expect("the settlement carries a document");
+    })
+    .await;
+    (start, settle)
+}
+
+/// A process start and its settlement retain an environment's package
+/// dependencies in round trips that do not grow with their number
+/// (FIG-7699): one sorted lock statement, one existence check, one edge
+/// write per kind, and one read per dependency level, also when a carry
+/// expands a package closure (FIG-7700).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn environment_dependency_retention_round_trips_ignore_the_dependency_count() {
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the environment retention round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let mut measured = Vec::new();
+    for (round, links) in [(1, 1), (2, 8), (3, 64)] {
+        let (start, settle) = environment_retention_round_trips(&store, round, links).await;
+        measured.push((2 * links, start, settle));
+    }
+    eprintln!("dependencies, start round trips, settlement round trips: {measured:?}");
+    let (_, start, settle) = measured[0];
+    assert!(
+        measured
+            .iter()
+            .all(|&(_, other_start, other_settle)| (other_start, other_settle) == (start, settle)),
+        "round trips grow with the dependency count: {measured:?}"
+    );
+}
+
+/// An artifact read is one statement: the referrer edges it decodes and
+/// the bytes it answers come back together (FIG-7701 R1).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_artifact_read_is_one_statement() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
+
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the artifact-read round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let document = lash_kernel_value::names::DocumentId::from_bytes([9; 32]).to_string();
+    store
+        .publish_module_artifact(&claim, &document, b"held document")
+        .await
+        .expect("publish the document");
+    let (read, trips) = round_trips(store.get_module_artifact(&document)).await;
+    assert_eq!(read.expect("read"), Some(b"held document".to_vec()));
+    assert_eq!(trips, 1, "edges and bytes in one statement");
+}
+
+/// A module acquisition is its guarded BEGIN and fence read, one call that locks the
+/// referrer and reads its fence, one that locks the artifact, checks it
+/// and writes the edge, and COMMIT (FIG-7701 R3).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_module_acquisition_is_two_calls_in_its_transaction() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore as _;
+
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the acquisition round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let publisher = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let document = lash_kernel_value::names::DocumentId::from_bytes([10; 32]).to_string();
+    store
+        .publish_module_artifact(&publisher, &document, b"held document")
+        .await
+        .expect("publish the document");
+    let holder = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    let (held, trips) = round_trips(store.acquire_module_artifact(&holder, &document)).await;
+    held.expect("acquire the document");
+    assert_eq!(trips, 5, "BEGIN, fence read, referrer, holds, COMMIT");
+}
+
+/// Publishing an environment over a stored body is its guarded BEGIN and fence read,
+/// the plugin writers' admission, the referrer call, one closure read per
+/// dependency level (the link, then its document), the sorted lock
+/// statement, one call that compares the body, stores the head and writes
+/// the edges, and COMMIT (FIG-7701 R5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_publication_over_a_stored_body_is_one_call_after_its_locks() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::process::ProcessEnvStore as _;
+
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!(
+            "skipping the stored-body publication round-trip budget: database URL is not set"
+        );
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let store = storage.process_env_store();
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("pin claim");
+    crate::artifact_store::tests::published_environment(&store, &claim, 23).await;
+    let (env_ref, bytes) = crate::artifact_store::tests::environment_over(23, Some("other"));
+    let (published, trips) = round_trips(store.publish_process_env(&claim, &env_ref, &bytes)).await;
+    published.expect("publish over the stored body");
+    assert_eq!(
+        trips, 8,
+        "BEGIN, fence read, admission, referrer, two closure levels, locks, the call, COMMIT"
+    );
+}
+
+/// A created process's execution writes (FIG-7701): its registration, each
+/// initial resolution and then the stamp of its actor's requirements answer
+/// as their explicit form did, in the writes' order: the stamp merges the
+/// registration's stable debt and the debt a winner leaves unsettled; a
+/// seed's refusal names that seed's program, and a seed that cannot be
+/// built answers only once every write before it ran; every refusal
+/// commits nothing. The writes are one call after the process's own
+/// statements.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_created_process_execution_answers_its_writes_in_order() {
+    use lash_core_store::tool_surface::{OperationRoute, RouteSource};
+    use lash_durable::packages::PackageRefusal;
+    use lash_durable::resolutions::{
+        DeferredUse, ExecutionId, ExecutionRegistration, ResolutionEntry, ResolutionKey,
+        ResolutionRecord,
+    };
+    use lash_execution_contracts::PluginError;
+    use lash_execution_contracts::process::{
+        EngineLaunch, Lifetime, ProcessInput, ProcessProvenance, ProcessRegistrar as _,
+        ProcessRegistration,
+    };
+    use lash_kernel_value::names::{ImportSlot, OperationUse, QualifiedName};
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the created process execution law: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let stores = crate::PostgresStoreSet::new(
+        &storage,
+        std::sync::Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+    );
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = stores.process_registry();
+    let name = |member: &str| QualifiedName {
+        package: lash_kernel_value::names::PackagePath::parse("wip").expect("package"),
+        member: lash_kernel_value::names::Segment::new(member).expect("member"),
+        type_member: None,
+    };
+    let kernel = |version: u32| lash_durable::ClaimRequirements {
+        machine: lash_kernel_value::claims::NodeRequirements {
+            kernels: [version].into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let use_at = |slot: u32| OperationUse {
+        link: lash_kernel_value::package::LinkId::from_bytes([7; 32]),
+        slot: ImportSlot(slot).into(),
+    };
+    let refused = |execution: &ExecutionId, slot: u32, note: &str| ResolutionRecord {
+        key: ResolutionKey {
+            execution: execution.clone(),
+            use_: use_at(slot),
+        },
+        requested: name("lookup"),
+        entry: ResolutionEntry::Refused { note: note.into() },
+    };
+    // A winner whose target a read-only mode cannot run: it is refused
+    // before the store sees it.
+    let unrunnable = |execution: &ExecutionId| {
+        let definition = lash_vocabulary::ToolDefinition::raw(
+            "tool:resolved",
+            "wip.lookup",
+            "lookup",
+            serde_json::json!({}),
+            serde_json::json!({"type":"null"}),
+        )
+        .expect("definition")
+        .with_execution(std::time::Duration::from_secs(1));
+        let route = OperationRoute {
+            tool: definition.manifest.id.clone(),
+            provider: lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Process,
+                "target",
+                lash_vocabulary::providers::ToolProviderKey::new("tools").expect("key"),
+            ),
+            policy: definition.manifest.execution_policy,
+            projection: definition.manifest.argument_projection.clone(),
+            payload: None,
+            source: RouteSource::Resolved {
+                definition: Box::new(definition.clone()),
+            },
+        };
+        ResolutionRecord {
+            key: ResolutionKey {
+                execution: execution.clone(),
+                use_: use_at(2),
+            },
+            requested: name("other"),
+            entry: ResolutionEntry::Resolved {
+                contract: definition.contract_id(),
+                definition: Box::new(definition),
+                route: Box::new(route),
+                mode: lash_kernel_value::package::OperationMode::Read,
+                requirements: kernel(5).into(),
+            },
+        }
+    };
+    // Each case registers a fresh process with one registered use (slot 1,
+    // discovery debt kernel 2, stable debt kernel 1) and the seeds `seeds`
+    // builds for its execution.
+    let prepare = || {
+        let registry = registry.clone();
+        let input = ProcessInput::Engine {
+            kind: "execution-writes".into(),
+            payload: serde_json::json!({}),
+            launch: EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
+        };
+        async move {
+            registry
+                .prepare_process_registration(
+                    ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached),
+                    &[],
+                )
+                .await
+                .expect("prepare the registration")
+        }
+    };
+    let with = |prepared: lash_execution_contracts::process::PreparedProcessRegistration,
+                seeds: &dyn Fn(&ExecutionId) -> Vec<ResolutionRecord>| {
+        let process = prepared.process_id().clone();
+        let execution = ExecutionId::process(&process);
+        let registration = ExecutionRegistration {
+            execution: execution.clone(),
+            uses: [(
+                use_at(1),
+                DeferredUse {
+                    requested: name("lookup"),
+                    discovery: kernel(2),
+                },
+            )]
+            .into(),
+            referrer: lash_core_store::artifact_referrer::ArtifactReferrer::ProcessRecord(
+                process.clone(),
+            ),
+            requirements: kernel(1),
+        };
+        let seeds = seeds(&execution);
+        (process, prepared.with_execution(registration, seeds))
+    };
+    let processes = |process: lash_vocabulary::identity::ProcessId| {
+        let pool = storage.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM lash_processes WHERE process_id = $1",
+            )
+            .bind(process.as_str())
+            .fetch_one(&pool)
+            .await
+            .expect("count the process's rows")
+        }
+    };
+
+    // A winner settles its use's discovery debt; the stamp keeps the
+    // stable debt alone.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![refused(execution, 1, "first")]
+    });
+    let (created, trips) = round_trips(registry.commit_process_registration(prepared)).await;
+    created.expect("register the process and its execution");
+    within("a created process's registration", trips, 8);
+    let actor = ActorKey::process(process.as_str()).expect("actor key");
+    let mut stamped = storage
+        .durable_store()
+        .actor_requirements(None, 64)
+        .await
+        .expect("requirements");
+    stamped.retain(|(stamped, _)| *stamped == actor);
+    let kernels: Vec<Vec<String>> = stamped
+        .into_iter()
+        .map(|(_, tokens)| {
+            tokens
+                .into_iter()
+                .filter(|token| token.starts_with("kernel:"))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        kernels,
+        vec![vec!["kernel:1".to_owned()]],
+        "the stable debt is stamped; the winner settled the discovery debt"
+    );
+
+    // A seed of a use the execution never registered is refused as an
+    // execution use, after the winner before it ran.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![
+            refused(execution, 1, "first"),
+            refused(execution, 9, "stray"),
+        ]
+    });
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            answer,
+            Err(PluginError::PackageStoreRefused(
+                PackageRefusal::ExecutionUse
+            ))
+        ),
+        "a stray seed answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+
+    // A second winner of the same use is refused as immutable: the refusal
+    // is the second seed's own, not the registration's.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![
+            refused(execution, 1, "first"),
+            refused(execution, 1, "second"),
+        ]
+    });
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            &answer,
+            Err(PluginError::PackageStoreRefused(PackageRefusal::Immutable(detail)))
+                if detail.contains("ResolutionKey")
+        ),
+        "a second winner answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+
+    // A seed that cannot be built answers once the writes before it ran:
+    // the stray seed's refusal comes first, and alone it is the answer.
+    let (process, prepared) = with(prepare().await, &|execution| {
+        vec![refused(execution, 9, "stray"), unrunnable(execution)]
+    });
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            answer,
+            Err(PluginError::PackageStoreRefused(
+                PackageRefusal::ExecutionUse
+            ))
+        ),
+        "a stray seed before an unbuildable one answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+    let (process, prepared) = with(prepare().await, &|execution| vec![unrunnable(execution)]);
+    let answer = registry.commit_process_registration(prepared).await;
+    assert!(
+        matches!(
+            answer,
+            Err(PluginError::PackageStoreRefused(
+                PackageRefusal::ResolutionTarget
+            ))
+        ),
+        "an unbuildable seed answered {answer:?}"
+    );
+    assert_eq!(processes(process).await, 0, "a refusal commits nothing");
+}
+
+/// The most round trips a process's terminal commit pays (FIG-7701; 25
+/// before it): its frontier read under the process row's lock answers the
+/// registry record and driver the terminal then writes from, so the
+/// terminal does not lock and read the row again, nor read its driver
+/// before the save.
+const PROCESS_TERMINAL_ROUND_TRIPS: u64 = 23;
+
+/// A process owner's terminal commit stays within its round-trip budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_process_terminal_commit_stays_within_its_round_trip_budget() {
+    use lash_core_execution::runtime::actor::process::record_terminal;
+    use lash_execution_contracts::process::{
+        EngineLaunch, LifetimeDecision, ProcessInput, ProcessOutcome, ProcessProvenance,
+        ProcessRegistrar as _, ProcessRegistration,
+    };
+    let Some(database_url) = crate::postgres_test_support::database_url() else {
+        eprintln!("skipping the process terminal round-trip budget: database URL is not set");
+        return;
+    };
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store");
+    let stores = crate::PostgresStoreSet::new(
+        &storage,
+        std::sync::Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+    );
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let process = stores
+        .process_registry()
+        .register_process(ProcessRegistration::new(
+            ProcessInput::Engine {
+                kind: "terminal-round-trips".to_owned(),
+                payload: serde_json::json!({}),
+                launch: EngineLaunch::new(
+                    lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+                    None,
+                ),
+            },
+            ProcessProvenance::host(),
+            LifetimeDecision::Detached,
+        ))
+        .await
+        .expect("register the process")
+        .id;
+    let store = storage.durable_store();
+    let actor = ActorKey::process(process.as_str()).expect("actor key");
+    let formats = store
+        .actor(&actor)
+        .await
+        .expect("read the actor")
+        .expect("the process's actor")
+        .formats;
+    let node = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("round-trips"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register");
+    let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
+    let (mut tx, view) = store
+        .open_process(&actor, epoch, u64::MAX)
+        .await
+        .expect("open the process");
+    tx.retain_process(view);
+    let outcome = ProcessOutcome::from_tool_output(lash_protocol_types::ToolCallOutput::success(
+        serde_json::json!({}),
+    ));
+    record_terminal(&mut tx, &process, &outcome).expect("record the terminal");
+    let (receipt, trips) = round_trips(store.commit(tx, CommitLabel::PROCESS_TERMINAL)).await;
+    receipt.expect("commit the terminal");
+    within(
+        "a process's terminal commit",
+        trips,
+        PROCESS_TERMINAL_ROUND_TRIPS,
+    );
 }

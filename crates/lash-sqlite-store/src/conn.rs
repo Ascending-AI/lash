@@ -59,6 +59,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
 mod batch;
 mod checkpoint;
+mod passive;
 mod worker;
 use checkpoint::checkpoint_state;
 use worker::Connection as AsyncConnection;
@@ -617,18 +618,53 @@ impl SqliteConnection {
         operational: crate::SqliteOperationalSettings,
         #[cfg(feature = "testing")] synchronous_replies: bool,
     ) -> tokio_rusqlite::Result<Self> {
-        operational.validate()?;
+        Self::open_reader(
+            target,
+            operational,
+            false,
+            #[cfg(feature = "testing")]
+            synchronous_replies,
+        )
+        .await
+    }
 
+    pub(crate) async fn open_passive(
+        target: &DatabaseTarget,
+        operational: crate::SqliteOperationalSettings,
+    ) -> tokio_rusqlite::Result<Self> {
+        Self::open_reader(
+            target,
+            operational,
+            true,
+            #[cfg(feature = "testing")]
+            false,
+        )
+        .await
+    }
+
+    async fn open_reader(
+        target: &DatabaseTarget,
+        operational: crate::SqliteOperationalSettings,
+        passive: bool,
+        #[cfg(feature = "testing")] synchronous_replies: bool,
+    ) -> tokio_rusqlite::Result<Self> {
+        operational.validate()?;
         let gate = write_gate(target);
         let setup_gate = Arc::clone(&gate);
-        let uri = target.read_only_uri();
-        let inner = AsyncConnection::start(move || {
-            open_connection(
-                uri,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                    | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-            )
+        let open_target = target.clone();
+        let inner = AsyncConnection::start_guarded(move || {
+            if passive {
+                let (guard, connection) = passive::open(&open_target)?;
+                Ok((Some(guard), connection))
+            } else {
+                let connection = open_connection(
+                    open_target.read_only_uri(),
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                        | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+                )?;
+                Ok((None, connection))
+            }
         })
         .await?;
         inner
@@ -646,6 +682,10 @@ impl SqliteConnection {
                 if let Some(timing) = &mut setup_timing {
                     timing.start_service();
                     timing.complete();
+                }
+                if passive {
+                    c.pragma_update(None, "query_only", true)?;
+                    c.pragma_update(None, "temp_store", "MEMORY")?;
                 }
                 c.busy_timeout(operational.readonly_busy_timeout)?;
                 c.set_prepared_statement_cache_capacity(operational.statement_cache_capacity);
@@ -919,6 +959,11 @@ impl SqliteConnection {
     /// §2.3), or the installer's admitted `F` before any write.
     pub(crate) fn fleet(&self) -> FleetFormat {
         self.fence.observed()
+    }
+
+    /// Retain the fleet admitted by a passive open without arming writes.
+    pub(crate) fn observe_passive_fleet(&self, fleet: FleetFormat) {
+        self.fence.observe(fleet);
     }
 
     /// Stand this connection's writers up on `fleet`, pin table included,

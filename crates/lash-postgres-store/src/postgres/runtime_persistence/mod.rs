@@ -349,7 +349,7 @@ mod queued_work;
 mod session_commit;
 pub(crate) use ingress_settlement::{command_refusal_tx, ingress_refusal_tx, released_rows_tx};
 pub(crate) use session_commit::{
-    committed_receipt_tx, frames_left_facts_tx, requested_ancestor_is_active_tx,
+    committed_receipt_tx, frames_left_facts_tx, plan_carries_tx, requested_ancestor_is_active_tx,
 };
 pub(crate) use turn_cancel::{append_identity_columns, requested_append_ancestor};
 pub(crate) mod turn_cancel;

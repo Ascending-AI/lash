@@ -17,7 +17,7 @@
 # in this file records how the DDL declares it and is documentation, not a
 # requirement. Every object is read from the one namespace where lash_schema_versions
 # resolves.
-version 37
+version 51
 table lash_abandoned_consumer_holds
   column abandoned_at_ms bigint not-null
   column hold_key text not-null
@@ -68,6 +68,14 @@ table lash_artifact_cleanup_obligations
   column referrer_kind text not-null
   unique (obligation_id)
   primary-key (referrer_kind, referrer_id)
+table lash_artifact_dependency_edges
+  column artifact_ref text not-null
+  column holder_namespace text not-null
+  column holder_ref text not-null
+  column namespace text not-null
+  primary-key (holder_namespace, holder_ref, namespace, artifact_ref)
+  foreign-key (holder_namespace, holder_ref) references lash_lash_vm_artifacts (namespace, artifact_ref) on delete cascade
+  foreign-key (namespace, artifact_ref) references lash_lash_vm_artifacts (namespace, artifact_ref) on delete no action
 table lash_artifact_referrer_edges
   column artifact_ref text not-null
   column namespace text not-null
@@ -252,6 +260,8 @@ table lash_graph_nodes
 table lash_lash_vm_artifacts
   column artifact_bytes bytea nullable
   column artifact_ref text not-null
+  column body_at integer nullable
+  column body_ref text nullable
   column graph_ref bigint nullable
   column namespace text not-null
   column storage_kind smallint not-null
@@ -389,6 +399,9 @@ table lash_processes
   column consumer_hold_scope_kind text nullable
   column created_at_ms bigint not-null
   column driver_json text nullable
+  column end_plan_ended_at_ms bigint nullable
+  column end_plan_payload text nullable
+  column end_plan_scope_id text nullable
   column execution_json text not-null
   column identity_kind text not-null
   column identity_label text nullable
@@ -405,6 +418,12 @@ table lash_processes
   column start_key text nullable
   column state_rev bigint not-null default
   column status text not-null generated
+  column terminal_event_digest text nullable
+  column terminal_event_header text nullable
+  column terminal_event_key text nullable
+  column terminal_event_payload text nullable
+  column terminal_event_sequence bigint nullable
+  column terminal_event_type text nullable
   column unsequenced_saves integer not-null default
   column updated_at_ms bigint not-null
   column written_epoch bigint nullable
@@ -666,6 +685,12 @@ table lash_turn_change_clock
   column retention_horizon bigint not-null
   column singleton integer not-null
   primary-key (singleton)
+table lash_turn_journal
+  column inputs text not-null
+  column run text not-null
+  column seq bigint not-null
+  column session_id text not-null
+  primary-key (session_id, run, seq)
 table lash_turn_namespaces
   column entry text not-null
   column graph_root_ref bigint nullable
@@ -711,9 +736,18 @@ table lash_waits
   column tool_id text nullable
   column wait_id text not-null
   primary-key (wait_id)
+function lash_acquire_env (p_env text, p_kind text, p_id text, p_write boolean) -> text[]
+function lash_acquire_holds (p_locks text[], p_check_namespaces text[], p_check_refs text[], p_kind text, p_id text, p_edge_namespaces text[], p_edge_refs text[]) -> text
+function lash_advisory_xact_lock (p_key bigint, p_shared boolean) -> void
+function lash_advisory_xact_lock_pair (p_class integer, p_key integer, p_shared boolean) -> void
 function lash_artifact_end_local (p_kind text, p_id text, p_gate text, p_now bigint, p_namespaces text[]) -> jsonb
+function lash_artifact_lock_plan (p_kinds text[], p_ids text[], p_gates text[], p_namespaces text[], p_carry_namespaces text[], p_carry_refs text[], p_held_kinds text[], p_held_ids text[], p_sessions text[], p_envs text[], p_supplied text[], p_scope_kinds text[], p_scope_a text[], p_scope_b text[]) -> jsonb
 function lash_graph_peel_delete (p_gone bytea[]) -> bytea[]
 function lash_graph_peel_plan (p_roots bytea[], p_limit bigint, p_closure boolean) -> TABLE(candidates bytea[], locked bytea[], gone bytea[], deferred bytea[])
 function lash_graph_retire (p_roots bytea[], p_limit bigint, p_now bigint) -> void
+function lash_lock_artifacts (p_keys text[]) -> void
+function lash_lock_referrer (p_kind text, p_id text) -> boolean
 function lash_node_renew (p_node text, p_boot text, p_ttl bigint, p_fleet_low integer, p_fleet_high integer, p_lock_timeout text, p_statement_ms bigint, p_now bigint) -> TABLE(o_fleet integer, o_expires bigint)
-function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint, p_requires text, p_profile boolean) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text, o_session_heads jsonb, o_inserted bytea[], o_root_leases bigint[], o_answered jsonb)
+function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_sealed_lock_timeout text, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint, p_requires text, p_profile boolean) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text, o_session_heads jsonb, o_inserted bytea[], o_root_leases bigint[], o_answered jsonb)
+function lash_publish_env_over_stored_body (p_env_ref text, p_head bytea, p_body_ref text, p_at integer, p_body bytea, p_modules text[], p_kind text, p_id text, OUT stored boolean, OUT missing text) -> record
+function lash_register_process_execution (p_registry text, p_actor text, p_programs jsonb, p_stamp boolean) -> TABLE(o_program integer, o_step integer)

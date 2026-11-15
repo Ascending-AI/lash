@@ -3,6 +3,7 @@ use super::*;
 
 impl<T: Cell> Tree<T> {
     /// Visits the requested rank range, loading each intersecting node once.
+    #[cfg(test)]
     pub(in crate::paged) fn visit_ranks(
         &self,
         access: &Access<'_>,

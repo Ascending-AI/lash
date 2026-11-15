@@ -899,6 +899,8 @@ impl MailWrite {
 #[derive(Clone, Debug, Default)]
 pub struct MailTx {
     writes: Vec<MailWrite>,
+    retired: Vec<FormatSet>,
+    remedy: Option<String>,
 }
 
 impl MailTx {
@@ -947,5 +949,34 @@ impl MailTx {
     pub fn write(&mut self, write: MailDomainWrite) -> &mut Self {
         self.writes.push(MailWrite::Domain(write));
         self
+    }
+
+    /// Refuse the whole transaction when an actor it would wake is in one
+    /// of `retired`, the format sets the sending build retires (ADR 0115
+    /// §8): mail to it would sit in rows no node of that build serves. The
+    /// refusal is [`DurableError::RetiredStateRemains`](crate::DurableError::RetiredStateRemains)
+    /// naming those actors, with `remedy`, the command that carries them
+    /// forward, when there is one.
+    pub fn refusing_retired(&mut self, retired: &[FormatSet], remedy: Option<&str>) -> &mut Self {
+        self.retired = retired.to_vec();
+        self.remedy = remedy.map(str::to_owned);
+        self
+    }
+
+    /// The format sets an actor this transaction wakes must not be in.
+    #[must_use]
+    pub fn retired(&self) -> &[FormatSet] {
+        &self.retired
+    }
+
+    /// The refusal of a transaction that would wake `found`, actors in
+    /// [`retired`](Self::retired) sets.
+    #[must_use]
+    pub fn retired_refusal(&self, found: Vec<crate::RetiredActor>) -> crate::DurableError {
+        crate::DurableError::RetiredStateRemains {
+            remaining: found.len() as u64,
+            found,
+            remedy: self.remedy.clone(),
+        }
     }
 }

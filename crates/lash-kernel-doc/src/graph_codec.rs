@@ -436,6 +436,22 @@ pub mod heap_values {
             })
         }
     }
+    impl TokenCodec for PayloadRoot {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(2);
+            self.page.encode(out);
+            out.bytes(&self.id);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.expect_struct(2)?;
+            let page = PageRef::decode(input)?;
+            let id = input
+                .bytes()?
+                .try_into()
+                .map_err(|_| invalid("a payload identity is 32 bytes"))?;
+            Ok(Self { page, id })
+        }
+    }
     impl TokenCodec for Identity {
         fn encode(&self, out: &mut TokenWriter) {
             match self {
@@ -494,7 +510,7 @@ pub mod heap_values {
                     if summary.utf8_bytes <= IMMUTABLE_INLINE_MAX {
                         return Err(invalid("a short text must be inline"));
                     }
-                    TextPayload::paged(PageRef::decode(input)?)
+                    TextPayload::paged(PayloadRoot::decode(input)?)
                 }
             };
             Ok(Self {
@@ -534,7 +550,7 @@ pub mod heap_values {
                     if len <= IMMUTABLE_INLINE_MAX {
                         return Err(invalid("short bytes must be inline"));
                     }
-                    Payload::paged(PageRef::decode(input)?)
+                    Payload::paged(PayloadRoot::decode(input)?)
                 }
             };
             Ok(Self {
@@ -582,7 +598,7 @@ pub mod heap_values {
                         Self::Paged {
                             normal: Default::default(),
                             summary,
-                            digits: Arc::new(PageRef::decode(input)?),
+                            digits: Arc::new(PayloadRoot::decode(input)?),
                         }
                     }
                 },
@@ -909,6 +925,15 @@ pub mod heap_values {
         let mut hash = Sha256::new();
         hash.update(b"lash.normal-key.v1\0");
         hash.update(tokens);
+        hash.finalize().into()
+    }
+    /// SHA-256 of `parts` in order, with no framing of its own: the long
+    /// text and bytes identity grammar frames its preimages itself.
+    pub fn sha256(parts: &[&[u8]]) -> [u8; 32] {
+        let mut hash = Sha256::new();
+        for part in parts {
+            hash.update(part);
+        }
         hash.finalize().into()
     }
     pub fn integral_float(float: f64) -> Option<Integer> {

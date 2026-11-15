@@ -83,7 +83,12 @@ what the walk leaves opaque.
 Guard hashing ignores only allowlisted non-wire derives inside top-level
 ``derive`` attributes and ``derive`` entries of ``cfg_attr``. Wire-producing
 and unknown derives remain in the preimage, as do namespaced attributes, macro
-arguments, and every ``serde`` attribute.
+arguments, and every ``serde`` attribute. Serialized-shape projections also
+ignore only the format-string literal in an exact ``#[error(...)]`` helper;
+its arguments and all other tokens remain guarded.
+
+The named continuation-exchange surface requires shape and version changes
+together in both modes. Other coexist surfaces keep the pre-1.0 freeze policy.
 
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.
@@ -102,7 +107,7 @@ import re
 import subprocess
 import sys
 import tomllib
-from typing import Iterable
+from typing import Callable, Iterable
 
 from discover_version_surfaces import (
     REGISTRY, RUST_SOURCE_PATTERNS, SourceError as CheckError, WorktreeSources,
@@ -122,6 +127,20 @@ STRICT_VERSION_BUMPS = False
 # overlay bytes have a separate reset witness, which must cover the complete
 # trace projection. Strict mode ignores this pre-cut ownership relation.
 PRE_CUT_RESET_WITNESSES = {"TRACE_SCHEMA_VERSION": "HOST_STORED_SCHEMA_VERSION"}
+# The continuation exchange crosses builds even during the pre-1.0 freeze.
+# Each named surface requires shape/version changes together in both modes.
+EXACT_SHAPE_VERSION_SURFACES: dict[str, str] = {
+    "crates/lash-kernel-conformance/src/compat.rs:VERSION":
+        "continuation exchange written by the base and read by the candidate at the switch gate",
+}
+
+
+def exact_shape_version_relation(surface, previous=None) -> bool:
+    return any(item is not None and item.key in EXACT_SHAPE_VERSION_SURFACES
+               for item in (surface, previous))
+
+
+DOCUMENT_PROJECTION_PREDECESSOR = "d709cfaf7f5bbc3ed9efb5363f10bbca7c7525ff"
 # The one table a record lift is registered in (ADR 0106 §2). Its default-build
 # arm is the upgrade evidence a bumped decoder-law surface owes.
 UPCASTER_REGISTRY = "crates/lash-core-store/src/store/fleet_format.rs"
@@ -389,6 +408,66 @@ def normalize_rust_derive_lists(text: str) -> str:
     return normalized
 
 
+# Attributes whose wording supplies a parsed protocol token or structure.
+# Keys are (type name, enum variant or None for a type attribute); values name
+# the production readers. Presentation-only comparisons do not belong here.
+# The audited list is empty: the JSON fault record comes from to_record/format!,
+# and TypeScript's Unsupported convention comes from constants/format!, not an
+# error attribute. See r57/evidence/l58/rendered-message-audit.md.
+ERROR_ATTRIBUTE_DATA_READERS: dict[tuple[str, str | None], tuple[str, ...]] = {}
+
+
+def error_attribute_owner(text: str, attribute_end: int) -> tuple[str, str | None] | None:
+    """Identify a type/variant without treating tokens inside attributes as code."""
+    attributes = rust_outer_attribute_ranges(text)
+    tokens = [token for token in rust_lexemes(text)
+              if token.kind not in {"space", "comment"}]
+    declaration = next((index for index, token in enumerate(tokens[:-1])
+                        if token.kind == "ident" and token.value in {"enum", "struct"}
+                        and tokens[index + 1].kind == "ident"
+                        and not any(a <= token.start < b for a, b in attributes)), None)
+    if declaration is None:
+        return None
+    kind, name = tokens[declaration:declaration + 2]
+    if kind.value == "struct" or attribute_end <= kind.start:
+        return name.value, None
+    cursor = _rust_trivia_end(text, attribute_end)
+    by_start = dict(attributes)
+    while cursor in by_start:
+        cursor = _rust_trivia_end(text, by_start[cursor])
+    variant = next((token for token in tokens if cursor is not None and token.start >= cursor), None)
+    if variant is None or variant.kind != "ident":
+        return None
+    return name.value, variant.value
+
+
+def normalize_rust_shape_attributes(text: str) -> str:
+    """Exclude only the format string of an exact `#[error(...)]` helper.
+
+    Keep its format arguments and every other attribute token. The lexer makes
+    literals indivisible, so an attribute spelling inside data is never elided.
+    """
+    replacements: list[tuple[int, int]] = []
+    for start, end in rust_outer_attribute_ranges(text):
+        if ERROR_ATTRIBUTE_DATA_READERS:
+            owner = error_attribute_owner(text, end)
+            if owner is None or owner in ERROR_ATTRIBUTE_DATA_READERS:
+                continue
+        tokens = [token for token in rust_lexemes(text[start:end])
+                  if token.kind not in {"space", "comment"}]
+        if (len(tokens) >= 7
+                and [(token.kind, token.value) for token in tokens[:4]]
+                == [("punct", "#"), ("punct", "["), ("ident", "error"), ("punct", "(")]
+                and tokens[4].kind == "literal"
+                and text[start + tokens[4].start] in {'"', 'r'}
+                and tokens[5].value in {",", ")"}
+                and tokens[-2].value == ")" and tokens[-1].value == "]"):
+            replacements.append((start + tokens[4].start, start + tokens[4].end))
+    for start, end in reversed(replacements):
+        text = text[:start] + '""' + text[end:]
+    return normalize_rust_derive_lists(text)
+
+
 RUST_DECLARATION = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
     r"(?:(?:const[ \t]+)?(?:async[ \t]+)?(?:unsafe[ \t]+)?fn|const|static|struct|enum|type)"
@@ -403,7 +482,9 @@ RUST_SERDE_IMPL = re.compile(
     r"((?:[A-Za-z_][A-Za-z0-9_]*::)*(?:Serialize|Deserialize|DurableSerialize)(?:\s*<[^>{}]*>)?)"
     r"\s+for\s+([A-Za-z_][A-Za-z0-9_]*)\b"
 )
-def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
+def named_rust_items(
+    text: str, names: Iterable[str], strip: Callable[[str, str], str] | None = None
+) -> dict[str, str]:
     """Every production declaration called one of `names`.
 
     A name several items share (an `as_str` on each of two enums) guards all
@@ -425,7 +506,11 @@ def named_rust_items(text: str, names: Iterable[str]) -> dict[str, str]:
         if SYNTHETIC_NEXT_CFG in strip_rust_trivia(text[start : match.start()]):
             continue
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
+        raw = text[start:end] if strip is None else strip(name, text[start:end])
+        normalize = (normalize_rust_shape_attributes
+                     if re.search(r"\b(?:struct|enum)\s+" + re.escape(name) + r"\b", match[0])
+                     else normalize_rust_derive_lists)
+        value = strip_rust_trivia(normalize(raw))
         key = name
         ordinal = 2
         while key in found:
@@ -451,7 +536,7 @@ def named_rust_serde_impls(text: str, names: Iterable[str]) -> dict[str, str]:
     return found
 
 
-def serde_shapes(text: str) -> dict[str, str]:
+def serde_shapes(text: str, strip: Callable[[str, str], str] | None = None) -> dict[str, str]:
     found: dict[str, str] = {}
     attribute_ranges = rust_outer_attribute_ranges(text)
     excluded_ranges = test_only_module_ranges(text, attribute_ranges)
@@ -465,7 +550,8 @@ def serde_shapes(text: str) -> dict[str, str]:
                 and production_codec_source(text) is None):
             continue
         end = rust_item_end(text, match.start())
-        value = strip_rust_trivia(normalize_rust_derive_lists(text[start:end]))
+        raw = text[start:end] if strip is None else strip(name, text[start:end])
+        value = strip_rust_trivia(normalize_rust_shape_attributes(raw))
         key = name
         ordinal = 2
         while key in found:
@@ -1077,7 +1163,9 @@ class ParsedShape:
 
 
 @lru_cache(maxsize=None)
-def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> ParsedShape:
+def parse_shape(
+    text: str, offset: int, *, token_encoded: bool = False, unwritten: frozenset[str] = frozenset()
+) -> ParsedShape:
     """The types one struct, enum, union or alias serializes."""
     start = rust_item_start_with_attributes(text, offset, rust_outer_attribute_ranges(text))
     end = rust_item_end(text, offset)
@@ -1110,9 +1198,11 @@ def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> Parse
     def member(inner: _ItemParser, *, named: bool) -> None:
         field_attributes = inner.attributes()
         inner.visibility()
+        field = None
         if named:
             if inner.peek() == ("ident", "r") and inner.tokens[inner.index + 1:inner.index + 2] == (("punct", "#"),):
                 inner.index += 2
+            field = inner.peek()[1]
             inner.index += 2
         tokens = inner.until_comma()
         arguments = serde_arguments(field_attributes)
@@ -1120,6 +1210,9 @@ def parse_shape(text: str, offset: int, *, token_encoded: bool = False) -> Parse
         if _outside_default_build(field_attributes):
             return
         if not token_encoded and ("skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys):
+            return
+        if field in unwritten:
+            # Left out by the rule at `unwritten_fields`.
             return
         refs.extend(type_refs(tokens, scope))
         adapters.extend(
@@ -1999,10 +2092,12 @@ class Reachability:
         if shape.kind.startswith("macro "):
             return (shape.path, shape.name, strip_rust_trivia(_item_text(content, shape.offset)))
         parsed = parse_shape(content, shape.offset)
+        text = without_unwritten_fields(
+            self.view, shape.path, shape.name, content[parsed.start : parsed.end])
         return (
             shape.path,
             shape.name,
-            strip_rust_trivia(normalize_rust_derive_lists(content[parsed.start : parsed.end])),
+            strip_rust_trivia(normalize_rust_shape_attributes(text)),
         )
 
     def _expand(self, shape: Shape):
@@ -2045,7 +2140,12 @@ class Reachability:
             self._edges[key] = result
             return result
 
-        parsed = parse_shape(content, shape.offset, token_encoded=bool(codecs))
+        unwritten = frozenset()
+        if codecs:
+            item = parse_shape(content, shape.offset)
+            unwritten = frozenset(field for field, _, _ in unwritten_fields(
+                self.view, shape.path, shape.name, content[item.start : item.end]))
+        parsed = parse_shape(content, shape.offset, token_encoded=bool(codecs), unwritten=unwritten)
         if hand_written and not parsed.derives_serde and not codecs:
             opaque.append(
                 (shape.label, "its Serde impls are hand-written; the impls are guarded")
@@ -2219,14 +2319,17 @@ def _guard_signature(
             signature.append((path, "", apply_elision(path, "", content)))
             covered.update(marker for marker in guard.must_cover if marker in content)
             continue
+        def unwritten(name: str, raw: str, path: str = path) -> str:
+            return without_unwritten_fields(view, path, name, raw)
+
         if guard.kind == "items":
-            items = named_rust_items(content, guard.symbols)
+            items = named_rust_items(content, guard.symbols, unwritten)
             found_symbols.update(name.partition("#")[0] for name in items)
         elif guard.kind == "impls":
             items = named_rust_serde_impls(content, guard.symbols)
             found_symbols.update(items)
         else:
-            items = serde_shapes(content)
+            items = serde_shapes(content, unwritten)
             covered.update(name.partition("#")[0] for name in items)
         signature.extend(
             (path, name, apply_elision(path, name, value))
@@ -2253,12 +2356,60 @@ def _guard_signature(
     return tuple(sorted(set(signature)))
 
 
+RUST_ANY_IMPL = re.compile(
+    r"(?m)^[ \t]*impl\b(?:\s*<[^{}]*?>)?\s+"
+    r"(?:(?P<trait>[\w:]+)(?:\s*<[^{}]*?>)?\s+for\s+)?(?P<target>[\w:]+)"
+)
+RUST_ERROR_DERIVE = re.compile(r"#\[\s*derive\s*\([^\]]*\bError\b")
+RUST_SERDE_DERIVE = re.compile(r"#\[\s*derive\s*\([^\]]*\b(?:Serialize|Deserialize)\b")
+ENCODING_TRAITS = {"TokenCodec", "CodecVariant", "Serialize", "Deserialize", "DurableSerialize"}
+
+
+def without_unencoded_error_types(text: str) -> str:
+    """``text`` without its error types and their impls, when none is encoded.
+
+    A codec reports a refusal through an error type; the type's variants and
+    messages are not bytes any codec writes or reads. An error type that is
+    itself encoded or serialized in this file stays, as does everything else
+    a codec file holds (tags, writers, readers, constants, helpers).
+    """
+    attributes = rust_outer_attribute_ranges(text)
+    impls = [(m, m["trait"].split("::")[-1] if m["trait"] else None, m["target"].split("::")[-1])
+             for m in RUST_ANY_IMPL.finditer(text)]
+    errors, encoded = set(), set()
+    spans: dict[str, list[tuple[int, int]]] = {}
+    for match in RUST_SERDE_SHAPE.finditer(text):
+        start = rust_item_start_with_attributes(text, match.start(), attributes)
+        header = text[start:match.start()]
+        spans.setdefault(match[1], []).append((start, rust_item_end(text, match.start())))
+        if RUST_ERROR_DERIVE.search(header):
+            errors.add(match[1])
+        if RUST_SERDE_DERIVE.search(header):
+            encoded.add(match[1])
+    for _, trait, target in impls:
+        if trait == "Error":
+            errors.add(target)
+        if trait in ENCODING_TRAITS:
+            encoded.add(target)
+    dropped = errors - encoded
+    if not dropped:
+        return text
+    ranges = [span for name in dropped for span in spans.get(name, [])]
+    ranges += [(rust_item_start_with_attributes(text, m.start(), attributes), rust_item_end(text, m.start()))
+               for m, _, target in impls if target in dropped]
+    for start, end in sorted(ranges, reverse=True):
+        text = text[:start] + text[end:]
+    return text
+
+
 @lru_cache(maxsize=None)
 def production_codec_source(text: str) -> str | None:
     """Codec implementation, helpers and macro calls, excluding test-only code.
 
     Hash the production file conservatively: a codec can call a local helper
     or expand a macro, so hashing just its impl body misses encoding changes.
+    Only unencoded error types leave the projection
+    (``without_unencoded_error_types``).
     """
     if "TokenCodec" not in text and "CodecVariant" not in text:
         return None
@@ -2275,6 +2426,7 @@ def production_codec_source(text: str) -> str | None:
             merged.append((start, end))
     for start, end in reversed(merged):
         text = text[:start] + text[end:]
+    text = without_unencoded_error_types(text)
     tokens = rust_tokens(text)
     # Includes generic/qualified impls and macro-generated codecs ($ty).
     if not (any(kind == "ident" and name == "impl" for kind, name in tokens)
@@ -2296,6 +2448,36 @@ def codec_entry(view: TreeView, path: str, label: str, raw: str) -> Entry:
         view._codec_raw = {}
     view._codec_raw[entry] = raw
     return entry
+
+
+def _module_stem(path: str) -> str:
+    """The module a source file declares: its stem, or its directory's name
+    for a `mod.rs`."""
+    file = Path(path)
+    return file.parent.name if file.stem == "mod" else file.stem
+
+
+def _named_helpers(
+    candidates: Iterable[Entry], qualifiers: set[str | None], caller: str
+) -> tuple[Entry, ...]:
+    """The helpers a call by name reaches. A name the crate defines once is
+    that definition. A name it defines several times is the one in the module
+    the call qualifies (`identity::leaf`), or, for a bare call, the caller's
+    own file's; a call neither settles binds every definition, so an
+    unresolved name never drops a helper from a guard."""
+    candidates = tuple(candidates)
+    if len(candidates) <= 1:
+        return candidates
+    chosen: list[Entry] = []
+    for qualifier in qualifiers:
+        if qualifier is None:
+            local = [entry for entry in candidates if entry[0] == caller]
+        else:
+            local = [entry for entry in candidates if _module_stem(entry[0]) == qualifier]
+        if not local:
+            return candidates
+        chosen.extend(local)
+    return tuple(dict.fromkeys(chosen))
 
 
 def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple[Entry, ...]:
@@ -2329,7 +2511,11 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
         if raw is None:
             continue
         tokens = rust_tokens(raw)
-        wanted = {value for kind, value in tokens if kind == "ident" and value.isupper()}
+        # Each called name with the module that qualifies it at the call
+        # (`identity::leaf(..)`), or None when the call is bare.
+        wanted: dict[str, set[str | None]] = {
+            value: {None} for kind, value in tokens if kind == "ident" and value.isupper()
+        }
         for i, (kind, value) in enumerate(tokens[:-1]):
             if kind != "ident" or tokens[i + 1] != ("punct", "("):
                 continue
@@ -2340,12 +2526,18 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
                 start -= 2
             if tokens[start][1][:1].isupper():
                 continue
-            wanted.add(value)
-        aliases = {name: segments[-1] for name, segments, _ in reach._file(entry[0]).uses
-                   if segments}
-        wanted.update(aliases[name] for name in tuple(wanted) if name in aliases)
-        for name in wanted:
-            for helper in catalog.get(name, ()):
+            wanted.setdefault(value, set()).add(tokens[i - 2][1] if start < i else None)
+        uses = {name: segments for name, segments, _ in reach._file(entry[0]).uses if segments}
+        # A bare call of an imported name is qualified by its `use` path.
+        for name in tuple(wanted):
+            if name in uses and None in wanted[name]:
+                segments = uses[name]
+                if segments[-1] == name:
+                    wanted[name].discard(None)
+                wanted.setdefault(segments[-1], set()).add(
+                    segments[-2] if len(segments) > 1 else None)
+        for name, qualifiers in wanted.items():
+            for helper in _named_helpers(catalog.get(name, ()), qualifiers, entry[0]):
                 helpers.add(helper)
                 if helper not in seen:
                     seen.add(helper)
@@ -2353,7 +2545,138 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
     return tuple(sorted(helpers))
 
 
-def token_codec_signature(view: TreeView, shape: Shape) -> tuple[Entry, ...]:
+# --- Fields a token codec never writes ----------------------------------------
+#
+# Rule (FIG-7694): in a type with a token codec, a named field marked
+# `#[serde(skip)]` (or both `skip_serializing` and `skip_deserializing`) that
+# the type's codec never names when it writes (its `encode`, and every helper
+# the codec calls) is written by neither encoding. It is left out of the
+# type's checked text, and its type is not followed. A `decode` may still name
+# it to give it its empty value: a decode that read bytes into a field encode
+# never writes would fail every round-trip law of the type. The codec text
+# stays guarded, so a codec that starts writing the field brings it back into
+# the shape.
+#
+# A codec could still reach such a field through a method this text scan does
+# not see. The law that closes that gap for the one field the rule exempts,
+# `Document.source_evidence`, is
+# `lash-kernel-doc` `tests::source_evidence_never_reaches_a_documents_bytes_or_identity`:
+# documents that differ only in that field have identical canonical bytes,
+# identity, token body and JSON, and it fails when the codec writes the field
+# through a helper. A further field this rule exempts needs a law like it.
+
+SERDE_ATTRIBUTE = re.compile(r"#\[\s*serde\s*\((?P<args>[^\]]*)\)\s*\]")
+FIELD_NAME = re.compile(r"^\s*(?:pub(?:\s*\([^)]*\))?\s+)?(?:r#)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*:")
+
+
+def _serde_skipped(attributes: str) -> bool:
+    keys = {
+        argument.partition("=")[0].strip()
+        for match in SERDE_ATTRIBUTE.finditer(attributes)
+        for argument in match["args"].split(",")
+    }
+    return "skip" in keys or {"skip_serializing", "skip_deserializing"} <= keys
+
+
+def _struct_fields(text: str) -> list[tuple[str, int, int, bool]]:
+    """The named fields of the struct `text` declares: each field's name, its
+    span from its first attribute or doc line to its comma, and whether Serde
+    skips it. An enum, tuple or unit struct has none."""
+    header = re.search(r"\bstruct\s+[A-Za-z_][A-Za-z0-9_]*", text)
+    if header is None:
+        return []
+    depth = 0
+    index = header.end()
+    while index < len(text):
+        char = text[index]
+        if char == "<":
+            depth += 1
+        elif char == ">":
+            depth -= 1
+        elif char in "(;" and depth == 0:
+            return []
+        elif char == "{" and depth == 0:
+            break
+        index += 1
+    else:
+        return []
+    fields: list[tuple[str, int, int, bool]] = []
+    start = index + 1
+    depth = 0
+    index = start
+    while index < len(text):
+        char = text[index]
+        if text.startswith("//", index):
+            index = text.find("\n", index)
+            index = len(text) if index < 0 else index
+            continue
+        if text.startswith("/*", index):
+            index = text.find("*/", index + 2)
+            index = len(text) if index < 0 else index + 2
+            continue
+        if char == '"':
+            index += 1
+            while index < len(text) and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+        elif char in "<([{":
+            depth += 1
+        elif char == ">" and text[index - 1] != "-":
+            depth -= 1
+        elif char in ")]":
+            depth -= 1
+        elif char == "}" and depth > 0:
+            depth -= 1
+        elif (char == "," and depth == 0) or (char == "}" and depth == 0):
+            segment = text[start:index]
+            code = re.sub(r"//[^\n]*|/\*.*?\*/", "", segment, flags=re.S)
+            attributes = "".join(match.group(0) for match in re.finditer(
+                r"#\[(?:[^\[\]]|\[[^\]]*\])*\]", code))
+            bare = re.sub(r"#\[(?:[^\[\]]|\[[^\]]*\])*\]", "", code)
+            name = FIELD_NAME.match(bare)
+            if name:
+                end = index + 1 if char == "," else index
+                fields.append((name["name"], start, end, _serde_skipped(attributes)))
+            if char == "}":
+                break
+            start = index + 1
+        index += 1
+    return fields
+
+
+def unwritten_fields(view: TreeView, path: str, name: str, text: str) -> list[tuple[str, int, int]]:
+    """The fields of type `name`, declared by `text` in `path`, that the rule
+    above leaves out: Serde skips them and its token codec never names them."""
+    fields = [field for field in _struct_fields(text) if field[3]]
+    if not fields:
+        return []
+    codecs = token_codec_signature(view, Shape(path, name, 0, "struct"), own=True)
+    if not codecs:
+        return []
+    written = "\n".join(_without_decode(value) for _, _, value in codecs)
+    return [
+        (field, start, end) for field, start, end, _ in fields
+        if not re.search(rf"\b{re.escape(field)}\b", written)
+    ]
+
+
+def _without_decode(text: str) -> str:
+    """A codec impl's text (guarded entries have their whitespace stripped)
+    without its `decode` method."""
+    match = re.search(r"(?<![A-Za-z0-9_])fn\s*decode\s*[(<]", text)
+    if match is None:
+        return text
+    return text[: match.start()] + text[rust_item_end(text, match.start()) :]
+
+
+def without_unwritten_fields(view: TreeView, path: str, name: str, text: str) -> str:
+    for _, start, end in reversed(unwritten_fields(view, path, name, text)):
+        text = text[:start] + text[end:]
+    return text
+
+
+def token_codec_signature(
+    view: TreeView, shape: Shape, *, own: bool = False
+) -> tuple[Entry, ...]:
     """Find a type's codecs wherever its crate implements them.
 
     Retain each impl and the helpers it calls, without binding unrelated
@@ -2402,6 +2725,8 @@ def token_codec_signature(view: TreeView, shape: Shape) -> tuple[Entry, ...]:
     entries = cache[crate].get(shape.name, [])
     if entries:
         entries = [*entries, *codec_helpers(view, crate, entries)]
+        if own:
+            return tuple(sorted(set(entries)))
         if "primitives" not in cache:
             primitives = []
             primitive_crates = set()
@@ -2745,6 +3070,30 @@ def _declaration(view: TreeView, surface: Surface) -> Declaration | None:
                        None, declared.catalogs if declared else ())
 
 
+def audited_document_guards(
+    base: TreeView, surface: Surface, guards: tuple[Guard, ...]
+) -> tuple[Guard, ...]:
+    """Correct the reviewed main predecessor's overbroad document projection.
+
+    FIG-7694 / r57 L56: main's document.rs sweep included ephemeral Selection
+    and RestoreSelection, neither serialized by Document. Compare the Document
+    closure on BOTH trees instead. Only these two owners, this predecessor and
+    this exact sweep are corrected; decode and every other guard still bind.
+    The normal union of base/head guards, including dropped roots, stays intact.
+    """
+    if not isinstance(base, RevisionView) or base.revision != DOCUMENT_PROJECTION_PREDECESSOR:
+        return guards
+    if surface.key not in {
+        "crates/lash-kernel-doc/src/document_bytes.rs:DOCUMENT_GRAMMAR_VERSION",
+        "crates/lash-vm-runtime/src/formats.rs:KERNEL_DOCUMENT_SCHEMA_VERSION",
+    }:
+        return guards
+    paths = ("crates/lash-kernel-doc/src/document.rs",)
+    historical = Guard("shapes", paths, must_cover=("Document",))
+    corrected = Guard("roots", paths, ("Document",))
+    return tuple(corrected if guard == historical else guard for guard in guards)
+
+
 def _compare(
     base: TreeView,
     head: TreeView,
@@ -2872,8 +3221,11 @@ def check_views(
             changed, head_entries = _compare(
                 base_view,
                 head_view,
-                declaration.guards,
-                () if base_declaration is None else base_declaration.guards,
+                audited_document_guards(base_view, surface, declaration.guards),
+                audited_document_guards(
+                    base_view, surface,
+                    () if base_declaration is None else base_declaration.guards,
+                ),
             )
             if previous is None:
                 registered.append(surface)
@@ -2910,7 +3262,8 @@ def check_views(
                             in_place.append(Finding(surface, f"pre-1.0 reset witnessed by {reset.constant}; wire schema stays {head_version}"))
                         evaluated.append(surface)
                         continue
-                    witness_required = (strict or surface.upgrade != "coexist"
+                    witness_required = (strict or exact_shape_version_relation(surface, previous)
+                                        or surface.upgrade != "coexist"
                                         or any(name.startswith("token codecs:")
                                                for _, name, _ in head_entries))
                     (failures if witness_required else in_place).append(
@@ -2974,6 +3327,15 @@ def check_views(
                                     f"{version}"
                                     for catalog, version in unstepped
                                 ),
+                            )
+                        )
+                    elif exact_shape_version_relation(surface, previous) and not changed:
+                        failures.append(
+                            Finding(
+                                surface,
+                                f"{surface.constant} moved {base_version} to "
+                                f"{head_version} without a changed guarded shape. "
+                                "A format version advances only with its shape.",
                             )
                         )
                     else:

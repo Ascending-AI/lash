@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "rule": "K-LIB-012",
+    "owner": "L3 native specializations (FIG-7688)"
+  },
+  {
+    "rule": "K-MACH-009",
+    "owner": "L2 object directory and reclamation (FIG-7688)"
+  }
+]

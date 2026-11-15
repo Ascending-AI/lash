@@ -17,9 +17,9 @@ actually exhibits, each of which is asserted by `--check` rather than assumed:
 * No first-party dependency is target-conditional, so there is no `cfg()`
   dependency edge to evaluate and only the configured
   `x86_64-unknown-linux-gnu` target is in play.
-* Every optional first-party dependency is referenced explicitly as `dep:name`
-  by some feature, so no package acquires an *implicit* optional-dependency
-  feature whose name shadows a dependency.
+* Optional dependencies may have an implicit same-name feature. A strong
+  `dependency/feature` request enables it when present; `dep:dependency`
+  suppresses that implicit feature, and weak forwarding does not enable it.
 * Feature unification is resolver v2: a feature enabled through a
   build-dependency edge does not unify with the normal edge. No first-party
   package is a build-dependency, so there is no second context to resolve.
@@ -126,9 +126,12 @@ class _Resolver:
     def dependency_named(self, owner: str, alias: str) -> dict | None:
         package = self.workspace.packages[owner]
         for dependency in package["dependencies"]:
-            if dependency["kind"] is not None:
+            if dependency_alias(dependency) != alias:
                 continue
-            if dependency_alias(dependency) == alias:
+            if dependency["kind"] is None or (
+                dependency["kind"] == "dev"
+                and alias in self.resolution.activated.get(owner, set())
+            ):
                 return dependency
         return None
 
@@ -167,6 +170,8 @@ class _Resolver:
             if weak and not already:
                 self.deferred.setdefault((owner, alias), set()).add(feature)
                 return
+            if not weak and dependency["optional"]:
+                self.activate_feature(owner, alias)
             if not already:
                 self.activate_dependency(owner, dependency)
             self.activate_feature(dependency["name"], feature)

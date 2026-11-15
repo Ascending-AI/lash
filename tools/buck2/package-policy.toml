@@ -284,6 +284,14 @@ shards = 4
 # The host contract law compares all 27 shipped schema/declaration documents.
 compile_data = ["//:host_schemas"]
 
+# The closing build's refusal law (FIG-7695) has a PostgreSQL leg: a
+# refused start changes no row there either.
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["test"]
+targets = ["kernel_two_build_claim"]
+tags = ["hermetic-postgres"]
+
 [[rule]]
 packages = ["lash-runtime"]
 kinds = ["test"]

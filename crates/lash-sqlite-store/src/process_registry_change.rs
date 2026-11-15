@@ -207,12 +207,28 @@ fn prune_process_rows_conn(
     }
 
     let sql = process_sql();
+    // A packed terminal event counts with the event rows (FIG-7701), and a
+    // packed plan reclaim left in place moves to the table before its row goes.
+    let packed_events: i64 = conn
+        .query_row_once(
+            sql.event_sqlite.count_packed.sql(),
+            params![process_ids_json],
+            |row| row.get(0),
+        )
+        .map_err(process_sqlite_error)?;
+    crate::conn::cached_execute(
+        conn,
+        sql.plan_sqlite.restore_packed.sql(),
+        params![process_ids_json],
+    )
+    .map_err(process_sqlite_error)?;
     let pruned_events = conn
         .execute_once(
             sql.event_sqlite.delete_by_process_ids.sql(),
             params![process_ids_json],
         )
-        .map_err(process_sqlite_error)?;
+        .map_err(process_sqlite_error)?
+        + usize::try_from(packed_events).unwrap_or(0);
     crate::conn::cached_execute(
         conn,
         sql.observer_sqlite.delete_by_process_ids.sql(),

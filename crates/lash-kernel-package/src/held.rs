@@ -200,7 +200,6 @@ impl LinkedContent {
             root,
             selector,
             catalog,
-            None,
             lash_kernel_check::ReachMode::Referenced,
         )
     }
@@ -222,24 +221,6 @@ impl LinkedContent {
             root,
             selector,
             &BTreeMap::new(),
-            None,
-            lash_kernel_check::ReachMode::Referenced,
-        )
-    }
-
-    /// Executable admission after a mismatch proof. The ordinary retained DAG
-    /// remains intact; dead code never selects helpers for this executable.
-    pub fn inspect_restored(
-        &self,
-        root: LinkId,
-        selection: &lash_kernel_doc::RestoreSelection,
-        catalog: &dyn lash_kernel_doc::FunctionCatalog,
-    ) -> Result<LinkedReach, LinkRefusal> {
-        self.inspect_with(
-            root,
-            &ReachSelection::AllExports,
-            catalog,
-            Some(selection),
             lash_kernel_check::ReachMode::Referenced,
         )
     }
@@ -256,7 +237,6 @@ impl LinkedContent {
             root,
             selector,
             catalog,
-            None,
             lash_kernel_check::ReachMode::Invoked,
         )
     }
@@ -266,7 +246,6 @@ impl LinkedContent {
         root: LinkId,
         selector: &ReachSelection,
         catalog: &dyn lash_kernel_doc::FunctionCatalog,
-        restored: Option<&lash_kernel_doc::RestoreSelection>,
         mode: lash_kernel_check::ReachMode,
     ) -> Result<LinkedReach, LinkRefusal> {
         let mut reach = LinkedReach {
@@ -289,120 +268,51 @@ impl LinkedContent {
             }
             let link = self.link(id)?;
             let document = self.document(link.document)?;
-            let required = if let Some(selection) = restored {
-                let mut required = lash_kernel_check::Requirements::default();
-                let roots = selection
-                    .live
-                    .iter()
-                    .filter(|callable| {
-                        callable.link == id && document.functions.contains_key(&callable.function)
-                    })
-                    .map(|callable| callable.function)
-                    .collect();
-                lash_kernel_check::follow(document, &mut required, roots, catalog);
-                // Preserve exact helper callables' operation Links from the
-                // mismatch proof. Old dead manifest ancestry is never rebuilt.
-                let mut pending: Vec<_> = selection
-                    .live
-                    .iter()
-                    .filter(|callable| {
-                        callable.link == id && selection.pins.contains(&callable.function)
-                    })
-                    .map(|callable| callable.function)
-                    .collect();
-                pending.extend(
-                    required
-                        .functions
-                        .keys()
-                        .filter(|function| selection.pins.contains(function))
-                        .copied(),
-                );
-                let mut seen = BTreeSet::new();
-                while let Some(function) = pending.pop() {
-                    if !seen.insert(function) {
-                        continue;
-                    }
-                    if !selection.pins.contains(&function) {
+            let required = match &selector {
+                ReachSelection::Start(selector) => mode.selected(document, selector, catalog)?,
+                ReachSelection::Callable(function) => {
+                    if !document.functions.contains_key(function)
+                        && !document.library.contains(function)
+                    {
                         return Err(LinkRefusal::InvalidDocument {
-                            message: format!("unproved helper {function}"),
+                            message: format!("missing callable {function}"),
                         });
                     }
-                    let registered =
-                        catalog
-                            .registered(&function)
-                            .ok_or(LinkRefusal::HelperUnavailable {
-                                reason: lash_kernel_value::HelperUnavailableReason::Unknown,
-                                function,
-                            })?;
-                    pending.extend(registered.callees());
+                    let mut required = lash_kernel_check::Requirements::default();
+                    mode.follow(
+                        document,
+                        &mut required,
+                        BTreeSet::from([*function]),
+                        catalog,
+                    );
                     required
-                        .functions
-                        .insert(function, registered.header().name.clone());
-                    required
-                        .helper_imports
-                        .extend(registered.imports().values().map(|import| {
-                            (
-                                lash_kernel_value::HelperOperationId::of_import(import),
-                                import.clone(),
-                            )
-                        }));
                 }
-                // Ordinary Link operations and code retention stay authorized
-                // even when the current main has already passed their use.
-                required.imports.extend(document.imports.keys());
-                required.functions.retain(|function, _| {
-                    document.functions.contains_key(function) || selection.pins.contains(function)
-                });
-                required
-            } else {
-                match &selector {
-                    ReachSelection::Start(selector) => {
-                        mode.selected(document, selector, catalog)?
+                ReachSelection::AllExports => mode.requirements(document, catalog),
+                ReachSelection::Function(export) => {
+                    // Imported functions may accept executable values; the host-only predicate does not apply.
+                    let function = self.function_export(id, export)?;
+                    function_reach(document, &function, catalog, mode)
+                }
+                ReachSelection::Type(export) => {
+                    let Export::Type(ty) = self.export(id, export)? else {
+                        return Err(LinkRefusal::NotFunction {
+                            export: export.clone(),
+                        });
+                    };
+                    let mut required = lash_kernel_check::Requirements::default();
+                    mode.follow(
+                        document,
+                        &mut required,
+                        BTreeSet::from([ty.checker]),
+                        catalog,
+                    );
+                    for member in ty.members.values() {
+                        let r = function_reach(document, member.function(), catalog, mode);
+                        required.imports.extend(r.imports);
+                        required.helper_imports.extend(r.helper_imports);
+                        required.functions.extend(r.functions);
                     }
-                    ReachSelection::Callable(function) => {
-                        if !document.functions.contains_key(function)
-                            && !document.library.contains(function)
-                        {
-                            return Err(LinkRefusal::InvalidDocument {
-                                message: format!("missing callable {function}"),
-                            });
-                        }
-                        let mut required = lash_kernel_check::Requirements::default();
-                        mode.follow(
-                            document,
-                            &mut required,
-                            BTreeSet::from([*function]),
-                            catalog,
-                        );
-                        required
-                    }
-                    ReachSelection::AllExports => mode.requirements(document, catalog),
-                    ReachSelection::Function(export) => {
-                        // Imported functions may accept executable values; the host-only predicate does not apply.
-                        let function = self.function_export(id, export)?;
-                        function_reach(document, &function, catalog, mode)
-                    }
-                    ReachSelection::Type(export) => {
-                        let Export::Type(ty) = self.export(id, export)? else {
-                            return Err(LinkRefusal::NotFunction {
-                                export: export.clone(),
-                            });
-                        };
-                        let mut required = lash_kernel_check::Requirements::default();
-                        mode.follow(
-                            document,
-                            &mut required,
-                            BTreeSet::from([ty.checker]),
-                            catalog,
-                        );
-                        for member in ty.members.values() {
-                            let r = function_reach(document, member.function(), catalog, mode);
-                            required.imports.extend(r.imports);
-                            required.helper_imports.extend(r.helper_imports);
-                            required.functions.extend(r.functions);
-                        }
-                        required
-                    }
+                    required
                 }
             };
             reach

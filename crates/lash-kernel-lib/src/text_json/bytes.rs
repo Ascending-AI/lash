@@ -110,7 +110,7 @@ fn slice(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let start = position(&*integer_value(&call.args, 1)?, len);
     let end = position(&*integer_value(&call.args, 2)?, len).max(start);
     call.new.hold(0, room(end - start))?;
-    Ok(call.new.bytes(&bytes.whole()?[start..end]))
+    Ok(call.new.bytes(&bytes.range(start as u64..end as u64)?))
 }
 fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     let (bytes, other) = (bytes_arg(&call.args, 0)?, bytes_arg(&call.args, 1)?);

@@ -24,7 +24,7 @@ const BOUNDS: Bounds = Bounds {
 };
 
 /// The library functions the entries name.
-const USES: [&str; 25] = [
+const USES: [&str; 27] = [
     "eq",
     "kind",
     "same",
@@ -37,6 +37,8 @@ const USES: [&str; 25] = [
     "record.copy_deep",
     "map.copy_deep",
     "set.copy_deep",
+    "set.contains",
+    "ref",
     "record.values",
     "map.values",
     "text.concat",
@@ -52,8 +54,11 @@ const USES: [&str; 25] = [
     "ts.number.format_value",
 ];
 
-/// Independent eager copy oracle. Boundary copying preserves every value;
-/// JSON normalization is exclusively the encoder's responsibility (FIG-7637).
+/// Independent eager copy oracle (FIG-7637): copy the whole value, then
+/// visit every list, record and map member once and refuse a built-in
+/// object or a named built-in function, as a boundary with no forwarding
+/// factory must. The copy otherwise preserves every value; JSON
+/// normalization is exclusively the encoder's responsibility.
 const FORMER_BOUNDARY: &str = r#"
 function former_boundary(value: Any) -> Any
 kernel 1
@@ -61,10 +66,38 @@ metering statements
 body {
   let k = kind(value)
   if same(k, "set") { return set.copy_deep(value) }
-  if same(k, "list") { return list.copy_deep(value) }
-  if same(k, "record") { return record.copy_deep(value) }
-  if same(k, "map") { return map.copy_deep(value) }
-  return value
+  let copied = value
+  if same(k, "list") { set copied = list.copy_deep(value) }
+  if same(k, "record") { set copied = record.copy_deep(value) }
+  if same(k, "map") { set copied = map.copy_deep(value) }
+  let pending = [copied]
+  let seen = set{}
+  while num.lt(0, list.len(pending)) {
+    let last = num.sub(list.len(pending), 1)
+    let item = pending[last]
+    remove pending[last]
+    let ik = kind(item)
+    if same(ik, "tuple") {
+      if same(item, ()) {} else {
+        if same(item[0], "ts.object") { throw error.new("not_data", "A built-in object is not data", null) }
+        if same(item[0], "ts.function") {
+          if same(item[1], "") {} else { throw error.new("not_data", "A built-in function is not data", null) }
+        }
+      }
+    }
+    let members = []
+    if same(ik, "list") { set members = item }
+    if same(ik, "record") { set members = record.values(item) }
+    if same(ik, "map") { set members = map.values(item) }
+    if num.lt(0, list.len(members)) {
+      let identity = ref(item)
+      if set.contains(seen, identity) {} else {
+        set seen[identity] = true
+        for member in members { set pending[list.len(pending)] = member }
+      }
+    }
+  }
+  return copied
 }
 "#;
 
@@ -459,6 +492,16 @@ fn values(seed: u64, rounds: u32) -> Vec<Datum> {
     values
 }
 
+/// A value holding several built-ins may name any one of them: the walk
+/// order is not part of the boundary's contract, the refusal is.
+fn refusal(end: &str) -> &str {
+    if end.starts_with("error not_data: A built-in ") {
+        "error not_data: a built-in"
+    } else {
+        end
+    }
+}
+
 /// FIG-7637: the optimized copy agrees with an independent eager copy on
 /// guest membership and values, including holes, undefined, tokens and aliases.
 /// Plain containers still avoid the eager copy's allocation and charge.
@@ -472,8 +515,8 @@ fn the_boundary_matches_its_former_copy_and_walk() {
             let now = run("boundary", &value, mode);
             let before = run("former_boundary_entry", &value, mode);
             assert_eq!(
-                (&now.end, &now.printed),
-                (&before.end, &before.printed),
+                (refusal(&now.end), &now.printed),
+                (refusal(&before.end), &before.printed),
                 "{value:?} mode {mode}"
             );
             cases += 1;

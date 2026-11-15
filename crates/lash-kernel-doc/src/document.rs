@@ -48,12 +48,12 @@ impl LibraryDependencies {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
     /// Retained source facts for copied authored functions. Not executable content.
     #[serde(skip)]
-    pub source_evidence: BTreeMap<FunctionId, Vec<crate::ImplicitTextConversion>>,
+    pub source_evidence: BTreeMap<FunctionId, crate::SourceEvidence>,
     #[serde(default)]
     pub library: LibraryDependencies,
     pub imports: BTreeMap<ImportSlot, Import>,
@@ -118,42 +118,6 @@ pub struct Ordinals {
     pub actions: BTreeMap<Site, u32>,
     /// [`Document::condition_ordinals`].
     pub conditions: BTreeMap<Site, u32>,
-}
-
-/// Ephemeral admission facts produced by the single live-code walk after a
-/// helper-library mismatch. It is not part of any saved document or checkpoint.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RestoreSelection {
-    pub pins: BTreeSet<FunctionId>,
-    /// Reached authored and helper callables, each with its operation Link.
-    pub live: BTreeSet<CallableId>,
-}
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum Selection {
-    #[default]
-    Fresh,
-    Restored(RestoreSelection),
-}
-
-impl Selection {
-    /// One owner of helper provenance for frames, captures and public callables.
-    pub fn admits_helper(
-        &self,
-        callable: &CallableId,
-        manifest: &LibraryDependencies,
-        helpers: &crate::BuildHelpers,
-    ) -> bool {
-        match self {
-            Self::Fresh => helpers.admits(manifest, &callable.function),
-            Self::Restored(selection) => {
-                selection.live.contains(callable)
-                    && selection.pins.contains(&callable.function)
-                    && helpers.contains(&callable.function)
-            }
-        }
-    }
 }
 
 /// A document's admitted code origins: local definitions first, then only its
@@ -226,6 +190,35 @@ impl Document {
                     .body()
                     .map(|body| (crate::Unit::Library(*id), &body.block))
             }))
+    }
+
+    /// Every function this document's units and exports name: what its
+    /// lowering kept, never what a lowering resolved and then discarded.
+    pub fn referenced_functions(&self) -> BTreeSet<FunctionId> {
+        let mut found: BTreeSet<FunctionId> = self
+            .units()
+            .flat_map(|(_, block)| Node::Block(block).functions_within())
+            .collect();
+        let mut exported = Vec::new();
+        for offered in self.exports.values() {
+            match offered {
+                Export::Function(function) => exported.push(function),
+                Export::Type(ty) => {
+                    found.insert(ty.checker);
+                    exported.extend(ty.members.values().map(|member| match member {
+                        TypeMember::Static(function)
+                        | TypeMember::Method(function)
+                        | TypeMember::Property(function) => function,
+                    }));
+                }
+                Export::Error { .. } => {}
+            }
+        }
+        for function in exported {
+            found.insert(function.function);
+            found.extend(function.convention.functions().into_iter().copied());
+        }
+        found
     }
 
     /// Every statement and block of this document's own units with the
@@ -618,6 +611,34 @@ impl Document {
         Ok(done)
     }
 }
+/// Two documents are equal when their executable content is, as their
+/// canonical bytes are (`K-ID-003`): source evidence beside it is not compared.
+impl PartialEq for Document {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            source_evidence: _,
+            library,
+            imports,
+            exports,
+            main,
+            functions,
+            requires,
+            numbers,
+            private_bindings,
+        } = self;
+        *library == other.library
+            && *imports == other.imports
+            && *exports == other.exports
+            && *main == other.main
+            && *functions == other.functions
+            && *requires == other.requires
+            && *numbers == other.numbers
+            && *private_bindings == other.private_bindings
+    }
+}
+
+impl Eq for Document {}
+
 impl Document {
     /// The singleton kernel version; structural validation establishes this invariant.
     pub fn kernel(&self) -> u32 {
@@ -628,83 +649,4 @@ impl Document {
             .copied()
             .unwrap_or_else(|| unreachable!("validated Document has one kernel"))
     }
-}
-
-/// After a mismatch proof, admit only retained authored code and exact pins.
-/// Dead manifest roots are structurally checked but never resolved.
-pub fn validate_restored_document_with_limits(
-    document: &Document,
-    helpers: &crate::BuildHelpers,
-    catalog: &dyn crate::FunctionCatalog,
-    selection: &RestoreSelection,
-    limits: lash_kernel_value::KernelDataLimits,
-) -> Result<(), crate::Invalid> {
-    crate::validate_document_structure_with_limits(document, limits)?;
-    let missing = |function| crate::Invalid {
-        site: None,
-        reason: Box::new(crate::InvalidReason::HelperUnavailable {
-            function,
-            reason: lash_kernel_value::HelperUnavailableReason::Unknown,
-        }),
-    };
-    struct Pinned<'a> {
-        catalog: &'a dyn crate::FunctionCatalog,
-        pins: &'a BTreeSet<FunctionId>,
-    }
-    impl crate::FunctionCatalog for Pinned<'_> {
-        fn definition(&self, id: &FunctionId) -> Option<&FunctionDefinition> {
-            self.pins
-                .contains(id)
-                .then(|| self.catalog.definition(id))
-                .flatten()
-        }
-        fn header(&self, id: &FunctionId) -> Option<std::sync::Arc<crate::FunctionHeader>> {
-            self.pins
-                .contains(id)
-                .then(|| self.catalog.header(id))
-                .flatten()
-        }
-        fn registered(&self, id: &FunctionId) -> Option<&crate::RegisteredFunction> {
-            self.pins
-                .contains(id)
-                .then(|| self.catalog.registered(id))
-                .flatten()
-        }
-    }
-    // The Program checks each pinned helper's operation declarations under its
-    // exact saved Link. Document-local validation cannot infer a Link from bytes.
-    for function in &selection.pins {
-        helpers
-            .registered(function)
-            .ok_or_else(|| missing(*function))?;
-    }
-    let pinned = Pinned {
-        catalog,
-        pins: &selection.pins,
-    };
-    let context = DocumentCatalog::new(document, &pinned);
-    let mut pending: Vec<_> = selection
-        .live
-        .iter()
-        .map(|callable| callable.function)
-        .collect();
-    let mut seen = BTreeSet::new();
-    while let Some(function) = pending.pop() {
-        if !seen.insert(function) {
-            continue;
-        }
-        let Some(definition) = document.functions.get(&function) else {
-            continue;
-        };
-        crate::validate_definition_with_limits(definition, &context, limits)?;
-        if let Some(body) = definition.body() {
-            pending.extend(
-                body.functions
-                    .keys()
-                    .filter(|id| document.functions.contains_key(id))
-                    .copied(),
-            );
-        }
-    }
-    Ok(())
 }

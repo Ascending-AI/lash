@@ -139,6 +139,16 @@ pub enum PostgresHostError {
         /// The session endpoint's.
         session: String,
     },
+    /// `guards.sealed_lock_timeout_ms` is not below the server's
+    /// `deadlock_timeout`, so a cycle through a sealed transaction would be
+    /// broken by the deadlock detector instead of the transaction's own
+    /// retry; only the probe connected.
+    SealedLockTimeoutNotBelowDeadlockTimeout {
+        /// The configured sealed lock timeout.
+        sealed_lock_timeout: Duration,
+        /// The server's `deadlock_timeout` for the store's connections.
+        deadlock_timeout: Duration,
+    },
     /// The open did not finish within `guards.store_startup_ms`.
     StartupTimedOut {
         /// The bound it exceeded.
@@ -157,6 +167,14 @@ impl std::fmt::Display for PostgresHostError {
             Self::EndpointCatalogMismatch { primary, session } => write!(
                 f,
                 "the session endpoint reaches catalog {session}, the primary {primary}"
+            ),
+            Self::SealedLockTimeoutNotBelowDeadlockTimeout {
+                sealed_lock_timeout,
+                deadlock_timeout,
+            } => write!(
+                f,
+                "guards.sealed_lock_timeout_ms {sealed_lock_timeout:?} is not below the server's \
+                 deadlock_timeout {deadlock_timeout:?}"
             ),
             Self::StartupTimedOut { after } => {
                 write!(f, "the postgres store open did not finish within {after:?}")
@@ -312,9 +330,9 @@ pub struct TransactionPrelude {
     /// one simple query: what a guarded writer begins with.
     fenced: Arc<str>,
     deadline: Option<Duration>,
-    /// The `lock_timeout` a one-call commit installs, and its statement
-    /// budget in milliseconds.
-    call_guards: (Option<Arc<str>>, Option<i64>),
+    /// The `lock_timeout` a one-call commit installs, its statement budget
+    /// in milliseconds, and its sealed `lock_timeout`.
+    call_guards: (Option<Arc<str>>, Option<i64>, Option<Arc<str>>),
 }
 
 impl TransactionPrelude {
@@ -326,8 +344,24 @@ impl TransactionPrelude {
     /// The prelude installing `guards` after `begin`, a `BEGIN` with its
     /// isolation options (`BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`).
     pub fn with_begin(begin: &str, guards: &TransactionGuards) -> Self {
+        Self::build(begin, guards, None)
+    }
+
+    /// The prelude of a store transaction, which may take artifact locks:
+    /// `guards`, and `sealed` as the `lock_timeout` it runs under once it
+    /// holds them ([`GuardPolicies::sealed_lock_timeout`]). Without it the
+    /// seal installs [`crate::advisory_lock::DEFAULT_SEALED_LOCK_TIMEOUT`].
+    pub(crate) fn sealing(guards: &TransactionGuards, sealed: Duration) -> Self {
+        Self::build("BEGIN", guards, Some(sealed))
+    }
+
+    fn build(begin: &str, guards: &TransactionGuards, sealed: Option<Duration>) -> Self {
+        let sealed = sealed.map(|bound| bound.as_millis().to_string());
         let mut settings = String::new();
-        for (name, value) in guard_settings(guards) {
+        let sealed_setting = sealed
+            .clone()
+            .map(|ms| (crate::advisory_lock::SEALED_LOCK_TIMEOUT, ms));
+        for (name, value) in guard_settings(guards).into_iter().chain(sealed_setting) {
             settings.push_str("SET LOCAL ");
             settings.push_str(name);
             settings.push_str(" = ");
@@ -349,6 +383,7 @@ impl TransactionPrelude {
                     ServerTimeout::Limit(limit) => i64::try_from(limit.as_millis()).ok(),
                     ServerTimeout::Inherit | ServerTimeout::Disabled => None,
                 },
+                sealed.map(Into::into),
             ),
         }
     }
@@ -360,7 +395,7 @@ impl TransactionPrelude {
             begin: "BEGIN".into(),
             fenced: fenced_begin("").into(),
             deadline: None,
-            call_guards: (None, None),
+            call_guards: (None, None, None),
         }
     }
 
@@ -377,10 +412,14 @@ impl TransactionPrelude {
     }
 
     /// What a one-call commit installs in place of the `BEGIN`'s guards:
-    /// its `lock_timeout`, and the budget of its statements in milliseconds,
-    /// which it checks between them.
-    pub(crate) fn call_guards(&self) -> (Option<&str>, Option<i64>) {
-        (self.call_guards.0.as_deref(), self.call_guards.1)
+    /// its `lock_timeout`, the budget of its statements in milliseconds,
+    /// which it checks between them, and its sealed `lock_timeout`.
+    pub(crate) fn call_guards(&self) -> (Option<&str>, Option<i64>, Option<&str>) {
+        (
+            self.call_guards.0.as_deref(),
+            self.call_guards.1,
+            self.call_guards.2.as_deref(),
+        )
     }
     /// The whole-operation deadline of the profile.
     pub fn deadline(&self) -> Option<Duration> {
@@ -627,8 +666,8 @@ pub(crate) struct Preludes {
 impl Preludes {
     fn new(guards: &GuardPolicies) -> Self {
         Self {
-            ordinary: TransactionPrelude::new(&guards.ordinary),
-            durable: TransactionPrelude::new(&guards.durable),
+            ordinary: TransactionPrelude::sealing(&guards.ordinary, guards.sealed_lock_timeout),
+            durable: TransactionPrelude::sealing(&guards.durable, guards.sealed_lock_timeout),
             renewal: TransactionPrelude::new(&guards.renewal),
             scheduler: TransactionPrelude::new(&guards.scheduler),
         }
@@ -813,6 +852,22 @@ where
         reserved_connections: u32::try_from(reserved_connections)
             .map_err(|error| StoreError::Backend(error.to_string()))?,
     })
+}
+
+/// Read the server's `deadlock_timeout` as the store's connections see it.
+pub(crate) async fn deadlock_timeout<'e, E>(executor: E) -> Result<Duration, StoreError>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    // `pg_settings` reports `deadlock_timeout` in milliseconds.
+    let millis: i64 = crate::observed_sql::query_scalar(
+        "SELECT setting::bigint FROM pg_settings WHERE name = 'deadlock_timeout'",
+    )
+    .fetch_one(crate::observed_sql::executor(executor))
+    .await
+    .map_err(store_sqlx_error)?;
+    let millis = u64::try_from(millis).map_err(|error| StoreError::Backend(error.to_string()))?;
+    Ok(Duration::from_millis(millis))
 }
 
 /// One role pool's state at a moment.

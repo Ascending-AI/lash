@@ -19,13 +19,281 @@ use lash_kernel_doc::{self as k};
 use lash_kernel_value::Name;
 use lash_kernel_value::sites::Site;
 
-use super::lift::{Lift, Lifter};
+use super::lift::{Lift, Lifter, reads_name};
 use super::source::Expr;
 
 impl Lifter<'_> {
+    /// RegExp literal lowering holds its argument array once before the
+    /// constructor. Keep that array pending even when other temporaries
+    /// retain declarations, so the ordinary literal can recreate the hold.
+    pub(super) fn regexp_argument_array(&self, block: &[k::Stmt], name: &Name) -> bool {
+        let [
+            k::Stmt::Let {
+                value: k::Rhs::Expr(k::Expr::List(_)),
+                ..
+            },
+            k::Stmt::Let { value, .. },
+            rest @ ..,
+        ] = block
+        else {
+            return false;
+        };
+        let Some(helper) = lash_ext_ts_helpers::builtins::table()
+            .constructors
+            .get("RegExp")
+        else {
+            return false;
+        };
+        self.helper_read(value, helper).is_some_and(|arguments| {
+            matches!(arguments.as_slice(), [k::Expr::Literal(k::Literal::Absent), k::Expr::Variable(read)] if read == name)
+        }) && !reads_name(k::Node::Block(rest), name)
+    }
+
+    /// `x.get(k)`, `x.set(k, v)` or `x.has(k)` on a value of no single
+    /// known kind:
+    ///
+    /// ```text
+    /// let r = absent
+    /// if same(kind(x), "map") { set r = invoke ts.map.get(x, [k]) }
+    /// else { <the method read and call of `x.get(k)`> }
+    /// ```
+    ///
+    /// read from the map's arm; the general arm is the front end's own
+    /// method call on the same receiver, which read-back verifies.
+    pub(super) fn map_ladder(&mut self, block: &[k::Stmt]) -> Lift<Option<(Name, Expr, usize)>> {
+        let [
+            k::Stmt::Let {
+                name: result,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            },
+            k::Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            },
+            ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let Some(target) = self.kind_test(condition, "map") else {
+            return Ok(None);
+        };
+        if let Some((method, mut args)) = self.map_body(then_block, target, result) {
+            // The body takes a missing argument as undefined; the other
+            // branch's method call passes the arguments the source wrote.
+            let mut nodes: Vec<_> = else_block.last().map(k::Node::Stmt).into_iter().collect();
+            let mut written = None;
+            while let Some(node) = nodes.pop() {
+                if let k::Node::Expr(k::Expr::List(items)) = node {
+                    written = Some(items.len());
+                    break;
+                }
+                nodes.extend(node.children());
+            }
+            let Some(written) = written else {
+                return Ok(None);
+            };
+            if written > args.len()
+                || args[written..]
+                    .iter()
+                    .any(|arg| *arg != k::Expr::Literal(k::Literal::Absent))
+            {
+                return Ok(None);
+            }
+            args.truncate(written);
+            let items = args
+                .iter()
+                .map(|item| self.expr(item))
+                .collect::<Lift<_>>()?;
+            return Ok(Some((
+                result.clone(),
+                self.method_call(target, method, items)?,
+                2,
+            )));
+        }
+        let [
+            k::Stmt::Assign {
+                place: k::Place::Variable(assigned),
+                value,
+                order: k::AssignOrder::ValueFirst,
+            },
+        ] = then_block.as_slice()
+        else {
+            return Ok(None);
+        };
+        if assigned != result {
+            return Ok(None);
+        }
+        for method in ["get", "set", "has"] {
+            if let Some(args) = self.helper_read(value, &format!("ts.map.{method}"))
+                && let [receiver, k::Expr::List(items)] = args.as_slice()
+                && receiver == target
+            {
+                let items = items
+                    .iter()
+                    .map(|item| self.expr(item))
+                    .collect::<Lift<_>>()?;
+                return Ok(Some((
+                    result.clone(),
+                    self.method_call(target, method, items)?,
+                    2,
+                )));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The same map arm without receiver admission, after a proved construction.
+    pub(super) fn constructed_map(
+        &mut self,
+        block: &[k::Stmt],
+    ) -> Lift<Option<(Name, Expr, usize)>> {
+        let [
+            k::Stmt::Let {
+                name: result,
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+            },
+            rest @ ..,
+        ] = block
+        else {
+            return Ok(None);
+        };
+        let (target, taken) = match rest {
+            [
+                k::Stmt::Assign {
+                    value: k::Rhs::Expr(k::Expr::Call { function, args }),
+                    ..
+                },
+                ..,
+            ] if self.is(function, "map.contains") => match args.as_slice() {
+                [target, _] => (target, 1),
+                _ => return Ok(None),
+            },
+            [
+                k::Stmt::Assign {
+                    place: k::Place::Member(k::Member::Index { target, .. }),
+                    ..
+                },
+                _,
+                ..,
+            ] => (target, 2),
+            [
+                k::Stmt::Let { .. },
+                k::Stmt::If {
+                    condition: k::Expr::Call { function, args },
+                    ..
+                },
+                _,
+                ..,
+            ] if self.is(function, "map.contains") => match args.as_slice() {
+                [target, _] => (target, 3),
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+        let Some((method, args)) = self.map_body(&rest[..taken], target, result) else {
+            return Ok(None);
+        };
+        let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
+        Ok(Some((
+            result.clone(),
+            self.method_call(target, method, args)?,
+            taken + 1,
+        )))
+    }
+
+    /// A map method's body in place over plain arguments
+    /// (`lower::calls`'s `map_method`), setting `result`: the method and the
+    /// arguments it was called with.
+    fn map_body<'e>(
+        &self,
+        block: &'e [k::Stmt],
+        target: &k::Expr,
+        result: &Name,
+    ) -> Option<(&'static str, Vec<k::Expr>)> {
+        // A key that is not known to be text is `ts.map.key`'s.
+        let key = |key: &k::Expr| {
+            self.helper_read(&k::Rhs::Expr(key.clone()), "ts.map.key")
+                .and_then(|args| <[k::Expr; 1]>::try_from(args).ok())
+                .map_or_else(|| key.clone(), |[authored]| authored)
+        };
+        let contains = |test: &'e k::Expr| match test {
+            k::Expr::Call { function, args } if self.is(function, "map.contains") => {
+                match args.as_slice() {
+                    [map, found] if map == target => Some(found),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let sets = |statement: &'e k::Stmt| match statement {
+            k::Stmt::Assign {
+                place: k::Place::Variable(set),
+                value: k::Rhs::Expr(value),
+                order: k::AssignOrder::ValueFirst,
+            } if set == result => Some(value),
+            _ => None,
+        };
+        match block {
+            [only] => {
+                let found = contains(sets(only)?)?;
+                Some(("has", vec![key(found)]))
+            }
+            [
+                k::Stmt::Assign {
+                    place: k::Place::Member(member),
+                    value: k::Rhs::Expr(value),
+                    order: k::AssignOrder::PlaceFirst,
+                },
+                last,
+            ] if sets(last) == Some(target) => match member {
+                k::Member::Index { target: map, index } if map == target => {
+                    Some(("set", vec![key(index), value.clone()]))
+                }
+                _ => None,
+            },
+            [
+                k::Stmt::Let {
+                    name: value,
+                    value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)),
+                },
+                k::Stmt::If {
+                    condition,
+                    then_block,
+                    else_block,
+                },
+                last,
+            ] if else_block.is_empty() && sets(last) == Some(&k::Expr::Variable(value.clone())) => {
+                let found = contains(condition)?;
+                let [
+                    k::Stmt::Assign {
+                        place: k::Place::Variable(read),
+                        value: k::Rhs::Expr(k::Expr::Member(entry)),
+                        order: k::AssignOrder::ValueFirst,
+                    },
+                ] = then_block.as_slice()
+                else {
+                    return None;
+                };
+                let k::Member::Index { target: map, index } = &**entry else {
+                    return None;
+                };
+                (read == value && map == target && index == found)
+                    .then(|| ("get", vec![key(found)]))
+            }
+            _ => None,
+        }
+    }
+
     /// The array read or method call at the start of `block`, its result
     /// temporary, and how many statements it takes.
-    pub(super) fn array_ladder(&mut self, block: &[k::Stmt]) -> Lift<Option<(Name, Expr, usize)>> {
+    pub(super) fn array_ladder(
+        &mut self,
+        block: &[k::Stmt],
+        site: &Site,
+        at: usize,
+    ) -> Lift<Option<(Name, Expr, usize)>> {
         let [
             k::Stmt::Let {
                 name: test,
@@ -75,7 +343,8 @@ impl Lifter<'_> {
             && let [receiver, key] = args.as_slice()
             && receiver == target
         {
-            let read = Expr::Index(Box::new(self.expr(target)?), Box::new(self.expr(key)?));
+            let target = self.array_read_receiver(target)?;
+            let read = Expr::Index(Box::new(target), Box::new(self.expr(key)?));
             return Ok(Some((result.clone(), read, 4)));
         }
         // A checked array's length: `ts.get(x, "length")` in the general arm.
@@ -94,7 +363,8 @@ impl Lifter<'_> {
                     k::Expr::Literal(k::Literal::Text("length".into())),
                 ]
         {
-            let read = Expr::Field(Box::new(self.expr(target)?), "length".into());
+            let target = self.array_read_receiver(target)?;
+            let read = Expr::Field(Box::new(target), "length".into());
             return Ok(Some((result.clone(), read, 4)));
         }
         let [
@@ -133,58 +403,35 @@ impl Lifter<'_> {
         let Some(args) = self.method_arguments(member, target, &method, call) else {
             return Ok(None);
         };
-        // The general arm's own temporaries: the function values it passes.
-        let saved = self.enter();
-        let mut bound = Vec::new();
-        let mut lifted = Ok(());
-        for statement in middle {
-            let k::Stmt::Let {
-                name,
-                value: k::Rhs::Expr(value),
-            } = statement
-            else {
-                lifted = Err("a statement among a method's arguments".to_owned());
-                break;
-            };
-            let value = self.expr(value);
-            match value {
-                Ok(value) => bound.push((name.clone(), value)),
-                Err(why) => {
-                    lifted = Err(why);
-                    break;
-                }
-            }
-        }
-        self.leave(saved);
-        lifted?;
         // A local annotation can be erased while its initializer infers a
         // narrower receiver. Retain the kind check this ladder declares.
         let target = Expr::As(
             Box::new(self.expr(target)?),
             super::source::Type::Array(Box::new(super::source::Type::Word("any"))),
         );
-        let mut written = Vec::with_capacity(args.len());
-        for arg in args {
-            let value = match arg {
-                k::Expr::Variable(name) => bound
-                    .iter()
-                    .position(|(bound, _)| bound == name)
-                    .map(|at| bound.remove(at).1),
-                _ => None,
-            };
-            written.push(match value {
-                Some(value) => value,
-                None => self.expr(arg)?,
-            });
-        }
-        if !bound.is_empty() {
-            return Ok(None);
-        }
+        let written =
+            self.statement_arguments(middle, args, &site.child((at + 3) as u32).child(2), 1)?;
         Ok(Some((
             result.clone(),
             Expr::Call(Box::new(Expr::Field(Box::new(target), method)), written),
             4,
         )))
+    }
+
+    /// Retain typed-array dispatch when a local array initializer would infer
+    /// a plain list. Captured cells still need their declared source evidence.
+    fn array_read_receiver(&mut self, target: &k::Expr) -> Lift<Expr> {
+        let annotated = self.style.exact
+            && matches!(target, k::Expr::Variable(name) if self.constructed_lists.contains(name));
+        let target = self.expr(target)?;
+        Ok(if annotated {
+            Expr::As(
+                Box::new(target),
+                super::source::Type::Array(Box::new(super::source::Type::Word("any"))),
+            )
+        } else {
+            target
+        })
     }
 
     /// `if invoke ts.array.is(x) {} else { throw ... }`.
@@ -236,14 +483,67 @@ impl Lifter<'_> {
         if self.pending_at(member).is_none() {
             return Ok(None);
         }
-        let Some(read @ Expr::Field(..)) = self.take_pending(member) else {
-            return Err("a method read that is not a member read".to_owned());
+        let read = match self.take_pending(member) {
+            Some(read @ Expr::Field(..)) => read,
+            // A record's own field or its built-in row, read under the
+            // exact style: the call is `record.method`.
+            Some(Expr::Call(callee, read))
+                if matches!(&*callee, Expr::Ident(name) if name == "record.field")
+                    && matches!(read.as_slice(), [_, Expr::Text(field)] if field == method) =>
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expr(arg))
+                    .collect::<Lift<Vec<_>>>()?;
+                let mut read = read;
+                read.extend(args);
+                return Ok(Some(super::expressions::constructor("record.method", read)));
+            }
+            _ => return Err("a method read that is not a member read".to_owned()),
         };
         if !matches!(&read, Expr::Field(_, field) if field == method) {
             return Err("a method called by another name than it was read by".to_owned());
         }
         let args = args.iter().map(|arg| self.expr(arg)).collect::<Lift<_>>()?;
+        if self.style.exact
+            && self.reads_binding(target)
+            && let (k::Expr::Variable(binding), Expr::Field(receiver, _)) = (target, &read)
+            && matches!(receiver.as_ref(), Expr::Ident(name) if self.binding(binding).as_ref() == Ok(name))
+        {
+            let Expr::Field(receiver, _) = read else {
+                unreachable!()
+            };
+            return Ok(Some(super::expressions::constructor(
+                "callable.method",
+                [*receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )));
+        }
         Ok(Some(Expr::Call(Box::new(read), args)))
+    }
+
+    /// `target.method(args)`, or under [`super::lift::Style::exact`]
+    /// `callable.method(target, "method", args)` when the call reads its
+    /// receiver binding in place.
+    fn method_call(&mut self, target: &k::Expr, method: &str, args: Vec<Expr>) -> Lift<Expr> {
+        let exact = self.style.exact && self.reads_binding(target);
+        let receiver = self.expr(target)?;
+        Ok(if exact {
+            super::expressions::constructor(
+                "callable.method",
+                [receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )
+        } else {
+            Expr::Call(
+                Box::new(Expr::Field(Box::new(receiver), method.to_owned())),
+                args,
+            )
+        })
     }
 
     /// The arguments `call` passes the method `member` holds, with `target`
@@ -438,6 +738,7 @@ impl Lifter<'_> {
             body => super::source::Body::Block(inner.block(body, &at)?),
         };
         let mut args = vec![Expr::arrow(super::source::Function {
+            ordinary: None,
             result: None,
             is_async: false,
             params: parameters,
@@ -448,12 +749,21 @@ impl Lifter<'_> {
         {
             args.push(self.expr(context)?);
         }
-        Ok(Some(Expr::Call(
-            Box::new(Expr::Field(
-                Box::new(self.expr(receiver)?),
-                method.to_owned(),
-            )),
-            args,
-        )))
+        let exact = self.style.exact && self.reads_binding(receiver);
+        let receiver = self.expr(receiver)?;
+        Ok(Some(if exact {
+            super::expressions::constructor(
+                "list.method",
+                [receiver, Expr::Text(method.to_owned())]
+                    .into_iter()
+                    .chain(args)
+                    .collect(),
+            )
+        } else {
+            Expr::Call(
+                Box::new(Expr::Field(Box::new(receiver), method.to_owned())),
+                args,
+            )
+        }))
     }
 }

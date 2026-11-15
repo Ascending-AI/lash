@@ -1146,7 +1146,10 @@ async fn printed_tool_image_survives_execution_settlement_and_the_next_model_req
                 let lash_core::SessionHistoryRecord::Protocol(event) = event else {
                     return None;
                 };
-                match crate::decode_rlm_protocol_event(event).unwrap().as_deref() {
+                match crate::projection::decode_rlm_protocol_event(event)
+                    .unwrap()
+                    .as_deref()
+                {
                     Some(RlmProtocolEvent::RlmTrajectoryEntry(record)) => Some(record.clone()),
                     _ => None,
                 }

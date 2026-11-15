@@ -16,6 +16,19 @@ enum Clause<'a> {
     Everything(&'a k::Block),
 }
 
+/// An in-place operation spelled `op=`: its operator, the leading operands
+/// the operator spells, and the right operand.
+struct InPlace<'e> {
+    operator: &'static str,
+    prefix: usize,
+    operand: &'e k::Expr,
+}
+
+/// The operators Python writes in place.
+const IN_PLACE: &[&str] = &[
+    "+", "-", "*", "/", "//", "%", "**", "|", "&", "^", "<<", ">>",
+];
+
 impl Renderer<'_> {
     pub(super) fn authored_statement(&mut self, stmt: &k::Stmt) -> bool {
         if self.syntax_statement(stmt) {
@@ -62,8 +75,13 @@ impl Renderer<'_> {
                 self.inline_expr(target);
                 self.out.write("[");
                 self.inline_expr(index);
-                self.out.write("] = ");
-                self.inline_expr(value);
+                if let Some(in_place) = self.indexed_in_place(target, index, value) {
+                    self.out.write("]");
+                    self.in_place_value(in_place);
+                } else {
+                    self.out.write("] = ");
+                    self.inline_expr(value);
+                }
                 self.out.end_node();
                 self.out.write("\n");
                 true
@@ -91,6 +109,25 @@ impl Renderer<'_> {
                 self.out.write(".append(");
                 self.write_inline_rhs(value);
                 self.out.write(")\n");
+                true
+            }
+            k::Stmt::Assign {
+                place: k::Place::Member(k::Member::Index { target, index }),
+                value: k::Rhs::Expr(value),
+                order: k::AssignOrder::ValueFirst,
+            } if self.inline.contains(target)
+                && self.inline.contains(index)
+                && self.inline.contains(value) =>
+            {
+                let Some(in_place) = self.indexed_in_place(target, index, value) else {
+                    return false;
+                };
+                self.member_target(target, false);
+                self.out.write("[");
+                self.inline_expr(index);
+                self.out.write("]");
+                self.in_place_value(in_place);
+                self.out.write("\n");
                 true
             }
             k::Stmt::Assign {
@@ -168,6 +205,108 @@ impl Renderer<'_> {
         }
     }
 
+    /// `value`, stored at `target[index]`, as `target[index] op= operand`:
+    /// an in-place operation whose left operand reads that same item. A
+    /// symbol action's leading operands are spelled by its operator.
+    fn indexed_in_place<'e>(
+        &self,
+        target: &k::Expr,
+        index: &k::Expr,
+        value: &'e k::Expr,
+    ) -> Option<InPlace<'e>> {
+        let k::Expr::Act(operation) = value else {
+            return None;
+        };
+        let k::ActKind::Call(callee) = &operation.kind else {
+            return None;
+        };
+        let (operator, prefix) = match callee {
+            k::Callee::Local(id) if self.operators.assignment_token(id, false).is_some() => {
+                (self.operators.assignment_token(id, false)?, 0)
+            }
+            callee => self
+                .operators
+                .action_token(&super::task::target(callee)?, &operation.args)
+                .filter(|(token, _)| IN_PLACE.contains(token))?,
+        };
+        let [k::Expr::Act(read), operand] = operation.args.get(prefix..)? else {
+            return None;
+        };
+        let k::ActKind::Call(reader) = &read.kind else {
+            return None;
+        };
+        let form = self
+            .operators
+            .access(&super::task::target(reader)?, read.args.len())?;
+        (form == crate::constructs::access::Form::Index
+            && matches!(read.args.as_slice(), [read_target, read_index]
+                if read_target == target && read_index == index))
+        .then_some(InPlace {
+            operator,
+            prefix,
+            operand,
+        })
+    }
+
+    /// ` op= operand`, in the frames of the in-place operation it spells.
+    fn in_place_value(&mut self, in_place: InPlace<'_>) {
+        self.out.write(" ");
+        self.out.write(in_place.operator);
+        self.out.write("= ");
+        self.out.begin_node(None); // in-place operation
+        for _ in 0..in_place.prefix {
+            self.implicit(); // operator symbol
+        }
+        self.implicit(); // item read
+        self.inline_expr(in_place.operand);
+        self.out.end_node();
+    }
+
+    /// The target, index and value of an indexed store: a discarded call of
+    /// a store helper, or an item assignment.
+    fn indexed_store<'s>(&self, statement: &'s k::Stmt) -> Option<[&'s k::Expr; 3]> {
+        match statement {
+            k::Stmt::Do {
+                value: k::Expr::Act(action),
+            } => {
+                let k::ActKind::Call(callee) = &action.kind else {
+                    return None;
+                };
+                let [target, index, value] = action.args.as_slice() else {
+                    return None;
+                };
+                (self.operators.access(&super::task::target(callee)?, 3)
+                    == Some(crate::constructs::access::Form::Store))
+                .then_some([target, index, value])
+            }
+            k::Stmt::Assign {
+                place: k::Place::Member(k::Member::Index { target, index }),
+                value: k::Rhs::Expr(value),
+                order: k::AssignOrder::ValueFirst,
+            } => Some([target, index, value]),
+            _ => None,
+        }
+    }
+
+    /// Whether every read of the pinned operand `name` in `rest` is in one
+    /// indexed in-place store, as its target or index: the store's spelling
+    /// writes the place once, and readback pins it again.
+    fn indexed_in_place_operand(&self, rest: &[k::Stmt], name: &Name) -> bool {
+        let Some(store) = rest
+            .iter()
+            .find(|statement| reads(std::slice::from_ref(*statement), name) > 0)
+        else {
+            return false;
+        };
+        let Some([target, index, value]) = self.indexed_store(store) else {
+            return false;
+        };
+        let pinned = k::Expr::Variable(name.clone());
+        (target == &pinned || index == &pinned)
+            && reads(rest, name) == reads(std::slice::from_ref(store), name)
+            && self.indexed_in_place(target, index, value).is_some()
+    }
+
     /// `value` as `name op= operand`: the operator and its operand.
     fn in_place<'e>(&self, name: &Name, value: &'e k::Expr) -> Option<(&'static str, &'e k::Expr)> {
         let (operator, args) = match value {
@@ -212,10 +351,29 @@ impl Renderer<'_> {
                 self.padding();
                 self.out.write("except ");
                 self.out.write(classes);
+                let named = match then_block.as_slice() {
+                    [
+                        k::Stmt::Assign {
+                            place: k::Place::Variable(name),
+                            value: k::Rhs::Expr(k::Expr::Variable(_)),
+                            ..
+                        },
+                        k::Stmt::Try(scope),
+                    ] if scope.catch.is_none()
+                        && matches!(scope.finally.as_deref(), Some([k::Stmt::Assign { place: k::Place::Variable(cleared), value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Absent)), .. }]) if cleared == name) =>
+                    {
+                        Some((name, &scope.body))
+                    }
+                    _ => None,
+                };
+                if let Some((name, _)) = named {
+                    self.out.write(" as ");
+                    self.name(name);
+                }
                 self.out.write(":\n");
                 self.out.begin_node(None); // the test
                 self.implicit();
-                self.readable_block(then_block);
+                self.readable_block(named.map_or(*then_block, |(_, body)| body));
                 self.caption_next();
                 self.out.begin_node(None); // the other clauses
                 self.except(rest);
@@ -387,6 +545,7 @@ pub(super) fn authored_awaits(body: &k::Block, sync: &BTreeSet<Name>) -> bool {
 pub(super) struct Comprehension {
     element: k::Expr,
     key: Option<k::Expr>,
+    filters: Vec<k::Expr>,
     collection: crate::constructs::collections::Collection,
     binding: Name,
     source_binding: Name,
@@ -414,6 +573,37 @@ impl Renderer<'_> {
         let mut index = range.start;
         while index < range.end {
             let statement = &block[index];
+            if let [
+                k::Stmt::Let {
+                    name: held,
+                    value: k::Rhs::Expr(value),
+                },
+                k::Stmt::Assign {
+                    place: k::Place::Variable(target),
+                    value: k::Rhs::Expr(k::Expr::Variable(input)),
+                    ..
+                },
+                result,
+                ..,
+            ] = &block[index..range.end]
+                && temporary_name(held)
+                && input == held
+                && let Some((name, k::Rhs::Expr(k::Expr::Variable(read)))) = binding_value(result)
+                && read == held
+            {
+                self.padding();
+                self.name(name);
+                self.out.write(" = (");
+                self.name(target);
+                self.out.write(" := ");
+                self.inline_expr(value);
+                self.out.write(")\n");
+                for _ in 0..3 {
+                    self.implicit();
+                }
+                index += 3;
+                continue;
+            }
             let structured = self.structured_statements(&block[index..range.end]);
             if structured > 0 {
                 for _ in 0..structured {
@@ -473,7 +663,8 @@ impl Renderer<'_> {
             }
             if let k::Stmt::Let { name, value } = statement
                 && temporary_name(name)
-                && reads(&block[index + 1..], name) == 1
+                && (reads(&block[index + 1..], name) == 1
+                    || self.indexed_in_place_operand(&block[index + 1..range.end], name))
                 && !assigned(&block[index + 1..], name)
                 && (!matches!(value, k::Rhs::Expr(k::Expr::Closure(_)))
                     || self.scope_provider(value))
@@ -595,8 +786,19 @@ impl Renderer<'_> {
     }
 
     fn lift_comprehension(&self, statements: &[k::Stmt]) -> Option<(Name, Comprehension)> {
+        let mut normalized = statements.to_vec();
+        let mut pending = vec![k::NodeMut::Block(&mut normalized)];
+        while let Some(mut node) = pending.pop() {
+            if let k::NodeMut::Stmt(k::Stmt::Let { value, .. } | k::Stmt::Assign { value, .. }) =
+                &mut node
+                && let k::Rhs::Action(action) = value
+            {
+                *value = k::Rhs::Expr(action.clone().into());
+            }
+            pending.extend(node.children());
+        }
         let found = crate::constructs::collections::COMPREHENSION
-            .recognize(statements, &|id, name| {
+            .recognize(&normalized, &|id, name| {
                 self.operators.unique(name) == Some(*id)
             })?;
         let crate::constructs::collections::Comprehension {
@@ -607,6 +809,7 @@ impl Renderer<'_> {
             via,
             value,
             key,
+            filters,
             collection,
             rest,
         } = found;
@@ -622,6 +825,7 @@ impl Renderer<'_> {
             Comprehension {
                 element,
                 key: key.cloned(),
+                filters: filters.into_iter().cloned().collect(),
                 collection,
                 binding: binding.clone(),
                 source_binding,
@@ -668,6 +872,23 @@ impl Renderer<'_> {
             self.out.write(view);
             self.out.write("()");
         }
+        let previous = self.substitutions.insert(
+            comprehension.binding.clone(),
+            k::Expr::Variable(comprehension.source_binding.clone()),
+        );
+        for filter in &comprehension.filters {
+            self.out.write(" if ");
+            self.inline_expr(filter);
+        }
+        match previous {
+            Some(value) => {
+                self.substitutions
+                    .insert(comprehension.binding.clone(), value);
+            }
+            None => {
+                self.substitutions.remove(&comprehension.binding);
+            }
+        }
         self.out
             .write(if matches!(comprehension.collection, Collection::List) {
                 "]"
@@ -688,7 +909,7 @@ impl Renderer<'_> {
         else {
             return false;
         };
-        if name.as_str() != spelling {
+        if self.aliases.get(name).unwrap_or(name).as_str() != spelling {
             return false;
         }
         self.name(name);
@@ -790,7 +1011,13 @@ fn assigned(block: &[k::Stmt], name: &Name) -> bool {
 
 fn reads(block: &[k::Stmt], name: &Name) -> usize {
     fn count(node: k::Node<'_>, name: &Name) -> usize {
+        if let k::Node::Action(action) = node {
+            return count(k::Node::Expr(&action.clone().into()), name);
+        }
         usize::from(matches!(node, k::Node::Expr(k::Expr::Variable(read)) if read == name))
+            + usize::from(
+                matches!(node, k::Node::Expr(k::Expr::Act(act)) if matches!(&act.kind, k::ActKind::Call(k::Callee::Value(read)) if read == name)),
+            )
             + node
                 .children()
                 .into_iter()
