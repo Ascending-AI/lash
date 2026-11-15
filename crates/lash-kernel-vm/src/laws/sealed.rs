@@ -361,9 +361,9 @@ fn seal_rule_every_form() {
 }
 
 /// Members of each deep sequence: past what one level of index pages
-/// below the row held (96 pages of 96 chunks of 64 members, 589,824), so
-/// its index takes two levels below the row (cutover contract §6 index
-/// rule).
+/// below the row holds (a tuple's full pages: 96 of 96 chunks of 64
+/// members, 589,824; a list's 72-reference fill: 442,368), so its index
+/// takes two levels below the row (cutover contract §6 index rule).
 const DEEP: i64 = 2_400_000;
 
 /// The deep rows of the inventory: a list and a tuple of [`DEEP`]

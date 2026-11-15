@@ -6,7 +6,7 @@
 //!
 //! A point read of a cold large object loads its row, the index pages on
 //! the chunk's path ([`lash_kernel_state::paged::run::index`]; one up to
-//! 589,824 members) and one chunk. A point edit dirties one chunk: the
+//! 442,368 members of a list or table, 589,824 of a tuple) and one chunk. A point edit dirties one chunk: the
 //! seal re-encodes the object's resident chunks, writes only those whose
 //! encoding changed, rewrites the index pages on their paths and the row,
 //! and adjusts the row's edge multiset by the changed chunks' references
@@ -681,6 +681,7 @@ fn assemble(
     let mut replaced: HashMap<u64, (Vec<Piece>, bool)> = HashMap::new();
     let mut tail = Vec::new();
     let mut chunk = 0u32;
+    let kept = outcomes.len() as u64;
     let known =
         |firsts: &mut Option<Vec<Option<Placement>>>, first: Option<Option<Placement>>| match (
             firsts.as_mut(),
@@ -740,6 +741,31 @@ fn assemble(
                     tail.extend(pieces);
                 }
             }
+        }
+    }
+    // The old chunks past the new end leave the row, with the references
+    // they hold; one never read is read for them.
+    if let Some(old) = old {
+        for at in kept..old_count {
+            let edges = match old.seen.get(&(at as u32)) {
+                Some(held) => held.edges.clone(),
+                None => {
+                    let (_, chunk) = old
+                        .row
+                        .index
+                        .get(access, &old.row.shape(), Seek::At(at))?
+                        .ok_or_else(|| {
+                            HeapFault::Malformed(format!("the row names no chunk {at}"))
+                        })?;
+                    let (page, _) = chunk_page(access, &chunk)?;
+                    edges_of(page.members.values())
+                }
+            };
+            for id in &edges {
+                *delta.entry(*id).or_insert(0) -= 1;
+            }
+            changed.insert(at);
+            replaced.insert(at, (Vec::new(), false));
         }
     }
     let seal = |piece: Piece| -> Result<ChunkRef, HeapFault> {

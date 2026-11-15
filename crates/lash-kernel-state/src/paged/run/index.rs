@@ -158,11 +158,30 @@ pub struct Shape {
 }
 
 impl Shape {
-    /// The height a full tree of `leaves` takes: the least, at least
-    /// [`Self::min_height`], whose top holds them.
-    pub fn full_height(&self, leaves: u64) -> u8 {
-        let mut height = self.min_height;
-        while span(height).saturating_mul(NODE_REFS as u64) < leaves {
+    /// The references one page groups when `refs` of one level are
+    /// written together: a full tree's [`NODE_REFS`], another's all of
+    /// them within the bound, else [`FILL`] to a page, spread evenly.
+    pub fn width(&self, refs: u64) -> u64 {
+        let bound = NODE_REFS as u64;
+        if self.full {
+            bound
+        } else if refs <= bound {
+            refs.max(1)
+        } else {
+            refs.div_ceil(refs.div_ceil(FILL as u64))
+        }
+    }
+
+    /// The height of an index of `leaves`: the least, at least
+    /// [`Self::min_height`], at which pages of [`Self::width`] bring the
+    /// top within [`NODE_REFS`]. It is a function of the count alone and
+    /// the one a build gives, and an edit's rebuild grows or shrinks to
+    /// it.
+    pub fn height(&self, leaves: u64) -> u8 {
+        let mut height = 0;
+        let mut count = leaves;
+        while count > NODE_REFS as u64 || height < self.min_height {
+            count = count.div_ceil(self.width(count));
             height += 1;
         }
         height
@@ -383,11 +402,10 @@ impl<L: Leaf> Index<L> {
         if (shape.tuple.is_some() && !ids) || (shape.tuple.is_none() && tupled) {
             return Err("an index's content ids are another kind's".into());
         }
+        if self.height() != shape.height(self.leaves()) {
+            return Err("an index is not at the height its leaves give".into());
+        }
         if shape.full {
-            let leaves = self.leaves();
-            if self.height() != shape.full_height(leaves) {
-                return Err("a full index is not at its height".into());
-            }
             if let Self::Nodes { height, refs } = self {
                 let last = refs.len().saturating_sub(1);
                 if refs.iter().enumerate().any(|(at, part)| {
@@ -608,7 +626,10 @@ impl<L: Leaf> Index<L> {
     /// what `replace` gives for it (none drops it) and `tail` appended:
     /// only the index pages on a changed leaf's path, or the last path
     /// when `tail` is not empty, are read and written again; a node past
-    /// its bound splits, and the top grows a level when it would.
+    /// its bound splits, and the top moves to the height its leaves give
+    /// ([`Shape::height`]): it grows a level, or gives way to the nodes
+    /// below it while they fit one node. Only when they do not is the
+    /// index built again from its leaves.
     ///
     /// # Errors
     ///
@@ -653,9 +674,53 @@ impl<L: Leaf> Index<L> {
                 )?,
             ),
         };
-        while level.len() > NODE_REFS || height < shape.min_height {
+        let leaves = match &level {
+            Level::Leaves(leaves) => leaves.len() as u64,
+            Level::Parts(parts) => parts.iter().map(|part| part.count).sum(),
+        };
+        let target = shape.height(leaves);
+        while level.len() > NODE_REFS || height < target {
             level = Level::Parts(Self::group(access, shape, level, height, 0)?);
             height += 1;
+        }
+        while height > target {
+            let Level::Parts(parts) = &level else {
+                return Err(HeapFault::Malformed(
+                    "an index above its height holds leaves".into(),
+                ));
+            };
+            let mut below = if height == 1 {
+                Level::Leaves(Vec::new())
+            } else {
+                Level::Parts(Vec::new())
+            };
+            let mut first = 0u64;
+            for part in parts {
+                match (&mut below, Self::node(access, shape, part, height, first)?) {
+                    (Level::Leaves(out), Level::Leaves(leaves)) => out.extend(leaves),
+                    (Level::Parts(out), Level::Parts(parts)) => out.extend(parts),
+                    _ => {
+                        return Err(HeapFault::Malformed(
+                            "an index page is of another level".into(),
+                        ));
+                    }
+                }
+                first += part.count;
+            }
+            if below.len() > NODE_REFS {
+                let top = Self::Nodes {
+                    height,
+                    refs: parts.clone(),
+                };
+                let mut leaves = Vec::new();
+                top.each(access, shape, &mut |_, leaf| {
+                    leaves.push(leaf.clone());
+                    Ok(false)
+                })?;
+                return Self::build(access, shape, leaves);
+            }
+            level = below;
+            height -= 1;
         }
         Ok(match level {
             Level::Leaves(leaves) => Self::Leaves(leaves),
@@ -736,13 +801,7 @@ impl<L: Leaf> Index<L> {
         if len == 0 {
             return Ok(Vec::new());
         }
-        let width = if shape.full {
-            NODE_REFS
-        } else if len <= NODE_REFS {
-            len
-        } else {
-            len.div_ceil(len.div_ceil(FILL))
-        };
+        let width = usize::try_from(shape.width(len as u64)).unwrap_or(NODE_REFS);
         let above = height + 1;
         let first_node = start / span(above);
         let seal = |tokens: Vec<u8>, children: Vec<PageRef>| {
