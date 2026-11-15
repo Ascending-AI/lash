@@ -324,9 +324,21 @@ pub(super) fn copy(
         text: bool,
         answer: super::PageAnswer,
         out: &mut Vec<u8>,
+        limit: usize,
     ) -> Result<(), HeapFault> {
         match decode(part, text, answer)? {
-            Node::Leaf(leaf) => out.extend_from_slice(leaf.bytes()),
+            Node::Leaf(leaf) => {
+                // The output is reserved at the root's count, which the
+                // caller admitted: a tree that holds more is refused before
+                // it grows past it.
+                if out.len() + leaf.bytes().len() > limit {
+                    return Err(HeapFault::Corrupt {
+                        page: part.page.id,
+                        reason: "a payload tree holds more bytes than its root counts".into(),
+                    });
+                }
+                out.extend_from_slice(leaf.bytes());
+            }
             Node::Index(children) => {
                 let children: Vec<_> = children
                     .into_iter()
@@ -334,22 +346,27 @@ pub(super) fn copy(
                     .collect();
                 let pages: Vec<_> = children.iter().map(|child| child.page).collect();
                 for (child, answer) in children.iter().zip(access.read_batch(&pages)) {
-                    walk(access, child, text, answer?, out)?;
+                    walk(access, child, text, answer?, out, limit)?;
                 }
             }
         }
         Ok(())
     }
-    let mut out = Vec::new();
     if summary.utf8_bytes == 0 {
-        return Ok(out);
+        return Ok(Vec::new());
     }
+    let limit = usize::try_from(summary.utf8_bytes).map_err(|_| HeapFault::Corrupt {
+        page: root.page.id,
+        reason: "a payload's count is past memory".into(),
+    })?;
+    let mut out = Vec::with_capacity(limit);
     walk(
         access,
         &Part::root(root, summary),
         text,
         access.read(root.page)?,
         &mut out,
+        limit,
     )?;
     Ok(out)
 }

@@ -989,19 +989,39 @@ impl Heap for SlotHeap {
         if let Record::Chunked(chunked) = &row.record {
             return self.open_large(object, id, chunked, roots);
         }
+        let placeholder = self
+            .units
+            .get(object.index() as usize)
+            .copied()
+            .unwrap_or(0);
         // A scalar payload reads whole: an integer or a host handle is one
-        // value. Its pages are checked against the row's root as they are
-        // read, and the scalar against its referrers' head below, before
-        // the run sees it.
+        // value. Admission comes before materialization: the scalar it
+        // decodes to (at most its tokens) and the tokens it is decoded
+        // from are admitted before a page of it is read, then released for
+        // the admission below of the scalar it held. Its pages are checked
+        // against the row's root as they are read, and the scalar against
+        // its referrers' head below, before the run sees it.
         let row = match &row.record {
             Record::Scalar(scalar) => {
-                let access = self
+                let staged = |heap: &Self| {
+                    heap.load_units(&row)
+                        .saturating_add(scalar.summary.utf8_bytes)
+                        .saturating_sub(placeholder)
+                };
+                let mut wanted = staged(self);
+                if self.admit(wanted).is_err() {
+                    self.collect(roots);
+                    wanted = staged(self);
+                    self.admit(wanted).map_err(LoadError::Memory)?;
+                }
+                let read = self
                     .durable
                     .as_ref()
-                    .map(|durable| durable.directory.access())
-                    .ok_or_else(|| malformed("a cold object in a heap with no directory".into()))?;
+                    .map(|durable| scalar.read(durable.directory.access()))
+                    .ok_or_else(|| malformed("a cold object in a heap with no directory".into()));
+                self.held = self.held.saturating_sub(wanted);
                 lash_kernel_state::paged::run::directory::Row {
-                    record: scalar.read(access).map_err(LoadError::Store)?,
+                    record: read?.map_err(LoadError::Store)?,
                     ..row
                 }
             }
@@ -1010,11 +1030,6 @@ impl Heap for SlotHeap {
 
         // Admission of the growth: the body replaces the proxy's
         // placeholder. Then one collection from the roots, and once more.
-        let placeholder = self
-            .units
-            .get(object.index() as usize)
-            .copied()
-            .unwrap_or(0);
         let wanted = self.load_units(&row).saturating_sub(placeholder);
         if self.admit(wanted).is_err() {
             self.collect(roots);
