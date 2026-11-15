@@ -622,6 +622,50 @@ impl<L: Leaf> Index<L> {
         )
     }
 
+    /// The index over `leaves`, in order, as [`Self::rebuild`] gives it
+    /// from this one: a place both hold is changed only where its leaf
+    /// differs, the places past `leaves`' end are dropped and the leaves
+    /// past this index's end appended, so an index page is sealed again
+    /// only where its content changes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::rebuild`].
+    pub fn revise(
+        &self,
+        access: &super::super::tree::Access<'_>,
+        shape: &Shape,
+        leaves: Vec<L>,
+    ) -> Result<Self, HeapFault> {
+        let mut old = Vec::new();
+        self.each(access, shape, &mut |_, leaf| {
+            old.push(lash_kernel_value::tokens::encode_body(leaf));
+            Ok(false)
+        })?;
+        let mut leaves = leaves.into_iter();
+        let mut fresh = std::collections::BTreeMap::new();
+        let mut held = 0u64;
+        for (at, (was, now)) in old.iter().zip(leaves.by_ref()).enumerate() {
+            held += 1;
+            if *was != lash_kernel_value::tokens::encode_body(&now) {
+                fresh.insert(at as u64, now);
+            }
+        }
+        let mut changed: BTreeSet<u64> = fresh.keys().copied().collect();
+        changed.extend(held..old.len() as u64);
+        let tail: Vec<L> = leaves.collect();
+        if changed.is_empty() && tail.is_empty() {
+            return Ok(self.clone());
+        }
+        self.rebuild(
+            access,
+            shape,
+            &changed,
+            &mut |at, _| Ok(fresh.remove(&at).into_iter().collect()),
+            tail,
+        )
+    }
+
     /// The index with each leaf whose place is in `changed` replaced by
     /// what `replace` gives for it (none drops it) and `tail` appended:
     /// only the index pages on a changed leaf's path, or the last path

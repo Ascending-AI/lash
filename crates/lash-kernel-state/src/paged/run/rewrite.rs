@@ -572,7 +572,7 @@ pub fn rewrite(
                 .get(&placed.link)
                 .is_none_or(|image| *image == placed.link)
     });
-    out.heap = continuation::write(&access, &record)?;
+    out.heap = continuation::write(&access, &record, Some(root.heap))?;
     Ok(out)
 }
 

@@ -681,7 +681,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     let mut record = continuation::read(&access, root.heap).unwrap();
     record.tasks[0].frames[0].site = super::embedder::main_site([0, 0]);
     let mut moved = root.clone();
-    moved.heap = continuation::write(&access, &record).unwrap();
+    moved.heap = continuation::write(&access, &record, None).unwrap();
     assert_ne!(snapshot(&run, &moved), original, "a frame's point is exact");
     let mut unshared = parked(2);
     let root = unshared.checkpoint();

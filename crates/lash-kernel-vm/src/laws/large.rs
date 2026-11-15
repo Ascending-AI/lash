@@ -1026,7 +1026,8 @@ fn run_case() -> Result<(), String> {
             return Err(format!("the record does not take {count} segments"));
         }
         let access = Access::new(Box::new(store.clone()));
-        let page = continuation::write(&access, &record).map_err(|error| format!("{error:?}"))?;
+        let page =
+            continuation::write(&access, &record, None).map_err(|error| format!("{error:?}"))?;
         let cold = Access::new(Box::new(store.clone()));
         let root: RunPage = decode_body(
             &cold
@@ -1167,4 +1168,77 @@ fn an_object_grown_and_shrunk_across_each_boundary_is_the_one_built_there() {
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// An edit in one segment of a run seals that segment's index path and no
+/// other index page. Through the run writer, at heights 0 and 1, the
+/// writer seals every segment again (it encodes the record whole, and an
+/// unchanged segment is the same page), the one changed index page and
+/// the root: 2 + 0 + 1 and 97 + 1 + 1. At height 2, through the index
+/// alone, it seals one page for each level below the embedded top. A
+/// large object's chunk edits are counted at each height by
+/// [`a_point_edit_in_a_four_deep_directory_seals_within_its_fixture_ceiling`].
+#[test]
+fn an_edit_in_one_segment_seals_only_its_index_path() {
+    use lash_kernel_state::paged::PageKind;
+    use lash_kernel_state::paged::run::continuation::{
+        self, RunPage, SEGMENT_BYTES, SEGMENTS, Segment,
+    };
+    use lash_kernel_value::tokens::decode_body;
+    let mut embedder =
+        super::embedder::Embedder::new("main { return perform 0(\"pause\") as Any }");
+    assert!(matches!(embedder.run(), crate::Step::Parked(_)));
+    let mut record = embedder.run_record();
+    let store = Counting {
+        pages: embedder.source.clone(),
+        ..Counting::default()
+    };
+    let access = Access::new(Box::new(store.clone()));
+    let top = |page| -> Vec<_> {
+        let root: RunPage = decode_body(&access.read(page).unwrap().tokens).unwrap();
+        match root.segments {
+            Index::Leaves(leaves) => leaves.iter().map(|leaf| leaf.0.id).collect(),
+            Index::Nodes { refs, .. } => refs.iter().map(|part| part.page.id).collect(),
+        }
+    };
+    record.sites.push(Vec::new());
+    for (count, index_pages) in [(2usize, 0u64), (97, 1)] {
+        // Two bytes per zero coordinate, half a segment past `count - 1`.
+        *record.sites.last_mut().unwrap() =
+            vec![0; ((count - 1) * SEGMENT_BYTES + SEGMENT_BYTES / 2) / 2];
+        let before = continuation::write(&access, &record, None).unwrap();
+        *record.sites.last_mut().unwrap().last_mut().unwrap() = 1;
+        let (after, _, writes) =
+            store.during(|| continuation::write(&access, &record, Some(before)).unwrap());
+        assert_eq!(
+            writes,
+            count as u64 + index_pages + 1,
+            "an edit in the last of {count} segments"
+        );
+        let (old, new) = (top(before), top(after));
+        let kept = old.len() - 1;
+        assert_eq!((old.len(), &old[..kept]), (new.len(), &new[..kept]));
+        assert_ne!(old[kept], new[kept]);
+        let cold = Access::new(Box::new(store.clone()));
+        assert_eq!(
+            continuation::read(&cold, after).unwrap().sites,
+            record.sites
+        );
+    }
+    let leaves: Vec<Segment> = (0..9_217u64)
+        .map(|i| {
+            access
+                .seal(PageKind::RUN_SEGMENT, i.to_le_bytes().to_vec(), Vec::new())
+                .map(Segment)
+        })
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let index = Index::build(&access, &SEGMENTS, leaves.clone()).unwrap();
+    assert_eq!(index.height(), 2);
+    let mut edited = leaves;
+    edited[9_000] = edited[0];
+    let (revised, _, writes) =
+        store.during(|| index.revise(&access, &SEGMENTS, edited.clone()).unwrap());
+    assert_eq!(writes, 2, "an edit at height 2");
+    assert_eq!(revised, Index::build(&access, &SEGMENTS, edited).unwrap());
 }

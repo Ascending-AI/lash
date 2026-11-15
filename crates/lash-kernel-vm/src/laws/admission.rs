@@ -55,7 +55,7 @@ impl Sealed {
     fn open(&self, record: &RunRecord) -> Result<CoreMachine, OpenError> {
         let access = Access::new(Box::new(self.source.clone()));
         let mut root = self.root.clone();
-        root.heap = continuation::write(&access, record).unwrap();
+        root.heap = continuation::write(&access, record, None).unwrap();
         <CoreMachine as Machine>::open(
             core_program(&self.text, None),
             ROOMY,

@@ -923,7 +923,7 @@ impl Embedder {
             lash_kernel_state::kernel_internals::tree::Access::new(Box::new(self.source.clone()));
         let mut record = continuation::read(&access, root.heap).unwrap();
         edit(&mut record);
-        root.heap = continuation::write(&access, &record).unwrap();
+        root.heap = continuation::write(&access, &record, None).unwrap();
         let (program, library) = self.program(true);
         self.machine = crate::KernelMachine::open_in(
             program,

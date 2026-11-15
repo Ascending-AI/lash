@@ -48,6 +48,9 @@ pub struct CoreMachine {
     /// A budgeted seal's written run record and what the checkpoint root
     /// takes from it, until the run moves.
     partial: Option<Partial>,
+    /// The run root the run was last opened or sealed under, which the
+    /// next seal's segment index is written over.
+    run: Option<lash_kernel_doc::heap::PageRef>,
     /// What saves the functions a session cell's end drops (`K-SES-004`).
     save: Option<Box<dyn crate::CellSave>>,
 }
@@ -676,6 +679,7 @@ impl CoreMachine {
             document,
             ended: false,
             partial: None,
+            run: None,
             save: None,
             convention,
             output,
@@ -745,6 +749,7 @@ impl Machine for CoreMachine {
         if !matches!(root.status, RootStatus::Parked) {
             return Err(malformed("an ended root cannot execute"));
         }
+        let run = root.heap;
         let (mut record, directory) =
             continuation::open(source, root.heap).map_err(OpenError::Heap)?;
         // Under another build image, the run opens only if the image holds
@@ -877,6 +882,7 @@ impl Machine for CoreMachine {
             document: Arc::clone(&program.document),
             ended: false,
             partial: None,
+            run: Some(run),
             save: None,
             convention,
             output,
@@ -1000,7 +1006,9 @@ impl Machine for CoreMachine {
                 let access = self.vm.heap.access().ok_or_else(|| SealError::Fault {
                     problem: "the heap has no directory".into(),
                 })?;
-                let heap = continuation::write(access, &record).map_err(SealError::Heap)?;
+                let heap =
+                    continuation::write(access, &record, self.run).map_err(SealError::Heap)?;
+                self.run = Some(heap);
                 let meters = SavedMeters {
                     charged: (self.header.bounds.charge == Charge::Exact).then_some(record.charged),
                     waits_issued: record.next_wait,

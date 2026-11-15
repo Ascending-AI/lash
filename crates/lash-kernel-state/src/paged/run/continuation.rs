@@ -689,12 +689,19 @@ record! {
 
 /// Seals `record` under a run root page: its encoded state in segments
 /// under their index, the root holding the index's top, the directory's
-/// root page and the carried session as its children.
+/// root page and the carried session as its children. Over `previous`,
+/// the run root this run was last sealed or opened under, only the index
+/// pages whose segments change are sealed again
+/// ([`super::index::Index::revise`]).
 ///
 /// # Errors
 ///
-/// The page port's faults.
-pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFault> {
+/// The page port's faults; as [`read`] for a `previous` run root.
+pub fn write(
+    access: &Access<'_>,
+    record: &RunRecord,
+    previous: Option<PageRef>,
+) -> Result<PageRef, HeapFault> {
     let bytes = encode_body(record);
     let directory = record.heap.directory.page;
     let mut segments = Vec::with_capacity(bytes.len().div_ceil(SEGMENT_BYTES));
@@ -707,11 +714,15 @@ pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFau
             Vec::new(),
         )?));
     }
+    let segments = match previous.map(|page| root_page(access, page)).transpose()? {
+        Some(Some(old)) => old.segments.revise(access, &SEGMENTS, segments)?,
+        _ => super::index::Index::build(access, &SEGMENTS, segments)?,
+    };
     let page = RunPage {
         directory,
         carried: record.carried,
         bytes: bytes.len() as u64,
-        segments: super::index::Index::build(access, &SEGMENTS, segments)?,
+        segments,
     };
     let children = page
         .directory
@@ -748,27 +759,23 @@ pub fn read(access: &Access<'_>, page: PageRef) -> Result<RunRecord, HeapFault> 
     Ok(record)
 }
 
-/// The root page `page`, the pages it retains granted, and the bytes its
-/// segments hold.
-fn read_segmented(access: &Access<'_>, page: PageRef) -> Result<(RunPage, Vec<u8>), HeapFault> {
-    let corrupt = |page: PageRef, reason: String| HeapFault::Corrupt {
+/// The run root page `page`'s body, the pages it retains granted; none
+/// for the keyed leaf the paged engine parked its run under (no run of
+/// the core is rooted at one).
+fn root_page(access: &Access<'_>, page: PageRef) -> Result<Option<RunPage>, HeapFault> {
+    let corrupt = |reason: String| HeapFault::Corrupt {
         page: page.id,
         reason,
     };
     let answer = access.read(page)?;
     if answer.kind == PageKind::KEYED_LEAF {
-        // The paged engine parked its run under its heap's header, a keyed
-        // leaf; no run of the core is rooted at one.
-        return Err(HeapFault::Retired {
-            page: page.id,
-            state: lash_kernel_value::tokens::RetiredState::ParkedRun,
-        });
+        return Ok(None);
     }
     if answer.kind != PageKind::RUN_ROOT {
-        return Err(corrupt(page, "not a run root page".into()));
+        return Err(corrupt("not a run root page".into()));
     }
     let mut root: RunPage =
-        decode_body(&answer.tokens).map_err(|error| corrupt(page, error.to_string()))?;
+        decode_body(&answer.tokens).map_err(|error| corrupt(error.to_string()))?;
     for held in [&mut root.directory, &mut root.carried]
         .into_iter()
         .flatten()
@@ -776,15 +783,28 @@ fn read_segmented(access: &Access<'_>, page: PageRef) -> Result<(RunPage, Vec<u8
         grant(held, &answer.children)?;
     }
     root.segments.grant(&answer.children)?;
-    root.segments
-        .check(&SEGMENTS)
-        .map_err(|reason| corrupt(page, reason))?;
+    root.segments.check(&SEGMENTS).map_err(corrupt)?;
     if root.bytes.div_ceil(SEGMENT_BYTES as u64) != root.segments.leaves() {
         return Err(corrupt(
-            page,
             "the run's segment count and length disagree".into(),
         ));
     }
+    Ok(Some(root))
+}
+
+/// The root page `page`, the pages it retains granted, and the bytes its
+/// segments hold.
+fn read_segmented(access: &Access<'_>, page: PageRef) -> Result<(RunPage, Vec<u8>), HeapFault> {
+    let corrupt = |page: PageRef, reason: String| HeapFault::Corrupt {
+        page: page.id,
+        reason,
+    };
+    let Some(root) = root_page(access, page)? else {
+        return Err(HeapFault::Retired {
+            page: page.id,
+            state: lash_kernel_value::tokens::RetiredState::ParkedRun,
+        });
+    };
     let total = root.bytes;
     let mut bytes = Vec::with_capacity(usize::try_from(total).unwrap_or(0));
     root.segments.each(access, &SEGMENTS, &mut |_, segment| {

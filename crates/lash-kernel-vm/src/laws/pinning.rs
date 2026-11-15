@@ -211,7 +211,7 @@ fn an_open_under_another_image_walks_the_resume_points_itself() {
         let mut record = continuation::read(&access, root.heap).unwrap();
         record.pins.clear();
         record.held_code.clear();
-        root.heap = continuation::write(&access, &record).unwrap();
+        root.heap = continuation::write(&access, &record, None).unwrap();
         let opened = open(text, &library, &images, &source, root);
         assert!(
             matches!(
