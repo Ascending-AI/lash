@@ -219,18 +219,6 @@ fn long(content: &[u8], kind: Kind) -> [u8; 32] {
         .id
 }
 
-/// Writes the member `key` into a tuple's tokens: inline tokens as they
-/// are, a digest under its own tag, so a tuple's key needs no member body.
-pub fn embed(key: &NormalKey, out: &mut TokenWriter) {
-    match key {
-        NormalKey::Inline(tokens) => out.raw(tokens),
-        NormalKey::Digest(digest) => {
-            out.sum(11, 1);
-            out.bytes(digest);
-        }
-    }
-}
-
 /// The flat key of finished `tokens`.
 pub fn flat(out: TokenWriter) -> NormalKey {
     let bytes = out.into_bytes();
@@ -257,7 +245,9 @@ fn encode(counts: TextSummary) -> [u8; 24] {
 // - each member writes one token stream ([`Member::write`]): a keyable
 //   member exactly the tokens it contributes to a tuple's flat normal
 //   form, any other member under its own tag, by its head or its durable
-//   id;
+//   id; an immutable member always by its whole head (kind, length or
+//   summary, shape, root or flat form), so a parent authenticates every
+//   field its member opens by, not its normal form alone;
 // - leaves group [`TUPLE_LEAF`] members by position,
 //   `leaf = SHA-256(lash.tuple.leaf ‖ start ‖ count ‖ tokens)`;
 // - each level above groups [`TUPLE_FANOUT`] children left to right,
@@ -283,6 +273,24 @@ pub const TUPLE_FANOUT: usize = super::run::index::NODE_REFS;
 const TUPLE_LEAF_TAG: &[u8] = b"lash.tuple.leaf.v1\0";
 const TUPLE_INDEX_TAG: &[u8] = b"lash.tuple.index.v1\0";
 const ERROR_TAG: &[u8] = b"lash.error.v1\0";
+
+/// Writes the key tokens of `float` alone: an integral one is the integer
+/// it equals, whose tokens a big integer's flat normal form holds whole.
+/// Inside a tuple a float past a word is named by that integer's head
+/// ([`Member::write`]).
+pub fn float_key(float: lash_kernel_doc::Float, out: &mut TokenWriter) {
+    use lash_kernel_value::tokens::TokenCodec;
+    match lash_kernel_doc::heap_values::integral_float(float.get()) {
+        Some(int) => {
+            out.sum(2, 1);
+            int.encode(out);
+        }
+        None => {
+            out.sum(3, 1);
+            float.encode(out);
+        }
+    }
+}
 
 /// A member of a tuple or an error, as its content identity names it.
 #[derive(Clone, Debug)]
@@ -326,14 +334,23 @@ impl Member<'_> {
                 lash_kernel_doc::Integer::from(*word).encode(out);
             }
             Self::Float(float) => match lash_kernel_doc::heap_values::integral_float(float.get()) {
-                Some(int) => {
-                    out.sum(2, 1);
-                    int.encode(out);
+                // An integral float past a word is the big integer it
+                // equals, which a tuple names by its head.
+                Some(int) if int.word().is_none() => {
+                    let mut normal = TokenWriter::new();
+                    normal.sum(2, 1);
+                    int.encode(&mut normal);
+                    out.sum(25, 1);
+                    Head::BigInt {
+                        summary: lash_kernel_doc::heap::IntSummary {
+                            bits: int.bits(),
+                            negative: int.is_negative(),
+                        },
+                        normal: flat(normal),
+                    }
+                    .encode(out);
                 }
-                None => {
-                    out.sum(3, 1);
-                    float.encode(out);
-                }
+                _ => float_key(*float, out),
             },
             Self::Text(text) => {
                 out.sum(4, 1);
@@ -358,9 +375,12 @@ impl Member<'_> {
                 out.sum(12, 1);
                 out.unsigned(*token);
             }
+            // A keyable immutable is named by its whole head, every field a
+            // load opens it by, so the parent authenticates them all.
             Self::Immutable(head) => match (&**head, head.normal()) {
-                (_, Some(normal)) => {
-                    embed(normal, out);
+                (head, Some(_)) => {
+                    out.sum(25, 1);
+                    head.encode(out);
                 }
                 (Head::Function(callable), None) => {
                     out.sum(8, 1);

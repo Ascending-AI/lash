@@ -490,10 +490,15 @@ pub(super) fn tokens(
     out: &mut TokenWriter,
 ) -> Result<bool, NativeError> {
     match value {
+        // Alone, a float past a word is the big integer's flat tokens; in a
+        // tuple, its head (`identity::Member::write`).
+        Value::Float(float) => {
+            identity::float_key(*float, out);
+            Ok(true)
+        }
         Value::Null
         | Value::Bool(_)
         | Value::Int(_)
-        | Value::Float(_)
         | Value::Text(_)
         | Value::Timestamp(_)
         | Value::TaskRef(_)

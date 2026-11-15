@@ -125,14 +125,25 @@ fn a_long_value_is_keyed_by_its_identity_root_wherever_it_is_held() {
     }
 }
 
-/// A tuple embeds a long member by its identity root under the member tag
-/// (`sum(11)`), as the arena keys it (the retired page heap once embedded the member's
-/// raw text, so equal tuples keyed apart).
+/// A tuple embeds a long member by its whole head under the head tag
+/// (`sum(25)`): `LongText` (`sum(4, 2)`), its three counts (4,097 each)
+/// and its identity root (`sum(1)` digest), as the arena keys it (the
+/// retired page heap once embedded the member's raw text, so equal tuples
+/// keyed apart; a member named by its root alone let a forged count pass).
 #[test]
 fn a_tuple_embeds_a_long_member_by_its_identity_root() {
-    let expected = NormalKey::Inline(bytes(
-        "0c090109010c0b010820455d48dd074c7f06b1d5be25db8933771281aa393a82ca56ba37eb8a749b7bba",
-    ));
+    let expected = NormalKey::Inline(bytes(concat!(
+        "0c0901",
+        "0901",
+        "0c1901",
+        "0c0402",
+        "0903",
+        "038120",
+        "038120",
+        "038120",
+        "0c0101",
+        "0820455d48dd074c7f06b1d5be25db8933771281aa393a82ca56ba37eb8a749b7bba",
+    )));
     let text = "a".repeat(4097);
     let mut arena = Arena::new();
     let member = arena.text(&text);

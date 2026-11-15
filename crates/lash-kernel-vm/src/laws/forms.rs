@@ -413,6 +413,13 @@ fn forms_do_what_their_rules_say() {
             tuple([int(1), text("b")]),
         ),
         (
+            "K-KEY-002: an integral float past a word is the integer it equals, also inside a tuple",
+            "let b = perform 2(\"18446744073709551616\") as Int let f = perform 2(\"18446744073709551616\") as Float \
+             let m = map{} set m[(b, 1)] = \"a\" set m[(f, 1)] = \"b\" set m[f] = \"c\" \
+             return (list.len(m), m[(b, 1)], m[b])",
+            tuple([int(2), text("b"), text("c")]),
+        ),
+        (
             "K-KEY-004: a ref is a key and deref gives the object back",
             "let xs = [1] let r = ident.ref(xs) let m = map{r: \"v\"} let ys = deref(r) \
              set ys[1] = 2 return (xs, m[ident.ref(ys)])",
