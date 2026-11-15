@@ -186,6 +186,15 @@ pub struct Projected {
     /// or the one its first seal certified. Fixed once given: the object
     /// never changes, and every row that names it holds this head.
     pub head: std::cell::OnceCell<Head>,
+    /// The head of an immutable that names an object or task, until the
+    /// first seal certifies it: it reads the identity of the objects it
+    /// names (a durable id, or a process-local token before there is
+    /// one), so it is computed once and kept only while those hold, each
+    /// of them listing this object in its [`Self::headed_by`].
+    pub(crate) named_head: std::cell::RefCell<Option<Head>>,
+    /// The immutables whose [`Self::named_head`] reads this object's
+    /// identity: cleared when it gains or loses a durable id.
+    pub(crate) headed_by: std::cell::RefCell<Vec<ArenaHandle>>,
 }
 
 impl Projected {
@@ -1301,6 +1310,7 @@ impl Arena {
         facts.dirty = true;
         facts.listed = true;
         self.dirty.push(handle);
+        self.unhead(handle);
         self.rekey_after(handle)?;
         Ok(entity)
     }
@@ -1327,6 +1337,7 @@ impl Arena {
             facts.listed = true;
             self.dirty.push(handle);
         }
+        self.unhead(handle);
         self.rekey_after(handle)
     }
 

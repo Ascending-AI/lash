@@ -126,6 +126,7 @@ impl Drop for Registration<'_> {
                 .objects
                 .discard_install(self.batch.iter().map(|(handle, _)| *handle));
             let mut kept = self.dirty;
+            let mut withdrawn = Vec::new();
             for at in self.dirty..self.arena.dirty.len() {
                 let handle = self.arena.dirty[at];
                 let facts = &mut self.arena.facts[handle.index() as usize];
@@ -140,6 +141,7 @@ impl Drop for Registration<'_> {
                             projected.entity = None;
                         }
                         facts.listed = false;
+                        withdrawn.push(handle);
                     }
                     _ => {
                         self.arena.dirty[kept] = handle;
@@ -148,6 +150,9 @@ impl Drop for Registration<'_> {
                 }
             }
             self.arena.dirty.truncate(kept);
+            for handle in withdrawn {
+                self.arena.unhead(handle);
+            }
             self.arena.next_ordinal = self.next;
         }
         self.arena.registering = false;

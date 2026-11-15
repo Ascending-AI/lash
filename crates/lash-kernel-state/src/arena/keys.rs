@@ -578,9 +578,10 @@ fn member<'v>(
 }
 
 /// The head of the immutable `handle`: the one it holds, else the one its
-/// resident body gives, which is installed when `keep` and the object
-/// names no object or task at any depth (a ref keyed before its
-/// referent's first seal is keyed by a token that changes). A member
+/// resident body gives, which is kept when `keep`: installed when the
+/// object names no object or task at any depth, else held only while the
+/// identities it reads hold (a ref keyed before its referent's first seal
+/// is keyed by a token that changes). A member
 /// already headed answers by its head, so heading a shared graph is linear
 /// in its distinct objects, not its leaves.
 pub(crate) fn object_head(
@@ -595,16 +596,102 @@ pub(crate) fn object_head(
     if let Some(head) = fact.head() {
         return Ok(head.clone());
     }
+    if let Some(head) = fact
+        .projected()
+        .and_then(|projected| projected.named_head.borrow().clone())
+    {
+        return Ok(head);
+    }
     let body = body(objects, handle)?;
     let head = content_head(objects, facts, Some(handle), body, fact.summary)?;
-    if keep
-        && !fact.summary.has_edges
-        && let Ok(projected) = fact.try_projection()
-    {
+    if !keep {
+        return Ok(head);
+    }
+    let Ok(projected) = fact.try_projection() else {
+        return Ok(head);
+    };
+    if !fact.summary.has_edges {
         super::freeze(body);
         let _ = projected.head.set(head.clone());
+        return Ok(head);
+    }
+    // A head that reads the identity of the objects it names is kept
+    // while they keep it: each lists this object, and giving one a
+    // durable id or withdrawing it forgets this head
+    // ([`super::Arena::unhead`]). One it cannot list is not kept.
+    let Some(named) = named(objects, facts, handle, body)? else {
+        return Ok(head);
+    };
+    let listed = named.iter().all(|named| {
+        facts
+            .get(named.index() as usize)
+            .and_then(|facts| facts.try_projection().ok())
+            .is_some()
+    });
+    if listed {
+        for named in named {
+            if let Some(facts) = facts.get(named.index() as usize)
+                && let Ok(projection) = facts.try_projection()
+            {
+                projection.headed_by.borrow_mut().push(handle);
+            }
+        }
+        super::freeze(body);
+        *projected.named_head.borrow_mut() = Some(head.clone());
     }
     Ok(head)
+}
+
+/// The objects whose identity the head of the immutable `handle`, whose
+/// body is `body`, reads: each object or ref it holds (a durable id, or a
+/// token before it has one), and each immutable member whose own head
+/// reads one. `None` when a member's head is not kept, so none can be
+/// listed for it.
+fn named(
+    objects: &(impl super::Bodies + ?Sized),
+    facts: &(impl super::FactTable + ?Sized),
+    handle: ArenaHandle,
+    own: &Body,
+) -> Result<Option<Vec<ArenaHandle>>, NativeError> {
+    let error;
+    let members: &[Value] = match own {
+        Body::Tuple(sequence) => super::ops::values(handle, &sequence.chunks)?,
+        Body::Error(held) => {
+            error = [held.kind, held.message, held.data];
+            &error
+        }
+        _ => return Ok(None),
+    };
+    let mut named = Vec::new();
+    for value in members {
+        let Some(member) = value.handle() else {
+            continue;
+        };
+        let Some(fact) = facts.get(member.index() as usize) else {
+            return Ok(None);
+        };
+        let immutable = !matches!(
+            value,
+            Value::ObjectRef(_)
+                | Value::List(_)
+                | Value::Map(_)
+                | Value::Set(_)
+                | Value::Record(_)
+                | Value::Closure(_)
+        ) && !matches!(body(objects, member)?, Body::Cell(_));
+        if !immutable {
+            named.push(member);
+        } else if fact.head().is_none() {
+            if fact
+                .projected()
+                .is_none_or(|projected| projected.named_head.borrow().is_none())
+            {
+                return Ok(None);
+            }
+            named.push(member);
+        }
+    }
+    Ok(Some(named))
 }
 
 /// The head of the immutable `body`, whose summary is `shape`, held by

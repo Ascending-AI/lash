@@ -126,8 +126,37 @@ impl Arena {
     /// naming it does: every later row names it so.
     pub fn certify(&self, handle: ArenaHandle, head: Head) -> Result<(), NativeError> {
         super::freeze(self.body(handle)?);
-        let _ = self.facts(handle)?.try_projection()?.head.set(head);
+        let projected = self.facts(handle)?.try_projection()?;
+        let _ = projected.head.set(head);
+        projected.named_head.take();
         Ok(())
+    }
+
+    /// Forgets every head that read `handle`'s identity, now that it has
+    /// changed (a durable id given, or withdrawn by a registration that
+    /// did not commit), and every head that read one of those: each is
+    /// computed again when it is next asked for.
+    pub(super) fn unhead(&self, handle: ArenaHandle) {
+        let mut pending = vec![handle];
+        while let Some(named) = pending.pop() {
+            let Some(projected) = self
+                .facts
+                .get(named.index() as usize)
+                .and_then(Facts::projected)
+            else {
+                continue;
+            };
+            for dependent in projected.headed_by.take() {
+                if self
+                    .facts
+                    .get(dependent.index() as usize)
+                    .and_then(Facts::projected)
+                    .is_some_and(|projected| projected.named_head.take().is_some())
+                {
+                    pending.push(dependent);
+                }
+            }
+        }
     }
 
     /// Re-keys every resident map and set once `handle`, which a key named
