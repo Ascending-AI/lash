@@ -141,7 +141,7 @@ A dialect ships a front end, a printer and the build-owned helper functions its 
 
 ## 5. Execution
 
-- The engine compiles an admitted document to an internal executable. It is a cache: derived deterministically, never edited, rebuilt at will. The library's part of it is compiled once per registry and shared by every run that uses the registry, keyed by function identity; each live immutable document is admitted and compiled once against that prepared library and layout, then reused at start and at every open of a checkpoint. Weak document references isolate replacement and copy-on-write edits, and unused preparation is reclaimed on the next admission. A checkpoint's header (kernel version, document, execution closure) is checked on every open, before the run executes; each page is checked when it is first read (§6).
+- The engine compiles an admitted document to an internal executable. It is a cache: derived deterministically, never edited, rebuilt at will. The library's part of it is compiled once per process and shared by every instance whose registry and build image key it: the key is a digest of the registry's functions, whether each has a native and the inline answer that native declares, the build image and the compiler revision. The process holds a few libraries and drops the oldest first. An instance compiles only its own document's code, at start and at every open of a checkpoint, and links it to that library. A checkpoint's header (kernel version, document, execution closure) is checked on every open, before the run executes; each page is checked when it is first read (§6).
 - Charges come from a cost table for kernel forms and from each function's charge formula; both are pinned (§6). Bounds are explicit, as today.
 - **After a crash** a run resumes from its last saved state. Computation after that save may run again, including declared `Read` tools, including clock and random, printing and logging. An admitted `Once` without an outcome becomes `Interrupted`; an unfinished `Repeatable` can run again under its policy. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
 - Worker processes, worker reset, effect admission before execution and the host boundary stay as they are.
@@ -154,15 +154,6 @@ callback charges, extra writes and changed returns. The description records
 the native facts used by the proof; preparation checks those facts against the
 installed implementations. Native-only definitions supply their own resident,
 text and pair capabilities through `NativeFunction::specialization`.
-
-Access and heap-template execution obtain a shared admission result before
-publishing their selected source prefix. Compiled descriptions retain source
-coordinates and resource requirements; the result carries only the accepted
-charge and the publication facts its storage owner needs. An access may commit its own
-shorter prefix when its consumer declines. The semantic heap context retains
-its staged-write rollback owner through admission. Typed-loop snapshots,
-native nursery disposal and moved-text rollback retain their separate storage
-implementations.
 
 ## 6. Parked runs
 
@@ -186,6 +177,8 @@ A parked run is a checkpoint root over the run's persistent heap ([ADR 0145](../
 An active call (`FrameRecord`) holds semantic coordinates only: the site of its pending statement and, when it stands at a nested action, that action's continuation (its site under the statement's, its phase, and its operand roles, each the site suffix of an operand with its value); its bindings, each by name and declaring site with its value or shared cell; its loops (site, iterations started, and a map or set position as a table cursor); its `finally` blocks under way and how each was entered, an entry's run-root cleanup among them as a `finally` row at the body's own site; the values a loop iterates and a `finally` (or a cleanup) departs with; and a library call's arguments. Every unbounded record is itself a tree, so a resume reads only the paths it touches.
 
 Not saved: registers, which belong to one step and are empty at every safe point, a continuation's roles being saved by site instead; compiled code, statement and slot numbers, which are rebuilt caches; the handlers around a statement, derived from its site; loop activation numbers and check counts, which the kernel does not have (`K-EFF-008`); and any trace state of the memory census.
+
+*Objects and cold access.* Every object the heap holds gets an `ObjectId` when it is first written (a page-out or a seal), from a high-water mark each checkpoint root persists; ids are never reused in a lineage and resolve only through the root they were read under. A checkpoint keeps an immutable directory; the run's current directory is a copy-on-write working tree over the last sealed one, and a seal drops the rows its new roots do not reach while older checkpoint and fork directories never change (`K-MACH-009`). Each row carries the exact set of ids its record references, so a resident object a cold record references stays a collector root, and seal-time pruning traces those edge sets without loading a payload. An operation that needs a cold object or chunk stops before it commits anything, the machine loads what it named and runs the operation again: nothing is charged twice and no step, slice or observation is added. A point read or write of a large list or table loads one chunk through the object's chunk index: 2 page reads with its row open, d + 2 from fully cold, where d is the directory depth (`lash-kernel-vm`'s `laws::large`). A point edit dirties one chunk.
 
 A wait persists its identity and kind, never its admitted request's arguments: the embedder hands the admission of every wait in at open. A request issued since the last park is frozen once, so a crash before the park that reports it neither loses nor duplicates it, and an outcome delivered and not yet run with stays committed in the root until the task resumes and its wait is removed in the same edit.
 

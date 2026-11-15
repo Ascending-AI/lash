@@ -1,13 +1,15 @@
 # Kernel end state: the seams
 
-Status: stage-1 seam design for the kernel end state (FIG-6691), on main at
-`40bbde07e7`. It pins the contracts the stage-2 storage swaps and the stage-3
-instruction-set and helper lanes build against, so they can proceed in
-parallel. The direction is the kend spec v2
+Status: historical. This is the stage-1 seam design for the kernel end state
+(FIG-6691), written on main at `40bbde07e7`. The seam contracts of §3 still
+state rules that code cites. Its module paths, owners, "where today" columns,
+build notes and §4 lane briefs describe the engine of that time
+(`lash_kernel_exec`, `machine/*.rs`), which the bytecode core replaced
+(FIG-7694); [the kernel design](../kernel/design.md) describes execution as
+it is. The direction was the kend spec v2
 (`/workspace/notes/lash/tasks/lanes/kend/spec.md`): the machine executes on
 plain memory and projects to the paged heap only at projection points (park,
-slice return, end). Its §2 contracts are fixed here. This supersedes the
-execution half of
+slice return, end). This supersedes the execution half of
 [ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
 ("the machine executes on that heap"); the checkpoint half stands: a park seals
 the changed pages and writes one root.
@@ -65,7 +67,7 @@ operation memory reservation and `FrameRecord.registers` deleted).
 | Seam | Pinned in code | Pinned in this document |
 | --- | --- | --- |
 | A coordinates | `lash_kernel_exec::coord` | the grammar, restore validation |
-| B charge | `lash_kernel_exec::charge`; `KernelMachine::record_charges` and `lash_kernel_vm::ChargeTape`; the corpus law | region split rules, the library charge |
+| B charge | `KernelMachine::record_charges` and `lash_kernel_vm::ChargeTape`; the corpus law | the library charge |
 | C values | `lash_kernel_doc::arena::{ArenaHandle, Value, ShortText}` | the kind table, id assignment and walk order |
 | D arena | `lash_kernel_doc::arena::{Objects, Body, Sequence, Table, LongText, Bytes, Chunk}` | ownership, proxies, worklist, cold edges |
 | E calls | none | the call ABI, kill sets, cold frames |
@@ -172,8 +174,8 @@ with that event; nothing after it is charged.
 | Event | Weight | Where today |
 | --- | --- | --- |
 | Statement | 1, atomic | `advance` (`machine/exec.rs`) |
-| Expression node, atom argument | 1 each, in pre-order, as a unit run | the stream's charge regions (`Op::Region`, `RegionTable`; `machine/stream.rs`); an action's atom operands, `machine/actions.rs` |
-| Construction | its members, atomic | the charge region the construction stands in (`machine/stream.rs`) |
+| Expression node, atom argument | 1 each, in pre-order, as a unit run | `machine/stream.rs`; an action's atom operands, `machine/actions.rs` |
+| Construction | its members, atomic | `machine/stream.rs` |
 | Loop test | the cost table's, atomic | `machine/loops.rs` |
 | Library formula | its formula at completion (on a raise, with an absent result), atomic | `charge_call` (`machine/exec.rs`, `machine/ops.rs`) |
 | Copy-out, decode | the value's deep size, atomic | `machine/exec.rs` |
@@ -205,46 +207,14 @@ body trace and bill no formula. A helper is atomic for the bound and for
 slices; its work guard still caps it. The 569 formulas are seeded from their
 bodies, and charge numbers change (dev phase: images re-recorded).
 
-**Regions (stage 3).** A region is a maximal straight-line run of fixed events
-(statement, expression node, atom argument, construction, loop test) and the
-ops between them. It ends before:
-
-- a dynamic event: a formula, a copy-out, a decode;
-- a call, a nested action or a statement's action (the callee charges, or the
-  run parks);
-- a host observation: `HostRead`, `Clock`, `Random`, `Print`;
-- a handler entry: a `catch` or `finally` block, or a raise's unwinding;
-- a back edge (a loop's next iteration is a new region).
-
-An op inside a region that can raise or halt is an exit. Its executed prefix
-(how many of the region's events precede it) is static.
-
-- **Executed prefix.** The machine keeps the entry charge `c0` and commits
-  `c0 + prefix` at every exit (`RegionSummary::commit`). It never charges a
-  suffix ahead and gives it back, and never subtracts from a saturated total.
-- **Fast admission** (`RegionSummary::admit`): with checked arithmetic, if
-  `c0 + total <= bound` and `c0 + total < slice_end`, the region runs without
-  internal checks. Strictly below the slice threshold, no step boundary inside
-  the region can reach it, so slice returns land on the same step under every
-  layout. Otherwise the region replays its events in order, as the reference
-  charges them: a unit run stops at its first crossing unit and a formula
-  charges atomically.
-- **Verifier.** `RegionSummary::verify` checks a region's summary against its
-  events (count, every prefix, no dynamic event) before the region is
-  admitted to the fast path.
-- **The tape under regions.** With a charge tape attached, a fast region
-  records the events it executed from its `RegionEvent` list at each exit.
-  Recording never changes the admission.
-
 **The oracle.** `ReferenceCharger` charges one unit at a time with
-`K-CHG-002`'s saturating, strict rule. It is the oracle stage 3 keeps.
+`K-CHG-002`'s saturating, strict rule.
 
 - **Today's engine.** `KernelMachine::record_charges(ChargeTape)` records every
   charge the run makes, in order: each unit run as `Units`, every other charge
   as `Atomic`, and, when a run passes its bound inside a unit run, the units
   within the bound and then the unit that passes. It is an observation: one
-  branch on whether anything observes, at the anchors (`charge` and a
-  region's close, exit and replay), and it changes no result, charge, park or export. Under
+  branch on whether anything observes, at the anchors, and it changes no result, charge, park or export. Under
   kdec-api it becomes one of `MachineOptions`' observers.
 - **Law** (`lash-kernel-conformance`,
   `tests::charge::every_corpus_charge_bound_ends_where_the_per_unit_reference_charger_ends`):
@@ -256,22 +226,12 @@ An op inside a region that can raise or halt is an exit. Its executed prefix
   run. At FIG-6691: 296 cases, 29,660 bounded runs, 28,480 of them crossing.
   Under-counting a unit run's crossing unit (`cross_nodes`) makes 12,268 of
   them disagree.
-- **Law** (`lash-kernel-exec`,
-  `charge::tests::a_fast_region_commits_what_the_per_unit_reference_charges`):
-  a region admitted fast commits at every exit exactly what the reference has
-  charged there, never passes the bound or the slice threshold, and a region
-  the reference would stop inside replays. Entries run to `u64::MAX`.
+**Owner and types.** `lash-kernel-vm` (`observe/charge.rs`): `Weight`, `Ending`,
+`ReferenceCharger` and `Crossed`.
 
-**Owner and types.** `lash_kernel_exec::charge`: `Weight`, `Ending`,
-`ReferenceCharger`, `Crossed`, `RegionEvent`, `RegionSummary`, `Admission`,
-`RegionError`. The anchors stay in `lash-kernel-vm` (`machine/ops.rs`,
-`machine/stream.rs`) until stage 3.
-
-**Built by** hcharge (FIG-6694: library charge) and the stage-3 instruction-set
-lane (regions). **Deletes** body-trace charging (`Code.charged` as
-`!has_native`, `call_units`' zero for body-only functions), `charge_nodes` and
-`cross_nodes` (replaced by region commit and replay), and `Op::Charge`
-coalescing in `compile/lower.rs` (replaced by the region side table).
+**Built by** hcharge (FIG-6694: library charge). **Deletes** body-trace
+charging (`Code.charged` as `!has_native`, `call_units`' zero for body-only
+functions).
 
 ### C. Values, kinds and the three namespaces
 
@@ -378,10 +338,7 @@ and `heap::Value`'s `EntityId` operands (with 2.4(a)).
 - **Resident chunks own their storage by value** (ruled 2026-10-17, FIG-6708):
   a list's, tuple's, map's, set's or record's values are `Chunks`, and
   immutable payloads keep boxed exact-size storage, except a long text's
-  resident chunk: a `String`, whose spare capacity the register program's linear text
-  accumulator grows into (FIG-6795, `docs/design/kernel-regions.md` §3.5).
-  A boxed slice cannot grow, so an append would copy the whole object;
-  amortized O(1) append is required. A whole body (what the run built, or one joined once every chunk
+  resident chunk, which is a `String` (FIG-6795). A whole body (what the run built, or one joined once every chunk
   is resident) holds up to `Chunks::INLINE` (2) values inline, so a fresh
   `[n]` or pair allocates no storage and frees none at release, and is
   otherwise one `Vec<Value>` with no chunk list; only a large object opened
@@ -689,9 +646,7 @@ seal reads a staged leaf back and places its rows canonically.
   run holds is a root a sweep visits: a statement's end, before the next
   effect; a native call's answer once its value is pinned, naming the
   native; a large-buffer reservation (`text_buffer`, regex output) with the
-  bytes it asks for. A region enters only with a nursery of one chunk of
-  headroom and an island only with its admitted headroom, so no verdict
-  falls inside either.
+  bytes it asks for.
 - **Sweep, then limiter (FIG-6768).** A verdict past the bound first sweeps:
   the census refinement over what the machine holds (which warms changed
   cold objects first), cycle collection and arena release over tasks,
@@ -1060,23 +1015,6 @@ Three lanes, in order.
 - **Deletes:** the interpretation of each helper its segment covers (the body
   stays as reference and fallback).
 - **Gate:** lean, plus the helper differential and the durable image targets.
-
-### 3.4 The instruction set
-
-- **Seams:** B (regions), E (register windows), A (side tables).
-- **Do:** a compact common encoding with a wide extension, and a cold,
-  pc-indexed side table holding sites, roles, kill sets and charge events.
-  Opcodes for the hottest native-stating operators, with the depth check first.
-  Per-site monomorphic property caches holding a guard and a slot location,
-  discarded on restore. Charge regions with fast admission and the verifier.
-  Overlapping call windows. Rust `match` dispatch.
-- **Done when:** the charge oracle passes under random region layouts, along
-  with the lean gate and the §1 kbench rows.
-- **Deletes:** Kir block versions and numeric specialization, `charge_nodes`
-  and `cross_nodes`, `Op::Charge` coalescing, and `returns_borrowed` and
-  `record_read_marker`.
-- **Gate:** lean, plus the exec unit target, and the helper differential
-  (operation dispatch changes).
 
 ## 5. Open questions
 

@@ -49,9 +49,7 @@ fn body_bytes(values: u64) -> u64 {
 
 impl Arena {
     /// The bytes [`Arena::install`] adds to what the arena holds for
-    /// `new`: what a region admits before it installs what a statement
-    /// built, so that their capacity is counted before they exist
-    /// (`docs/design/kernel-regions.md` §3.5).
+    /// `new`, so that their capacity is counted before they exist.
     #[inline]
     pub fn install_bound(&self, new: &[(ArenaHandle, NewObject)]) -> u64 {
         new.iter()
