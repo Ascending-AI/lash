@@ -3,9 +3,9 @@
 ## Status
 
 Accepted. The release design requires a one-release rolling upgrade and
-rollback window. The pre-1.0 version freeze holds until the release cut;
-synthetic-next declares successor formats without changing the ordinary
-build's versions. The removed two-build harness and tagged-capture workflow
+rollback window. Before 1.0, `scripts/land` advances each format witness
+whose guarded shape changed (§7); synthetic-next declares successor formats
+without changing the ordinary build's versions. The removed two-build harness and tagged-capture workflow
 leave release proof gaps (§6); the design below is not a certification.
 
 ## Context
@@ -425,13 +425,10 @@ separate implementation work required before the release can claim it.
 
 ### 7. Release-cut guardrails
 
-Default versions stay frozen until the 1.0 cut. Pre-1.0 shape changes keep
-the current numbers. Compatibility descriptors and refusal machinery are
-part of the binary; numeric schema, protocol, cursor and VM constants retain
-their current default values
-(`crates/lash-sqlite-store/src/schema.rs`,
-`crates/lash-core/src/runtime/observation/process_replay.rs`).
-Synthetic-only changes do not advance those default versions.
+Before 1.0, `scripts/land` advances each format witness whose guarded shape
+changed (FIG-7517); nobody hand-edits a constant. Compatibility descriptors
+and refusal machinery are part of the binary. Synthetic-only changes do not
+advance a format witness.
 
 ### 8. Upgrade operations
 

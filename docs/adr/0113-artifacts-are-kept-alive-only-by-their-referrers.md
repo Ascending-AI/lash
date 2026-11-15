@@ -46,6 +46,13 @@ are `Incompatible(UnknownVocabulary)` under
 malformed ids are `StoredDataCorrupt`. A store never treats an undecodable
 edge as absent (`crates/lash-core-store/src/artifact_referrer.rs:176-279,621-633`).
 
+A read of an artifact's bytes, single or batched and package records
+included, reads the artifact alone: it neither fetches nor decodes its
+referrer edges, so an undecodable or unknown-kind edge does not refuse it.
+Every operation that acts on edges (local and relay ends, reclamation,
+carries) decodes the edges it acts on and refuses such an edge as above
+(FIG-7701).
+
 A frame id combines the session and the admitted frame node. Host registrations
 hold their definitions with an explicit `host_pin` under ADR 0137; a host
 record or copied definition id alone acquires no artifact edge.

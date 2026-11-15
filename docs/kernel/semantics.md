@@ -218,15 +218,16 @@ The statement rule is withdrawn: an action may be nested in an expression, and a
 ## Charges (`K-CHG`)
 
 The rules below apply when the host selects `Charge::Exact`, the default.
-`Charge::Off` removes the meter and its bound: preparation emits no charge
-regions, execution evaluates no completion charge formula, and charge readouts
-are `None`. Native guards and the other bounds still apply. The run saves its
-charge policy and every worker resumes that same choice (FIG-6732). Under
-Off a run still counts its pace: one unit for each statement, loop
-continuation test and action atom of guest code and closures, the units
-`K-CHG-002` gives them. A slice counts pace where Exact counts charge, so
-where a slice returns does not depend on the plan or on how library
-functions run (FIG-6775). Nothing reads pace out.
+`Charge::Off` removes the meter and its bound: execution evaluates no
+completion charge formula, and charge readouts are `None`. Native guards and
+the other bounds still apply. The run saves its charge policy and every worker
+resumes that same choice (FIG-6732). Under Off a slice counts the fixed charge
+of what runs: the units `K-CHG-002` gives statements, expression nodes,
+constructions, loop continuation tests and action atoms, as Exact charges them
+before any completion formula, copy-out, decode or other size-dependent fee.
+It evaluates none of those. A covered library body adds nothing (`K-CHG-007`),
+so where a slice returns does not depend on the plan or on how library
+functions run (FIG-6775). Nothing reads the count out.
 
 - **K-CHG-001.** A run is charged in charge units, deterministically: the charge of a run is a function of what it executed and of nothing else. It does not depend on the engine's layout, on caches, on whether a native implementation or a kernel body ran, or on parking.
 - **K-CHG-002.** The cost table of kernel version 1: each statement executed costs 1; each expression node evaluated costs 1; a tuple, list, map, set or record construction costs 1 more per member written; each test of a loop's continuation costs 1; an action costs 1 per atom; copying a value out or decoding one in (`K-EFF-002`, `K-EFF-005`) costs its deep size (`K-CHG-005`).
@@ -354,7 +355,7 @@ whole-document kernel-text example that compiles and runs.
 
 ## The machine (`K-MACH`)
 
-- **K-MACH-001.** The machine is a library. It does no I/O, starts no thread and keeps no global state; everything guest-derived lives in the instance the embedder owns. Its heap's pages are read and sealed only through a page source the embedder hands it, and a call to that source may block while the statement and any native call under way wait intact. A page the source cannot supply, or supplies corrupt, is the embedder's failure: never a value, a raise or a bound the guest sees, and the run continues from its last committed state.
+- **K-MACH-001.** The machine is a library. It does no I/O, starts no thread and keeps no global state; everything guest-derived lives in the instance the embedder owns. Its heap's pages are read and sealed only through a page source the embedder hands it, and a call to that source may block while the statement and any native call under way wait intact. A page the source cannot supply, or supplies corrupt, is the embedder's failure: never a value, a raise or a bound the guest sees, and the run continues from its last committed state. A call or spawn passes at most 65,535 arguments, and a function, closure or library body holds at most 65,535 parameters and locals, the machine's own temporaries included. Code past either limit is code the machine cannot compile: the count never wraps and the machine does not panic. A document whose `main` passes a limit is refused when the run starts; a function that passes one is refused to the embedder with a machine fault naming the limit when it is called, never a value, a raise or a bound the guest sees.
 - **K-MACH-002.** `run` executes ready tasks until no task is ready, the run ends, or the charge spent in this call reaches the slice, tested after each step of any frame: a statement, or the part of one that runs up to or on from an action nested in it. A native Decline and entry into its alternative body create no additional slice boundary. The alternative body's own statements stay within the caller's step; code reached through function arguments or closures remains ordinary stepped code, and nested action pauses retain `K-EVAL-008` boundaries. Unwind bookkeeping, dispatch of a pending return or raise after `finally`, and scheduler handoff create no additional step. Executed cleanup or policy code retains its ordinary steps and action boundaries; the selected task resumes its own continuation. It returns which. A slice may therefore return while a frame stands at a nested call or `spawn` (`K-EVAL-008`).
 - **K-MACH-003.** A park returns the effects and sleeps requested since the last park and explicit cancellation requests for owned effect waits. These requests and guest state must commit together before cleanup effects can be admitted. Ordinary join withdrawal and aggregate selection carry no call-cancel request. A committed call final wins over a later request, whether retained before declarations or committed together with a declaration-free outcome.
 - **K-MACH-004.** `deliver` takes one outcome for one wait and makes its task ready (`K-TASK-005`). An outcome for a withdrawn wait is dropped. An outcome for a wait never handed out, or delivered twice, is an error to the embedder and changes nothing.
