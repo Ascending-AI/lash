@@ -480,25 +480,29 @@
       "script_digest": "ffff3cf74981b3484e0b9d31a966ae6f7861e2788f83c196eecac9c6bb52c8ac",
       "backend": "sqlite-file",
       "turns": 20,
-      "sessions": 1
+      "sessions": 1,
+      "source_hash": "d0d8f83ab33ad0602b9c457f53a8535e7c48fdbad8d91c23131d0315586ba127"
     },
     "replay/chat-long-compacting": {
       "script_digest": "bc6a18e98200270f288968265fd67da5399573f0a903ac445a776abffd967c88",
       "backend": "sqlite-file",
       "turns": 200,
-      "sessions": 1
+      "sessions": 1,
+      "source_hash": "448740ed075631e80d636ede78e860adbe832207e3a1e6899099219491936850"
     },
     "replay/ts-codemode": {
       "script_digest": "49459a2be4af8e8e4e2a10ea9e793fc48ceb1b438dc8f37df75ed605f5b7bf32",
       "backend": "sqlite-file",
       "turns": 12,
-      "sessions": 1
+      "sessions": 1,
+      "source_hash": "7de617fba6401a5ae029473a2ba94e54aa2348a3082cbd5634cd68a8b8882c6b"
     },
     "replay/py-codemode": {
       "script_digest": "19791d32850b2b2e1b29a7a6a9255beea43ede0f2e907a3afa6d96401e81339b",
       "backend": "sqlite-file",
       "turns": 24,
-      "sessions": 1
+      "sessions": 1,
+      "source_hash": "3694d8d6c17257a695ab199b753c870729f860f476bafe3e1945643a6f342a6d"
     }
   },
   "rows": {

@@ -11,7 +11,9 @@ import sys
 import unittest
 from unittest import mock
 
-from perf_gate_baseline import calibrate_changed, references
+import shutil
+
+from perf_gate_baseline import calibrate_changed, check_sources, references, source_drift
 
 spec = importlib.util.spec_from_file_location("perf_gates", Path(__file__).with_name("perf-gates.py"))
 gate = importlib.util.module_from_spec(spec)
@@ -220,6 +222,41 @@ class InstructionBaselineLaws(unittest.TestCase):
             self.assertEqual(refreshed["rows"]["kernel/python/changed"], 1000)
             decision = json.loads((out / "decision.json").read_text())
             self.assertEqual([r[0] for r in decision["regressed_rows"]], ["kernel/python/same"])
+
+
+class ReplaySourceIdentityLaws(unittest.TestCase):
+    """FIG-7694: replay drift is decided by workload content, never by resolving a recorded commit.
+
+    The land refused when the baseline's provenance commit, never an ancestor of main,
+    was pruned from the object store. The copy below has no repository at all."""
+
+    def setUp(self):
+        repo = Path(__file__).resolve().parents[1]
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        for part in ("crates/lash-perf/src/compare", "crates/lash-perf/workloads/replay", "docs/perf/baselines"):
+            shutil.copytree(repo / part, self.root / part)
+        self.baseline_path = self.root / "docs/perf/baselines/instructions.json"
+        self.baseline = json.loads(self.baseline_path.read_text())
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_committed_baseline_checks_without_its_provenance_commit(self):
+        check_sources(self.root)
+
+    def test_one_changed_byte_in_a_workload_is_drift(self):
+        path = self.root / "crates/lash-perf/workloads/replay/chat-short.json"
+        source = path.read_bytes()
+        path.write_bytes(source.replace(b'"W1:', b'"W2:', 1))
+        self.assertNotEqual(path.read_bytes(), source)
+        self.assertEqual(source_drift(self.root, self.baseline), ["replay/chat-short"])
+
+    def test_replay_row_without_a_source_hash_is_refused(self):
+        del self.baseline["geometry"]["replay/ts-codemode"]["source_hash"]
+        self.baseline_path.write_text(json.dumps(self.baseline))
+        with self.assertRaisesRegex(ValueError, "replay/ts-codemode"):
+            check_sources(self.root)
 
 
 if __name__ == "__main__":
