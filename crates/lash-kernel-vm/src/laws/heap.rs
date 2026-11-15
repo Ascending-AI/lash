@@ -1040,7 +1040,7 @@ fn reference_tuple_keys_survive_first_seal_and_reopen() {
 fn a_rolled_back_registration_restores_the_reference_keys_it_changed() {
     let found = |arena: &mut Arena, map: Value, key: &Value| -> Vec<Option<i64>> {
         let handle = map.handle().expect("a map");
-        [short("first"), key.clone(), short("last")]
+        [short("first"), *key, short("last")]
             .iter()
             .map(
                 |query| match arena.table_get(handle, query).expect("a lookup") {
@@ -1064,7 +1064,7 @@ fn a_rolled_back_registration_restores_the_reference_keys_it_changed() {
             .create(NewObject::Map(vec![
                 (short("gone"), Value::Int(0)),
                 (short("first"), Value::Int(10)),
-                (key.clone(), Value::Int(73)),
+                (key, Value::Int(73)),
                 (short("last"), Value::Int(30)),
                 (Value::Int(0), referent),
             ]))
@@ -1093,7 +1093,7 @@ fn a_rolled_back_registration_restores_the_reference_keys_it_changed() {
         let pages = Pages::default();
         seal(
             &mut arena,
-            &[map, key.clone()],
+            &[map, key],
             &mut pages.directory(None),
             &mut HighWater(0),
         )

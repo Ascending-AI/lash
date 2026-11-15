@@ -413,14 +413,14 @@ impl<L: Leaf> Index<L> {
         if self.height() != shape.height(self.leaves()) {
             return Err("an index is not at the height its leaves give".into());
         }
-        if shape.full {
-            if let Self::Nodes { height, refs } = self {
-                let last = refs.len().saturating_sub(1);
-                if refs.iter().enumerate().any(|(at, part)| {
-                    (at < last && part.count != span(*height)) || part.count > span(*height)
-                }) {
-                    return Err("a full index's top is not full".into());
-                }
+        if shape.full
+            && let Self::Nodes { height, refs } = self
+        {
+            let last = refs.len().saturating_sub(1);
+            if refs.iter().enumerate().any(|(at, part)| {
+                (at < last && part.count != span(*height)) || part.count > span(*height)
+            }) {
+                return Err("a full index's top is not full".into());
             }
         }
         Ok(())

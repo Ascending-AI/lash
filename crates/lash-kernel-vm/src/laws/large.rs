@@ -947,7 +947,10 @@ fn edge_case() -> Result<(), String> {
     let store = Counting::default();
     let mut model: BTreeMap<ObjectId, u64> = BTreeMap::new();
     let mut edges = Index::empty(&EDGES);
-    let steps: [(&str, Vec<(u64, i64)>, u64, u8); 4] = [
+    // Each step: its name, the (id, count change) pairs, and the pages
+    // and index height it leaves.
+    type Step = (&'static str, Vec<(u64, i64)>, u64, u8);
+    let steps: [Step; 4] = [
         ("built", (0..73_728).map(|i| (2 * i, 1)).collect(), 96, 0),
         ("filled", (0..256).map(|i| (2 * i + 1, 1)).collect(), 96, 0),
         ("grown", vec![(513, 1)], 97, 1),
