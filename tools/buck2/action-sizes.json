@@ -1806,14 +1806,14 @@
     "samples": 945
   },
   "lash-internal-plugin-mcp/lash_plugin_mcp": {
-    "cpu_count": 1,
-    "cpu_samples": 1622,
-    "mean_cores": 1.18,
-    "memory_kb": 2097152,
-    "p95_cores": 1.27,
-    "p99_peak_bytes": 1087819776,
-    "peak_bytes": 1555021824,
-    "samples": 1622
+    "cpu_count": 2,
+    "cpu_samples": 59,
+    "mean_cores": 1.26,
+    "memory_kb": 2621440,
+    "p95_cores": 2.69,
+    "p99_peak_bytes": 1534513152,
+    "peak_bytes": 1534513152,
+    "samples": 59
   },
   "lash-internal-plugin-process-controls/lash_plugin_process_controls": {
     "cpu_count": 1,
@@ -2081,13 +2081,13 @@
   },
   "lash-internal-protocol-standard/lash_protocol_standard": {
     "cpu_count": 2,
-    "cpu_samples": 1817,
-    "mean_cores": 1.27,
-    "memory_kb": 1572864,
-    "p95_cores": 1.25,
-    "p99_peak_bytes": 512995328,
-    "peak_bytes": 1191092224,
-    "samples": 1817
+    "cpu_samples": 52,
+    "mean_cores": 1.32,
+    "memory_kb": 2359296,
+    "p95_cores": 1.49,
+    "p99_peak_bytes": 1294942208,
+    "peak_bytes": 1294942208,
+    "samples": 52
   },
   "lash-internal-protocol-standard/protocol_scenarios": {
     "cpu_count": 2,
@@ -2838,19 +2838,19 @@
     "samples": 541
   },
   "lash-kernel-vm/lash_kernel_vm": {
-    "cpu_count": 2,
-    "cpu_samples": 2330,
-    "mean_cores": 1.74,
-    "memory_kb": 2621440,
-    "oom_all_killed_request_kb": 0,
-    "oom_floor_kb": 2621440,
-    "oom_kills": 239,
-    "oom_max_request_kb": 524288,
-    "oom_peak_bytes": 1624231936,
-    "p95_cores": 2.87,
-    "p99_peak_bytes": 1178521600,
-    "peak_bytes": 1560846336,
-    "samples": 2330,
+    "cpu_count": 1,
+    "cpu_samples": 32,
+    "mean_cores": 1.06,
+    "memory_kb": 14417920,
+    "oom_all_killed_request_kb": 3145728,
+    "oom_floor_kb": 14417920,
+    "oom_kills": 37,
+    "oom_max_request_kb": 5242880,
+    "oom_peak_bytes": 10823962624,
+    "p95_cores": 1.11,
+    "p99_peak_bytes": 10705993728,
+    "peak_bytes": 10705993728,
+    "samples": 32,
     "worker_memory_kb": 52428800
   },
   "lash-kernel-vm/linked_dispatch": {
