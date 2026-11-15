@@ -2,6 +2,13 @@
 //! gets a directory row under an [`ObjectId`], and the directory keeps only
 //! what the roots reach.
 //!
+//! A heap the machine admits always seals. Every page a seal writes is
+//! bounded by construction: large tuples, lists and tables are chunked
+//! under index pages, long payloads and scalars are payload trees, and each
+//! reference to an immutable carries a bounded head. No size limit stands
+//! in for this, so `Malformed` from a seal means a malformed heap, never a
+//! large one.
+//!
 //! Seal writes the rows of the objects that changed since the last seal:
 //! the new ones the roots reach and every dirty object with an id. It
 //! descends only into those, so an unchanged object and a cold proxy cost

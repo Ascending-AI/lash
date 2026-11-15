@@ -8,6 +8,11 @@
 //! head the row holds for it, so its length, summaries and key answer
 //! without its row. One load therefore reads one directory path, whatever
 //! the record's referents hold.
+//!
+//! Every partial load of an immutable checks the pages it consumes, from
+//! the row to the leaf, against the head that names it before anything is
+//! installed; a page that does not match is [`HeapFault::Corrupt`], a store
+//! fault, never `Malformed`.
 
 use std::sync::Arc;
 

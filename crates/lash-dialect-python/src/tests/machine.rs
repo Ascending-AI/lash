@@ -554,6 +554,151 @@ fn dict_same_size_key_replacement_raises_within_charge_bound() {
     }
 }
 
+/// Contract §6, paged heap: a tuple past one page node, held across
+/// slices, seals and reopens cold at each, and every read of it gives the
+/// same result and the same charge as the uninterrupted run. The expected
+/// lines are Python's for these reads.
+#[test]
+fn a_large_tuple_held_across_slices_runs_alike_reopened() {
+    // 200,000 members, `t[i] == i % 1000`; repetition builds it in one
+    // native step.
+    let source = "\
+t = tuple(range(1000)) * 200
+print(len(t), t[123456], t[-1])
+print(t[199997:])
+print(999 in t, -1 in t)
+u = t + (7,)
+print(len(u), u[200000])
+a, b, *rest = t[:4]
+print(a, b, rest)
+v = tuple(range(1000)) * 200
+d = {t: 'big'}
+print(d[v], len(set([t, v, u])))
+print(sum(t))
+";
+    let lowered = lower(source).unwrap();
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
+    let observe = |slice| {
+        execution_observation_sliced(program.clone(), BOUNDS, slice, &mut |_| {}, &mut |_, _| {}).0
+    };
+    let straight = observe(None);
+    assert_eq!(
+        (ending(straight.end.clone()), straight.lines.clone()),
+        (
+            "ok".to_string(),
+            [
+                "200000 456 999",
+                "(997, 998, 999)",
+                "True False",
+                "200001 7",
+                "0 1 [2, 3]",
+                "big 2",
+                "99900000",
+            ]
+            .map(String::from)
+            .to_vec()
+        )
+    );
+    assert_eq!(observe(Some(100_000)), straight);
+}
+
+/// Contract §6, the seal rule: every value a Python program can build
+/// seals, whatever its size. Each form below is past one page node and
+/// is held across every slice, sealed and reopened cold at each; the run
+/// gives Python's lines and the uninterrupted run's charge.
+#[test]
+fn seal_rule_every_form_python_guest() {
+    let source = "\
+w = ['x' * 300 + str(i) for i in range(400)]
+t = tuple(range(1000)) * 41
+print(len(t), t[-1], sum(t))
+l = list(w)
+print(len(l), l[399][-3:])
+s = set(w)
+print(len(s), w[7] in s, 'q' in s)
+d = {w[i]: i for i in range(400)}
+print(len(d), d[w[200]])
+tw = tuple(w)
+print(len(tw), tw[100][-3:])
+z = 'y' * 70000 + 'z'
+print(len(z), z[70000])
+n = 7 ** 200000
+print(n % 1000, n > 7 ** 199999)
+print(len(t), len(l), len(s), len(d), len(tw), len(z), n % 7)
+";
+    let lowered = lower(source).unwrap();
+    let program = crate::tests::linked::program(
+        Arc::clone(lowered.document.shared()),
+        installed().prepared.clone(),
+    );
+    let bounds = Bounds {
+        charge_limit: 2_000_000_000,
+        ..BOUNDS
+    };
+    let observe = |slice| {
+        execution_observation_sliced(program.clone(), bounds, slice, &mut |_| {}, &mut |_, _| {}).0
+    };
+    let straight = observe(None);
+    assert_eq!(
+        (ending(straight.end.clone()), straight.lines.clone()),
+        (
+            "ok".to_string(),
+            [
+                "41000 999 20479500",
+                "400 399",
+                "400 True False",
+                "400 200",
+                "400 100",
+                "70001 z",
+                "1 True",
+                "41000 400 400 400 400 70001 0",
+            ]
+            .map(String::from)
+            .to_vec()
+        )
+    );
+    assert_eq!(observe(Some(2_000_000)), straight);
+}
+
+/// Contract §6: tuple identity is computed lazily and changes no guest
+/// charge. A tuple used as a dict key, and a small tuple held across
+/// every seal, charge exactly what they charged before the change
+/// (pinned from the parent commit's run of these programs).
+#[test]
+fn tuple_keys_and_sealed_tuples_charge_as_before() {
+    let as_key = "\
+k = tuple(range(1000)) * 3
+e = {k: 'big'}
+print(e[tuple(range(1000)) * 3], len(e), k in e)
+";
+    let across_seal = "\
+p = (1, 'two', (3, 4))
+total = 0
+for i in range(50):
+    total = total + p[0] + p[2][1] + len(p)
+print(p, total, p == (1, 'two', (3, 4)))
+";
+    let mut charged = Vec::new();
+    for (source, lines) in [
+        (as_key, ["big 1 True"]),
+        (across_seal, ["(1, 'two', (3, 4)) 400 True"]),
+    ] {
+        let lowered = lower(source).unwrap();
+        let program = crate::tests::linked::program(
+            Arc::clone(lowered.document.shared()),
+            installed().prepared.clone(),
+        );
+        let straight = execution_observation(program.clone(), BOUNDS, false);
+        assert_eq!(straight.lines, lines);
+        assert_eq!(execution_observation(program, BOUNDS, true), straight);
+        charged.push(straight.charged);
+    }
+    assert_eq!(charged, [2_032_190, 7_754]);
+}
+
 /// Runs `source` to its end as a cell of a session that holds `bindings`
 /// and can call the tools `effects`. At each park, `at_park` is given the
 /// lines printed since the park before, the park and the document's
@@ -1002,6 +1147,19 @@ fn execution_observation_with_stops(
     on_park: &mut dyn FnMut(u64),
     on_stop: &mut dyn FnMut(&Step, &mut KernelMachine),
 ) -> (ExecutionObservation, u64) {
+    execution_observation_sliced(program, bounds, rebuild.then_some(1), on_park, on_stop)
+}
+
+/// Runs `program` to its end, sealed and reopened after every `slice`
+/// units of work when there is one, else uninterrupted.
+fn execution_observation_sliced(
+    program: Program,
+    bounds: Bounds,
+    slice: Option<u64>,
+    on_park: &mut dyn FnMut(u64),
+    on_stop: &mut dyn FnMut(&Step, &mut KernelMachine),
+) -> (ExecutionObservation, u64) {
+    let rebuild = slice.is_some();
     let session = Session::default();
     let mut machine = KernelMachine::start(
         program.clone(),
@@ -1021,7 +1179,7 @@ fn execution_observation_with_stops(
     let mut requests = Vec::new();
     loop {
         let step = machine
-            .run(&mut host, if rebuild { 1 } else { u64::MAX })
+            .run(&mut host, slice.unwrap_or(u64::MAX))
             .unwrap_or_else(|error| panic!("the document runs with rebuild={rebuild}, bounds={bounds:?}, charged={:?}: {error:?}", machine.meters().charged));
         on_stop(&step, &mut machine);
         if let Step::Ended(mut end) = step {

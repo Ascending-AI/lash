@@ -223,7 +223,7 @@ pub(crate) fn end(source: &str) -> Ended {
 
 /// Runs a cell with kernel session data supplied by the law.
 pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -> Ended {
-    let (mut machine, text) = start_with_bindings(source, bindings);
+    let (mut machine, text, _) = start_with_bindings(source, bindings);
     let mut finished_with = None;
     loop {
         match machine.run(&mut Console::default(), u64::MAX) {
@@ -261,7 +261,8 @@ pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -
 /// Lowers `source` as a first cell and starts a machine on it. Gives the
 /// machine and the document's kernel text.
 fn start(source: &str) -> (KernelMachine, String) {
-    start_with_bindings(source, super::pages::Session::default())
+    let (machine, text, _) = start_with_bindings(source, super::pages::Session::default());
+    (machine, text)
 }
 
 /// FIG-7315: Number recurrences execute typed scalar regions, including
@@ -317,7 +318,12 @@ fn number_recurrences_execute_typed_scalar_regions_and_keep_bigint_exact() {
     );
 }
 
-fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMachine, String) {
+/// Lowers `source` as a cell of the session `values` and starts a machine
+/// on it. Gives the machine, the document's kernel text and its program.
+fn start_with_bindings(
+    source: &str,
+    values: super::pages::Session,
+) -> (KernelMachine, String, lash_kernel_vm::Program) {
     let library = super::library();
     let effects = effects();
     let bindings = values.names();
@@ -349,13 +355,120 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
         modes: Default::default(),
         host: Vec::new(),
     };
-    let mut machine = super::pages::with_source(program, BOUNDS, start, &values.source)
+    let mut machine = super::pages::with_source(program.clone(), BOUNDS, start, &values.source)
         .unwrap_or_else(|error| panic!("{error}"));
     machine.set_options(lash_kernel_vm::MachineOptions {
         function_origins,
         ..Default::default()
     });
-    (machine, text)
+    (machine, text, program)
+}
+
+/// Contract §6, paged heap: a host tuple past one page node, held across
+/// slices, seals and reopens cold at each, and comes back to the host the
+/// tuple it gave, at the same charge as the uninterrupted run. (A guest
+/// reads no member of a host tuple: the dialect's own tagged values are
+/// kernel tuples.)
+#[test]
+fn a_large_host_tuple_held_across_slices_runs_alike_reopened() {
+    let source = "const xs = await host.echo(0); \
+        let n = 0; for (let i = 0; i < 20000; i++) n += i; \
+        await host.echo(xs); console.log(n);";
+    let tuple = Datum::Tuple((0..200_000_i64).map(|i| Datum::Int(i.into())).collect());
+    let run = |slice: Option<u64>| {
+        let session = super::pages::Session::default();
+        let pages = session.source.clone();
+        let (mut machine, text, program) = start_with_bindings(source, session);
+        let mut console = Console::default();
+        let mut given = Vec::new();
+        loop {
+            match machine.run(&mut console, slice.unwrap_or(u64::MAX)) {
+                Ok(Step::Slice) => super::pages::reopen(&mut machine, &program, BOUNDS, &pages),
+                Ok(Step::Parked(park)) => {
+                    for request in park.requests {
+                        let Request::Effect(effect) = request;
+                        let answer = if given.is_empty() {
+                            tuple.clone()
+                        } else {
+                            Datum::Null
+                        };
+                        given.push(effect.args.first().cloned().unwrap_or(Datum::Null));
+                        machine
+                            .deliver(effect.wait, Outcome::Completed(answer))
+                            .unwrap_or_else(|error| panic!("{error}"));
+                    }
+                }
+                Ok(Step::Ended(End::Finished(_))) => {
+                    let charged = machine.meters().charged.expect("exact charge");
+                    return (given, console.lines, charged);
+                }
+                other => panic!("{other:?}\n{text}"),
+            }
+        }
+    };
+    let straight = run(None);
+    assert_eq!(
+        (&straight.0[1], &straight.1),
+        (&tuple, &vec!["199990000".to_string()]),
+        "the uninterrupted run"
+    );
+    assert_eq!(run(Some(20_000)), straight, "reopened at every slice");
+}
+
+/// Contract §6, the seal rule: every value a TypeScript program can build
+/// seals, whatever its size. Each form below is past one page node and is
+/// held across every slice, sealed and reopened cold at each; the run
+/// gives JavaScript's lines and the uninterrupted run's charge.
+#[test]
+fn seal_rule_every_form_typescript_guest() {
+    let source = "\
+        const w = []; for (let i = 0; i < 400; i++) w.push('x'.repeat(300) + String(i)); \
+        const a = []; for (let i = 0; i < 20000; i++) a.push(i % 1000); \
+        console.log(String(a.length), String(a[19999]), w[399].slice(-3)); \
+        const o = {}; for (let i = 0; i < 400; i++) o[w[i]] = i; \
+        console.log(String(Object.keys(o).length), String(o[w[200]])); \
+        const m = new Map(); for (let i = 0; i < 400; i++) m.set(w[i], i); \
+        console.log(String(m.size), String(m.get(w[399]))); \
+        const s = new Set(w); \
+        console.log(String(s.size), String(s.has(w[7])), String(s.has('q'))); \
+        const z = 'y'.repeat(70000) + 'z'; \
+        console.log(String(z.length), z[70000]); \
+        const n = 7n ** 200000n; \
+        console.log(String(n % 1000n)); \
+        console.log(String(a.length + w.length + m.size + s.size + z.length), String(o[w[3]]), String(n % 7n));";
+    let run = |slice: Option<u64>| {
+        let session = super::pages::Session::default();
+        let pages = session.source.clone();
+        let (mut machine, text, program) = start_with_bindings(source, session);
+        let mut console = Console::default();
+        loop {
+            match machine.run(&mut console, slice.unwrap_or(u64::MAX)) {
+                Ok(Step::Slice) => super::pages::reopen(&mut machine, &program, BOUNDS, &pages),
+                Ok(Step::Ended(End::Finished(_))) => {
+                    let charged = machine.meters().charged.expect("exact charge");
+                    return (console.lines, charged);
+                }
+                other => panic!("{other:?}\n{text}"),
+            }
+        }
+    };
+    let straight = run(None);
+    assert_eq!(
+        straight.0,
+        [
+            "20000 999 399",
+            "400 200",
+            "400 399",
+            "400 true false",
+            "70001 z",
+            "1",
+            "91201 3 0",
+        ]
+        .map(String::from)
+        .to_vec(),
+        "the uninterrupted run"
+    );
+    assert_eq!(run(Some(200_000)), straight, "reopened at every slice");
 }
 
 /// Lowers `source` as a first cell and runs it to its end. At each park the

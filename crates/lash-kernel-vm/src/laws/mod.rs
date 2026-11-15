@@ -28,6 +28,7 @@ mod preparation;
 mod resident;
 mod rewrite;
 mod scheduler;
+mod sealed;
 mod session;
 mod stream;
 mod tasks;

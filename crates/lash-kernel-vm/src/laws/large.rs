@@ -28,16 +28,16 @@ use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 
 /// Members of each large object.
-const N: i64 = 200_000;
+pub(super) const N: i64 = 200_000;
 
 /// A store that counts the pages read from and written to it, and the
 /// bytes written.
 #[derive(Clone, Default)]
-struct Counting {
-    pages: Source,
-    reads: Rc<Cell<u64>>,
-    writes: Rc<Cell<u64>>,
-    bytes: Rc<Cell<u64>>,
+pub(super) struct Counting {
+    pub(super) pages: Source,
+    pub(super) reads: Rc<Cell<u64>>,
+    pub(super) writes: Rc<Cell<u64>>,
+    pub(super) bytes: Rc<Cell<u64>>,
 }
 
 impl PageSource for Counting {
@@ -54,14 +54,14 @@ impl PageSource for Counting {
 
 impl Counting {
     /// The pages read and written while `work` runs.
-    fn during<T>(&self, work: impl FnOnce() -> T) -> (T, u64, u64) {
+    pub(super) fn during<T>(&self, work: impl FnOnce() -> T) -> (T, u64, u64) {
         let (reads, writes) = (self.reads.get(), self.writes.get());
         let out = work();
         (out, self.reads.get() - reads, self.writes.get() - writes)
     }
 }
 
-fn fresh(store: &Counting) -> SlotHeap {
+pub(super) fn fresh(store: &Counting) -> SlotHeap {
     SlotHeap::durable(
         u64::MAX,
         crate::heap::open::Durable {
@@ -71,7 +71,7 @@ fn fresh(store: &Counting) -> SlotHeap {
     )
 }
 
-fn make(heap: &mut SlotHeap, object: NewObject) -> Value {
+pub(super) fn make(heap: &mut SlotHeap, object: NewObject) -> Value {
     heap.admit(crate::heap::slots::schedule(&object))
         .expect("room");
     heap.create(object).expect("an object")
@@ -79,7 +79,7 @@ fn make(heap: &mut SlotHeap, object: NewObject) -> Value {
 
 /// `root`, sealed, reopened from its store with nothing loaded and no
 /// page decoded.
-fn reopened(store: &Counting, root: &HeapRoot) -> (SlotHeap, Value) {
+pub(super) fn reopened(store: &Counting, root: &HeapRoot) -> (SlotHeap, Value) {
     let (heap, roots) = SlotHeap::open(
         u64::MAX,
         root,
@@ -90,14 +90,25 @@ fn reopened(store: &Counting, root: &HeapRoot) -> (SlotHeap, Value) {
 }
 
 /// What `op` answers once every chunk it asks for is loaded.
-fn warm<T>(
+pub(super) fn warm<T>(
     heap: &mut SlotHeap,
     roots: &[Value],
-    mut op: impl FnMut(&mut SlotHeap) -> Result<T, NativeError>,
+    op: impl FnMut(&mut SlotHeap) -> Result<T, NativeError>,
 ) -> T {
     // A whole read loads every chunk once, then joins them: never more
     // loads than an object of `N` members has chunks, and one more.
-    for _ in 0..=(N as usize).div_ceil(32) {
+    warm_within(heap, roots, (N as usize).div_ceil(32), op)
+}
+
+/// What `op` answers once every chunk it asks for is loaded, in at most
+/// `loads` loads.
+pub(super) fn warm_within<T>(
+    heap: &mut SlotHeap,
+    roots: &[Value],
+    loads: usize,
+    mut op: impl FnMut(&mut SlotHeap) -> Result<T, NativeError>,
+) -> T {
+    for _ in 0..=loads {
         match op(heap) {
             Ok(out) => return out,
             Err(NativeError::Retry(Retry::Cold { object, chunk })) => heap
@@ -111,18 +122,18 @@ fn warm<T>(
     panic!("a read asked for more loads than its object has chunks");
 }
 
-fn item(heap: &mut SlotHeap, roots: &[Value], list: Value, at: i64) -> Option<Value> {
+pub(super) fn item(heap: &mut SlotHeap, roots: &[Value], list: Value, at: i64) -> Option<Value> {
     let handle = list.handle().expect("a list");
     warm(heap, roots, |heap| heap.arena().item(handle, at as u64))
 }
 
-fn get(heap: &mut SlotHeap, roots: &[Value], table: Value, key: Value) -> Option<Value> {
+pub(super) fn get(heap: &mut SlotHeap, roots: &[Value], table: Value, key: Value) -> Option<Value> {
     let handle = table.handle().expect("a table");
     warm(heap, roots, |heap| heap.arena().table_get(handle, &key))
 }
 
 /// The integer `value` holds.
-fn int(value: Option<Value>) -> Option<i64> {
+pub(super) fn int(value: Option<Value>) -> Option<i64> {
     value.map(|value| match value {
         Value::Int(int) => int,
         other => panic!("{other:?} is no integer"),
@@ -166,17 +177,87 @@ fn opened_root(store: &Counting, build: fn(&mut SlotHeap) -> Value) -> (SlotHeap
     (heap, object, root)
 }
 
-/// Contract §6: a point read of a cold large list loads one index page
-/// and one chunk, wherever the position is.
+/// A tuple of `0 .. N`.
+fn counted_tuple(heap: &mut SlotHeap) -> Value {
+    make(heap, NewObject::Tuple((0..N).map(Value::Int).collect()))
+}
+
+/// Contract §6: a point read of a cold large list or tuple loads one
+/// index page and one chunk, wherever the position is.
 #[test]
-fn a_point_read_of_a_cold_large_list_reads_one_index_page_and_one_chunk() {
-    let store = Counting::default();
-    let (mut heap, list) = opened_large(&store, counted);
-    for at in [0, 64, 5 * 64 + 63, N / 2 + 3, N - 1] {
-        heap.forget_pages();
-        let (value, reads, writes) = store.during(|| item(&mut heap, &[list], list, at));
-        assert_eq!(int(value), Some(at), "position {at}");
-        assert_eq!((reads, writes), (2, 0), "position {at}");
+fn a_point_read_of_a_cold_large_sequence_reads_one_index_page_and_one_chunk() {
+    for (kind, build) in [
+        ("list", counted as fn(&mut SlotHeap) -> Value),
+        ("tuple", counted_tuple),
+    ] {
+        let store = Counting::default();
+        let (mut heap, sequence) = opened_large(&store, build);
+        for at in [0, 64, 5 * 64 + 63, N / 2 + 3, N - 1] {
+            heap.forget_pages();
+            let (value, reads, writes) =
+                store.during(|| item(&mut heap, &[sequence], sequence, at));
+            assert_eq!(int(value), Some(at), "{kind} position {at}");
+            assert_eq!((reads, writes), (2, 0), "{kind} position {at}");
+        }
+    }
+}
+
+/// Contract §6, immutable heads: a tuple's key does not depend on how its
+/// payload is written or held. A large tuple, and a tuple written chunked
+/// for the width of its members, read cold from its head key the same as
+/// the equal tuple built anew, and each finds the other as a map's and a
+/// set's key.
+#[test]
+fn a_chunked_tuple_is_the_same_key_warm_and_cold() {
+    fn wide(heap: &mut SlotHeap) -> Value {
+        let members = (0..256)
+            .map(|i| make(heap, NewObject::long_text(format!("{i:0>250}"))))
+            .collect();
+        make(heap, NewObject::Tuple(members))
+    }
+    for (kind, build) in [
+        (
+            "a tuple of N integers",
+            counted_tuple as fn(&mut SlotHeap) -> Value,
+        ),
+        ("a tuple of 256 wide texts", wide),
+    ] {
+        let store = Counting::default();
+        let mut heap = fresh(&store);
+        let tuple = build(&mut heap);
+        let map = make(&mut heap, NewObject::Map(vec![(tuple, Value::Int(7))]));
+        let set = make(&mut heap, NewObject::Set(vec![tuple]));
+        let root = heap.seal(&[tuple, map, set]).expect("a seal");
+        let (mut heap, roots) = SlotHeap::open(
+            u64::MAX,
+            &root,
+            Directory::open(root.directory, Box::new(store.clone())),
+        )
+        .expect("an open");
+        let [cold, map, set] = roots[..] else {
+            panic!("three roots")
+        };
+        let again = build(&mut heap);
+        let held = [cold, map, set, again];
+        let key = |heap: &mut SlotHeap, value: Value| {
+            warm(heap, &held, |heap| {
+                heap.arena().semantics().normal_key(&value)
+            })
+        };
+        let (cold_key, again_key) = (key(&mut heap, cold), key(&mut heap, again));
+        assert!(cold_key.is_some(), "{kind}: a tuple of keys is a key");
+        assert_eq!(cold_key, again_key, "{kind}: the key warm and cold");
+        for probe in [cold, again] {
+            assert_eq!(
+                int(get(&mut heap, &held, map, probe)),
+                Some(7),
+                "{kind}: a map key"
+            );
+            assert!(
+                get(&mut heap, &held, set, probe).is_some(),
+                "{kind}: a set member"
+            );
+        }
     }
 }
 

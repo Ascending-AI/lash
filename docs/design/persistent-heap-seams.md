@@ -65,7 +65,7 @@ open that two lanes would otherwise settle differently.
 - **D-ENV.** Semantic pages use the existing generic envelope
   (`"LASH" | kind | child table | body`) with the blob-domain blake3 digest
   `LASH_BLOB_DOMAIN_VERSION`. The registry's reserved range 1000–1999 becomes
-  the semantic page range. Kinds 1000–1008 are declared in
+  the semantic page range. Kinds 1000–1012 are declared in
   `paged::source::PageKind`. All of them are direct-bodied and node-bounded
   except `CHECKPOINT_ROOT`, which is root-bounded (4096 bytes). hp-heap owns
   the canonical body encodings. hp-publish registers the range in the node
@@ -478,7 +478,7 @@ the store (`lash-core-store/src/checkpoint_graph/node.rs`), and its kind
 registration to hp-publish.
 
 The **page envelope** is the generic node envelope
-`"LASH" | kind (1000–1008) | child_count | sorted child digests | body_len | body`.
+`"LASH" | kind (1000–1012) | child_count | sorted child digests | body_len | body`.
 Its digest is the blob-domain blake3. The body is graph tokens in which a
 child reference is a slot of the child table. An envelope is at most 64 KiB,
 and a `CHECKPOINT_ROOT` at most 4096 bytes.

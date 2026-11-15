@@ -29,7 +29,7 @@ use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 use crate::{CellStart, CoreMachine, End, Finished, Machine, Step};
 
-fn start(session: Option<SessionRoot>, host: Vec<(Name, Datum)>) -> CellStart {
+pub(super) fn start(session: Option<SessionRoot>, host: Vec<(Name, Datum)>) -> CellStart {
     CellStart {
         session,
         host,
@@ -46,7 +46,7 @@ fn finished(end: End) -> Finished {
 
 /// Runs `text` as a session cell over `source` to its end, answering each
 /// park.
-fn cell(text: &str, start: CellStart, source: &Source) -> Finished {
+pub(super) fn cell(text: &str, start: CellStart, source: &Source) -> Finished {
     let mut machine = <CoreMachine as Machine>::start(
         core_program(text, None),
         ROOMY,
