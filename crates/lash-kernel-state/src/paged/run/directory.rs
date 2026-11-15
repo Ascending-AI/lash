@@ -39,6 +39,33 @@ impl Row {
     }
 }
 
+impl Row {
+    /// The row as its page holds it: a closure's code placed
+    /// ([`super::objects::Code::place`]).
+    fn place(mut self, access: &Access<'_>) -> Result<Self, HeapFault> {
+        if let Record::Closure { code, .. } = &mut self.record
+            && let super::objects::Code::Inline(inline) = code
+        {
+            *code = super::objects::Code::place(access, inline.clone())?;
+        }
+        Ok(self)
+    }
+
+    /// The row as its page holds it, read whole: a closure's code inline.
+    ///
+    /// # Errors
+    ///
+    /// As [`super::objects::Code::read`].
+    pub fn read(mut self, access: &Access<'_>) -> Result<Self, HeapFault> {
+        if let Record::Closure { code, .. } = &mut self.record
+            && let super::objects::Code::Paged { .. } = code
+        {
+            *code = super::objects::Code::Inline(code.read(access)?);
+        }
+        Ok(self)
+    }
+}
+
 impl TokenCodec for Row {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(3);
@@ -77,6 +104,10 @@ impl Cell for Row {
             }
             Record::Paged(paged) => out.push(paged.root.page),
             Record::Scalar(scalar) => out.push(scalar.root.page),
+            Record::Closure {
+                code: super::objects::Code::Paged { root, .. },
+                ..
+            } => out.push(root.page),
             _ => {}
         }
     }
@@ -88,6 +119,10 @@ impl Cell for Row {
             }
             Record::Paged(paged) => super::super::tree::grant(&mut paged.root.page, children)?,
             Record::Scalar(scalar) => super::super::tree::grant(&mut scalar.root.page, children)?,
+            Record::Closure {
+                code: super::objects::Code::Paged { root, .. },
+                ..
+            } => super::super::tree::grant(&mut root.page, children)?,
             _ => {}
         }
         Ok(())
@@ -178,7 +213,10 @@ impl Directory {
     ///
     /// The page port's faults.
     pub fn get(&self, id: ObjectId) -> Result<Option<Row>, HeapFault> {
-        self.tree.get(&id.key(), &self.access)
+        self.tree
+            .get(&id.key(), &self.access)?
+            .map(|row| row.read(&self.access))
+            .transpose()
     }
 
     /// Writes `row` as the row of `id`.
@@ -187,6 +225,7 @@ impl Directory {
     ///
     /// The page port's faults.
     pub fn put(&mut self, id: ObjectId, row: Row) -> Result<(), HeapFault> {
+        let row = row.place(&self.access)?;
         self.tree.write(id.key().to_vec(), row, &self.access)
     }
 

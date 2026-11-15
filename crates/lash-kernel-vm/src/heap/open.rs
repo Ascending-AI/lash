@@ -235,10 +235,13 @@ pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<
             }
         }
         Record::Closure { code, captures } => Body::Closure {
-            identity: Arc::new(ClosureIdentity {
-                capture_names: code.capture_names.clone(),
-                callable: code.callable,
-                site: code.linked_site(),
+            identity: Arc::new({
+                let code = code.inline().map_err(|fault| fault.to_string())?;
+                ClosureIdentity {
+                    capture_names: code.capture_names.clone(),
+                    callable: code.callable,
+                    site: code.linked_site(),
+                }
             }),
             captures: captures
                 .iter()

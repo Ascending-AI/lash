@@ -492,6 +492,7 @@ impl SessionEditor {
                     .ok_or_else(|| HeapFault::Malformed(format!("object {} has no row", id.0)))?;
                 match &mut row.record {
                     Record::Closure { code, .. } => {
+                        let code = code.inline_mut()?;
                         if let Some(sites) = &relinked.sites {
                             code.site = sites.successor(&code.site).cloned().ok_or_else(|| {
                                 HeapFault::Malformed(format!(

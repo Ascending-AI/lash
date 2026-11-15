@@ -356,6 +356,9 @@ fn seal_rule_every_form() {
     if let Err(error) = run_record_row() {
         failed.push(format!("run record row: {error}"));
     }
+    if let Err(error) = closure_row() {
+        failed.push(format!("closure row: {error}"));
+    }
     failed.extend(deep_rows());
     assert!(failed.is_empty(), "{failed:#?}");
 }
@@ -578,6 +581,43 @@ fn run_record_row() -> Result<(), String> {
             run.segments.height()
         ));
     }
+    if warm.run_to_end(&[]) != expected {
+        return Err("the run sealed warm ends otherwise".into());
+    }
+    Ok(())
+}
+
+/// The closure row: a closure capturing a binding whose name is past one
+/// payload leaf, which the run holds over a park. Its code (capture names,
+/// callable, site) is past the inline bound, so its row names it by a
+/// payload; the run seals, and reopened cold or sealed warm it ends as the
+/// run that never parked.
+fn closure_row() -> Result<(), String> {
+    use super::embedder::Embedder;
+    use crate::Step;
+
+    let name = "n".repeat(65_600);
+    let source = format!(
+        "main {{ let {name} = 7 let f = fn() {{ return {name} }} \
+         let pause = perform 0(\"pause\") as Any return apply f() }}"
+    );
+    let parked = || {
+        let mut embedder = Embedder::new(&source);
+        match embedder.run() {
+            Step::Parked(_) => Ok(embedder),
+            other => Err(format!("the run did not park: {other:?}")),
+        }
+    };
+    let expected = parked()?.run_to_end(&[]);
+    let mut cold = parked()?;
+    cold.try_reopen(true)
+        .map_err(|error| format!("the cold reopen failed: {error}"))?;
+    if cold.run_to_end(&[]) != expected {
+        return Err("the run reopened cold ends otherwise".into());
+    }
+    let mut warm = parked()?;
+    warm.try_checkpoint()
+        .map_err(|error| format!("the seal failed: {error:?}"))?;
     if warm.run_to_end(&[]) != expected {
         return Err("the run sealed warm ends otherwise".into());
     }

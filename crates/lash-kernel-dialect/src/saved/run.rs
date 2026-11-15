@@ -427,14 +427,17 @@ impl Walk<'_> {
         queue: &mut Vec<Found>,
     ) -> Result<Candidate, HeapFault> {
         let (callable, site, cells) = match self.record(found.object)? {
-            Record::Closure { code, captures } => (
-                code.callable,
-                Some(code.site),
-                code.capture_names
-                    .into_iter()
-                    .zip(captures)
-                    .collect::<Vec<_>>(),
-            ),
+            Record::Closure { code, captures } => {
+                let code = code.into_inline()?;
+                (
+                    code.callable,
+                    Some(code.site),
+                    code.capture_names
+                        .into_iter()
+                        .zip(captures)
+                        .collect::<Vec<_>>(),
+                )
+            }
             Record::Function(callable) => (callable, None, Vec::new()),
             _ => {
                 return Err(HeapFault::Malformed(format!(

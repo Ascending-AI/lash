@@ -386,6 +386,7 @@ impl Ids<'_> {
     fn row(&mut self, row: &mut Row) -> Result<(), RewriteFault> {
         match &mut row.record {
             Record::Closure { code, .. } => {
+                let code = code.inline_mut()?;
                 self.callable(&mut code.callable)?;
                 if let Self::Collect(live) = self {
                     live.links.insert(code.link);
@@ -495,7 +496,9 @@ fn rows(
         found.push(row.clone());
         true
     })?;
-    found.into_iter().try_for_each(each)
+    found
+        .into_iter()
+        .try_for_each(|row| each(row.read(access)?))
 }
 
 /// Calls `each` with every chunk page of the large object `chunked`.

@@ -253,6 +253,146 @@ impl TokenCodec for ClosureCode {
     }
 }
 
+/// A closure's code as its row holds it: inline within
+/// [`SCALAR_INLINE_MAX`] token bytes, else its canonical tokens as a
+/// payload tree, so no closure row outgrows its page whatever its capture
+/// names and site. The directory places the code as it writes the row and
+/// reads it back as it reads the row ([`super::directory::Directory`]), so
+/// a row read through it holds its code inline.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Code {
+    Inline(ClosureCode),
+    /// The code's token bytes, past [`SCALAR_INLINE_MAX`], and their tree.
+    Paged {
+        bytes: u64,
+        root: PayloadRoot,
+    },
+}
+
+impl Code {
+    /// `code` as its row holds it: inline within [`SCALAR_INLINE_MAX`]
+    /// token bytes, else written as a payload tree.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults.
+    pub fn place(access: &Access<'_>, code: ClosureCode) -> Result<Self, HeapFault> {
+        let tokens = encode_body(&code);
+        if tokens.len() as u64 <= SCALAR_INLINE_MAX {
+            return Ok(Self::Inline(code));
+        }
+        Ok(Self::Paged {
+            bytes: tokens.len() as u64,
+            root: crate::paged::payload::build(access, &tokens, false)?,
+        })
+    }
+
+    /// The code, read from its pages if it is paged, every edge checked
+    /// against the root id.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults; a tree that disagrees with its count or
+    /// identity, or whose tokens are no closure code.
+    pub fn read(&self, access: &Access<'_>) -> Result<ClosureCode, HeapFault> {
+        let (bytes, root) = match self {
+            Self::Inline(code) => return Ok(code.clone()),
+            Self::Paged { bytes, root } => (*bytes, *root),
+        };
+        let summary = TextSummary {
+            utf8_bytes: bytes,
+            chars: 0,
+            utf16_units: 0,
+        };
+        let tokens = super::super::payload::copy(access, root, summary, false)?;
+        decode_body(&tokens).map_err(|error| HeapFault::Corrupt {
+            page: root.page.id,
+            reason: format!("a closure's code payload holds no code: {error}"),
+        })
+    }
+
+    /// The code of a row read through its directory.
+    ///
+    /// # Errors
+    ///
+    /// [`HeapFault::Malformed`] for code still on its pages.
+    pub fn inline(&self) -> Result<&ClosureCode, HeapFault> {
+        match self {
+            Self::Inline(code) => Ok(code),
+            Self::Paged { .. } => Err(HeapFault::Malformed(
+                "a closure's code is read through its directory".into(),
+            )),
+        }
+    }
+
+    /// As [`Self::inline`], to change it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::inline`].
+    pub fn inline_mut(&mut self) -> Result<&mut ClosureCode, HeapFault> {
+        match self {
+            Self::Inline(code) => Ok(code),
+            Self::Paged { .. } => Err(HeapFault::Malformed(
+                "a closure's code is read through its directory".into(),
+            )),
+        }
+    }
+
+    /// The code inline, taken.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::inline`].
+    pub fn into_inline(self) -> Result<ClosureCode, HeapFault> {
+        match self {
+            Self::Inline(code) => Ok(code),
+            Self::Paged { .. } => Err(HeapFault::Malformed(
+                "a closure's code is read through its directory".into(),
+            )),
+        }
+    }
+}
+
+impl TokenCodec for Code {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Inline(code) => {
+                out.sum(0, 1);
+                code.encode(out);
+            }
+            Self::Paged { bytes, root } => {
+                out.sum(1, 2);
+                out.unsigned(*bytes);
+                root.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let (tag, fields) = input.sum()?;
+        match tag {
+            0 => {
+                TokenReader::expect_fields(fields, 1)?;
+                Ok(Self::Inline(ClosureCode::decode(input)?))
+            }
+            1 => {
+                TokenReader::expect_fields(fields, 2)?;
+                let bytes = input.unsigned()?;
+                if bytes <= SCALAR_INLINE_MAX {
+                    return Err(TokenError::Invalid(
+                        "a closure's code within one payload leaf is paged".into(),
+                    ));
+                }
+                Ok(Self::Paged {
+                    bytes,
+                    root: PayloadRoot::decode(input)?,
+                })
+            }
+            _ => Err(TokenError::UnsupportedVariant { variant: tag }),
+        }
+    }
+}
+
 /// An object's body in page form.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Record {
@@ -263,7 +403,7 @@ pub enum Record {
     Map(Vec<(RunValue, RunValue)>),
     Record(Vec<(RunValue, RunValue)>),
     Closure {
-        code: ClosureCode,
+        code: Code,
         /// The cells of its captured variables, in capture order.
         captures: Vec<ObjectId>,
     },
@@ -633,7 +773,7 @@ impl TokenCodec for Record {
             5 => {
                 expect(2)?;
                 Self::Closure {
-                    code: ClosureCode::decode(input)?,
+                    code: Code::decode(input)?,
                     captures: Vec::decode(input)?,
                 }
             }

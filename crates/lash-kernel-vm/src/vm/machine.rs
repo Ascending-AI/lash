@@ -202,10 +202,13 @@ fn foreign_closures(
             }
             At::Saved(id) => match row(id)? {
                 Record::Closure { code, captures } => (
-                    lash_kernel_doc::arena::ClosureIdentity {
-                        capture_names: code.capture_names.clone(),
-                        callable: code.callable,
-                        site: code.linked_site(),
+                    {
+                        let code = code.inline().map_err(|fault| linked(fault.to_string()))?;
+                        lash_kernel_doc::arena::ClosureIdentity {
+                            capture_names: code.capture_names.clone(),
+                            callable: code.callable,
+                            site: code.linked_site(),
+                        }
                     },
                     captures
                         .iter()

@@ -35,7 +35,7 @@ use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{
-    ClosureCode, Heads, ObjectKind, Paged, Record, RunValue, ScalarPayload,
+    ClosureCode, Code, Heads, ObjectKind, Paged, Record, RunValue, ScalarPayload,
 };
 use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_value::FunctionId;
@@ -105,7 +105,7 @@ pub(crate) fn seal(
             let record = record(arena, handle, directory.access())?;
             match &record {
                 Record::Closure { code: closure, .. } => {
-                    code.insert(closure.callable.function);
+                    code.insert(closure.inline().map_err(SealError::Heap)?.callable.function);
                 }
                 Record::Function(callable) => {
                     code.insert(callable.function);
@@ -386,12 +386,12 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
         Body::Closure {
             identity, captures, ..
         } => Record::Closure {
-            code: ClosureCode {
+            code: Code::Inline(ClosureCode {
                 capture_names: identity.capture_names.clone(),
                 callable: identity.callable,
                 link: identity.site.link,
                 site: identity.site.site.clone(),
-            },
+            }),
             captures: captures
                 .iter()
                 .map(|cell| id_of(arena, *cell))

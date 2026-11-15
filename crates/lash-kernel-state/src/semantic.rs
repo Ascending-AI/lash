@@ -264,7 +264,7 @@ mod run {
                     self.values(flat.into_iter())?;
                 }
                 Record::Closure { code, captures } => {
-                    self.put(&code);
+                    self.put(code.inline()?);
                     self.put(&(captures.len() as u64));
                     for cell in captures {
                         self.object(cell)?;
