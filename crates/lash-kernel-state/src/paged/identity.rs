@@ -32,7 +32,7 @@
 use super::run::objects::{Head, Heads, ObjectKind, RunValue};
 use lash_kernel_doc::heap::{HeapFault, NormalKey, TextSummary};
 use lash_kernel_doc::heap_values::{key_digest, sha256, text_summary};
-use lash_kernel_value::tokens::TokenWriter;
+use lash_kernel_value::tokens::{TokenError, TokenReader, TokenWriter};
 use std::ops::Range;
 
 /// The longest content, in UTF-8 bytes or octets, keyed flat.
@@ -485,6 +485,42 @@ pub fn tuple_root(len: u64, leaves: &[[u8; 32]]) -> [u8; 32] {
         }
     }
     nodes[0]
+}
+
+/// The root of the tuple of `len` members whose flat normal form is
+/// `flat`: its member tokens grouped into leaves as [`TupleBuilder`]
+/// groups them, so a head that holds a tuple's flat form derives its root
+/// from it and never carries a second one.
+///
+/// # Errors
+///
+/// `flat` is no flat tuple form of `len` members.
+pub fn flat_root(len: u64, flat: &[u8]) -> Result<[u8; 32], TokenError> {
+    let mut input = TokenReader::new(flat);
+    let (tag, fields) = input.sum()?;
+    if (tag, fields) != (9, 1) || input.seq()? != len {
+        return Err(TokenError::Invalid(format!(
+            "a tuple's flat form is no tuple of {len} members"
+        )));
+    }
+    let mut leaves = Vec::with_capacity(usize::try_from(tuple_leaves(len)).unwrap_or(0));
+    let mut start = input.position();
+    let mut at = 0_u64;
+    while at < len {
+        let count = (len - at).min(TUPLE_LEAF as u64);
+        for _ in 0..count {
+            input.skip_tree()?;
+        }
+        let end = input.position();
+        leaves.push(tuple_leaf(at, count, &flat[start..end]));
+        start = end;
+        at += count;
+    }
+    input.finish()?;
+    if leaves.is_empty() {
+        leaves.push(tuple_leaf(0, 0, &[]));
+    }
+    Ok(tuple_root(len, &leaves))
 }
 
 /// The leaves of a tuple of `len` members: one per [`TUPLE_LEAF`], and

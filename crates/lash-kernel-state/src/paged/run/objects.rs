@@ -1030,17 +1030,29 @@ impl TokenCodec for Head {
                 normal,
                 root,
             } => {
-                out.sum(0, 4);
+                // One identity: the root, from which a tree-keyed tuple's
+                // normal form is its digest, or the flat form, from which
+                // decoding derives the root. Neither is carried twice.
+                out.sum(0, 3);
                 out.unsigned(*len);
                 encode_shape(shape, out);
                 match normal {
-                    None => out.sum(0, 0),
-                    Some(normal) => {
+                    None => {
+                        out.sum(0, 1);
+                        out.bytes(root);
+                    }
+                    Some(NormalKey::Digest(_)) => {
+                        // The root is the identity; the digest is never
+                        // written, so no head can name one tuple's key
+                        // and another's root.
                         out.sum(1, 1);
-                        encode_normal(normal, out);
+                        out.bytes(root);
+                    }
+                    Some(NormalKey::Inline(flat)) => {
+                        out.sum(2, 1);
+                        out.bytes(flat);
                     }
                 }
-                out.bytes(root);
             }
             Self::Error { shape, content } => {
                 out.sum(1, 2);
@@ -1091,26 +1103,34 @@ impl TokenCodec for Head {
         let expect = |count| TokenReader::expect_fields(fields, count);
         Ok(match tag {
             0 => {
-                expect(4)?;
+                expect(3)?;
                 let len = input.unsigned()?;
                 let shape = decode_shape(input)?;
-                let (present, fields) = input.sum()?;
-                let normal = match present {
-                    0 => {
-                        TokenReader::expect_fields(fields, 0)?;
-                        None
-                    }
+                let (form, fields) = input.sum()?;
+                TokenReader::expect_fields(fields, 1)?;
+                let (normal, root) = match form {
+                    0 => (None, digest(input)?),
                     1 => {
-                        TokenReader::expect_fields(fields, 1)?;
-                        Some(decode_normal(input)?)
+                        let root = digest(input)?;
+                        (Some(NormalKey::Digest(root)), root)
                     }
-                    _ => return Err(TokenError::UnsupportedVariant { variant: present }),
+                    2 => {
+                        let flat = input.bytes()?;
+                        if flat.len() > NormalKey::INLINE_MAX {
+                            return Err(TokenError::Invalid(
+                                "an inline normal form exceeds the inline bound".into(),
+                            ));
+                        }
+                        let root = crate::paged::identity::flat_root(len, flat)?;
+                        (Some(NormalKey::Inline(flat.to_vec())), root)
+                    }
+                    _ => return Err(TokenError::UnsupportedVariant { variant: form }),
                 };
                 Self::Tuple {
                     len,
                     shape,
                     normal,
-                    root: digest(input)?,
+                    root,
                 }
             }
             1 => {
