@@ -211,6 +211,8 @@ fn foreign_closures(
                         }
                     },
                     captures
+                        .inline()
+                        .map_err(|fault| linked(fault.to_string()))?
                         .iter()
                         .map(|cell| saved(*cell))
                         .collect::<Result<Vec<_>, _>>()?,

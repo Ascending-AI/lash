@@ -266,7 +266,7 @@ mod run {
                 Record::Closure { code, captures } => {
                     self.put(code.inline()?);
                     self.put(&(captures.len() as u64));
-                    for cell in captures {
+                    for cell in captures.into_inline()? {
                         self.object(cell)?;
                     }
                 }

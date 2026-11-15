@@ -78,6 +78,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         cover(
 ///             "impl TokenCodec for ObjectKind", "impl TokenCodec for RunValue", "impl TokenCodec for Record",
 ///             "impl TokenCodec for Head", "impl TokenCodec for Heads", "impl TokenCodec for Paged",
+///             "impl TokenCodec for Code", "impl TokenCodec for Captures",
 ///         ),
 ///     ),
 ///     file(

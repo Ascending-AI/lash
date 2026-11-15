@@ -393,6 +393,143 @@ impl TokenCodec for Code {
     }
 }
 
+/// A closure's captures as its row holds it: inline up to [`LARGE`]
+/// cells, as they always were, else a chunked list of its cells
+/// ([`super::chunked::write_list`]), whose edge pages name them, so no
+/// closure row outgrows its page however many variables it captures and
+/// a mark still reads every edge without reading a chunk. The directory
+/// places the captures as it writes the row and reads them back as it
+/// reads the row ([`super::directory::Directory`]), so a row read through
+/// it holds its captures inline.
+///
+/// [`LARGE`]: super::chunked::LARGE
+#[derive(Clone, Debug, PartialEq)]
+pub enum Captures {
+    Inline(Vec<ObjectId>),
+    /// More than [`LARGE`](super::chunked::LARGE) cells: a list of them.
+    Paged(Box<Chunked>),
+}
+
+impl Captures {
+    /// `cells` as a row holds them: inline up to
+    /// [`LARGE`](super::chunked::LARGE), else written as a chunked list.
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults.
+    pub fn place(access: &Access<'_>, cells: Vec<ObjectId>) -> Result<Self, HeapFault> {
+        if cells.len() <= super::chunked::LARGE {
+            return Ok(Self::Inline(cells));
+        }
+        let values: Vec<RunValue> = cells
+            .into_iter()
+            .map(|cell| RunValue::Object(ObjectKind::Cell, cell))
+            .collect();
+        Ok(Self::Paged(Box::new(super::chunked::write_list(
+            access, &values,
+        )?)))
+    }
+
+    /// The cells, read from their chunks if they are paged.
+    ///
+    /// # Errors
+    ///
+    /// As [`super::chunked::read_list`]; [`HeapFault::Corrupt`] for a
+    /// member that is no cell.
+    pub fn read(&self, access: &Access<'_>) -> Result<Vec<ObjectId>, HeapFault> {
+        let chunked = match self {
+            Self::Inline(cells) => return Ok(cells.clone()),
+            Self::Paged(chunked) => chunked,
+        };
+        super::chunked::read_list(access, chunked)?
+            .into_iter()
+            .map(|value| match value {
+                RunValue::Object(ObjectKind::Cell, cell) => Ok(cell),
+                _ => {
+                    let reason = "a closure's captures name what is no cell".to_string();
+                    Err(match chunked.index.pages().first() {
+                        Some(page) => HeapFault::Corrupt {
+                            page: page.id,
+                            reason,
+                        },
+                        None => HeapFault::Malformed(reason),
+                    })
+                }
+            })
+            .collect()
+    }
+
+    /// How many cells the closure captures, whatever form they take.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Inline(cells) => cells.len(),
+            Self::Paged(chunked) => usize::try_from(chunked.len).unwrap_or(usize::MAX),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The cells of a row read through its directory, taken.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::inline`].
+    pub fn into_inline(self) -> Result<Vec<ObjectId>, HeapFault> {
+        match self {
+            Self::Inline(cells) => Ok(cells),
+            Self::Paged(_) => Err(HeapFault::Malformed(
+                "a closure's captures are read through its directory".into(),
+            )),
+        }
+    }
+
+    /// The cells of a row read through its directory.
+    ///
+    /// # Errors
+    ///
+    /// [`HeapFault::Malformed`] for captures still on their pages.
+    pub fn inline(&self) -> Result<&[ObjectId], HeapFault> {
+        match self {
+            Self::Inline(cells) => Ok(cells),
+            Self::Paged(_) => Err(HeapFault::Malformed(
+                "a closure's captures are read through its directory".into(),
+            )),
+        }
+    }
+}
+
+impl TokenCodec for Captures {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            // The form every closure row held before captures paged.
+            Self::Inline(cells) => cells.encode(out),
+            Self::Paged(chunked) => {
+                out.sum(0, 1);
+                chunked.encode(out);
+            }
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        if input.peek_tag()? != lash_kernel_value::tokens::Tag::Sum {
+            return Ok(Self::Inline(Vec::decode(input)?));
+        }
+        let (tag, fields) = input.sum()?;
+        if tag != 0 {
+            return Err(TokenError::UnsupportedVariant { variant: tag });
+        }
+        TokenReader::expect_fields(fields, 1)?;
+        let chunked = Chunked::decode(input)?;
+        if chunked.kind != ObjectKind::List || chunked.len <= super::chunked::LARGE as u64 {
+            return Err(TokenError::Invalid(
+                "a closure's paged captures are a list of more than LARGE cells".into(),
+            ));
+        }
+        Ok(Self::Paged(Box::new(chunked)))
+    }
+}
+
 /// An object's body in page form.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Record {
@@ -405,7 +542,7 @@ pub enum Record {
     Closure {
         code: Code,
         /// The cells of its captured variables, in capture order.
-        captures: Vec<ObjectId>,
+        captures: Captures,
     },
     /// A variable a closure shares (`K-CLO-001`).
     Cell(RunValue),
@@ -471,7 +608,12 @@ impl Record {
             return Vec::new();
         }
         let mut edges: Vec<ObjectId> = self.values().into_iter().filter_map(RunValue::id).collect();
-        if let Self::Closure { captures, .. } = self {
+        if let Self::Closure {
+            captures: Captures::Inline(captures),
+            ..
+        } = self
+        {
+            // Paged captures' edges are in their edge pages.
             edges.extend(captures.iter().copied());
         }
         edges.sort_unstable();
@@ -774,7 +916,7 @@ impl TokenCodec for Record {
                 expect(2)?;
                 Self::Closure {
                     code: Code::decode(input)?,
-                    captures: Vec::decode(input)?,
+                    captures: Captures::decode(input)?,
                 }
             }
             6 => {

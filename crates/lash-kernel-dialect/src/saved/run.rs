@@ -434,7 +434,7 @@ impl Walk<'_> {
                     Some(code.site),
                     code.capture_names
                         .into_iter()
-                        .zip(captures)
+                        .zip(captures.into_inline()?)
                         .collect::<Vec<_>>(),
                 )
             }

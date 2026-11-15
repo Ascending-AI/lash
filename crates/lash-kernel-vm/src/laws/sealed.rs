@@ -359,6 +359,11 @@ fn seal_rule_every_form() {
     if let Err(error) = closure_row() {
         failed.push(format!("closure row: {error}"));
     }
+    for captures in CAPTURES {
+        if let Err(error) = closure_captures(captures) {
+            failed.push(format!("closure of {captures} captures: {error}"));
+        }
+    }
     failed.extend(deep_rows());
     assert!(failed.is_empty(), "{failed:#?}");
 }
@@ -605,6 +610,58 @@ fn closure_row() -> Result<(), String> {
         let mut embedder = Embedder::new(&source);
         match embedder.run() {
             Step::Parked(_) => Ok(embedder),
+            other => Err(format!("the run did not park: {other:?}")),
+        }
+    };
+    let expected = parked()?.run_to_end(&[]);
+    let mut cold = parked()?;
+    cold.try_reopen(true)
+        .map_err(|error| format!("the cold reopen failed: {error}"))?;
+    if cold.run_to_end(&[]) != expected {
+        return Err("the run reopened cold ends otherwise".into());
+    }
+    let mut warm = parked()?;
+    warm.try_checkpoint()
+        .map_err(|error| format!("the seal failed: {error:?}"))?;
+    if warm.run_to_end(&[]) != expected {
+        return Err("the run sealed warm ends otherwise".into());
+    }
+    Ok(())
+}
+
+/// Capture counts of the closure captures row, each one past a boundary
+/// of its form: the last inline count ([`LARGE`]) and the first paged one;
+/// one edge page full ([`EDGE_REFS`]) and two; one chunk index page full
+/// (96 chunks of 64) and two; the 20,000 the seal once refused; and the
+/// most this program captures: `main`'s 65,535 locals (the core's limit)
+/// less `f` and `pause`, in the 1,024 chunks the most one function
+/// captures (`captures of one function`, u16::MAX) takes too.
+///
+/// [`LARGE`]: lash_kernel_state::paged::run::chunked::LARGE
+/// [`EDGE_REFS`]: lash_kernel_state::paged::run::chunked::EDGE_REFS
+const CAPTURES: [usize; 8] = [256, 257, 1024, 1025, 6144, 6145, 20_000, 65_533];
+
+/// The closure captures row: a closure capturing `captures` bindings,
+/// held over a park, which returns them as a list in capture order. The
+/// run seals, and reopened cold or sealed warm it ends as the run that
+/// never parked.
+fn closure_captures(captures: usize) -> Result<(), String> {
+    use super::embedder::Embedder;
+    use crate::Step;
+
+    let mut source = String::from("main { ");
+    for i in 0..captures {
+        source.push_str(&format!("let c{i} = {i} "));
+    }
+    source.push_str("let f = fn() { return [");
+    for i in 0..captures {
+        source.push_str(&format!("c{i}, "));
+    }
+    source.push_str("] } let pause = perform 0(\"pause\") as Any return apply f() }");
+    let parked = || {
+        let mut embedder = Embedder::new(&source);
+        match embedder.try_run() {
+            Ok(Step::Parked(_)) => Ok(embedder),
             other => Err(format!("the run did not park: {other:?}")),
         }
     };

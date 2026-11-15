@@ -35,7 +35,7 @@ use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{
-    ClosureCode, Code, Heads, ObjectKind, Paged, Record, RunValue, ScalarPayload,
+    Captures, ClosureCode, Code, Heads, ObjectKind, Paged, Record, RunValue, ScalarPayload,
 };
 use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_value::FunctionId;
@@ -392,10 +392,12 @@ fn record(arena: &Arena, handle: ArenaHandle, access: &Access<'_>) -> Result<Rec
                 link: identity.site.link,
                 site: identity.site.site.clone(),
             }),
-            captures: captures
-                .iter()
-                .map(|cell| id_of(arena, *cell))
-                .collect::<Result<_, _>>()?,
+            captures: Captures::Inline(
+                captures
+                    .iter()
+                    .map(|cell| id_of(arena, *cell))
+                    .collect::<Result<_, _>>()?,
+            ),
         },
         Body::Cell(held) => Record::Cell(value(held)?),
         Body::Error(ErrorBody {

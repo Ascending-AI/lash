@@ -377,6 +377,67 @@ pub fn each_members(
     Ok(())
 }
 
+/// `values`, which name no immutable, written as a chunked list: its
+/// chunk pages, the index pages above them and its edge pages sealed. A
+/// closure's captures past [`LARGE`] are written this way
+/// ([`super::objects::Captures`]).
+///
+/// # Errors
+///
+/// The page port's faults.
+pub fn write_list(access: &Access<'_>, values: &[RunValue]) -> Result<Chunked, HeapFault> {
+    let mut delta: BTreeMap<ObjectId, i64> = BTreeMap::new();
+    let mut chunks = Vec::with_capacity(values.len().div_ceil(CHUNK));
+    for run in values.chunks(CHUNK) {
+        for id in run.iter().filter_map(RunValue::id) {
+            *delta.entry(id).or_insert(0) += 1;
+        }
+        let page = ChunkPage {
+            members: Members::List(run.to_vec()),
+            heads: Heads(Vec::new()),
+        };
+        chunks.push(ChunkRef {
+            first: None,
+            len: run.len() as u32,
+            page: access.seal(PageKind::SEQUENCE_LEAF, encode_body(&page), Vec::new())?,
+            leaf: None,
+        });
+    }
+    let len = values.len() as u64;
+    let chunked = Chunked {
+        kind: ObjectKind::List,
+        len,
+        next: len,
+        index: Index::build(access, &Chunked::shape_of(ObjectKind::List, len), chunks)?,
+        edges: rewrite_edges(access, &Index::empty(&EDGES), &delta)?,
+    };
+    chunked.check().map_err(HeapFault::Malformed)?;
+    Ok(chunked)
+}
+
+/// Every value of the chunked list `chunked`, in order: one read of each
+/// index page and each chunk.
+///
+/// # Errors
+///
+/// As [`each_members`]; [`HeapFault::Corrupt`] for a list whose chunks
+/// hold a table's entries or another count than its row names.
+pub fn read_list(access: &Access<'_>, chunked: &Chunked) -> Result<Vec<RunValue>, HeapFault> {
+    let mut values = Vec::with_capacity(usize::try_from(chunked.len).unwrap_or(0));
+    let mut table = false;
+    each_members(access, chunked, &mut |members| match members {
+        Members::List(held) => values.extend(held.iter().cloned()),
+        Members::Table(_) => table = true,
+    })?;
+    if table || values.len() as u64 != chunked.len {
+        let page = chunked.index.pages().first().copied().ok_or_else(|| {
+            HeapFault::Malformed("a chunked list's row names no index page".into())
+        })?;
+        return Err(corrupt(page, "a chunked list's chunks are not its row's"));
+    }
+    Ok(values)
+}
+
 /// The edge index `edges` with `delta` applied to the counts: only the
 /// edge pages an id of `delta` falls in, and the edge index pages on their
 /// paths, are read and written again.

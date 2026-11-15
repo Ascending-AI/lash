@@ -136,6 +136,8 @@ pub(crate) fn referents<'a>(
     if let Record::Closure { captures, .. } = record {
         referents.extend(
             captures
+                .inline()
+                .map_err(|fault| fault.to_string())?
                 .iter()
                 .map(|cell| (*cell, Opening::Proxy(ProxyKind::Cell))),
         );
@@ -244,6 +246,8 @@ pub(crate) fn body(arena: &mut Arena, record: &Record, heads: &Heads) -> Result<
                 }
             }),
             captures: captures
+                .inline()
+                .map_err(|fault| fault.to_string())?
                 .iter()
                 .map(|cell| arena.proxy(entity(*cell), ProxyKind::Cell))
                 .collect(),

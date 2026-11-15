@@ -14,7 +14,7 @@ use lash_kernel_value::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter
 use super::super::tree::{Access, Cell, SealWork, Tree};
 use super::super::{PageSource, SealBudget};
 use super::ids::ObjectId;
-use super::objects::{Heads, Record};
+use super::objects::{Captures, Code, Heads, Record};
 
 /// One written object: its record, the heads of the immutables it names
 /// and the ids it references.
@@ -40,27 +40,41 @@ impl Row {
 }
 
 impl Row {
-    /// The row as its page holds it: a closure's code placed
-    /// ([`super::objects::Code::place`]).
+    /// The row as its page holds it: a closure's code and captures placed
+    /// ([`Code::place`], [`Captures::place`]), its edges then the row's
+    /// own, its paged captures' in their edge pages.
     fn place(mut self, access: &Access<'_>) -> Result<Self, HeapFault> {
-        if let Record::Closure { code, .. } = &mut self.record
-            && let super::objects::Code::Inline(inline) = code
+        let Record::Closure { code, captures } = &mut self.record else {
+            return Ok(self);
+        };
+        if let Code::Inline(inline) = code {
+            *code = Code::place(access, inline.clone())?;
+        }
+        if let Captures::Inline(cells) = captures
+            && cells.len() > super::chunked::LARGE
         {
-            *code = super::objects::Code::place(access, inline.clone())?;
+            *captures = Captures::place(access, std::mem::take(cells))?;
+            self.edges = self.record.edges();
         }
         Ok(self)
     }
 
-    /// The row as its page holds it, read whole: a closure's code inline.
+    /// The row as its page holds it, read whole: a closure's code and
+    /// captures inline, its edges every cell's.
     ///
     /// # Errors
     ///
-    /// As [`super::objects::Code::read`].
+    /// As [`Code::read`] and [`Captures::read`].
     pub fn read(mut self, access: &Access<'_>) -> Result<Self, HeapFault> {
-        if let Record::Closure { code, .. } = &mut self.record
-            && let super::objects::Code::Paged { .. } = code
-        {
-            *code = super::objects::Code::Inline(code.read(access)?);
+        let Record::Closure { code, captures } = &mut self.record else {
+            return Ok(self);
+        };
+        if let Code::Paged { .. } = code {
+            *code = Code::Inline(code.read(access)?);
+        }
+        if let Captures::Paged(_) = captures {
+            *captures = Captures::Inline(captures.read(access)?);
+            self.edges = self.record.edges();
         }
         Ok(self)
     }
@@ -104,10 +118,15 @@ impl Cell for Row {
             }
             Record::Paged(paged) => out.push(paged.root.page),
             Record::Scalar(scalar) => out.push(scalar.root.page),
-            Record::Closure {
-                code: super::objects::Code::Paged { root, .. },
-                ..
-            } => out.push(root.page),
+            Record::Closure { code, captures } => {
+                if let Code::Paged { root, .. } = code {
+                    out.push(root.page);
+                }
+                if let Captures::Paged(chunked) = captures {
+                    out.extend(chunked.index.pages());
+                    out.extend(chunked.edges.pages());
+                }
+            }
             _ => {}
         }
     }
@@ -119,10 +138,15 @@ impl Cell for Row {
             }
             Record::Paged(paged) => super::super::tree::grant(&mut paged.root.page, children)?,
             Record::Scalar(scalar) => super::super::tree::grant(&mut scalar.root.page, children)?,
-            Record::Closure {
-                code: super::objects::Code::Paged { root, .. },
-                ..
-            } => super::super::tree::grant(&mut root.page, children)?,
+            Record::Closure { code, captures } => {
+                if let Code::Paged { root, .. } = code {
+                    super::super::tree::grant(&mut root.page, children)?;
+                }
+                if let Captures::Paged(chunked) = captures {
+                    chunked.index.grant(children)?;
+                    chunked.edges.grant(children)?;
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -238,8 +262,14 @@ impl Directory {
         self.tree.remove(&id.key(), &self.access)
     }
 
+    /// The row of `id` as its page holds it: a closure's code and captures
+    /// not read.
+    fn held(&self, id: ObjectId) -> Result<Option<Row>, HeapFault> {
+        self.tree.get(&id.key(), &self.access)
+    }
+
     /// Every id `roots` reach through the rows' edges, the roots included
-    /// when the directory holds them. Reads rows only.
+    /// when the directory holds them. Reads rows and edge pages only.
     ///
     /// # Errors
     ///
@@ -255,13 +285,13 @@ impl Directory {
             if reached.contains(&id) {
                 continue;
             }
-            let Some(row) = self.get(id)? else {
+            let Some(row) = self.held(id)? else {
                 continue;
             };
             reached.insert(id);
             for edge in self.edges(&row)? {
                 if !reached.contains(&edge) {
-                    if self.get(edge)?.is_none() {
+                    if self.held(edge)?.is_none() {
                         return Err(HeapFault::Malformed(format!(
                             "object {} references object {}, which the directory does not hold",
                             id.0, edge.0
@@ -274,8 +304,8 @@ impl Directory {
         Ok(reached)
     }
 
-    /// The ids `row` references: its edges, or a large object's edge
-    /// pages read. Reads no chunk.
+    /// The ids `row` references, ascending once each: its edges, and a
+    /// large object's or paged captures' edge pages read. Reads no chunk.
     ///
     /// # Errors
     ///
@@ -283,6 +313,16 @@ impl Directory {
     pub fn edges(&self, row: &Row) -> Result<Vec<ObjectId>, HeapFault> {
         match &row.record {
             Record::Chunked(chunked) => super::chunked::edge_ids(&self.access, &chunked.edges),
+            Record::Closure {
+                captures: Captures::Paged(chunked),
+                ..
+            } => {
+                let mut edges = row.edges.clone();
+                edges.extend(super::chunked::edge_ids(&self.access, &chunked.edges)?);
+                edges.sort_unstable();
+                edges.dedup();
+                Ok(edges)
+            }
             _ => Ok(row.edges.clone()),
         }
     }
