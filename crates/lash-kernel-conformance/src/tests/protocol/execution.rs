@@ -255,13 +255,16 @@ fn sites(rule: &str, case: &Case) {
                 // the try's own site; every held site is a statement.
                 for slot in &inner.slots {
                     assert!(
-                        matches!(document.node(&in_f(&slot.site)), Some(Node::Stmt(_))),
+                        matches!(
+                            document.node(&in_f(&run.sites[slot.site as usize])),
+                            Some(Node::Stmt(_))
+                        ),
                         "{slot:?}"
                     );
                 }
                 assert!(inner.slots.iter().any(|slot| slot.role == SlotRole::Held
                     && matches!(
-                        document.node(&in_f(&slot.site)),
+                        document.node(&in_f(&run.sites[slot.site as usize])),
                         Some(Node::Stmt(Stmt::Try(_)))
                     )));
             }
@@ -302,7 +305,7 @@ fn sites(rule: &str, case: &Case) {
                     .slots
                     .iter()
                     .filter(|slot| matches!(slot.role, SlotRole::Loop(_)))
-                    .map(|slot| main(&slot.site))
+                    .map(|slot| main(&run.sites[slot.site as usize]))
                     .collect();
                 assert!(!loops.is_empty());
                 assert!(loops.iter().all(|site| *site == main(&[0])));

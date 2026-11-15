@@ -14,7 +14,7 @@ mod catches;
 mod code;
 pub(crate) mod session;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use lash_kernel_value::names::FunctionId;
@@ -22,7 +22,7 @@ use lash_kernel_value::names::FunctionId;
 use lash_kernel_doc::{Datum, JoinMode, Value};
 use lash_kernel_state::paged::run::continuation::{
     self, JoinKind, PointPhase, RunBill, RunFrame, RunHandler, RunJoin, RunJoiner, RunOccurrence,
-    RunRecord, RunRequest, RunResume, RunSlot, RunTask, RunTaskState, RunUnit, RunWait,
+    RunRecord, RunRequest, RunResume, RunSlot, RunTask, RunTaskState, RunUnit, RunWait, Sites,
     SlotRole as SavedRole, UnitKind as SavedKind, WaitPhase,
 };
 use lash_kernel_value::content_ids::LinkId;
@@ -80,6 +80,7 @@ pub(crate) fn seal(
     let program = Arc::clone(&vm.program);
     let occurrences = occurrence_sites(&program);
     let mut values = Values::default();
+    let mut sites = Sites::default();
     let globals = vm.globals.iter().map(|value| values.put(*value)).collect();
     let unbound = vm
         .unbound
@@ -115,6 +116,7 @@ pub(crate) fn seal(
             task,
             cx,
             &mut values,
+            &mut sites,
         )?);
     }
     let waits = tasks
@@ -173,6 +175,7 @@ pub(crate) fn seal(
         installed,
         live,
         tasks: saved,
+        sites: sites.into_table(),
         ready,
         waits,
         withdrawn,
@@ -230,6 +233,7 @@ fn save_task(
     task: &Task,
     cx: &Context,
     values: &mut Values,
+    sites: &mut Sites,
 ) -> Result<RunTask, SealError> {
     let mut frames = Vec::with_capacity(cx.frames.len());
     for (at, frame) in cx.frames.iter().enumerate() {
@@ -242,7 +246,9 @@ fn save_task(
         } else {
             &TOP
         };
-        frames.push(save_frame(program, arena, cx, frame, end, phases, values)?);
+        frames.push(save_frame(
+            program, arena, cx, frame, end, phases, values, sites,
+        )?);
     }
     let handlers = cx
         .handlers
@@ -323,6 +329,7 @@ fn point<'a>(unit: &'a Unit, frame: &Frame, size: usize, phases: &[Phase]) -> Op
     })
 }
 
+#[expect(clippy::too_many_arguments, reason = "one saved frame, in its parts")]
 fn save_frame(
     program: &Program,
     arena: &Arena,
@@ -331,6 +338,7 @@ fn save_frame(
     end: usize,
     phases: &[Phase],
     values: &mut Values,
+    sites: &mut Sites,
 ) -> Result<RunFrame, SealError> {
     let unit = program.unit(frame.unit);
     let base = frame.base as usize;
@@ -360,7 +368,9 @@ fn save_frame(
             value = saved_cursor(arena, cx.stack[base + walked], value)?;
         }
         slots.push(RunSlot {
-            site: local.site.to_vec(),
+            site: sites
+                .put(&local.site)
+                .ok_or_else(|| fault("a site past u32 places"))?,
             role: save_role(&local.role),
             copy: local.copy,
             value: values.put(value),
@@ -664,12 +674,29 @@ pub(crate) fn open(
             Err(format!("task {at} is past the task table"))
         }
     };
+    let mut distinct = HashSet::with_capacity(record.sites.len());
+    if !record
+        .sites
+        .iter()
+        .all(|site| distinct.insert(site.as_slice()))
+    {
+        return Err("the run's site table names a site twice".into());
+    }
     let mut tasks = Vec::with_capacity(count);
     for (number, saved) in record.tasks.iter().enumerate() {
         let mut cx = Context::default();
         for (depth, frame) in saved.frames.iter().enumerate() {
             let root = number == 0 && depth == 0;
-            open_frame(vm, &program, &units, &mut cx, frame, root, &value)?;
+            open_frame(
+                vm,
+                &program,
+                &units,
+                &mut cx,
+                frame,
+                root,
+                &value,
+                &record.sites,
+            )?;
         }
         for handler in &saved.handlers {
             cx.handlers.push(open_handler(&program, &cx, handler)?);
@@ -852,6 +879,7 @@ pub(super) fn saved_key(unit: &RunUnit) -> UnitKey<'_> {
     (unit.link, unit.kind.clone(), &unit.site, unit.covered)
 }
 
+#[expect(clippy::too_many_arguments, reason = "one opened frame, in its parts")]
 fn open_frame(
     vm: &mut Vm<SlotHeap>,
     program: &Program,
@@ -860,6 +888,7 @@ fn open_frame(
     saved: &RunFrame,
     root: bool,
     value: &dyn Fn(u32) -> Result<Value, String>,
+    sites: &[Vec<u32>],
 ) -> Result<(), String> {
     let (id, link) = units
         .get(&saved.unit, root)
@@ -897,9 +926,12 @@ fn open_frame(
         .resize(base + usize::from(unit.locals), Value::Absent);
     let mut filled = vec![false; usize::from(unit.locals)];
     for slot in &saved.slots {
+        let site = sites
+            .get(slot.site as usize)
+            .ok_or_else(|| format!("site {} is past the site table", slot.site))?;
         let local = unit
             .sites
-            .local(&slot.site, &open_role(&slot.role)?, slot.copy)
+            .local(site, &open_role(&slot.role)?, slot.copy)
             .ok_or_else(|| format!("unit {} declares no slot {:?}", unit.name, slot.role))?;
         let at = usize::from(local.slot);
         if std::mem::replace(&mut filled[at], true) {

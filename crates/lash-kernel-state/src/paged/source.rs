@@ -136,6 +136,10 @@ impl PageKind {
     /// of its bindings and saved functions
     /// ([`run::session`](super::run::session)).
     pub const RUN_SESSION: Self = Self(1011);
+    /// One page of a bytecode-core run's segment index: up to 96 segments,
+    /// or index pages one level down, in order
+    /// ([`run::continuation`](super::run::continuation)).
+    pub const RUN_SEGMENT_INDEX: Self = Self(1012);
     /// The first number past the semantic kinds a format may add.
     pub const END: u32 = 2000;
 }

@@ -1121,9 +1121,18 @@ fn a_slot_two_saved_roles_share_or_its_body_does_not_key_is_refused() {
     let mut embedder = waiting();
     refused(
         &mut embedder,
-        |record| main_top(record).slots[0].site = vec![9, 9],
+        |record| {
+            let at = undeclared(record);
+            main_top(record).slots[0].site = at;
+        },
         "declares no slot",
     );
+}
+
+/// The place in `record`'s site table of a site no unit declares.
+fn undeclared(record: &mut RunRecord) -> u32 {
+    record.sites.push(vec![9, 9]);
+    (record.sites.len() - 1) as u32
 }
 
 /// CONT-GRAMMAR: a saved wait on a task that a value, not its request,
@@ -1153,12 +1162,13 @@ fn a_loop_moved_off_its_site_is_refused() {
     refused(
         &mut embedder,
         |record| {
+            let at = undeclared(record);
             for slot in &mut main_top(record).slots {
                 if matches!(
                     slot.role,
                     lash_kernel_state::paged::run::continuation::SlotRole::Loop(_)
                 ) {
-                    slot.site = vec![9, 9];
+                    slot.site = at;
                 }
             }
         },

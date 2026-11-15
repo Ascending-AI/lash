@@ -116,6 +116,13 @@ pub enum RewriteFault {
     Heap(#[from] HeapFault),
 }
 
+/// `path`'s place in the run's site table being rebuilt.
+fn place(sites: &mut continuation::Sites, path: &[u32]) -> Result<u32, RewriteFault> {
+    sites
+        .put(path)
+        .ok_or_else(|| HeapFault::Malformed("a site past u32 places".into()).into())
+}
+
 /// The code a sealed run names: the links its frames run, every link and
 /// function id its active code names, and the code it holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -407,6 +414,13 @@ impl Ids<'_> {
         {
             self.site(origin, "spawn origin")?;
         }
+        let table = std::mem::take(&mut record.sites);
+        let mut sites = continuation::Sites::default();
+        let held = |at: u32| {
+            table.get(at as usize).cloned().ok_or_else(|| {
+                HeapFault::Malformed(format!("site {at} is past the run's site table"))
+            })
+        };
         for task in &mut record.tasks {
             self.task(&mut task.identity)?;
             for frame in &mut task.frames {
@@ -419,7 +433,7 @@ impl Ids<'_> {
                     // A slot is named by the path of its declaring site in
                     // the frame's unit; it moves with the unit's sites.
                     for slot in &mut frame.slots {
-                        let old = Site::new(unit.clone(), std::mem::take(&mut slot.site));
+                        let old = Site::new(unit.clone(), held(slot.site)?);
                         let mut site = old.clone();
                         self.site(&mut site, "variable declaration")?;
                         if site.unit != frame.site.unit {
@@ -428,7 +442,11 @@ impl Ids<'_> {
                                 held: "variable declaration",
                             }));
                         }
-                        slot.site = site.path;
+                        slot.site = place(&mut sites, &site.path)?;
+                    }
+                } else {
+                    for slot in &mut frame.slots {
+                        slot.site = place(&mut sites, &held(slot.site)?)?;
                     }
                 }
             }
@@ -443,6 +461,7 @@ impl Ids<'_> {
                 )?;
             }
         }
+        record.sites = sites.into_table();
         for request in record
             .waits
             .iter_mut()
