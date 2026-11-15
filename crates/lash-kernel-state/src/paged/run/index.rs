@@ -78,52 +78,60 @@ pub struct Part<K> {
 
 impl<K: Key> TokenCodec for Part<K> {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3 + K::FIELDS);
+        out.seq(3 + K::FIELDS + u64::from(self.id.is_some()));
         self.first.write(out);
         out.unsigned(self.count);
         self.page.encode(out);
         encode_digest(&self.id, out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3 + K::FIELDS)?;
+        let present = digest_arity(input.seq()?, 3 + K::FIELDS)?;
         Ok(Self {
             first: K::read(input)?,
             count: input.unsigned()?,
             page: PageRef::decode(input)?,
-            id: decode_digest(input)?,
+            id: decode_digest(input, present)?,
         })
     }
 }
 
-/// Writes an optional content id.
+/// Writes an optional content id as a reference's last field: nothing when
+/// it has none. Its presence is the reference's arity, one field more than
+/// it has without one.
 pub fn encode_digest(digest: &Option<[u8; 32]>, out: &mut TokenWriter) {
-    match digest {
-        None => out.sum(0, 0),
-        Some(digest) => {
-            out.sum(1, 1);
-            out.bytes(digest);
-        }
+    if let Some(digest) = digest {
+        out.bytes(digest);
     }
 }
 
-/// Reads an optional content id.
+/// Whether a reference of `fields` fields besides its content id, whose
+/// header gives `found` fields, has one.
 ///
 /// # Errors
 ///
-/// Tokens that are not one.
-pub fn decode_digest(input: &mut TokenReader<'_>) -> Result<Option<[u8; 32]>, TokenError> {
-    let (tag, fields) = input.sum()?;
-    match tag {
-        0 => {
-            TokenReader::expect_fields(fields, 0)?;
-            Ok(None)
+/// Any other field count.
+pub fn digest_arity(found: u64, fields: u64) -> Result<bool, TokenError> {
+    match found.checked_sub(fields) {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => Err(lash_kernel_value::tokens::CanonicalFault::FieldCount {
+            expected: fields,
+            found,
         }
-        1 => {
-            TokenReader::expect_fields(fields, 1)?;
-            Ok(Some(digest(input)?))
-        }
-        _ => Err(TokenError::UnsupportedVariant { variant: tag }),
+        .into()),
     }
+}
+
+/// Reads an optional content id, `present` as [`digest_arity`] gave it.
+///
+/// # Errors
+///
+/// Bytes that are not 32 long.
+pub fn decode_digest(
+    input: &mut TokenReader<'_>,
+    present: bool,
+) -> Result<Option<[u8; 32]>, TokenError> {
+    present.then(|| digest(input)).transpose()
 }
 
 /// Reads a content id.

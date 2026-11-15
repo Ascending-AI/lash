@@ -58,7 +58,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/run/index.rs",
-///         NODE_REFS, FILL, Key, Part, encode_digest, decode_digest, digest, Shape, span, Index,
+///         NODE_REFS, FILL, Key, Part, encode_digest, digest_arity, decode_digest, digest, Shape, span, Index,
 ///     ),
 ///     file(
 ///         path = "crates/lash-kernel-state/src/paged/run/index.rs",

@@ -132,14 +132,14 @@ pub struct ChunkRef {
 
 impl TokenCodec for ChunkRef {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
+        out.seq(3 + u64::from(self.leaf.is_some()));
         encode_placement(&self.first, out);
         out.unsigned(u64::from(self.len));
         self.page.encode(out);
         index::encode_digest(&self.leaf, out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
+        let present = index::digest_arity(input.seq()?, 3)?;
         let first = decode_placement(input)?;
         let len = u32::try_from(input.unsigned()?)
             .map_err(|_| TokenError::Invalid("a chunk's length is past a u32".into()))?;
@@ -147,7 +147,7 @@ impl TokenCodec for ChunkRef {
             first,
             len,
             page: PageRef::decode(input)?,
-            leaf: index::decode_digest(input)?,
+            leaf: index::decode_digest(input, present)?,
         })
     }
 }
