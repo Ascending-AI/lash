@@ -32,6 +32,9 @@ pub struct Work {
     pub arena_marks: u64,
     /// Mutable objects given a durable id (seam C).
     pub identified: u64,
+    /// Tuple heads computed from a tuple's members: each hashes the
+    /// whole tuple.
+    pub tuple_heads: u64,
 }
 
 thread_local! {

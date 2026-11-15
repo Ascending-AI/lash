@@ -629,6 +629,8 @@ pub(crate) fn content_head(
                     .values()
                     .ok_or(NativeError::Malformed("a detached body holds a cold chunk"))?,
             };
+            #[cfg(any(test, feature = "perf-witness"))]
+            crate::perf_witness::record(|work| work.tuple_heads += 1);
             let mut content = identity::TupleBuilder::new(sequence.len);
             for value in members {
                 content.push(&member(objects, facts, value)?);

@@ -945,6 +945,62 @@ fn lookup(arena: &mut Arena, map: Value, list: Value) -> Option<Value> {
         .expect("a lookup")
 }
 
+/// Contract §6, immutable heads: a tuple's head is computed once and
+/// kept with the tuple, a tuple holding a ref to a mutable object
+/// included. Used as a map key 64 times before any seal, such a tuple is
+/// hashed once; the seal gives its referent an id, which the head names
+/// from then on, so the tuple is hashed once more and still finds its
+/// entry, and 64 more uses hash it no more.
+#[test]
+fn a_reference_tuple_key_is_hashed_once_until_its_referent_has_an_id() {
+    use lash_kernel_state::kernel_internals::perf_witness::{disable_work, enable_work, take_work};
+
+    let mut arena = Arena::new();
+    enable_work();
+    let (map, list) = keyed(&mut arena);
+    let key = arena
+        .tuple(
+            vec![
+                Value::ObjectRef(list.handle().expect("a list")),
+                Value::Int(2),
+            ],
+            64,
+        )
+        .expect("a tuple");
+    let handle = map.handle().expect("a map");
+    let _ = take_work();
+    for _ in 0..64 {
+        assert_eq!(
+            arena
+                .table_get(handle, &key)
+                .expect("a lookup")
+                .and_then(|found| found.handle()),
+            list.handle()
+        );
+    }
+    let before = take_work().expect("counting").tuple_heads;
+    let pages = Pages::default();
+    let mut directory = pages.directory(None);
+    seal(&mut arena, &[map, key], &mut directory, &mut HighWater(0)).expect("a seal");
+    let _ = take_work();
+    for _ in 0..64 {
+        assert_eq!(
+            arena
+                .table_get(handle, &key)
+                .expect("a lookup")
+                .and_then(|found| found.handle()),
+            list.handle()
+        );
+    }
+    let after = take_work().expect("counting").tuple_heads;
+    disable_work();
+    assert_eq!(
+        (before, after),
+        (1, 0),
+        "tuple heads computed before and after the seal"
+    );
+}
+
 /// Astra §1: a key holding a ref means its referent, whether the referent
 /// has a durable id yet or not: the same map answers the same query
 /// before the first seal, after it, and reopened from its pages.

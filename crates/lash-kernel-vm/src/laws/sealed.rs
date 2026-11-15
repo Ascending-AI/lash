@@ -10,7 +10,7 @@
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::{NewObject, Semantics};
 
-use super::large::{Counting, fresh, make, reopened, warm_within};
+use super::large::{Counting, fresh, make, reopened, warm, warm_within};
 use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 
@@ -211,6 +211,92 @@ const FORMS: &[(&str, Build)] = &[
         |heap| host_handle(heap, "i".repeat(WIDE)),
     ),
 ];
+
+/// Contract §2, admission before materialization: a cold immutable's
+/// load admits what it will hold, its decoded value and the staging its
+/// payload is copied through, before it reads its payload. A big integer
+/// and a long host handle, each a payload tree, and a long text, reopened
+/// under a bound with room for 1 KiB more than the heap holds: the load
+/// that would hold the value refuses as `Memory` at that bound, as the
+/// text's does, and the heap holds what it held. What the refused load
+/// staged is bounded by the pages it read, at most its row's and one
+/// payload node page (the staging constant: the text reads the leaf it
+/// then refuses), never the payload.
+#[test]
+fn a_cold_payload_is_admitted_before_its_pages_are_read() {
+    use lash_kernel_state::paged::run::directory::Directory;
+    use lash_kernel_state::paged::run::ids::ObjectId;
+
+    use crate::heap::LoadError;
+
+    let cases: [(&str, Build); 3] = [
+        ("a big integer", |heap| {
+            make(heap, NewObject::BigInt(big(DIGITS)))
+        }),
+        ("a long host handle", |heap| {
+            host_handle(heap, "i".repeat(WIDE))
+        }),
+        ("a long text", |heap| {
+            make(heap, NewObject::long_text("t".repeat(WIDE)))
+        }),
+    ];
+    let mut failed = Vec::new();
+    for (case, build) in cases {
+        let store = Counting::default();
+        let mut heap = fresh(&store);
+        let value = build(&mut heap);
+        let root = heap.seal(&[value]).expect("a seal");
+        let (mut heap, cold) = reopened(&store, &root);
+        let handle = cold.handle().expect("an object");
+        let id = ObjectId(
+            heap.arena()
+                .facts(handle)
+                .expect("live")
+                .entity()
+                .expect("an id")
+                .ordinal,
+        );
+        let directory = Directory::open(root.directory, Box::new(store.clone()));
+        let (_, depth, _) = store.during(|| directory.get(id).expect("a read").expect("a row"));
+        let bound = heap.held() + 1024;
+        heap.rebound(bound);
+        let mut refused = None;
+        for _ in 0..8 {
+            match crate::data::copy_out(heap.arena(), usize::MAX, &cold) {
+                Ok(_) => break,
+                Err(crate::data::CopyError::Cold { object, chunk }) => {
+                    let held = heap.held();
+                    let (loaded, reads, _) =
+                        store.during(|| heap.load(object, chunk, &mut |visit| visit(&cold)));
+                    if let Err(error) = loaded {
+                        refused = Some((error, held, heap.held(), reads));
+                        break;
+                    }
+                }
+                Err(other) => panic!("{case}: a copy failed: {other:?}"),
+            }
+        }
+        match refused {
+            Some((LoadError::Memory(refusal), before, after, reads)) => {
+                if refusal.bound != bound {
+                    failed.push(format!("{case}: refused at {}, not {bound}", refusal.bound));
+                }
+                if before != after {
+                    failed.push(format!(
+                        "{case}: the refusal moved the holding {before} to {after}"
+                    ));
+                }
+                if reads > depth + 1 {
+                    failed.push(format!(
+                        "{case}: {reads} pages read by the refused load, past its row's {depth} and one node"
+                    ));
+                }
+            }
+            other => failed.push(format!("{case}: the load answered {other:?}")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
 
 /// What `value` copies out to the host as, every page it reaches loaded
 /// first.
@@ -512,6 +598,8 @@ enum Read {
     Equal,
     /// The object copied out whole.
     Copy,
+    /// The first member of the tuple's first member.
+    Nested,
 }
 
 /// A text of 9,000 `fill`s: a payload tree past one leaf.
@@ -545,6 +633,26 @@ enum Substitute {
     /// The page under the first index page the row names, for the other
     /// tuple's page at the same place, its parent otherwise unchanged.
     Second,
+    /// The whole row, for the row the other object had at an earlier seal.
+    Stale,
+    /// In the root tuple's first chunk, the head of its member (the
+    /// object replaced) keeps its key and takes the other tuple's root,
+    /// and the member's row is the other tuple's. Only the root tuple and
+    /// the other are roots of the seal.
+    NestedRoot,
+}
+
+/// A list of 512 integers from `from`.
+fn list_ints(heap: &mut SlotHeap, from: i64) -> Value {
+    make(
+        heap,
+        NewObject::List((from..from + 512).map(Value::Int).collect()),
+    )
+}
+
+/// A tuple of 513 `fill`s.
+fn filled(heap: &mut SlotHeap, fill: i64) -> Value {
+    make(heap, NewObject::Tuple(vec![Value::Int(fill); 513]))
 }
 
 /// Every partial load of an immutable checks the pages it consumes
@@ -592,6 +700,75 @@ fn immutable_head_first_read() {
             },
             Read::Item,
             Substitute::Second,
+        ),
+        (
+            "tuple point read, another list's row",
+            |heap| {
+                let a = ints(heap, 0);
+                [a, a, list_ints(heap, 1000)]
+            },
+            Read::Item,
+            Substitute::Row,
+        ),
+        (
+            "tuple point read, a stale earlier list row",
+            |heap| {
+                let a = ints(heap, 0);
+                [a, a, list_ints(heap, 1000)]
+            },
+            Read::Item,
+            Substitute::Stale,
+        ),
+        (
+            "tuple point read, a text's row",
+            |heap| {
+                let a = ints(heap, 0);
+                [a, a, text(heap, 'b')]
+            },
+            Read::Item,
+            Substitute::Row,
+        ),
+        (
+            "text copy, a list's row",
+            |heap| {
+                let a = text(heap, 'a');
+                [a, a, list_ints(heap, 1000)]
+            },
+            Read::Copy,
+            Substitute::Row,
+        ),
+        (
+            "text copy, a big integer's row",
+            |heap| {
+                let a = text(heap, 'a');
+                let digits = format!("7{}", "3".repeat(19_999));
+                let int = lash_kernel_doc::Integer::parse(&digits).expect("an integer");
+                [a, a, make(heap, NewObject::BigInt(int))]
+            },
+            Read::Copy,
+            Substitute::Row,
+        ),
+        (
+            "big integer copy, a tuple's row",
+            |heap| {
+                let digits = format!("7{}", "3".repeat(19_999));
+                let int = lash_kernel_doc::Integer::parse(&digits).expect("an integer");
+                let a = make(heap, NewObject::BigInt(int));
+                [a, a, ints(heap, 1000)]
+            },
+            Read::Copy,
+            Substitute::Row,
+        ),
+        (
+            "nested tuple, its key kept and its root substituted",
+            |heap| {
+                let a = filled(heap, 10);
+                let b = filled(heap, 11);
+                let outer = make(heap, NewObject::Tuple(vec![a; 513]));
+                [outer, a, b]
+            },
+            Read::Nested,
+            Substitute::NestedRoot,
         ),
         (
             "tuple memberwise equality",
@@ -664,13 +841,47 @@ fn immutable_head_first_read() {
         let store = Counting::default();
         let mut heap = fresh(&store);
         let roots = build(&mut heap);
+        if let Substitute::NestedRoot = substitute {
+            match nested_root(&store, &mut heap, &roots) {
+                Ok(root) => {
+                    let (mut heap, cold) = reopened(&store, &root);
+                    let again = build(&mut heap)[0];
+                    match first_read(&mut heap, case, *read, [cold, again]) {
+                        Ok(Some(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt {
+                            ..
+                        }))) => {}
+                        Err(error) => failed.push(error),
+                        other => failed.push(format!("{case}: the first read answered {other:?}")),
+                    }
+                }
+                Err(error) => failed.push(format!("{case}: {error}")),
+            }
+            continue;
+        }
+        let early = match substitute {
+            Substitute::Stale => {
+                let early = heap.seal(&roots).expect("an early seal");
+                let list = roots[2].handle().expect("a list");
+                warm(&mut heap, &roots, |heap| {
+                    heap.arena_mut().list_set(list, 0, Value::Int(-1))
+                });
+                Some(early)
+            }
+            _ => None,
+        };
         let mut root = heap.seal(&roots).expect("a seal");
         let target = |at: usize| root.roots[at].id().expect("an object");
         let (a, b) = (target(1), target(2));
         let mut directory = Directory::open(root.directory, Box::new(store.clone()));
-        let other = directory.get(b).expect("a read").expect("a row");
+        let other = match &early {
+            Some(early) => Directory::open(early.directory, Box::new(store.clone()))
+                .get(b)
+                .expect("a read")
+                .expect("an earlier row"),
+            None => directory.get(b).expect("a read").expect("a row"),
+        };
         let row = match substitute {
-            Substitute::Row => other,
+            Substitute::Row | Substitute::Stale | Substitute::NestedRoot => other,
             Substitute::Top | Substitute::Second => {
                 let mut row = directory.get(a).expect("a read").expect("a row");
                 match (&mut row.record, &other.record) {
@@ -736,44 +947,151 @@ fn immutable_head_first_read() {
         root.directory = directory.seal().expect("a directory seal");
         let (mut heap, cold) = reopened(&store, &root);
         let again = build(&mut heap)[0];
-        let held = [cold, again];
-        let mut first = None;
-        for _ in 0..64 {
-            let asked = match read {
-                Read::Item => heap
-                    .arena()
-                    .item(cold.handle().expect("a tuple"), 0)
-                    .map(|_| ()),
-                Read::Equal => heap.arena().semantics().equal(&cold, &again).map(|_| ()),
-                Read::Copy => match crate::data::copy_out(heap.arena(), usize::MAX, &cold) {
-                    Ok(_) => Ok(()),
-                    Err(crate::data::CopyError::Cold { object, chunk }) => {
-                        Err(lash_kernel_doc::arena::native::NativeError::Retry(
-                            lash_kernel_doc::arena::native::Retry::Cold { object, chunk },
-                        ))
-                    }
-                    Err(other) => panic!("{case}: a copy failed: {other:?}"),
-                },
-            };
-            match asked {
-                Ok(()) => break,
-                Err(lash_kernel_doc::arena::native::NativeError::Retry(
-                    lash_kernel_doc::arena::native::Retry::Cold { object, chunk },
-                )) => {
-                    if let Err(error) = heap.load(object, chunk, &mut |visit| {
-                        held.iter().for_each(&mut *visit)
-                    }) {
-                        first = Some(error);
-                        break;
-                    }
-                }
-                Err(other) => panic!("{case}: a read failed: {other:?}"),
-            }
-        }
+        let first = first_read(&mut heap, case, *read, [cold, again]);
         match first {
-            Some(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt { .. })) => {}
+            Ok(Some(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt { .. }))) => {}
+            Err(error) => failed.push(error),
             other => failed.push(format!("{case}: the first read answered {other:?}")),
         }
     }
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The first load fault `read` of `cold` meets, its loads retried until
+/// it completes; `None` when it completes with none, and an error naming
+/// the case when a read fails other than by a load.
+fn first_read(
+    heap: &mut SlotHeap,
+    case: &str,
+    read: Read,
+    held: [Value; 2],
+) -> Result<Option<crate::heap::LoadError>, String> {
+    let [cold, again] = held;
+    let mut first = None;
+    for _ in 0..64 {
+        let asked = match read {
+            Read::Item => heap
+                .arena()
+                .item(cold.handle().expect("a tuple"), 0)
+                .map(|_| ()),
+            Read::Equal => heap.arena().semantics().equal(&cold, &again).map(|_| ()),
+            Read::Nested => heap
+                .arena()
+                .item(cold.handle().expect("a tuple"), 0)
+                .and_then(|inner| {
+                    heap.arena()
+                        .item(inner.and_then(|inner| inner.handle()).expect("a tuple"), 0)
+                })
+                .map(|_| ()),
+            Read::Copy => match crate::data::copy_out(heap.arena(), usize::MAX, &cold) {
+                Ok(_) => Ok(()),
+                Err(crate::data::CopyError::Cold { object, chunk }) => {
+                    Err(lash_kernel_doc::arena::native::NativeError::Retry(
+                        lash_kernel_doc::arena::native::Retry::Cold { object, chunk },
+                    ))
+                }
+                Err(other) => return Err(format!("{case}: a copy failed: {other:?}")),
+            },
+        };
+        match asked {
+            Ok(()) => break,
+            Err(lash_kernel_doc::arena::native::NativeError::Retry(
+                lash_kernel_doc::arena::native::Retry::Cold { object, chunk },
+            )) => {
+                if let Err(error) = heap.load(object, chunk, &mut |visit| {
+                    held.iter().for_each(&mut *visit)
+                }) {
+                    first = Some(error);
+                    break;
+                }
+            }
+            Err(other) => return Err(format!("{case}: a read failed: {other:?}")),
+        }
+    }
+    Ok(first)
+}
+
+/// Seals the root tuple `roots[0]` and the other tuple `roots[2]`, then
+/// rewrites the store as [`Substitute::NestedRoot`] says: the head of the
+/// root tuple's first member keeps the member's key and names the other
+/// tuple's root, and the member's row is the other tuple's.
+fn nested_root(
+    store: &Counting,
+    heap: &mut SlotHeap,
+    roots: &[Value; 3],
+) -> Result<lash_kernel_state::paged::run::root::HeapRoot, String> {
+    use lash_kernel_state::kernel_internals::tree::{Access, grant};
+    use lash_kernel_state::paged::PageKind;
+    use lash_kernel_state::paged::run::chunked::{ChunkPage, ChunkRef, Placement};
+    use lash_kernel_state::paged::run::directory::Directory;
+    use lash_kernel_state::paged::run::index::{Index, Part};
+    use lash_kernel_state::paged::run::objects::{Head, Record};
+    use lash_kernel_value::tokens::{decode_body, encode_body};
+
+    let mut root = heap
+        .seal(&[roots[0], roots[2]])
+        .map_err(|error| format!("the seal failed: {error:?}"))?;
+    let outer = root.roots[0].id().ok_or("the root is no object")?;
+    let other = root.roots[1].id().ok_or("the other is no object")?;
+    let Some(Head::Tuple {
+        root: replacement, ..
+    }) = root.heads.get(other).cloned()
+    else {
+        return Err("the other tuple has no head".into());
+    };
+    let access = Access::new(Box::new(store.clone()));
+    let mut directory = Directory::open(root.directory, Box::new(store.clone()));
+    let mut row = directory
+        .get(outer)
+        .map_err(|error| format!("{error:?}"))?
+        .ok_or("the root has no row")?;
+    let theirs = directory
+        .get(other)
+        .map_err(|error| format!("{error:?}"))?
+        .ok_or("the other has no row")?;
+    let Record::Chunked(tuple) = &mut row.record else {
+        return Err("the root tuple is not chunked".into());
+    };
+    let Index::Nodes { height: 1, refs } = &mut tuple.index else {
+        return Err("the root tuple is not one index level deep".into());
+    };
+    let index_page = access
+        .read(refs[0].page)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut chunks: Vec<ChunkRef> =
+        decode_body(&index_page.tokens).map_err(|error| error.to_string())?;
+    for chunk in &mut chunks {
+        grant(&mut chunk.page, &index_page.children).map_err(|error| format!("{error:?}"))?;
+    }
+    let chunk_page = access
+        .read(chunks[0].page)
+        .map_err(|error| format!("{error:?}"))?;
+    let mut chunk: ChunkPage =
+        decode_body(&chunk_page.tokens).map_err(|error| error.to_string())?;
+    let (member, head) = chunk.heads.0.first_mut().ok_or("the chunk names no head")?;
+    let member = *member;
+    let Head::Tuple { root: named, .. } = head else {
+        return Err("the member is no tuple".into());
+    };
+    *named = replacement;
+    chunks[0].page = access
+        .seal(
+            PageKind::SEQUENCE_LEAF,
+            encode_body(&chunk),
+            chunk_page.children.clone(),
+        )
+        .map_err(|error| format!("{error:?}"))?;
+    let children = chunks.iter().map(|chunk| chunk.page).collect();
+    let part: &mut Part<Option<Placement>> = &mut refs[0];
+    part.page = access
+        .seal(PageKind::SEQUENCE_INDEX, encode_body(&chunks), children)
+        .map_err(|error| format!("{error:?}"))?;
+    directory
+        .put(member, theirs)
+        .map_err(|error| format!("{error:?}"))?;
+    directory
+        .put(outer, row)
+        .map_err(|error| format!("{error:?}"))?;
+    root.directory = directory.seal().map_err(|error| format!("{error:?}"))?;
+    Ok(root)
 }
