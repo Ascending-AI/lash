@@ -162,11 +162,19 @@ impl Arena {
     /// Re-keys every resident map and set once `handle`, which a key named
     /// by its token, has a durable id: a ref key means its referent's id
     /// from then on, as it will on pages and after a reopen. Rare: only a
-    /// ref keyed before its referent's first seal costs it.
+    /// ref keyed before its referent's first seal costs it. The object
+    /// stays marked, so a registration that withdraws the id re-keys the
+    /// tables back ([`Self::rekey`]).
     pub(super) fn rekey_after(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
-        if !self.facts(handle)?.token_keyed.replace(false) {
-            return Ok(());
+        if self.facts(handle)?.token_keyed.get() {
+            self.rekey()?;
         }
+        Ok(())
+    }
+
+    /// Re-keys every resident map and set holding a ref or tuple key by
+    /// the identities its keys' referents have now.
+    pub(super) fn rekey(&mut self) -> Result<(), NativeError> {
         for index in 0..self.objects.capacity() as u32 {
             let Some(table) = self.objects.handle_at(index) else {
                 continue;

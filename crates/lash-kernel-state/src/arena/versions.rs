@@ -150,8 +150,16 @@ impl Drop for Registration<'_> {
                 }
             }
             self.arena.dirty.truncate(kept);
+            let mut rekey = false;
             for handle in withdrawn {
                 self.arena.unhead(handle);
+                rekey |= self.arena.facts[handle.index() as usize].token_keyed.get();
+            }
+            if rekey {
+                // A key that meant a withdrawn id means its referent's
+                // token again. Every key was valid before the registration
+                // gave the ids, and the tokens it restores are those keys'.
+                let _ = self.arena.rekey();
             }
             self.arena.next_ordinal = self.next;
         }

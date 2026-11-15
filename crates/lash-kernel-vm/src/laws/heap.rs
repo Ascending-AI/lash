@@ -1031,6 +1031,81 @@ fn reference_tuple_keys_survive_first_seal_and_reopen() {
     );
 }
 
+/// Contract §6, reference keys: a registration that is rolled back gives
+/// back the keys it changed. A map keyed by a tuple holding a ref (nested
+/// one to three deep, beside a task ref) finds its entry while the
+/// registration has given the referent an id, after the registration is
+/// dropped and the id withdrawn, and after a seal then gives the id again.
+#[test]
+fn a_rolled_back_registration_restores_the_reference_keys_it_changed() {
+    let found = |arena: &mut Arena, map: Value, key: &Value| -> Vec<Option<i64>> {
+        let handle = map.handle().expect("a map");
+        [short("first"), key.clone(), short("last")]
+            .iter()
+            .map(
+                |query| match arena.table_get(handle, query).expect("a lookup") {
+                    Some(Value::Int(int)) => Some(int),
+                    _ => None,
+                },
+            )
+            .collect()
+    };
+    let expected = vec![Some(10), Some(73), Some(30)];
+    for depth in 1..=3 {
+        let mut arena = Arena::new();
+        let referent = list(&mut arena, vec![Value::Int(1)]);
+        let mut key = Value::ObjectRef(referent.handle().expect("a list"));
+        for _ in 0..depth {
+            key = arena
+                .tuple(vec![key, Value::TaskRef(lash_kernel_doc::TaskId(41))], 64)
+                .expect("a tuple");
+        }
+        let map = arena
+            .create(NewObject::Map(vec![
+                (short("gone"), Value::Int(0)),
+                (short("first"), Value::Int(10)),
+                (key.clone(), Value::Int(73)),
+                (short("last"), Value::Int(30)),
+                (Value::Int(0), referent),
+            ]))
+            .expect("a map");
+        arena
+            .table_delete(map.handle().expect("a map"), &short("gone"))
+            .expect("a delete");
+        assert_eq!(found(&mut arena, map, &key), expected, "depth {depth}");
+        {
+            let mut registration = arena.registration().expect("a registration");
+            registration
+                .arena()
+                .identify(referent.handle().expect("a list"))
+                .expect("an id");
+            assert_eq!(
+                found(registration.arena(), map, &key),
+                expected,
+                "depth {depth}, registered"
+            );
+        }
+        assert_eq!(
+            found(&mut arena, map, &key),
+            expected,
+            "depth {depth}, rolled back"
+        );
+        let pages = Pages::default();
+        seal(
+            &mut arena,
+            &[map, key.clone()],
+            &mut pages.directory(None),
+            &mut HighWater(0),
+        )
+        .expect("a seal");
+        assert_eq!(
+            found(&mut arena, map, &key),
+            expected,
+            "depth {depth}, sealed after the rollback"
+        );
+    }
+}
+
 /// Astra §1: a seal that fails keeps the ids and heads it gave, so its
 /// retry writes the rows one clean seal of the same graph would, whatever
 /// the run allocated before: no row or root records a process-local
