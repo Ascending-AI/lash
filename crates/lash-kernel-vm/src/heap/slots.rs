@@ -966,6 +966,24 @@ impl Heap for SlotHeap {
                 .map_err(LoadError::Store)?
                 .ok_or_else(|| corrupt(format!("object {} has no row", id.0)))?;
             open::referents(&row.record, &row.heads).map_err(corrupt)?;
+            // The head decides what the row may be: an immutable opens only
+            // from a row of its head's kind, and an object no head names
+            // only from a mutable one. Every form below (chunked, scalar
+            // payload, paged, inline) is dispatched after this, so a valid
+            // row of another object cannot stand in for it.
+            let head = self
+                .arena
+                .facts(object)
+                .map_err(|error| malformed(error.to_string()))?
+                .head()
+                .map(Head::kind);
+            let kind = row.record.kind();
+            if head.map_or(!kind.mutable(), |head| head != kind) {
+                return Err(corrupt(format!(
+                    "object {}'s row holds a {kind:?}, not the {head:?} its referrers name",
+                    id.0
+                )));
+            }
             (id, row)
         };
         if let Record::Chunked(chunked) = &row.record {

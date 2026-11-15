@@ -300,6 +300,29 @@ pub enum Record {
 }
 
 impl Record {
+    /// The kind of object the record holds, whatever form its row takes.
+    pub fn kind(&self) -> ObjectKind {
+        match self {
+            Self::List(_) => ObjectKind::List,
+            Self::Tuple(_) => ObjectKind::Tuple,
+            Self::Set(_) => ObjectKind::Set,
+            Self::Map(_) => ObjectKind::Map,
+            Self::Record(_) => ObjectKind::Record,
+            Self::Closure { .. } => ObjectKind::Closure,
+            Self::Cell(_) => ObjectKind::Cell,
+            Self::Error { .. } => ObjectKind::Error,
+            Self::BigInt(_) => ObjectKind::BigInt,
+            Self::Timestamp(_) => ObjectKind::Timestamp,
+            Self::LongText(_) => ObjectKind::LongText,
+            Self::Bytes(_) => ObjectKind::Bytes,
+            Self::Paged(paged) => paged.kind(),
+            Self::Function(_) => ObjectKind::Function,
+            Self::Handle(_) => ObjectKind::Handle,
+            Self::Scalar(scalar) => scalar.kind,
+            Self::Chunked(chunked) => chunked.kind,
+        }
+    }
+
     /// Every id the record references, once each, ascending: its exact
     /// edge set.
     pub fn edges(&self) -> Vec<ObjectId> {
