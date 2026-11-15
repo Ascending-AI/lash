@@ -236,20 +236,27 @@ impl<'a> Access<'a> {
             children,
         })
     }
-    /// Seals a childless page as [`Self::seal`] does and keeps it read, for
-    /// a page the run reads again before it leaves: a record's edge page,
-    /// which the same seal's pruning walks.
+    /// Seals a page as [`Self::seal`] does and keeps it read, for a page
+    /// the run reads again before it leaves: a record's edge page or edge
+    /// index page, which the same seal's pruning walks.
     ///
     /// # Errors
     ///
     /// As [`Self::seal`].
-    pub fn seal_kept(&self, kind: PageKind, tokens: Vec<u8>) -> Result<PageRef, HeapFault> {
-        let page = self.seal(kind, tokens.clone(), Vec::new())?;
+    pub fn seal_kept(
+        &self,
+        kind: PageKind,
+        tokens: Vec<u8>,
+        mut children: Vec<PageRef>,
+    ) -> Result<PageRef, HeapFault> {
+        let page = self.seal(kind, tokens.clone(), children.clone())?;
+        children.sort_by_key(|p| p.id);
+        children.dedup_by_key(|p| p.id);
         self.keep(&PageAnswer {
             page,
             kind,
             tokens: tokens.into(),
-            children: Vec::new(),
+            children,
         });
         Ok(page)
     }

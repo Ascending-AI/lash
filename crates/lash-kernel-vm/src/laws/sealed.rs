@@ -270,7 +270,93 @@ fn seal_rule_every_form() {
     if let Err(error) = run_record_row() {
         failed.push(format!("run record row: {error}"));
     }
+    failed.extend(deep_rows());
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Members of each deep sequence: past what one level of index pages
+/// below the row held (96 pages of 96 chunks of 64 members, 589,824), so
+/// its index takes two levels below the row (cutover contract §6 index
+/// rule).
+const DEEP: i64 = 2_400_000;
+
+/// The deep rows of the inventory: a list and a tuple of [`DEEP`]
+/// integers, built at the heap, sealed, and reopened cold. A point read at
+/// the far end loads the row's `d` directory pages, one index page per
+/// level below the row and the chunk; then every chunk loaded, the object
+/// equals the same object built again.
+fn deep_rows() -> Vec<String> {
+    use lash_kernel_state::paged::run::directory::Directory;
+    use lash_kernel_state::paged::run::ids::ObjectId;
+    use lash_kernel_state::paged::run::objects::Record;
+
+    use super::large::{int, item};
+
+    let forms: [(&str, Build); 2] = [
+        ("deep list row: a list of 2,400,000 integers", |heap| {
+            make(heap, NewObject::List((0..DEEP).map(Value::Int).collect()))
+        }),
+        ("deep tuple row: a tuple of 2,400,000 integers", |heap| {
+            make(heap, NewObject::Tuple((0..DEEP).map(Value::Int).collect()))
+        }),
+    ];
+    let mut failed = Vec::new();
+    for (case, build) in forms {
+        let store = Counting::default();
+        let mut heap = fresh(&store);
+        let object = build(&mut heap);
+        let root = match heap.seal(&[object]) {
+            Ok(root) => root,
+            Err(error) => {
+                failed.push(format!("{case}: the seal failed: {error:?}"));
+                continue;
+            }
+        };
+        drop(heap);
+        let (mut heap, cold) = reopened(&store, &root);
+        let handle = cold.handle().expect("an object");
+        let id = ObjectId(
+            heap.arena()
+                .facts(handle)
+                .expect("live")
+                .entity()
+                .expect("an id")
+                .ordinal,
+        );
+        let directory = Directory::open(root.directory, Box::new(store.clone()));
+        let (row, depth, _) = store.during(|| directory.get(id).expect("a read").expect("a row"));
+        let Record::Chunked(chunked) = &row.record else {
+            failed.push(format!("{case}: the row is not chunked"));
+            continue;
+        };
+        let levels = u64::from(chunked.index.height());
+        if levels != 2 {
+            failed.push(format!(
+                "{case}: its index is {levels} levels below the row, not 2"
+            ));
+        }
+        let (value, reads, _) = store.during(|| item(&mut heap, &[cold], cold, DEEP - 1));
+        if int(value) != Some(DEEP - 1) {
+            failed.push(format!("{case}: the far end reads {value:?}"));
+        }
+        if reads != depth + 1 + levels {
+            failed.push(format!(
+                "{case}: a cold far-end read loads {reads} pages, not d + 1 + L = {depth} + 1 + {levels}"
+            ));
+        }
+        for chunk in 0..chunked.chunks() {
+            let chunk = u32::try_from(chunk).expect("a chunk number");
+            heap.load(handle, chunk, &mut |visit| visit(&cold))
+                .expect("a chunk");
+        }
+        let again = build(&mut heap);
+        if !warm_within(&mut heap, &[cold, again], 16, |heap| {
+            heap.arena().semantics().equal(&cold, &again)
+        }) {
+            failed.push(format!("{case}: the object reopened cold differs"));
+        }
+    }
+    failed
 }
 
 /// The session row of the inventory: a binding's name and a saved
@@ -386,8 +472,26 @@ fn run_record_row() -> Result<(), String> {
         return Err("the run reopened cold ends otherwise".into());
     }
     let mut warm = parked()?;
-    warm.try_checkpoint()
+    let root = warm
+        .try_checkpoint()
         .map_err(|error| format!("the seal failed: {error:?}"))?;
+    // Past what the run root's own top node names: its segment index has
+    // a level of index pages (cutover contract §6 index rule).
+    let access =
+        lash_kernel_state::kernel_internals::tree::Access::new(Box::new(warm.source.clone()));
+    let page = access
+        .read(root.heap)
+        .map_err(|error| format!("the run root reads: {error:?}"))?;
+    let run: lash_kernel_state::paged::run::continuation::RunPage =
+        lash_kernel_value::tokens::decode_body(&page.tokens)
+            .map_err(|error| format!("the run root decodes: {error}"))?;
+    let segments = run.segments.leaves();
+    if segments <= 96 || run.segments.height() == 0 {
+        return Err(format!(
+            "the run is {segments} segments at index height {}, not past one node",
+            run.segments.height()
+        ));
+    }
     if warm.run_to_end(&[]) != expected {
         return Err("the run sealed warm ends otherwise".into());
     }
@@ -422,6 +526,27 @@ fn ints(heap: &mut SlotHeap, from: i64) -> Value {
     )
 }
 
+/// A tuple past one index level below its row: 600,000 integers, more
+/// than 96 index pages of 96 chunks of 64.
+fn deep_ints(heap: &mut SlotHeap, from: i64) -> Value {
+    make(
+        heap,
+        NewObject::Tuple((from..from + 600_000).map(Value::Int).collect()),
+    )
+}
+
+/// What of the row a case substitutes.
+#[derive(Clone, Copy)]
+enum Substitute {
+    /// The whole row, for the other object's.
+    Row,
+    /// The index top the row embeds, for the other row's.
+    Top,
+    /// The page under the first index page the row names, for the other
+    /// tuple's page at the same place, its parent otherwise unchanged.
+    Second,
+}
+
 /// Every partial load of an immutable checks the pages it consumes
 /// against the head that names it (cutover contract §6): for each kind
 /// of immutable a row can stand for, a store that answers a valid row of
@@ -435,7 +560,12 @@ fn immutable_head_first_read() {
 
     use crate::heap::LoadError;
 
-    let cases: &[(&str, Swap, Read, bool)] = &[
+    use lash_kernel_state::kernel_internals::tree::Access;
+    use lash_kernel_state::paged::PageKind;
+    use lash_kernel_state::paged::run::chunked::Placement;
+    use lash_kernel_state::paged::run::index::{Index, Part};
+
+    let cases: &[(&str, Swap, Read, Substitute)] = &[
         (
             "tuple point read",
             |heap| {
@@ -443,7 +573,7 @@ fn immutable_head_first_read() {
                 [a, a, ints(heap, 1000)]
             },
             Read::Item,
-            false,
+            Substitute::Row,
         ),
         (
             "tuple point read, index path",
@@ -452,7 +582,16 @@ fn immutable_head_first_read() {
                 [a, a, ints(heap, 1000)]
             },
             Read::Item,
-            true,
+            Substitute::Top,
+        ),
+        (
+            "tuple point read, second index level",
+            |heap| {
+                let a = deep_ints(heap, 0);
+                [a, a, deep_ints(heap, 1_000_000)]
+            },
+            Read::Item,
+            Substitute::Second,
         ),
         (
             "tuple memberwise equality",
@@ -461,7 +600,7 @@ fn immutable_head_first_read() {
                 [a, a, ints(heap, 1000)]
             },
             Read::Equal,
-            false,
+            Substitute::Row,
         ),
         (
             "payload leaf",
@@ -470,7 +609,7 @@ fn immutable_head_first_read() {
                 [a, a, text(heap, 'b')]
             },
             Read::Copy,
-            false,
+            Substitute::Row,
         ),
         (
             "scalar leaf",
@@ -483,7 +622,7 @@ fn immutable_head_first_read() {
                 [a, a, make(heap, NewObject::BigInt(digits("4")))]
             },
             Read::Copy,
-            false,
+            Substitute::Row,
         ),
         (
             "error field",
@@ -497,7 +636,7 @@ fn immutable_head_first_read() {
                 [a, a, b]
             },
             Read::Copy,
-            false,
+            Substitute::Row,
         ),
         (
             "cold map key",
@@ -507,7 +646,7 @@ fn immutable_head_first_read() {
                 [map, a, text(heap, 'b')]
             },
             Read::Copy,
-            false,
+            Substitute::Row,
         ),
         (
             "cold set member",
@@ -517,11 +656,11 @@ fn immutable_head_first_read() {
                 [set, a, text(heap, 'b')]
             },
             Read::Copy,
-            false,
+            Substitute::Row,
         ),
     ];
     let mut failed = Vec::new();
-    for (case, build, read, parts_only) in cases {
+    for (case, build, read, substitute) in cases {
         let store = Counting::default();
         let mut heap = fresh(&store);
         let roots = build(&mut heap);
@@ -530,20 +669,68 @@ fn immutable_head_first_read() {
         let (a, b) = (target(1), target(2));
         let mut directory = Directory::open(root.directory, Box::new(store.clone()));
         let other = directory.get(b).expect("a read").expect("a row");
-        let row = if *parts_only {
-            let mut row = directory.get(a).expect("a read").expect("a row");
-            match (&mut row.record, &other.record) {
-                (Record::Chunked(mine), Record::Chunked(theirs)) => {
-                    mine.parts.clone_from(&theirs.parts);
+        let row = match substitute {
+            Substitute::Row => other,
+            Substitute::Top | Substitute::Second => {
+                let mut row = directory.get(a).expect("a read").expect("a row");
+                match (&mut row.record, &other.record) {
+                    (Record::Chunked(mine), Record::Chunked(theirs)) => {
+                        if matches!(substitute, Substitute::Top) {
+                            mine.index.clone_from(&theirs.index);
+                        } else {
+                            // The first index page is rewritten to name the
+                            // other tuple's page below it in its own page's
+                            // place, every content id kept: the first page
+                            // passes its parent, and the read reaches the
+                            // substituted page.
+                            let access = Access::new(Box::new(store.clone()));
+                            let first = |index: &Index<_>| match index {
+                                Index::Nodes { height: 2, refs } => Some(refs[0]),
+                                _ => None,
+                            };
+                            let (Some(mine_first), Some(theirs_first)) =
+                                (first(&mine.index), first(&theirs.index))
+                            else {
+                                failed.push(format!("{case}: the tuples are not two levels deep"));
+                                continue;
+                            };
+                            let parts =
+                                |part: Part<Option<Placement>>| -> Vec<Part<Option<Placement>>> {
+                                    let page = access.read(part.page).expect("an index page");
+                                    let mut parts: Vec<Part<Option<Placement>>> =
+                                        lash_kernel_value::tokens::decode_body(&page.tokens)
+                                            .expect("index parts");
+                                    for part in &mut parts {
+                                        lash_kernel_state::kernel_internals::tree::grant(
+                                            &mut part.page,
+                                            &page.children,
+                                        )
+                                        .expect("a granted part");
+                                    }
+                                    parts
+                                };
+                            let mut forged = parts(mine_first);
+                            forged[0].page = parts(theirs_first)[0].page;
+                            let children = forged.iter().map(|part| part.page).collect();
+                            let page = access
+                                .seal(
+                                    PageKind::SEQUENCE_INDEX,
+                                    lash_kernel_value::tokens::encode_body(&forged),
+                                    children,
+                                )
+                                .expect("a page");
+                            if let Index::Nodes { refs, .. } = &mut mine.index {
+                                refs[0].page = page;
+                            }
+                        }
+                    }
+                    _ => {
+                        failed.push(format!("{case}: the tuple has no index to substitute"));
+                        continue;
+                    }
                 }
-                _ => {
-                    failed.push(format!("{case}: the tuple has no index to substitute"));
-                    continue;
-                }
+                row
             }
-            row
-        } else {
-            other
         };
         directory.put(a, row).expect("a put");
         root.directory = directory.seal().expect("a directory seal");

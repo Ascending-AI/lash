@@ -1,10 +1,11 @@
 //! A large list's, tuple's or table's page form (cutover contract §6, cold
-//! access):
-//! its row holds the object's index, each index page names a run of its
-//! chunks, and each chunk page holds at most [`CHUNK`] members with the
-//! heads of the immutables they name. A point read loads the row, one
-//! index page and one chunk; a point edit rewrites that chunk, its index
-//! page and the row.
+//! access): its row holds the top of the object's chunk index
+//! ([`super::index`]), whose pages name its chunks, and each chunk page
+//! holds at most [`CHUNK`] members with the heads of the immutables they
+//! name. A point read loads the row, one index page per level below it
+//! and one chunk; a point edit rewrites that chunk, the index pages on its
+//! path and the row. Up to [`INDEX_REFS`] × [`INDEX_REFS`] chunks the
+//! index has one level below the row.
 //!
 //! A list or a tuple is chunked by position: chunk `k` holds positions
 //! `k * CHUNK ..`. A table is chunked by key placement, the SHA-256 of
@@ -15,10 +16,10 @@
 //! assumption; a load still compares the keys it decodes.
 //!
 //! The ids the chunks reference, with how many times each, are the row's
-//! edge summary: kept in edge pages ([`EdgePage`]) the row names by their
-//! first id, so a row stays one bounded cell however many objects its
-//! members name, a mark reads the edge pages and never a chunk, and an
-//! edit that changes no reference rewrites no edge page.
+//! edge summary: kept in edge pages ([`EdgePage`]) under the row's edge
+//! index, by their first id, so a row stays one bounded cell however many
+//! objects its members name, a mark reads the edge pages and never a
+//! chunk, and an edit that changes no reference rewrites no edge page.
 
 use std::collections::BTreeMap;
 
@@ -33,13 +34,14 @@ use super::super::identity;
 use super::super::tree::Access;
 
 use super::ids::ObjectId;
+use super::index::{self, Index, Key, Leaf, Part, Seek, Shape};
 use super::objects::{Heads, ObjectKind, RunValue};
 
 /// The most members one chunk page holds: one sequence leaf.
 pub const CHUNK: usize = 64;
 
 /// The most chunk references one index page holds.
-pub const INDEX_REFS: usize = 96;
+pub const INDEX_REFS: usize = index::NODE_REFS;
 
 /// A list, tuple or table of more than this many members is written
 /// chunked; a smaller one is one row unless its row would pass
@@ -97,6 +99,26 @@ fn decode_placement(input: &mut TokenReader<'_>) -> Result<Option<Placement>, To
     }
 }
 
+impl Key for Option<Placement> {
+    const FIELDS: u64 = 1;
+    fn write(&self, out: &mut TokenWriter) {
+        encode_placement(self, out);
+    }
+    fn read(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        decode_placement(input)
+    }
+}
+
+impl Key for ObjectId {
+    const FIELDS: u64 = 1;
+    fn write(&self, out: &mut TokenWriter) {
+        self.encode(out);
+    }
+    fn read(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Self::decode(input)
+    }
+}
+
 /// One chunk, as its index page names it: the first placement it holds
 /// (a table's), how many members it holds, its page and, a tuple's, the
 /// content leaf its members make ([`identity::tuple_leaf`]).
@@ -114,7 +136,7 @@ impl TokenCodec for ChunkRef {
         encode_placement(&self.first, out);
         out.unsigned(u64::from(self.len));
         self.page.encode(out);
-        encode_digest(&self.leaf, out);
+        index::encode_digest(&self.leaf, out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(4)?;
@@ -125,107 +147,24 @@ impl TokenCodec for ChunkRef {
             first,
             len,
             page: PageRef::decode(input)?,
-            leaf: decode_digest(input)?,
+            leaf: index::decode_digest(input)?,
         })
     }
 }
 
-fn encode_digest(digest: &Option<[u8; 32]>, out: &mut TokenWriter) {
-    match digest {
-        None => out.sum(0, 0),
-        Some(digest) => {
-            out.sum(1, 1);
-            out.bytes(digest);
-        }
+impl Leaf for ChunkRef {
+    type Key = Option<Placement>;
+    fn key(&self) -> Self::Key {
+        self.first
     }
-}
-
-fn decode_digest(input: &mut TokenReader<'_>) -> Result<Option<[u8; 32]>, TokenError> {
-    let (tag, fields) = input.sum()?;
-    match tag {
-        0 => {
-            TokenReader::expect_fields(fields, 0)?;
-            Ok(None)
-        }
-        1 => {
-            TokenReader::expect_fields(fields, 1)?;
-            Ok(Some(digest(input)?))
-        }
-        _ => Err(TokenError::UnsupportedVariant { variant: tag }),
+    fn page(&self) -> PageRef {
+        self.page
     }
-}
-
-fn digest(input: &mut TokenReader<'_>) -> Result<[u8; 32], TokenError> {
-    input
-        .bytes()?
-        .try_into()
-        .map_err(|_| TokenError::Invalid("a content id is not 32 bytes".into()))
-}
-
-/// A chunked tuple's content index: its content root and its level-one
-/// nodes, each of [`identity::FANOUT`] chunks, so a load checks every
-/// index page against the row and the row against the head every referrer
-/// names the tuple by. A tuple's index pages are each [`INDEX_REFS`]
-/// chunks, the last fewer, so page `p` holds the chunks of nodes
-/// `3p .. 3p + 3`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TupleIndex {
-    pub root: [u8; 32],
-    pub nodes: Vec<[u8; 32]>,
-}
-
-/// The level-one nodes one tuple index page spans.
-pub const PAGE_NODES: usize = INDEX_REFS / identity::FANOUT;
-
-const _: () = assert!(INDEX_REFS.is_multiple_of(identity::FANOUT) && CHUNK == identity::TUPLE_LEAF);
-
-impl TokenCodec for TupleIndex {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.bytes(&self.root);
-        out.seq(self.nodes.len() as u64);
-        for node in &self.nodes {
-            out.bytes(node);
-        }
+    fn page_mut(&mut self) -> &mut PageRef {
+        &mut self.page
     }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        let root = digest(input)?;
-        let count = input.seq()?;
-        let mut nodes = Vec::with_capacity(usize::try_from(count).unwrap_or(0).min(4096));
-        for _ in 0..count {
-            nodes.push(digest(input)?);
-        }
-        Ok(Self { root, nodes })
-    }
-}
-
-/// One index page, as the row names it: the first placement under it (a
-/// table's), how many chunks it names and its page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Part {
-    pub first: Option<Placement>,
-    pub chunks: u32,
-    pub page: PageRef,
-}
-
-impl TokenCodec for Part {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        encode_placement(&self.first, out);
-        out.unsigned(u64::from(self.chunks));
-        self.page.encode(out);
-    }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        let first = decode_placement(input)?;
-        let chunks = u32::try_from(input.unsigned()?)
-            .map_err(|_| TokenError::Invalid("an index part's count is past a u32".into()))?;
-        Ok(Self {
-            first,
-            chunks,
-            page: PageRef::decode(input)?,
-        })
+    fn id(&self) -> Option<[u8; 32]> {
+        self.leaf
     }
 }
 
@@ -257,6 +196,29 @@ impl TokenCodec for EdgePart {
         })
     }
 }
+
+impl Leaf for EdgePart {
+    type Key = ObjectId;
+    fn key(&self) -> Self::Key {
+        self.first
+    }
+    fn page(&self) -> PageRef {
+        self.page
+    }
+    fn page_mut(&mut self) -> &mut PageRef {
+        &mut self.page
+    }
+}
+
+/// A row's edge index: its edge pages, by first id, kept read once
+/// written.
+pub const EDGES: Shape = Shape {
+    kind: PageKind::KEYED_INDEX,
+    min_height: 0,
+    full: false,
+    tuple: None,
+    kept: true,
+};
 
 /// An edge page: ids ascending, once each, with how many times the
 /// object's chunks reference each.
@@ -319,58 +281,19 @@ pub fn edge_page(access: &Access<'_>, part: &EdgePart) -> Result<EdgePage, HeapF
     Ok(page)
 }
 
-/// Every id `parts` name, ascending: one read of each edge page.
+/// Every id `edges` name, ascending: one read of each edge page and of
+/// each edge index page.
 ///
 /// # Errors
 ///
 /// As [`edge_page`].
-pub fn edge_ids(access: &Access<'_>, parts: &[EdgePart]) -> Result<Vec<ObjectId>, HeapFault> {
+pub fn edge_ids(access: &Access<'_>, edges: &Index<EdgePart>) -> Result<Vec<ObjectId>, HeapFault> {
     let mut ids = Vec::new();
-    for part in parts {
+    edges.each(access, &EDGES, &mut |_, part| {
         ids.extend(edge_page(access, part)?.0.into_iter().map(|(id, _)| id));
-    }
+        Ok(false)
+    })?;
     Ok(ids)
-}
-
-/// Checks the index page `index` of part `part` of `row`, when `row` is
-/// a tuple's, before any member under it is installed (seal design,
-/// "Tuple identity and loads"): its chunks are positional and their
-/// leaves make the row's level-one nodes the page spans. The row's nodes
-/// are checked against its root and the head when it opens.
-///
-/// # Errors
-///
-/// [`HeapFault::Corrupt`] for a page that is not the tuple's.
-pub fn check_tuple_index(row: &Chunked, part: usize, index: &IndexPage) -> Result<(), HeapFault> {
-    let Some(tuple) = &row.tuple else {
-        return Ok(());
-    };
-    let page = row.parts[part].page;
-    let first = part * INDEX_REFS;
-    let chunks = identity::tuple_leaves(row.len) as usize;
-    let mut leaves = Vec::with_capacity(index.0.len());
-    for (at, chunk) in index.0.iter().enumerate() {
-        let position = first + at;
-        let want = if position + 1 == chunks {
-            row.len as usize - position * CHUNK
-        } else {
-            CHUNK
-        };
-        let leaf = chunk
-            .leaf
-            .filter(|_| chunk.len as usize == want)
-            .ok_or_else(|| corrupt(page, "a tuple's index page is not positional"))?;
-        leaves.push(leaf);
-    }
-    let node = part * PAGE_NODES;
-    let nodes = identity::tuple_parents(row.len, CHUNK as u64, node as u64, &leaves);
-    if tuple.nodes.get(node..node + nodes.len()) != Some(&nodes[..]) {
-        return Err(corrupt(
-            page,
-            "a tuple's index page is not the one its row commits to",
-        ));
-    }
-    Ok(())
 }
 
 /// Checks chunk `position` of `row`, which `chunk` names and whose page is
@@ -382,11 +305,11 @@ pub fn check_tuple_index(row: &Chunked, part: usize, index: &IndexPage) -> Resul
 /// [`HeapFault::Corrupt`] for a page that is not the tuple's.
 pub fn check_tuple_chunk(
     row: &Chunked,
-    position: u32,
+    position: u64,
     chunk: &ChunkRef,
     page: &ChunkPage,
 ) -> Result<(), HeapFault> {
-    if row.tuple.is_none() {
+    if row.kind != ObjectKind::Tuple {
         return Ok(());
     }
     let Members::List(members) = &page.members else {
@@ -395,7 +318,7 @@ pub fn check_tuple_chunk(
             "a tuple's chunk holds a table's entries",
         ));
     };
-    let start = u64::from(position) * CHUNK as u64;
+    let start = position.saturating_mul(CHUNK as u64);
     if identity::chunk_leaf(start, members, &page.heads) != chunk.leaf {
         return Err(corrupt(
             chunk.page,
@@ -405,9 +328,34 @@ pub fn check_tuple_chunk(
     Ok(())
 }
 
+/// The chunk page `chunk` names.
+///
+/// # Errors
+///
+/// The page port's faults; [`HeapFault::Corrupt`] for a page that is not
+/// a chunk page of the count `chunk` names.
+pub fn chunk_page(
+    access: &Access<'_>,
+    chunk: &ChunkRef,
+) -> Result<(ChunkPage, [u8; 32]), HeapFault> {
+    let answer = access.read(chunk.page)?;
+    if answer.kind != PageKind::SEQUENCE_LEAF {
+        return Err(corrupt(chunk.page, "a chunk is not a leaf page"));
+    }
+    let page: ChunkPage =
+        decode_body(&answer.tokens).map_err(|error| corrupt(chunk.page, error.to_string()))?;
+    if page.members.len() != chunk.len as usize {
+        return Err(corrupt(chunk.page, "a chunk holds another count"));
+    }
+    Ok((
+        page,
+        lash_kernel_value::tokens::logical_digest(&answer.tokens),
+    ))
+}
+
 /// Calls `each` with the members of every chunk of `chunked`, in order:
 /// one read of each index page and each chunk, a tuple's checked against
-/// its content index.
+/// its content ids on the way down.
 ///
 /// # Errors
 ///
@@ -418,40 +366,20 @@ pub fn each_members(
     chunked: &Chunked,
     each: &mut dyn FnMut(&Members),
 ) -> Result<(), HeapFault> {
-    if let Some(tuple) = &chunked.tuple
-        && identity::tuple_root(chunked.len, &tuple.nodes) != tuple.root
-    {
-        return Err(HeapFault::Malformed(
-            "a chunked tuple's nodes do not make its root".into(),
-        ));
-    }
-    let mut position = 0;
-    for (at, part) in chunked.parts.iter().enumerate() {
-        let answer = access.read(part.page)?;
-        if answer.kind != PageKind::SEQUENCE_INDEX {
-            return Err(corrupt(part.page, "an index part is not an index page"));
-        }
-        let mut index: IndexPage =
-            decode_body(&answer.tokens).map_err(|error| corrupt(part.page, error.to_string()))?;
-        check_tuple_index(chunked, at, &index)?;
-        for chunk in &mut index.0 {
-            super::super::source::grant(&mut chunk.page, &answer.children)?;
-            let read = access.read(chunk.page)?;
-            if read.kind != PageKind::SEQUENCE_LEAF {
-                return Err(corrupt(chunk.page, "a chunk is not a leaf page"));
-            }
-            let page: ChunkPage = decode_body(&read.tokens)
-                .map_err(|error| corrupt(chunk.page, error.to_string()))?;
+    chunked
+        .index
+        .each(access, &chunked.shape(), &mut |position, chunk| {
+            let (page, _) = chunk_page(access, chunk)?;
             check_tuple_chunk(chunked, position, chunk, &page)?;
-            position += 1;
             each(&page.members);
-        }
-    }
+            Ok(false)
+        })?;
     Ok(())
 }
 
-/// The edge parts of `parts` with `delta` applied to the counts: only the
-/// edge pages an id of `delta` falls in are read and written again.
+/// The edge index `edges` with `delta` applied to the counts: only the
+/// edge pages an id of `delta` falls in, and the edge index pages on their
+/// paths, are read and written again.
 ///
 /// # Errors
 ///
@@ -459,65 +387,67 @@ pub fn each_members(
 /// below zero.
 pub fn rewrite_edges(
     access: &Access<'_>,
-    parts: &[EdgePart],
+    edges: &Index<EdgePart>,
     delta: &BTreeMap<ObjectId, i64>,
-) -> Result<Vec<EdgePart>, HeapFault> {
-    let mut touched: BTreeMap<usize, Vec<(ObjectId, i64)>> = BTreeMap::new();
-    for (id, change) in delta.iter().filter(|(_, change)| **change != 0) {
-        let at = parts
-            .iter()
-            .rposition(|part| part.first <= *id)
-            .unwrap_or(0);
-        touched.entry(at).or_default().push((*id, *change));
-    }
-    let mut out = Vec::with_capacity(parts.len() + 1);
-    let write = |edges: BTreeMap<ObjectId, u64>, out: &mut Vec<EdgePart>| {
+) -> Result<Index<EdgePart>, HeapFault> {
+    let write = |edges: BTreeMap<ObjectId, u64>| {
         let edges: Vec<(ObjectId, u64)> = edges.into_iter().filter(|(_, n)| *n > 0).collect();
         let width = if edges.len() > EDGE_REFS {
             EDGE_FILL
         } else {
             EDGE_REFS
         };
+        let mut out = Vec::new();
         for run in edges.chunks(width) {
             let page = EdgePage(run.to_vec());
             out.push(EdgePart {
                 first: run[0].0,
                 ids: run.len() as u32,
-                page: access.seal_kept(PageKind::KEYED_LEAF, encode_body(&page))?,
+                page: access.seal_kept(PageKind::KEYED_LEAF, encode_body(&page), Vec::new())?,
             });
         }
-        Ok::<(), HeapFault>(())
+        Ok::<_, HeapFault>(out)
     };
-    if parts.is_empty() {
-        let mut edges = BTreeMap::new();
-        for (id, change) in touched.into_values().flatten() {
-            let count = u64::try_from(change)
-                .map_err(|_| HeapFault::Malformed("an edge count falls below zero".into()))?;
-            edges.insert(id, count);
+    let below_zero = || HeapFault::Malformed("an edge count falls below zero".into());
+    if edges.is_empty() {
+        let mut counts = BTreeMap::new();
+        for (id, change) in delta.iter().filter(|(_, change)| **change != 0) {
+            counts.insert(*id, u64::try_from(*change).map_err(|_| below_zero())?);
         }
-        write(edges, &mut out)?;
-        return Ok(out);
+        return Index::build(access, &EDGES, write(counts)?);
     }
-    for (at, part) in parts.iter().enumerate() {
-        let Some(changes) = touched.remove(&at) else {
-            out.push(*part);
-            continue;
-        };
-        let mut edges: BTreeMap<ObjectId, u64> = edge_page(access, part)?.0.into_iter().collect();
-        for (id, change) in changes {
-            let count = edges.entry(id).or_insert(0);
-            *count = count
-                .checked_add_signed(change)
-                .ok_or_else(|| HeapFault::Malformed("an edge count falls below zero".into()))?;
-        }
-        write(edges, &mut out)?;
+    let mut touched: BTreeMap<u64, Vec<(ObjectId, i64)>> = BTreeMap::new();
+    for (id, change) in delta.iter().filter(|(_, change)| **change != 0) {
+        let (at, _) = edges
+            .get(access, &EDGES, Seek::Key(*id))?
+            .ok_or_else(|| HeapFault::Malformed("an edge index found no page".into()))?;
+        touched.entry(at).or_default().push((*id, *change));
     }
-    Ok(out)
+    if touched.is_empty() {
+        return Ok(edges.clone());
+    }
+    let changed = touched.keys().copied().collect();
+    edges.rebuild(
+        access,
+        &EDGES,
+        &changed,
+        &mut |at, part| {
+            let mut counts: BTreeMap<ObjectId, u64> =
+                edge_page(access, &part)?.0.into_iter().collect();
+            for (id, change) in touched.remove(&at).unwrap_or_default() {
+                let count = counts.entry(id).or_insert(0);
+                *count = count.checked_add_signed(change).ok_or_else(below_zero)?;
+            }
+            write(counts)
+        },
+        Vec::new(),
+    )
 }
 
 /// A large list's or table's row record: its kind and length, the next
-/// insertion sequence of a table, its index and the edge pages holding
-/// the exact multiset of ids its chunks reference.
+/// insertion sequence of a table, the top of its chunk index and of the
+/// index of the edge pages holding the exact multiset of ids its chunks
+/// reference.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chunked {
     pub kind: ObjectKind,
@@ -525,22 +455,48 @@ pub struct Chunked {
     pub len: u64,
     /// The sequence a table's next new entry takes; a list's length.
     pub next: u64,
-    pub parts: Vec<Part>,
-    /// The edge pages, ascending by first id.
-    pub edges: Vec<EdgePart>,
-    /// A tuple's content index; none for a list or a table.
-    pub tuple: Option<TupleIndex>,
+    /// The chunk index: a tuple's references carry their content ids.
+    pub index: Index<ChunkRef>,
+    /// The edge index, ascending by first id.
+    pub edges: Index<EdgePart>,
 }
 
 impl Chunked {
     /// How many chunks the object is in.
     pub fn chunks(&self) -> u64 {
-        self.parts.iter().map(|part| u64::from(part.chunks)).sum()
+        self.index.leaves()
+    }
+
+    /// The shape of the chunk index of an object of `kind` and `len`: a
+    /// tuple's is full and carries content ids, so its pages are
+    /// positional and its top makes its content root.
+    pub fn shape_of(kind: ObjectKind, len: u64) -> Shape {
+        let tuple = kind == ObjectKind::Tuple;
+        Shape {
+            kind: PageKind::SEQUENCE_INDEX,
+            min_height: 1,
+            full: tuple,
+            tuple: tuple.then_some(len),
+            kept: false,
+        }
+    }
+
+    /// The shape of the object's chunk index.
+    pub fn shape(&self) -> Shape {
+        Self::shape_of(self.kind, self.len)
+    }
+
+    /// A tuple's content root, which its head must name.
+    pub fn tuple_root(&self) -> Option<[u8; 32]> {
+        (self.kind == ObjectKind::Tuple)
+            .then(|| self.index.tuple_root(self.len))
+            .flatten()
     }
 
     /// Checks what decoding cannot: the kind is a list's or a table's, a
-    /// table's index is in placement order and a list's names none, and
-    /// the edges ascend once each.
+    /// table's index is in placement order and a list's names none, a
+    /// tuple's is positional with its content ids, and the edges ascend
+    /// once each.
     ///
     /// # Errors
     ///
@@ -551,53 +507,31 @@ impl Chunked {
             ObjectKind::Map | ObjectKind::Set | ObjectKind::Record => true,
             other => return Err(format!("a chunked {other:?}")),
         };
-        if self.parts.iter().any(|part| part.first.is_some() != table) {
+        let Index::Nodes { refs, .. } = &self.index else {
+            return Err("a chunked object's row names its chunks with no index".into());
+        };
+        if refs
+            .iter()
+            .any(|part: &Part<_>| part.first.is_some() != table)
+        {
             return Err("a chunked object's index places another kind's keys".into());
         }
-        if self.parts.iter().any(|part| part.chunks == 0) {
-            return Err("a chunked object's index names an empty part".into());
-        }
-        if !self
-            .parts
-            .windows(2)
-            .all(|pair| pair[0].first <= pair[1].first)
-        {
-            return Err("a chunked table's index is out of placement order".into());
-        }
+        self.index.check(&self.shape())?;
         if !table && self.next != self.len {
             return Err("a chunked sequence's next is not its length".into());
         }
-        match (&self.tuple, self.kind) {
-            (None, ObjectKind::Tuple) | (Some(_), ObjectKind::List) => {
-                return Err("a chunked sequence's content index is another kind's".into());
-            }
-            (None, _) => {}
-            (Some(index), _) => {
-                let chunks = identity::tuple_leaves(self.len);
-                let last = self.parts.len().saturating_sub(1);
-                if self.chunks() != chunks
-                    || self
-                        .parts
-                        .iter()
-                        .enumerate()
-                        .any(|(at, part)| at < last && part.chunks as usize != INDEX_REFS)
-                    || index.nodes.len() as u64 != chunks.div_ceil(identity::FANOUT as u64)
-                {
-                    return Err("a chunked tuple's index is not positional".into());
-                }
-            }
+        if self.kind == ObjectKind::Tuple && self.chunks() != identity::tuple_leaves(self.len) {
+            return Err("a chunked tuple's index is not positional".into());
         }
         if self.len > self.next {
             return Err("a chunked table holds more entries than it took".into());
         }
-        if !self
-            .edges
-            .windows(2)
-            .all(|pair| pair[0].first < pair[1].first)
-            || self
-                .edges
-                .iter()
-                .any(|part| part.ids == 0 || part.ids as usize > EDGE_REFS)
+        self.edges.check(&EDGES)?;
+        if let Index::Leaves(parts) = &self.edges
+            && (!parts.windows(2).all(|pair| pair[0].first < pair[1].first)
+                || parts
+                    .iter()
+                    .any(|part| part.ids == 0 || part.ids as usize > EDGE_REFS))
         {
             return Err("a chunked object's edge pages are out of order or bound".into());
         }
@@ -607,68 +541,24 @@ impl Chunked {
 
 impl TokenCodec for Chunked {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(6);
+        out.seq(5);
         self.kind.encode(out);
         out.unsigned(self.len);
         out.unsigned(self.next);
-        self.parts.encode(out);
+        self.index.encode(out);
         self.edges.encode(out);
-        match &self.tuple {
-            None => out.sum(0, 0),
-            Some(index) => {
-                out.sum(1, 1);
-                index.encode(out);
-            }
-        }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
-        let kind = ObjectKind::decode(input)?;
-        let len = input.unsigned()?;
-        let next = input.unsigned()?;
-        let parts = Vec::<Part>::decode(input)?;
-        let edges = Vec::<EdgePart>::decode(input)?;
-        let (tag, fields) = input.sum()?;
-        let tuple = match tag {
-            0 => {
-                TokenReader::expect_fields(fields, 0)?;
-                None
-            }
-            1 => {
-                TokenReader::expect_fields(fields, 1)?;
-                Some(TupleIndex::decode(input)?)
-            }
-            _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
-        };
+        input.expect_struct(5)?;
         let chunked = Self {
-            kind,
-            len,
-            next,
-            parts,
-            edges,
-            tuple,
+            kind: ObjectKind::decode(input)?,
+            len: input.unsigned()?,
+            next: input.unsigned()?,
+            index: Index::decode(input)?,
+            edges: Index::decode(input)?,
         };
         chunked.check().map_err(TokenError::Invalid)?;
         Ok(chunked)
-    }
-}
-
-/// An index page: the chunks one part names, in chunk order.
-#[derive(Clone, Debug, PartialEq)]
-pub struct IndexPage(pub Vec<ChunkRef>);
-
-impl TokenCodec for IndexPage {
-    fn encode(&self, out: &mut TokenWriter) {
-        self.0.encode(out);
-    }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let refs = Vec::<ChunkRef>::decode(input)?;
-        if refs.is_empty() || refs.len() > INDEX_REFS {
-            return Err(TokenError::Invalid(
-                "an index page names no chunk, or more than it may".into(),
-            ));
-        }
-        Ok(Self(refs))
     }
 }
 

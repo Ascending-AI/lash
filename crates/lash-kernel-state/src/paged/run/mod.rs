@@ -12,6 +12,7 @@ pub mod chunked;
 pub mod continuation;
 pub mod directory;
 pub mod ids;
+pub mod index;
 pub mod objects;
 pub mod rewrite;
 pub mod root;

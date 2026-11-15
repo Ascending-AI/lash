@@ -4,8 +4,11 @@
 //!
 //! A heap the machine admits always seals. Every page a seal writes is
 //! bounded by construction: large tuples, lists and tables are chunked
-//! under index pages, long payloads and scalars are payload trees, and each
-//! reference to an immutable carries a bounded head. No size limit stands
+//! under an index tree whose nodes, its top in the row included, name at
+//! most 96 references
+//! ([`lash_kernel_state::paged::run::index`]), long payloads and scalars
+//! are payload trees, and each reference to an immutable carries a bounded
+//! head. No size limit stands
 //! in for this, so `Malformed` from a seal means a malformed heap, never a
 //! large one.
 //!

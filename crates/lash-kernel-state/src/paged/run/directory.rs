@@ -72,8 +72,8 @@ impl Cell for Row {
     fn children(&self, out: &mut Vec<PageRef>) {
         match &self.record {
             Record::Chunked(chunked) => {
-                out.extend(chunked.parts.iter().map(|part| part.page));
-                out.extend(chunked.edges.iter().map(|part| part.page));
+                out.extend(chunked.index.pages());
+                out.extend(chunked.edges.pages());
             }
             Record::Paged(paged) => out.push(paged.root.page),
             Record::Scalar(scalar) => out.push(scalar.root.page),
@@ -83,12 +83,8 @@ impl Cell for Row {
     fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         match &mut self.record {
             Record::Chunked(chunked) => {
-                for part in &mut chunked.parts {
-                    super::super::tree::grant(&mut part.page, children)?;
-                }
-                for part in &mut chunked.edges {
-                    super::super::tree::grant(&mut part.page, children)?;
-                }
+                chunked.index.grant(children)?;
+                chunked.edges.grant(children)?;
             }
             Record::Paged(paged) => super::super::tree::grant(&mut paged.root.page, children)?,
             Record::Scalar(scalar) => super::super::tree::grant(&mut scalar.root.page, children)?,

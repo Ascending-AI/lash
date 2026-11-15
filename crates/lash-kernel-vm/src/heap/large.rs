@@ -4,34 +4,36 @@
 //! a [`Chunked`] row over index pages and chunk pages, opened by their row
 //! alone, and read one chunk at a time.
 //!
-//! A point read of a cold large object loads its row, one index page and
-//! one chunk. A point edit dirties one chunk: the seal re-encodes the
-//! object's resident chunks, writes only those whose encoding changed,
-//! rewrites the index pages naming them and the row, and adjusts the row's
-//! edge multiset by the changed chunks' references alone. A table's new
+//! A point read of a cold large object loads its row, the index pages on
+//! the chunk's path ([`lash_kernel_state::paged::run::index`]; one up to
+//! 589,824 members) and one chunk. A point edit dirties one chunk: the
+//! seal re-encodes the object's resident chunks, writes only those whose
+//! encoding changed, rewrites the index pages on their paths and the row,
+//! and adjusts the row's edge multiset by the changed chunks' references
+//! alone. A table's new
 //! entries wait in an overflow chunk until the seal places them by key;
 //! a chunk past [`CHUNK`] entries splits by placement, and an object whose
 //! chunks moved goes back to its row as a proxy, so the arena's chunks are
 //! always the row's.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Sequence, Table};
-use lash_kernel_doc::heap::{HeapFault, PageRef};
+use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::arena::Arena;
-use lash_kernel_state::kernel_internals::tree::{Access, grant};
+use lash_kernel_state::kernel_internals::tree::Access;
 use lash_kernel_state::paged::PageKind;
-use lash_kernel_state::paged::identity::{chunk_leaf, tuple_parents, tuple_root};
+use lash_kernel_state::paged::identity::chunk_leaf;
 use lash_kernel_state::paged::run::chunked::{
-    CHUNK, ChunkPage, ChunkRef, Chunked, Entry, INDEX_REFS, IndexPage, LARGE, Members, Part,
-    Placement, ROW_BYTES, TupleIndex, check_tuple_chunk, check_tuple_index, placement,
-    rewrite_edges,
+    CHUNK, ChunkPage, ChunkRef, Chunked, EDGES, Entry, LARGE, Members, Placement, ROW_BYTES,
+    check_tuple_chunk, chunk_page, placement, rewrite_edges,
 };
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::ObjectId;
+use lash_kernel_state::paged::run::index::{Index, Seek};
 use lash_kernel_state::paged::run::objects::{Heads, ObjectKind, Record, RunValue};
-use lash_kernel_value::tokens::{decode_body, encode_body, logical_digest};
+use lash_kernel_value::tokens::{encode_body, logical_digest};
 
 use super::seal::{fault, heads, named_immutable, run_value};
 use crate::paged::SealError;
@@ -39,9 +41,6 @@ use crate::paged::SealError;
 /// The entries a table's chunk holds when it is first written: room for a
 /// quarter more before it splits.
 const FILL: usize = CHUNK * 3 / 4;
-
-/// The chunks an index page names when it is first written.
-const INDEX_FILL: usize = INDEX_REFS * 3 / 4;
 
 /// What the heap knows of a chunk it read or wrote: its encoding's digest
 /// and the ids its members reference, once per reference.
@@ -115,44 +114,6 @@ fn row_bytes(arena: &Arena, values: &[Value]) -> usize {
     bytes
 }
 
-fn corrupt(page: PageRef, reason: impl Into<String>) -> HeapFault {
-    HeapFault::Corrupt {
-        page: page.id,
-        reason: reason.into(),
-    }
-}
-
-/// The index page `part` names, its chunk references granted.
-fn index_page(access: &Access<'_>, part: &Part) -> Result<IndexPage, HeapFault> {
-    let answer = access.read(part.page)?;
-    if answer.kind != PageKind::SEQUENCE_INDEX {
-        return Err(corrupt(part.page, "an index part is not an index page"));
-    }
-    let mut page: IndexPage =
-        decode_body(&answer.tokens).map_err(|error| corrupt(part.page, error.to_string()))?;
-    if page.0.len() != part.chunks as usize {
-        return Err(corrupt(part.page, "an index page names another count"));
-    }
-    for chunk in &mut page.0 {
-        grant(&mut chunk.page, &answer.children)?;
-    }
-    Ok(page)
-}
-
-/// The chunk page `chunk` names and its encoding's digest.
-fn chunk_page(access: &Access<'_>, chunk: &ChunkRef) -> Result<(ChunkPage, [u8; 32]), HeapFault> {
-    let answer = access.read(chunk.page)?;
-    if answer.kind != PageKind::SEQUENCE_LEAF {
-        return Err(corrupt(chunk.page, "a chunk is not a leaf page"));
-    }
-    let page: ChunkPage =
-        decode_body(&answer.tokens).map_err(|error| corrupt(chunk.page, error.to_string()))?;
-    if page.members.len() != chunk.len as usize {
-        return Err(corrupt(chunk.page, "a chunk holds another count"));
-    }
-    Ok((page, logical_digest(&answer.tokens)))
-}
-
 /// Calls `visit` with every value large object `row` holds, its chunks
 /// read in order, until it answers `true`; gives whether one did.
 ///
@@ -165,37 +126,11 @@ pub(crate) fn any_value(
     row: &Chunked,
     visit: &mut dyn FnMut(&RunValue) -> bool,
 ) -> Result<bool, HeapFault> {
-    let mut at = 0;
-    for (part, held) in row.parts.iter().enumerate() {
-        let index = index_page(access, held)?;
-        check_tuple_index(row, part, &index)?;
-        for chunk in &index.0 {
-            let (page, _) = chunk_page(access, chunk)?;
-            check_tuple_chunk(row, at, chunk, &page)?;
-            at += 1;
-            if page.members.values().into_iter().any(&mut *visit) {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
-}
-
-/// The part and slot of chunk `chunk`.
-fn locate(row: &Chunked, chunk: u32) -> Option<(usize, usize)> {
-    let mut start = 0u32;
-    for (at, part) in row.parts.iter().enumerate() {
-        if chunk < start + part.chunks {
-            return Some((at, (chunk - start) as usize));
-        }
-        start += part.chunks;
-    }
-    None
-}
-
-/// The first chunk of part `part`.
-fn part_start(row: &Chunked, part: usize) -> u32 {
-    row.parts[..part].iter().map(|part| part.chunks).sum()
+    row.index.each(access, &row.shape(), &mut |at, chunk| {
+        let (page, _) = chunk_page(access, chunk)?;
+        check_tuple_chunk(row, at, chunk, &page)?;
+        Ok(page.members.values().into_iter().any(&mut *visit))
+    })
 }
 
 /// Of items ordered by their first placement, the one a placement falls
@@ -285,7 +220,7 @@ impl Large {
     }
 
     /// The chunk of the table `id` that holds `normal`'s key, if any
-    /// does: one index page read.
+    /// does: one index page read per level.
     pub(crate) fn chunk_of_key(
         &self,
         access: &Access<'_>,
@@ -293,10 +228,12 @@ impl Large {
         at: &Placement,
     ) -> Result<u32, HeapFault> {
         let row = &self.opened_row(id)?;
-        let part = placed_in(row.parts.iter().map(|part| &part.first), at);
-        let page = index_page(access, &row.parts[part])?;
-        let slot = placed_in(page.0.iter().map(|chunk| &chunk.first), at);
-        Ok(part_start(row, part) + slot as u32)
+        let (chunk, _) = row
+            .index
+            .get(access, &row.shape(), Seek::Key(Some(*at)))?
+            .ok_or_else(|| HeapFault::Malformed(format!("large object {} has no chunk", id.0)))?;
+        u32::try_from(chunk)
+            .map_err(|_| HeapFault::Malformed("a large object's chunk is past a u32".into()))
     }
 
     fn opened_row(&self, id: ObjectId) -> Result<&Chunked, HeapFault> {
@@ -304,8 +241,8 @@ impl Large {
             .ok_or_else(|| HeapFault::Malformed(format!("large object {} is not open", id.0)))
     }
 
-    /// Chunk `chunk` of the large object `id`: one index page read and
-    /// one chunk read.
+    /// Chunk `chunk` of the large object `id`: one index page read per
+    /// level, each checked against its parent, and one chunk read.
     pub(crate) fn read(
         &mut self,
         access: &Access<'_>,
@@ -316,13 +253,15 @@ impl Large {
             .opened
             .get_mut(&id)
             .ok_or_else(|| HeapFault::Malformed(format!("large object {} is not open", id.0)))?;
-        let (part, slot) = locate(&opened.row, chunk).ok_or_else(|| {
-            HeapFault::Malformed(format!("large object {} has no chunk {chunk}", id.0))
-        })?;
-        let index = index_page(access, &opened.row.parts[part])?;
-        let (page, digest) = chunk_page(access, &index.0[slot])?;
-        check_tuple_index(&opened.row, part, &index)?;
-        check_tuple_chunk(&opened.row, chunk, &index.0[slot], &page)?;
+        let (_, held) = opened
+            .row
+            .index
+            .get(access, &opened.row.shape(), Seek::At(u64::from(chunk)))?
+            .ok_or_else(|| {
+                HeapFault::Malformed(format!("large object {} has no chunk {chunk}", id.0))
+            })?;
+        let (page, digest) = chunk_page(access, &held)?;
+        check_tuple_chunk(&opened.row, u64::from(chunk), &held, &page)?;
         let edges = edges_of(page.members.values());
         opened.seen.insert(chunk, Seen { digest, edges });
         Ok(page)
@@ -557,10 +496,14 @@ fn table_outcomes(
                     Some(firsts) => firsts.clone(),
                     None => {
                         let mut firsts = Vec::new();
-                        for part in &opened.row.parts {
-                            let page = index_page(access, part).map_err(SealError::Heap)?;
-                            firsts.extend(page.0.iter().map(|chunk| chunk.first));
-                        }
+                        opened
+                            .row
+                            .index
+                            .each(access, &opened.row.shape(), &mut |_, chunk| {
+                                firsts.push(chunk.first);
+                                Ok(false)
+                            })
+                            .map_err(SealError::Heap)?;
                         firsts
                     }
                 }),
@@ -601,21 +544,24 @@ fn table_outcomes(
 
     // New entries go to the chunks their keys' placements name; a cold
     // chunk read back here names its immutables by its page's heads.
-    let mut pages: HashMap<usize, IndexPage> = HashMap::new();
     let mut read_heads = Vec::new();
     for entry in extra {
-        let part = placed_in(
-            opened.row.parts.iter().map(|part| &part.first),
-            &entry.placement,
-        );
-        if let std::collections::hash_map::Entry::Vacant(vacant) = pages.entry(part) {
-            vacant.insert(index_page(access, &opened.row.parts[part]).map_err(SealError::Heap)?);
-        }
-        let page = &pages[&part];
-        let slot = placed_in(page.0.iter().map(|chunk| &chunk.first), &entry.placement);
-        let chunk = part_start(&opened.row, part) as usize + slot;
+        let (chunk, held) = opened
+            .row
+            .index
+            .get(
+                access,
+                &opened.row.shape(),
+                Seek::Key(Some(entry.placement)),
+            )
+            .map_err(SealError::Heap)?
+            .ok_or_else(|| fault("a chunked table's index names no chunk"))?;
+        let chunk = usize::try_from(chunk)
+            .ok()
+            .filter(|chunk| *chunk < groups.len())
+            .ok_or_else(|| fault("a chunked table's index names a chunk past its row"))?;
         if matches!(groups[chunk], Group::Cold) {
-            let (held, digest) = chunk_page(access, &page.0[slot]).map_err(SealError::Heap)?;
+            let (held, digest) = chunk_page(access, &held).map_err(SealError::Heap)?;
             let edges = edges_of(held.members.values());
             opened.seen.insert(chunk as u32, Seen { digest, edges });
             let Members::Table(entries) = held.members else {
@@ -709,7 +655,7 @@ fn table_piece(
 
 /// The row of a large object of `kind`, `len` members below `next`, from
 /// the old row and what becomes of each chunk: the new chunk pages and
-/// the index pages naming them sealed, every other page kept.
+/// the index pages on their paths sealed, every other page kept.
 #[allow(clippy::type_complexity)]
 fn assemble(
     access: &Access<'_>,
@@ -719,212 +665,124 @@ fn assemble(
     old: Option<&Opened>,
     outcomes: Vec<Outcome>,
 ) -> Result<(Chunked, HashMap<u32, Seen>, Option<Vec<Option<Placement>>>), HeapFault> {
-    enum Build {
-        /// An old part, unchanged, whose first chunk was `start`.
-        Keep {
-            part: Part,
-            start: u32,
-        },
-        Refs(Vec<(ChunkRef, Option<Seen>)>),
-    }
-    let mut added: Vec<ObjectId> = Vec::new();
-    let mut seal = |piece: Piece| -> Result<(ChunkRef, Option<Seen>), HeapFault> {
-        let page = access.seal(PageKind::SEQUENCE_LEAF, piece.tokens, Vec::new())?;
-        added.extend(piece.seen.edges.iter().copied());
-        Ok((
-            ChunkRef {
-                first: piece.first,
-                len: piece.len,
-                page,
-                leaf: piece.leaf,
-            },
-            Some(piece.seen),
-        ))
+    let shape = Chunked::shape_of(kind, len);
+    let old_count = old.map_or(0, |old| old.row.chunks());
+    let old_firsts = match old {
+        Some(old) => old.firsts.as_ref().map(Some),
+        None => Some(None),
     };
-    // What the changed chunks add to and take from the row's edges.
+    // What the changed chunks add to and take from the row's edges, what
+    // the heap knows of each chunk of the new row, and each one's first
+    // placement while every one is known.
     let mut delta: BTreeMap<ObjectId, i64> = BTreeMap::new();
-    let mut drop_edges = |seen: &Seen| -> Result<(), HeapFault> {
-        for id in &seen.edges {
-            *delta.entry(*id).or_insert(0) -= 1;
+    let mut seen = HashMap::new();
+    let mut firsts = Some(Vec::new());
+    let mut changed = BTreeSet::new();
+    let mut replaced: HashMap<u64, (Vec<Piece>, bool)> = HashMap::new();
+    let mut tail = Vec::new();
+    let mut chunk = 0u32;
+    let known =
+        |firsts: &mut Option<Vec<Option<Placement>>>, first: Option<Option<Placement>>| match (
+            firsts.as_mut(),
+            first,
+        ) {
+            (Some(firsts), Some(first)) => firsts.push(first),
+            _ => *firsts = None,
+        };
+    let old_first = |at: u64| -> Option<Option<Placement>> {
+        match old_firsts {
+            Some(Some(firsts)) => firsts.get(usize::try_from(at).ok()?).copied(),
+            _ => None,
         }
-        Ok(())
     };
-    let old_seen = |chunk: u32| old.and_then(|old| old.seen.get(&chunk).cloned());
-    let mut builds = Vec::new();
-    let mut outcomes = outcomes.into_iter();
-    let mut at = 0u32;
-    if let Some(old) = old {
-        for part in &old.row.parts {
-            let range = at..at + part.chunks;
-            at += part.chunks;
-            let mine: Vec<Option<Outcome>> = range.clone().map(|_| outcomes.next()).collect();
-            if mine
-                .iter()
-                .all(|outcome| matches!(outcome, Some(Outcome::Same)))
-            {
-                builds.push(Build::Keep {
-                    part: *part,
-                    start: range.start,
-                });
-                continue;
-            }
-            let page = index_page(access, part)?;
-            let mut refs = Vec::with_capacity(page.0.len());
-            for ((chunk, held), outcome) in range.zip(page.0).zip(mine) {
-                if let Some(Outcome::Same) = outcome {
-                    refs.push((held, old_seen(chunk)));
-                    continue;
+    for (at, outcome) in (0u64..).zip(outcomes) {
+        match outcome {
+            Outcome::Same if at < old_count => {
+                if let Some(held) = old.and_then(|old| old.seen.get(&(at as u32))) {
+                    seen.insert(chunk, held.clone());
                 }
-                let seen = old.seen.get(&chunk).ok_or_else(|| {
-                    HeapFault::Malformed(format!("chunk {chunk} changed and was never read"))
+                known(&mut firsts, old_first(at));
+                chunk += 1;
+            }
+            Outcome::Same => {
+                return Err(HeapFault::Malformed(
+                    "a chunk past the old row is unchanged".into(),
+                ));
+            }
+            Outcome::New { pieces, keep_first } => {
+                if at < old_count {
+                    let held = old
+                        .and_then(|old| old.seen.get(&(at as u32)))
+                        .ok_or_else(|| {
+                            HeapFault::Malformed(format!("chunk {at} changed and was never read"))
+                        })?;
+                    for id in &held.edges {
+                        *delta.entry(*id).or_insert(0) -= 1;
+                    }
+                }
+                for (piece_at, piece) in pieces.iter().enumerate() {
+                    for id in &piece.seen.edges {
+                        *delta.entry(*id).or_insert(0) += 1;
+                    }
+                    seen.insert(chunk, piece.seen.clone());
+                    let first = if keep_first && piece_at == 0 && at < old_count {
+                        old_first(at)
+                    } else {
+                        Some(piece.first)
+                    };
+                    known(&mut firsts, first);
+                    chunk += 1;
+                }
+                if at < old_count {
+                    changed.insert(at);
+                    replaced.insert(at, (pieces, keep_first));
+                } else {
+                    tail.extend(pieces);
+                }
+            }
+        }
+    }
+    let seal = |piece: Piece| -> Result<ChunkRef, HeapFault> {
+        Ok(ChunkRef {
+            first: piece.first,
+            len: piece.len,
+            page: access.seal(PageKind::SEQUENCE_LEAF, piece.tokens, Vec::new())?,
+            leaf: piece.leaf,
+        })
+    };
+    let tail = tail.into_iter().map(seal).collect::<Result<Vec<_>, _>>()?;
+    let index = match old {
+        Some(old) => old.row.index.rebuild(
+            access,
+            &shape,
+            &changed,
+            &mut |at, held| {
+                let (pieces, keep_first) = replaced.remove(&at).ok_or_else(|| {
+                    HeapFault::Malformed(format!("chunk {at} was rewritten twice"))
                 })?;
-                drop_edges(seen)?;
-                if let Some(Outcome::New { pieces, keep_first }) = outcome {
-                    for (piece_at, mut piece) in pieces.into_iter().enumerate() {
+                pieces
+                    .into_iter()
+                    .enumerate()
+                    .map(|(piece_at, mut piece)| {
                         if keep_first && piece_at == 0 {
                             piece.first = held.first;
                         }
-                        refs.push(seal(piece)?);
-                    }
-                }
-            }
-            builds.push(Build::Refs(refs));
-        }
-    }
-    let mut tail = Vec::new();
-    for outcome in outcomes {
-        let Outcome::New { pieces, .. } = outcome else {
-            return Err(HeapFault::Malformed(
-                "a chunk past the old row is unchanged".into(),
-            ));
-        };
-        for piece in pieces {
-            tail.push(seal(piece)?);
-        }
-    }
-    if !tail.is_empty() {
-        match builds.pop() {
-            Some(Build::Keep { part, start }) => {
-                let page = index_page(access, &part)?;
-                let mut refs: Vec<_> = (start..)
-                    .zip(page.0)
-                    .map(|(chunk, held)| (held, old_seen(chunk)))
-                    .collect();
-                refs.extend(tail);
-                builds.push(Build::Refs(refs));
-            }
-            Some(Build::Refs(mut refs)) => {
-                refs.extend(tail);
-                builds.push(Build::Refs(refs));
-            }
-            None => builds.push(Build::Refs(tail)),
-        }
-    }
-    for id in added {
-        *delta.entry(id).or_insert(0) += 1;
-    }
-    let edges = rewrite_edges(access, old.map_or(&[][..], |old| &old.row.edges), &delta)?;
-
-    let old_firsts = old.and_then(|old| old.firsts.as_ref());
-    let mut firsts = Some(Vec::new());
-    let mut leaves: Vec<Option<[u8; 32]>> = Vec::new();
-    let kept = builds
-        .iter()
-        .any(|build| matches!(build, Build::Keep { .. }));
-    let mut parts = Vec::new();
-    let mut seen = HashMap::new();
-    let mut chunk = 0u32;
-    for build in builds {
-        match build {
-            Build::Keep { part, start } => {
-                for slot in 0..part.chunks {
-                    if let Some(held) = old_seen(start + slot) {
-                        seen.insert(chunk + slot, held);
-                    }
-                }
-                firsts = match (firsts, old_firsts) {
-                    (Some(mut firsts), Some(old_firsts)) => {
-                        let from = start as usize;
-                        firsts.extend(
-                            old_firsts
-                                .get(from..from + part.chunks as usize)
-                                .ok_or_else(|| {
-                                    HeapFault::Malformed("a row's firsts are short".into())
-                                })?,
-                        );
-                        Some(firsts)
-                    }
-                    _ => None,
-                };
-                chunk += part.chunks;
-                parts.push(part);
-            }
-            Build::Refs(refs) => {
-                if refs.is_empty() {
-                    continue;
-                }
-                // A tuple's pages are positional, one content node
-                // apart; another object's leave room to grow.
-                let width = if kind == ObjectKind::Tuple {
-                    INDEX_REFS
-                } else {
-                    let count = if refs.len() > INDEX_REFS {
-                        refs.len().div_ceil(INDEX_FILL)
-                    } else {
-                        1
-                    };
-                    refs.len().div_ceil(count)
-                };
-                for run in refs.chunks(width) {
-                    leaves.extend(run.iter().map(|(held, _)| held.leaf));
-                    let children: Vec<PageRef> = run.iter().map(|(held, _)| held.page).collect();
-                    let index = IndexPage(run.iter().map(|(held, _)| *held).collect());
-                    let page =
-                        access.seal(PageKind::SEQUENCE_INDEX, encode_body(&index), children)?;
-                    for (held, held_seen) in run {
-                        if let Some(held_seen) = held_seen {
-                            seen.insert(chunk, held_seen.clone());
-                        }
-                        if let Some(firsts) = &mut firsts {
-                            firsts.push(held.first);
-                        }
-                        chunk += 1;
-                    }
-                    parts.push(Part {
-                        first: run[0].0.first,
-                        chunks: run.len() as u32,
-                        page,
-                    });
-                }
-            }
-        }
-    }
-    // A tuple is immutable: one its heap opened keeps its content index,
-    // and one written whole makes it from its chunks' leaves.
-    let tuple = match (kind, old) {
-        (ObjectKind::Tuple, Some(old)) if kept => old.row.tuple.clone(),
-        (ObjectKind::Tuple, _) => {
-            let leaves = leaves
-                .into_iter()
-                .collect::<Option<Vec<_>>>()
-                .ok_or_else(|| {
-                    HeapFault::Malformed("a tuple's chunk has no content leaf".into())
-                })?;
-            let nodes = tuple_parents(len, CHUNK as u64, 0, &leaves);
-            Some(TupleIndex {
-                root: tuple_root(len, &nodes),
-                nodes,
-            })
-        }
-        _ => None,
+                        seal(piece)
+                    })
+                    .collect()
+            },
+            tail,
+        )?,
+        None => Index::build(access, &shape, tail)?,
     };
+    let no_edges = Index::empty(&EDGES);
+    let edges = rewrite_edges(access, old.map_or(&no_edges, |old| &old.row.edges), &delta)?;
     let chunked = Chunked {
         kind,
         len,
         next,
-        parts,
+        index,
         edges,
-        tuple,
     };
     chunked.check().map_err(HeapFault::Malformed)?;
     Ok((chunked, seen, firsts))

@@ -17,19 +17,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageRef};
+use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::{
     CaptureValue, Correspondence, Datum, FunctionTarget, FunctionValue, StartConvention,
 };
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::{CallableId, FunctionId};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, Unit};
-use lash_kernel_value::tokens::decode_body;
 
-use super::super::source::grant;
 use super::super::tree::{Access, Tree};
-use super::super::{CheckpointRoot, PageKind, PageSource};
-use super::chunked::{ChunkPage, IndexPage, Members};
+use super::super::{CheckpointRoot, PageSource};
+use super::chunked::{ChunkPage, Members};
 use super::continuation::{self, RunRecord};
 use super::directory::{DirectoryRoot, Row};
 use super::ids::ObjectId;
@@ -481,13 +479,6 @@ impl Ids<'_> {
     }
 }
 
-fn corrupt(page: PageRef, reason: &str) -> HeapFault {
-    HeapFault::Corrupt {
-        page: page.id,
-        reason: reason.into(),
-    }
-}
-
 /// The directory `root` names, over `access`.
 fn tree(root: DirectoryRoot) -> Tree<Row> {
     Tree::open(root.page, root.rows, LogicalBytes(0), false)
@@ -507,34 +498,26 @@ fn rows(
     found.into_iter().try_for_each(each)
 }
 
-/// Calls `each` with every chunk page of the large object of `parts`.
+/// Calls `each` with every chunk page of the large object `chunked`.
 fn chunks(
     access: &Access<'_>,
-    parts: &[super::chunked::Part],
+    chunked: &super::chunked::Chunked,
     each: &mut dyn FnMut(ChunkPage) -> Result<(), RewriteFault>,
 ) -> Result<(), RewriteFault> {
-    for part in parts {
-        let answer = access.read(part.page)?;
-        if answer.kind != PageKind::SEQUENCE_INDEX {
-            return Err(corrupt(part.page, "an index part is not an index page").into());
-        }
-        let mut index: IndexPage =
-            decode_body(&answer.tokens).map_err(|error| corrupt(part.page, &error.to_string()))?;
-        for chunk in &mut index.0 {
-            grant(&mut chunk.page, &answer.children)?;
-        }
-        for chunk in &index.0 {
-            let read = access.read(chunk.page)?;
-            if read.kind != PageKind::SEQUENCE_LEAF {
-                return Err(corrupt(chunk.page, "a chunk is not a leaf page").into());
+    let mut failed = None;
+    chunked
+        .index
+        .each(access, &chunked.shape(), &mut |_, chunk| {
+            let (page, _) = super::chunked::chunk_page(access, chunk)?;
+            match each(page) {
+                Ok(()) => Ok(false),
+                Err(fault) => {
+                    failed = Some(fault);
+                    Ok(true)
+                }
             }
-            each(
-                decode_body(&read.tokens)
-                    .map_err(|error| corrupt(chunk.page, &error.to_string()))?,
-            )?;
-        }
-    }
-    Ok(())
+        })?;
+    failed.map_or(Ok(()), Err)
 }
 
 /// Visits every code id the heap `heap` holds: its directory's rows, their
@@ -544,7 +527,7 @@ fn heap(access: &Access<'_>, heap: &HeapRoot, ids: &mut Ids<'_>) -> Result<(), R
     rows(access, heap.directory, &mut |mut row| {
         ids.row(&mut row)?;
         if let Record::Chunked(chunked) = &row.record {
-            chunks(access, &chunked.parts, &mut |mut chunk| {
+            chunks(access, chunked, &mut |mut chunk| {
                 ids.heads(&mut chunk.heads)
             })?;
         }
@@ -664,7 +647,7 @@ fn built(access: &Access<'_>, heap: &HeapRoot) -> Result<BTreeSet<FunctionId>, R
         match record {
             Record::Record(pairs) => fields.extend(pairs.iter().cloned()),
             Record::Chunked(chunked) if chunked.kind == ObjectKind::Record => {
-                chunks(access, &chunked.parts, &mut |chunk| {
+                chunks(access, chunked, &mut |chunk| {
                     if let Members::Table(entries) = chunk.members {
                         fields.extend(entries.into_iter().map(|entry| (entry.key, entry.value)));
                     }

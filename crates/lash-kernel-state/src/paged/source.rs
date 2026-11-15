@@ -52,8 +52,17 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/identity.rs",
 ///         FLAT_MAX, LEAF, FANOUT, Kind, Node, counts, cuts, leaf, index, of, text_key, bytes_key, long,
-///         embed, flat, encode, TUPLE_LEAF, TUPLE_NODE, TUPLE_LEAF_TAG, TUPLE_INDEX_TAG, ERROR_TAG, Member, headed,
-///         tuple_leaf, tuple_parents, tuple_root, tuple_leaves, TupleContent, TupleBuilder, chunk_leaf, error_content,
+///         embed, flat, encode, TUPLE_LEAF, TUPLE_FANOUT, TUPLE_LEAF_TAG, TUPLE_INDEX_TAG, ERROR_TAG, Member, headed,
+///         tuple_leaf, tuple_width, tuple_node, tuple_root, tuple_leaves, TupleContent, TupleBuilder, chunk_leaf,
+///         error_content,
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/run/index.rs",
+///         NODE_REFS, FILL, Key, Part, encode_digest, decode_digest, digest, Shape, span, Index,
+///     ),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/run/index.rs",
+///         cover("pub trait Leaf", "impl<K: Key> TokenCodec for Part<K>", "impl<L: Leaf> TokenCodec for Index<L>"),
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/arena/keys.rs",
@@ -78,12 +87,18 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     file(path = "crates/lash-kernel-state/src/paged/run/root.rs", cover("impl TokenCodec for HeapRoot")),
 ///     file(
 ///         path = "crates/lash-kernel-state/src/paged/run/continuation.rs",
-///         cover("macro_rules! record", "macro_rules! tags", "impl TokenCodec for UnitKind", "impl TokenCodec for RunStart"),
+///         cover(
+///             "macro_rules! record", "macro_rules! tags", "impl TokenCodec for UnitKind", "impl TokenCodec for RunStart",
+///             "impl TokenCodec for Segment",
+///         ),
 ///     ),
 ///     items(path = "crates/lash-kernel-value/src/names.rs", ExportName),
 ///     file(
 ///         path = "crates/lash-kernel-state/src/paged/run/chunked.rs",
-///         cover("impl TokenCodec for Chunked", "impl TokenCodec for IndexPage", "impl TokenCodec for ChunkPage"),
+///         cover(
+///             "impl TokenCodec for Chunked", "impl TokenCodec for ChunkRef", "impl TokenCodec for EdgePart",
+///             "impl TokenCodec for ChunkPage",
+///         ),
 ///     ),
 ///     file(path = "crates/lash-kernel-state/src/paged/checkpoint.rs", cover("impl TokenCodec for Checkpoint")),
 ///     file(

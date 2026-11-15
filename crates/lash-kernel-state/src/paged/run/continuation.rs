@@ -639,42 +639,56 @@ impl TokenCodec for WaitPhase {
 /// format's node bound.
 pub const SEGMENT_BYTES: usize = 60 * 1024;
 
-/// The most references one segment-index page holds.
-pub const SEGMENT_REFS: usize = 96;
+/// One segment of a run's encoded state, as its index names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Segment(pub PageRef);
 
-record! {
-    /// The segments of a run's encoded state: how many there are, the
-    /// bytes they hold, and the root page of their index. Every segment
-    /// but the last holds [`SEGMENT_BYTES`]; every index page but the last
-    /// of its level holds [`SEGMENT_REFS`] references, so `count` alone
-    /// gives the index's shape.
-    pub struct SegmentRoot {
-        pub count: u64,
-        pub bytes: u64,
-        pub index: PageRef,
+impl TokenCodec for Segment {
+    fn encode(&self, out: &mut TokenWriter) {
+        self.0.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        PageRef::decode(input).map(Self)
     }
 }
 
-record! {
-    /// One page of a run's segment index: segments, or index pages one
-    /// level down, in order.
-    pub struct SegmentIndex {
-        pub refs: Vec<PageRef>,
+impl super::index::Leaf for Segment {
+    type Key = ();
+    fn key(&self) {}
+    fn page(&self) -> PageRef {
+        self.0
+    }
+    fn page_mut(&mut self) -> &mut PageRef {
+        &mut self.0
     }
 }
+
+/// A run's segment index: full, so the run's length alone gives its
+/// shape, and its top is the run root's, so a run of at most
+/// [`super::index::NODE_REFS`] segments has no index page.
+pub const SEGMENTS: super::index::Shape = super::index::Shape {
+    kind: PageKind::RUN_SEGMENT_INDEX,
+    min_height: 0,
+    full: true,
+    tuple: None,
+    kept: false,
+};
 
 record! {
     /// A run root page's body: the directory and carried session pages it
-    /// retains and the segments of the run's encoded [`RunRecord`].
+    /// retains, the length of the run's encoded [`RunRecord`] and the top
+    /// of the index of its segments. Every segment but the last holds
+    /// [`SEGMENT_BYTES`].
     pub struct RunPage {
         pub directory: Option<PageRef>,
         pub carried: Option<PageRef>,
-        pub segments: SegmentRoot,
+        pub bytes: u64,
+        pub segments: super::index::Index<Segment>,
     }
 }
 
 /// Seals `record` under a run root page: its encoded state in segments
-/// under their index, the root naming the index's root, the directory's
+/// under their index, the root holding the index's top, the directory's
 /// root page and the carried session as its children.
 ///
 /// # Errors
@@ -683,55 +697,30 @@ record! {
 pub fn write(access: &Access<'_>, record: &RunRecord) -> Result<PageRef, HeapFault> {
     let bytes = encode_body(record);
     let directory = record.heap.directory.page;
-    let mut level = Vec::with_capacity(bytes.len().div_ceil(SEGMENT_BYTES));
+    let mut segments = Vec::with_capacity(bytes.len().div_ceil(SEGMENT_BYTES));
     for chunk in bytes.chunks(SEGMENT_BYTES) {
         let mut out = TokenWriter::new();
         out.bytes(chunk);
-        level.push(access.seal(PageKind::RUN_SEGMENT, out.into_bytes(), Vec::new())?);
+        segments.push(Segment(access.seal(
+            PageKind::RUN_SEGMENT,
+            out.into_bytes(),
+            Vec::new(),
+        )?));
     }
-    let count = level.len() as u64;
-    let index = loop {
-        let mut up = Vec::with_capacity(level.len().div_ceil(SEGMENT_REFS).max(1));
-        for refs in level.chunks(SEGMENT_REFS) {
-            up.push(seal_index(access, refs)?);
-        }
-        if up.is_empty() {
-            up.push(seal_index(access, &[])?);
-        }
-        if let [root] = up[..] {
-            break root;
-        }
-        level = up;
-    };
     let page = RunPage {
         directory,
         carried: record.carried,
-        segments: SegmentRoot {
-            count,
-            bytes: bytes.len() as u64,
-            index,
-        },
+        bytes: bytes.len() as u64,
+        segments: super::index::Index::build(access, &SEGMENTS, segments)?,
     };
     let children = page
         .directory
         .iter()
         .chain(&page.carried)
-        .chain([&index])
         .copied()
+        .chain(page.segments.pages())
         .collect();
     access.seal(PageKind::RUN_ROOT, encode_body(&page), children)
-}
-
-/// One segment-index page over `refs`.
-fn seal_index(access: &Access<'_>, refs: &[PageRef]) -> Result<PageRef, HeapFault> {
-    let page = SegmentIndex {
-        refs: refs.to_vec(),
-    };
-    access.seal(
-        PageKind::RUN_SEGMENT_INDEX,
-        encode_body(&page),
-        refs.to_vec(),
-    )
 }
 
 /// The run sealed under run root page `page`.
@@ -740,8 +729,8 @@ fn seal_index(access: &Access<'_>, refs: &[PageRef]) -> Result<PageRef, HeapFaul
 ///
 /// The page port's faults; [`HeapFault::Corrupt`] for a page that is not
 /// a run root, a segment or index page that is not one or has another
-/// shape than its count gives, or state that does not decode or names
-/// another directory than its root retains.
+/// shape than the run's length gives, or state that does not decode or
+/// names another directory than its root retains.
 pub fn read(access: &Access<'_>, page: PageRef) -> Result<RunRecord, HeapFault> {
     let (root, bytes) = read_segmented(access, page)?;
     let mut record: RunRecord = decode_body(&bytes).map_err(|error| HeapFault::Corrupt {
@@ -762,7 +751,7 @@ pub fn read(access: &Access<'_>, page: PageRef) -> Result<RunRecord, HeapFault> 
 /// The root page `page`, the pages it retains granted, and the bytes its
 /// segments hold.
 fn read_segmented(access: &Access<'_>, page: PageRef) -> Result<(RunPage, Vec<u8>), HeapFault> {
-    let corrupt = |reason: String| HeapFault::Corrupt {
+    let corrupt = |page: PageRef, reason: String| HeapFault::Corrupt {
         page: page.id,
         reason,
     };
@@ -776,98 +765,54 @@ fn read_segmented(access: &Access<'_>, page: PageRef) -> Result<(RunPage, Vec<u8
         });
     }
     if answer.kind != PageKind::RUN_ROOT {
-        return Err(corrupt("not a run root page".into()));
+        return Err(corrupt(page, "not a run root page".into()));
     }
     let mut root: RunPage =
-        decode_body(&answer.tokens).map_err(|error| corrupt(error.to_string()))?;
+        decode_body(&answer.tokens).map_err(|error| corrupt(page, error.to_string()))?;
     for held in [&mut root.directory, &mut root.carried]
         .into_iter()
         .flatten()
     {
         grant(held, &answer.children)?;
     }
-    let segments = &mut root.segments;
-    grant(&mut segments.index, &answer.children)?;
-    if segments.bytes.div_ceil(SEGMENT_BYTES as u64) != segments.count {
+    root.segments.grant(&answer.children)?;
+    root.segments
+        .check(&SEGMENTS)
+        .map_err(|reason| corrupt(page, reason))?;
+    if root.bytes.div_ceil(SEGMENT_BYTES as u64) != root.segments.leaves() {
         return Err(corrupt(
+            page,
             "the run's segment count and length disagree".into(),
         ));
     }
-    let mut span = 1u64;
-    while span.saturating_mul(SEGMENT_REFS as u64) < segments.count {
-        span *= SEGMENT_REFS as u64;
-    }
-    let mut bytes = Vec::with_capacity(usize::try_from(segments.bytes).unwrap_or(0));
-    read_index(
-        access,
-        segments.index,
-        segments.count,
-        span,
-        segments.bytes,
-        &mut bytes,
-    )?;
-    if bytes.len() as u64 != segments.bytes {
-        return Err(corrupt("the run's segments hold another length".into()));
-    }
-    Ok((root, bytes))
-}
-
-/// Appends to `bytes` the `count` segments under index page `page`, each
-/// of whose references covers `span` segments, of a run whose segments
-/// hold `total` bytes.
-fn read_index(
-    access: &Access<'_>,
-    page: PageRef,
-    count: u64,
-    span: u64,
-    total: u64,
-    bytes: &mut Vec<u8>,
-) -> Result<(), HeapFault> {
-    let corrupt = |page: PageRef, reason: &str| HeapFault::Corrupt {
-        page: page.id,
-        reason: reason.into(),
-    };
-    let answer = access.read(page)?;
-    if answer.kind != PageKind::RUN_SEGMENT_INDEX {
-        return Err(corrupt(page, "a run segment index page is not one"));
-    }
-    let mut index: SegmentIndex =
-        decode_body(&answer.tokens).map_err(|error| corrupt(page, &error.to_string()))?;
-    if index.refs.len() as u64 != count.div_ceil(span) {
-        return Err(corrupt(
-            page,
-            "a run segment index page has another shape than its count",
-        ));
-    }
-    for (at, child) in index.refs.iter_mut().enumerate() {
-        grant(child, &answer.children)?;
-        let under = span.min(count - at as u64 * span);
-        if span > 1 {
-            read_index(
-                access,
-                *child,
-                under,
-                span / SEGMENT_REFS as u64,
-                total,
-                bytes,
-            )?;
-            continue;
-        }
-        let read = access.read(*child)?;
+    let total = root.bytes;
+    let mut bytes = Vec::with_capacity(usize::try_from(total).unwrap_or(0));
+    root.segments.each(access, &SEGMENTS, &mut |_, segment| {
+        let read = access.read(segment.0)?;
         if read.kind != PageKind::RUN_SEGMENT {
-            return Err(corrupt(*child, "a run segment is not one"));
+            return Err(corrupt(segment.0, "a run segment is not one".into()));
         }
         let mut input = TokenReader::new(&read.tokens);
         let chunk = input
             .bytes()
-            .map_err(|error| corrupt(*child, &error.to_string()))?;
+            .map_err(|error| corrupt(segment.0, error.to_string()))?;
         let left = total.saturating_sub(bytes.len() as u64);
         if chunk.len() as u64 != left.min(SEGMENT_BYTES as u64) {
-            return Err(corrupt(*child, "a run segment holds another length"));
+            return Err(corrupt(
+                segment.0,
+                "a run segment holds another length".into(),
+            ));
         }
         bytes.extend_from_slice(chunk);
+        Ok(false)
+    })?;
+    if bytes.len() as u64 != total {
+        return Err(corrupt(
+            page,
+            "the run's segments hold another length".into(),
+        ));
     }
-    Ok(())
+    Ok((root, bytes))
 }
 
 /// Points `heap`'s directory at the granted `directory` its root page

@@ -260,10 +260,13 @@ fn encode(counts: TextSummary) -> [u8; 24] {
 //   id;
 // - leaves group [`TUPLE_LEAF`] members by position,
 //   `leaf = SHA-256(lash.tuple.leaf ‖ start ‖ count ‖ tokens)`;
-// - each level above groups [`FANOUT`] children left to right,
+// - each level above groups [`TUPLE_FANOUT`] children left to right,
 //   `index = SHA-256(lash.tuple.index ‖ start ‖ count ‖ n ‖ idⁿ)`, with
-//   start and count u64 and n u32, little-endian; level one always exists,
-//   so the root is an index node however few members the tuple has;
+//   start and count u64 and n u32, little-endian, until one node remains;
+//   levels one and two always exist, so the root is a node of level two
+//   or more however few members the tuple has. A level-one node is one
+//   index page of a chunked tuple, and each level above one index level
+//   ([`super::run::index`]): the root is the node over its row's top;
 // - a keyable tuple's normal form is its flat tokens,
 //   `sum(9) seq(len) ‖ member tokens`, inline within
 //   [`NormalKey::INLINE_MAX`], else the root's digest.
@@ -274,8 +277,8 @@ fn encode(counts: TextSummary) -> [u8; 24] {
 /// The members one tuple leaf groups: a chunk page's, by position.
 pub const TUPLE_LEAF: usize = 64;
 
-/// The members one level-one tuple node spans.
-pub const TUPLE_NODE: u64 = (TUPLE_LEAF * FANOUT) as u64;
+/// The children one tuple node groups: one index node's references.
+pub const TUPLE_FANOUT: usize = super::run::index::NODE_REFS;
 
 const TUPLE_LEAF_TAG: &[u8] = b"lash.tuple.leaf.v1\0";
 const TUPLE_INDEX_TAG: &[u8] = b"lash.tuple.index.v1\0";
@@ -445,37 +448,43 @@ pub fn tuple_leaf(start: u64, count: u64, tokens: &[u8]) -> [u8; 32] {
     ])
 }
 
-/// The nodes one level above `ids`, the nodes of a tuple of `len` members
-/// that each span `span` members, grouped [`FANOUT`] to a node; the first
-/// of them is node `first` of its level.
-pub fn tuple_parents(len: u64, span: u64, first: u64, ids: &[[u8; 32]]) -> Vec<[u8; 32]> {
-    let width = span.saturating_mul(FANOUT as u64);
-    ids.chunks(FANOUT)
-        .enumerate()
-        .map(|(at, group)| {
-            let start = (first + at as u64).saturating_mul(width);
-            let count = len.saturating_sub(start).min(width);
-            let mut preimage = Vec::with_capacity(20 + group.len() * 32);
-            preimage.extend_from_slice(&start.to_le_bytes());
-            preimage.extend_from_slice(&count.to_le_bytes());
-            preimage.extend_from_slice(&(group.len() as u32).to_le_bytes());
-            for id in group {
-                preimage.extend_from_slice(id);
-            }
-            sha256(&[TUPLE_INDEX_TAG, &preimage])
-        })
-        .collect()
+/// The members a tuple node of `level` spans; level zero is a leaf.
+fn tuple_width(level: u32) -> u64 {
+    (TUPLE_LEAF as u64).saturating_mul((TUPLE_FANOUT as u64).saturating_pow(level))
 }
 
-/// The root of a tuple of `len` members whose level-one nodes are `nodes`.
-pub fn tuple_root(len: u64, nodes: &[[u8; 32]]) -> [u8; 32] {
-    let mut level = nodes.to_vec();
-    let mut span = TUPLE_NODE;
-    while level.len() > 1 {
-        level = tuple_parents(len, span, 0, &level);
-        span = span.saturating_mul(FANOUT as u64);
+/// Node `at` of `level` of a tuple of `len` members, over its children's
+/// `ids`.
+pub fn tuple_node(len: u64, level: u32, at: u64, ids: &[[u8; 32]]) -> [u8; 32] {
+    let width = tuple_width(level);
+    let start = at.saturating_mul(width);
+    let count = len.saturating_sub(start).min(width);
+    let mut preimage = Vec::with_capacity(20 + ids.len() * 32);
+    preimage.extend_from_slice(&start.to_le_bytes());
+    preimage.extend_from_slice(&count.to_le_bytes());
+    preimage.extend_from_slice(&(ids.len() as u32).to_le_bytes());
+    for id in ids {
+        preimage.extend_from_slice(id);
     }
-    level.first().copied().unwrap_or([0; 32])
+    sha256(&[TUPLE_INDEX_TAG, &preimage])
+}
+
+/// The root of a tuple of `len` members whose leaves are `leaves`.
+pub fn tuple_root(len: u64, leaves: &[[u8; 32]]) -> [u8; 32] {
+    let mut nodes = leaves.to_vec();
+    let mut level = 0;
+    while nodes.len() > 1 || level < 2 {
+        level += 1;
+        nodes = nodes
+            .chunks(TUPLE_FANOUT)
+            .enumerate()
+            .map(|(at, ids)| tuple_node(len, level, at as u64, ids))
+            .collect();
+        if nodes.is_empty() {
+            return [0; 32];
+        }
+    }
+    nodes[0]
 }
 
 /// The leaves of a tuple of `len` members: one per [`TUPLE_LEAF`], and
@@ -485,11 +494,10 @@ pub fn tuple_leaves(len: u64) -> u64 {
 }
 
 /// A tuple's content identity: its normal form when it is a legal key,
-/// its level-one nodes and its root.
+/// and its root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TupleContent {
     pub normal: Option<NormalKey>,
-    pub nodes: Vec<[u8; 32]>,
     pub root: [u8; 32],
 }
 
@@ -563,17 +571,12 @@ impl TupleBuilder {
         if self.leaves.len() as u64 != tuple_leaves(self.len) {
             self.close_leaf();
         }
-        let nodes = tuple_parents(self.len, TUPLE_LEAF as u64, 0, &self.leaves);
-        let root = tuple_root(self.len, &nodes);
+        let root = tuple_root(self.len, &self.leaves);
         let normal = self.keyable.then(|| match self.flat {
             Some(flat) => NormalKey::Inline(flat.into_bytes()),
             None => NormalKey::Digest(root),
         });
-        Ok(TupleContent {
-            normal,
-            nodes,
-            root,
-        })
+        Ok(TupleContent { normal, root })
     }
 }
 
