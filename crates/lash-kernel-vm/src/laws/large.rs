@@ -2,13 +2,14 @@
 //! §6, cold access, ruling (A)): a point access to a large object whose
 //! row is open reads one index page and one chunk; a seal after a point
 //! edit writes W = C + I + E + D pages of heap, the changed chunks, index
-//! pages and edge pages and the union of the changed directory paths; and
-//! the object reopens holding what it held.
+//! pages, edge pages with their edge index pages, and the union of the
+//! changed directory paths; and the object reopens holding what it held.
 //!
 //! The objects here hold 200,000 members, so their chunk counts take the
-//! index past one page. The ceilings each law asserts are the ruling's
-//! fixture ceilings, not a run's: three writes for an integer-only list at
-//! directory depth one; at depth four, six, seven, eight and ten.
+//! index past one page. The ceilings each law asserts are the formula's
+//! values for its fixture, not a run's: three writes for an integer-only
+//! list at directory depth one; at depth four, the derivation in
+//! [`ceiling`] gives six, eight, ten and eleven.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -17,9 +18,10 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::arena::native::{NativeError, NewObject, Retry};
 use lash_kernel_doc::heap::{HeapFault, PageRef};
-use lash_kernel_state::paged::run::chunked::EDGE_REFS;
+use lash_kernel_state::paged::run::chunked::{CHUNK, EDGE_REFS};
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
+use lash_kernel_state::paged::run::index::NODE_REFS;
 use lash_kernel_state::paged::run::root::HeapRoot;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 
@@ -476,51 +478,87 @@ fn set(heap: &mut SlotHeap, roots: &[Value], list: Value, at: i64, value: Value)
 
 /// Contract §6, the d = 4 fixtures of ruling (A): in a heap of 200,001
 /// rows, whose directory is four deep, the seal of a point edit writes
-/// its chunk, its index page, its edge pages and the union of the
-/// directory paths it changes. The ceilings are the ruling's; the law
-/// records each fixture's depth and path overlap, and the bytes written.
+/// W = C + I + E + D + s + i + 2 pages. Each fixture's ceiling is that
+/// formula's value for it, term by term from the fixture's geometry (see
+/// [`ceiling`]); the law records each fixture's depth and path overlap,
+/// and the bytes written.
+///
+/// The fixture: 3,125 chunks, one chunk index level below the row
+/// (I = 1); 200,000 edges at 768 a page, 261 edge pages, one edge index
+/// level (nodes over pages 0–95, 96–191, 192–260); d = 4. `heap.seal`
+/// writes no run record, so s, i and the two roots count 0.
+///
+/// | case | C | I | E: pages + index nodes | D | W |
+/// |---|---|---|---|---|---|
+/// | unchanged-edge overwrite | 1 | 1 | 0 + 0 | 4 | 6 |
+/// | one edge page (page 130, node 1) | 1 | 1 | 1 + 1 | 4 | 8 |
+/// | two edge pages (pages 0 and 130, nodes 0 and 1) | 1 | 1 | 2 + 2 | 4 | 10 |
+/// | a single dead row | 1 | 1 | 1 + 1 | 4 + 3 | 11 |
 #[test]
 fn a_point_edit_in_a_four_deep_directory_seals_within_its_fixture_ceiling() {
     let at = N / 2 + 3;
-    // Each fixture: its name, the ruling's ceiling, and the edit. The
-    // edit returns the values the run still holds besides the list.
+    // Each fixture: its name, the list positions whose referents' edge
+    // counts it changes, and the edit. The edit returns the values the
+    // run still holds besides the list.
     type Edit = fn(&mut SlotHeap, Value, i64) -> Vec<Value>;
-    let fixtures: [(&str, u64, Edit); 4] = [
+    type Changed = fn(i64) -> Vec<i64>;
+    let fixtures: [(&str, Changed, Edit); 4] = [
         // Two members of one chunk swap: every edge count is unchanged.
-        ("an unchanged-edge overwrite", 6, |heap, list, at| {
-            let (a, b) = (member(heap, list, at), member(heap, list, at + 1));
-            set(heap, &[list, a, b], list, at, b);
-            set(heap, &[list, a, b], list, at + 1, a);
-            vec![]
-        }),
+        // W = C 1 + I 1 + E 0 + D 4 = 6.
+        (
+            "an unchanged-edge overwrite",
+            |_| vec![],
+            |heap, list, at| {
+                let (a, b) = (member(heap, list, at), member(heap, list, at + 1));
+                set(heap, &[list, a, b], list, at, b);
+                set(heap, &[list, a, b], list, at + 1, a);
+                vec![]
+            },
+        ),
         // A member is replaced by its neighbour, whose id shares its edge
-        // page; the run still holds the member replaced.
-        ("one edge page", 7, |heap, list, at| {
-            let (a, b) = (member(heap, list, at), member(heap, list, at + 1));
-            assert_eq!(id(heap, b).0, id(heap, a).0 + 1, "neighbouring ids");
-            set(heap, &[list, a, b], list, at, b);
-            vec![a]
-        }),
+        // page; the run still holds the member replaced. W = C 1 + I 1 +
+        // E (1 page + 1 index node) + D 4 = 8.
+        (
+            "one edge page",
+            |at| vec![at, at + 1],
+            |heap, list, at| {
+                let (a, b) = (member(heap, list, at), member(heap, list, at + 1));
+                assert_eq!(id(heap, b).0, id(heap, a).0 + 1, "neighbouring ids");
+                set(heap, &[list, a, b], list, at, b);
+                vec![a]
+            },
+        ),
         // A member is replaced by one whose id lies more than an edge
-        // page's references away: two edge pages change.
-        ("two edge pages", 8, |heap, list, at| {
-            let (a, b) = (member(heap, list, at), member(heap, list, 5));
-            assert!(
-                id(heap, a).0 - id(heap, b).0 > EDGE_REFS as u64,
-                "ids an edge page apart"
-            );
-            set(heap, &[list, a, b], list, at, b);
-            vec![a]
-        }),
+        // page's references away: two edge pages change, under two edge
+        // index nodes. W = C 1 + I 1 + E (2 + 2) + D 4 = 10.
+        (
+            "two edge pages",
+            |at| vec![at, 5],
+            |heap, list, at| {
+                let (a, b) = (member(heap, list, at), member(heap, list, 5));
+                assert!(
+                    id(heap, a).0 - id(heap, b).0 > EDGE_REFS as u64,
+                    "ids an edge page apart"
+                );
+                set(heap, &[list, a, b], list, at, b);
+                vec![a]
+            },
+        ),
         // The only reference to a member is overwritten: its row leaves
-        // the directory at the seal.
-        ("a single dead row", 10, |heap, list, at| {
-            let b = member(heap, list, at + 1);
-            set(heap, &[list, b], list, at, b);
-            vec![]
-        }),
+        // the directory at the seal. W = C 1 + I 1 + E (1 + 1) + D (4 + 3,
+        // the dead row's path sharing only the root) = 11.
+        (
+            "a single dead row",
+            |at| vec![at, at + 1],
+            |heap, list, at| {
+                let b = member(heap, list, at + 1);
+                set(heap, &[list, b], list, at, b);
+                vec![]
+            },
+        ),
     ];
-    for (fixture, ceiling, edit) in fixtures {
+    let mut failed = Vec::new();
+    for (fixture, changed, edit) in fixtures {
         let store = Counting::default();
         let (mut heap, list, root) = opened_root(&store, tuples);
         let dead = fixture == "a single dead row";
@@ -529,7 +567,7 @@ fn a_point_edit_in_a_four_deep_directory_seals_within_its_fixture_ceiling() {
         let at = if dead {
             // Its neighbour shares its chunk.
             (at..N - 1)
-                .filter(|at| at % 64 != 63)
+                .filter(|at| at % CHUNK as i64 != CHUNK as i64 - 1)
                 .find(|&at| {
                     let member = member(&mut heap, list, at);
                     paths(&store, &root, id(&heap, list), id(&heap, member)).1 == 1
@@ -543,18 +581,82 @@ fn a_point_edit_in_a_four_deep_directory_seals_within_its_fixture_ceiling() {
             paths(&store, &root, id(&heap, list), id(&heap, member))
         };
         assert_eq!(depth, 4, "{fixture}: 200,001 rows are four levels deep");
+        // The members' ids run with their positions, so a member's rank in
+        // the list's edge set is its position.
+        let first = member(&mut heap, list, 0);
+        let last = member(&mut heap, list, N - 1);
+        assert_eq!(
+            id(&heap, last).0 - id(&heap, first).0,
+            N as u64 - 1,
+            "{fixture}: the members' ids are consecutive"
+        );
+        let ceiling = ceiling(&changed(at), depth, if dead { depth - overlap } else { 0 });
         let held = edit(&mut heap, list, at);
         let mut roots = vec![list];
         roots.extend(held);
         let bytes = store.bytes.get();
         let (_, _, writes) = store.during(|| heap.seal(&roots).expect("a reseal"));
         let bytes = store.bytes.get() - bytes;
-        eprintln!("{fixture}: d {depth}, path overlap {overlap}, {writes} pages, {bytes} bytes");
-        assert!(
-            writes <= ceiling,
-            "{fixture}: d {depth}, path overlap {overlap}: {writes} pages ({bytes} bytes) over {ceiling}"
+        eprintln!(
+            "{fixture}: d {depth}, path overlap {overlap}, {writes} pages, {bytes} bytes, ceiling {ceiling}"
         );
+        if writes > ceiling {
+            failed.push(format!(
+                "{fixture}: d {depth}, path overlap {overlap}: {writes} pages ({bytes} bytes) over {ceiling}"
+            ));
+        }
     }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// W = C + I + E + D + s + i + 2 for a point edit of the [`tuples`] list
+/// that changes the edge counts of the members at `changed`, with the
+/// list's row `depth` directory pages down and `dead` more directory
+/// pages on a dead row's path (contract §6, ruling (A); `seal-design.md`
+/// run record).
+fn ceiling(changed: &[i64], depth: u64, dead: u64) -> u64 {
+    use std::collections::BTreeSet;
+    let n = N as u64;
+    let fanout = NODE_REFS as u64;
+    // An edge list past one page is cut into pages three quarters full.
+    let edge_width = EDGE_REFS as u64 * 3 / 4;
+    // Index levels below a row over `leaves` pages: none for up to one
+    // node's worth, which the row holds; else one per factor of the fanout.
+    let levels = |leaves: u64| {
+        let mut levels = 0;
+        let mut top = leaves;
+        while top > fanout {
+            top = top.div_ceil(fanout);
+            levels += 1;
+        }
+        levels
+    };
+    // C: the one chunk both edited positions share.
+    let c = 1;
+    // I: the chunk index path, one page per level below the row
+    // (3,125 chunks: one level).
+    let i_index = levels(n.div_ceil(CHUNK as u64));
+    // E: the changed edge pages, and the distinct edge index pages on
+    // their paths, one set per level below the row (261 edge pages: one
+    // level).
+    let edge_pages: BTreeSet<u64> = changed
+        .iter()
+        .map(|&at| u64::try_from(at).expect("a position") / edge_width)
+        .collect();
+    let edge_levels = levels(n.div_ceil(edge_width));
+    let mut e = edge_pages.len() as u64;
+    let mut nodes = edge_pages;
+    for _ in 0..edge_levels {
+        nodes = nodes.iter().map(|page| page / fanout).collect();
+        e += nodes.len() as u64;
+    }
+    // D: the union of the changed directory paths: the list row's, and a
+    // dead row's pages it does not share.
+    let d = depth + dead;
+    // s, i, 2: the run record's segments, segment index pages and two
+    // roots, which the run's checkpoint writes and a heap seal does not.
+    let (s, i, roots) = (0, 0, 0);
+    c + i_index + e + d + s + i + roots
 }
 
 /// `K-VAL-020` on cold lists: two large lists of one length that differ
