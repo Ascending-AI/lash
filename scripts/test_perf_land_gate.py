@@ -138,21 +138,20 @@ class GateLaws(unittest.TestCase):
             self.assertFalse(gate.instrument_only([*self.INSTRUMENT, fixed], self.PACKAGES), fixed)
 
     # Every row at main's median under its ceiling (ceiling / factor) and
-    # below 2x Monty, five equal repeats a side; a row listed exempt stays
-    # near 8x on the base side, so its exemption is not stale.
+    # 1.9x Monty, five equal repeats a side; `monty` sets one side's
+    # reference ratio of a row: {(side, row): ratio}.
     @staticmethod
-    def population(sides, plant=None, exempt_divisor=None):
-        exempt_divisor = exempt_divisor or {'base': 8}
+    def population(sides, plant=None, monty=None):
         samples = []
         for side in sides:
             for key, row in policy.ROWS.items():
                 for repeat in range(5):
                     secant = row['ceiling'] / policy.CEILING_FACTOR
+                    reference = secant / (monty or {}).get((side, key), 1.9)
                     if plant:
                         secant = plant(side, key, repeat, secant)
-                    monty = row['ceiling'] / (exempt_divisor.get(side, 2) if key in policy.MONTY_EXEMPT_ROWS else 2)
                     samples.append(dict(side=side, row=key, repeat=repeat, secant=secant, results=[1, 2],
-                                        reference_secants={'monty': monty} if key.startswith('python/') else {}))
+                                        reference_secants={'monty': reference} if key.startswith('python/') else {}))
         return samples
 
     def test_instrument_only_land_still_fails_a_noisy_candidate_row(self):
@@ -269,22 +268,29 @@ class GateLaws(unittest.TestCase):
 
     def test_the_exempt_row_over_three_times_passes_and_is_printed(self):
         policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
+        main = {(side, self.EXEMPT): 5.29 for side in ('base', 'candidate')}
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            _, errors, _ = gate.judge(self.population(('base', 'candidate'), exempt_divisor={'base': 8, 'candidate': 8}),
-                                      False)
+            _, errors, _ = gate.judge(self.population(('base', 'candidate'), monty=main), False)
         self.assertEqual(errors, [])
         lines = [line for line in out.getvalue().splitlines() if f'candidate/{self.EXEMPT}' in line]
         self.assertTrue(any('exempt' in line and 'report-only 2.00x' in line for line in lines), lines)
 
-    def test_an_exempt_row_at_or_under_three_times_on_both_sides_is_refused_as_stale(self):
-        policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
-        _, errors, _ = gate.judge(self.population(('base', 'candidate'), exempt_divisor={'base': 2}), False)
-        self.assertEqual(errors, [f'{self.EXEMPT}: exemption no longer needed: remove it '
-                                  f'(at or under 3.00x on both sides)'], errors)
-        # Over 3x on the base side only: the exemption is still needed.
-        _, errors, _ = gate.judge(self.population(('base', 'candidate')), False)
-        self.assertEqual(errors, [])
+    # Job F2: a land is held to what its candidate produces; main's base
+    # side stays at 5.29x in the land that fixes the row.
+    FIXED = {('base', 'python/records'): 5.29, ('candidate', 'python/records'): 2.9}
 
+    def test_an_exemption_whose_candidate_is_at_or_under_three_times_is_stale_whatever_the_base(self):
+        policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
+        _, errors, _ = gate.judge(self.population(('base', 'candidate'), monty=self.FIXED), False)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertTrue(errors[0].startswith(f'{self.EXEMPT}: exemption no longer needed: remove it'), errors)
+
+    def test_the_land_removing_an_exemption_passes_on_its_candidate_whatever_the_base(self):
+        # The exempt list is empty here, as the removing land leaves it.
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            _, errors, _ = gate.judge(self.population(('base', 'candidate'), monty=self.FIXED), False)
+        self.assertEqual(errors, [])
+        self.assertIn(f'perf base/{self.EXEMPT}: 5.290000x Monty, information only', out.getvalue())
 
 if __name__ == '__main__':
     unittest.main()

@@ -4,6 +4,7 @@
 import argparse
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,34 @@ from apply_format_witnesses import apply as apply_format_witnesses
 from perf_land_gate import apply_ratchet
 
 CEILINGS = "scripts/perf_land_ceilings.py"
+
+# A land never runs code that differs from the tree it lands. Each process
+# rebases once; when that rebase changed this script or a module it loaded
+# from scripts/, or main moved after qualification, it re-executes itself
+# from the tree with the same arguments. RUNS bounds the restarts.
+SCRIPTS = Path(__file__).resolve().parent
+RUNS = "LASH_LAND_RUNS"
+MAX_RUNS = 12
+
+
+def code_digest(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def loaded_code():
+    """This script and every module loaded from its directory, by digest."""
+    files = {Path(__file__).resolve()}
+    for module in list(sys.modules.values()):
+        source = getattr(module, "__file__", None)
+        if source and Path(source).resolve().parent == SCRIPTS:
+            files.add(Path(source).resolve())
+    return {path: code_digest(path) for path in files}
+
+
+LOADED = loaded_code()
 
 GENERATED = re.compile(
     r"(^|/)BUCK$|^tools/buck2/target-inventory\.json$"
@@ -169,6 +198,15 @@ def land_lock():
         yield
 
 
+def restart(reason):
+    runs = int(os.environ.get(RUNS, "1"))
+    if runs >= MAX_RUNS:
+        raise RuntimeError(f"main kept moving: {runs} runs of scripts/land")
+    print(f"land: restarting from the rebased tree ({reason}); run {runs + 1}/{MAX_RUNS}", flush=True)
+    os.environ[RUNS] = str(runs + 1)
+    os.execv(sys.executable, [sys.executable, str(SCRIPTS / "land"), *sys.argv[1:]])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="rebase, regenerate and check, without pushing")
@@ -178,80 +216,80 @@ def main():
         raise RuntimeError("rebase already in progress")
     if git("status", "--porcelain", "--untracked-files=all"):
         raise RuntimeError("dirty tree: commit or discard changes first")
-    for attempt in range(6):  # initial attempt, then at most five main-moved retries
-        run("git", "fetch", "origin", "main")
-        main_sha = git("rev-parse", "origin/main")
-        rebase()
-        authored = git("rev-parse", "HEAD")
-        witness_paths = apply_format_witnesses(Path.cwd(), main_sha)
-        if witness_paths:
-            run("git", "add", "--", *witness_paths)
-            ticket = re.search(r"\(FIG-\d+\)$", git("log", "-1", "--format=%s"))
-            subject = "Refresh format witnesses and schemas for the rebased shapes"
-            if ticket:
-                subject += " " + ticket.group()
-            run("git", "commit", "-m", subject, "-m",
-                "Hosts that retain stores or opaque bytes in the previous formats "
-                "must reset or recreate them before deployment. The generated "
-                "host-upgrade entry lists the changed stamps. No new opt-in, "
-                "migration or old-shape reader is provided.")
-        # Allocation validates the complete planned tree, including unchanged
-        # guards and the post-cut evidence. Do not project it a second time.
-        run("python3", "scripts/perf-gates.py", "check-sources", "--land-perf-gate")
-        run("python3", "scripts/apply_format_witnesses.py", "--check-artifacts")
-        run("kiln", "build", "//:schema_checks", "//:workspace_clippy")
-        run("python3", "scripts/check_format_registry.py")
-        # ADR 0149's release law: a changed helper or native answer lands
-        # only with its recorded release and native version. It is a test,
-        # so the build above cannot run it (FIG-7640).
-        run("kiln", "test", "//crates/lash-kernel-releases:lash-kernel-releases__unit_test",
-            "--test_arg=--exact",
-            "--test_arg=tests::checked_archive_covers_current_release_and_native_implementations")
-        qualified_head = git("rev-parse", "HEAD")
-        run("python3", "scripts/continuation_compat.py", "--base", main_sha)
-        receipt = Path(".kiln/perf-land") / f"land-{time.time_ns()}-{os.getpid()}"
-        run("python3", "scripts/perf_land_gate.py", "--base", main_sha, "--out", str(receipt))
-        # The gate's measured ceiling ratchet rides with the land as its own
-        # commit, like the format witnesses: only the lowered ceilings of the
-        # qualified tree, so the measured binary is unchanged.
-        lowered = json.loads((receipt / "receipt.json").read_text())["ratchet"]
-        for key, ceiling in lowered.items():
-            print(f"ratchet {key}: ceiling lowered to {ceiling}", flush=True)
-        if args.dry_run:
-            print("dry-run: ratchet not committed, push skipped; HEAD " + git("rev-parse", "HEAD"))
-            return
-        landed = False
-        try:
-            if lowered:
-                Path(CEILINGS).write_text(apply_ratchet(Path(CEILINGS).read_text(), lowered))
-                run("git", "add", "--", CEILINGS)
-                ticket = re.search(r"\(FIG-\d+\)$", git("log", "-1", "--format=%s", authored))
-                subject = "Instruction ceilings ratchet down to the land's measured medians times 1.03"
-                run("git", "commit", "-m", subject + (" " + ticket.group() if ticket else ""), "-m",
-                    "Generated by scripts/land from the perf gate's receipt: "
-                    + ", ".join(f"{key} {ceiling!r}" for key, ceiling in lowered.items()) + ".")
-                if paths("diff", "--name-only", "-z", qualified_head, "HEAD") != [CEILINGS]:
-                    raise RuntimeError("ratchet commit changed more than the ceilings file")
-            with land_lock():
-                run("git", "fetch", "origin", "main")
-                landed = git("rev-parse", "origin/main") == main_sha and push(main_sha, git("rev-parse", "HEAD"))
-        finally:
-            # A ratchet that did not land is measured again on the next attempt.
-            if not landed and git("rev-parse", "HEAD") != qualified_head:
-                run("git", "reset", "--keep", qualified_head)
-        if landed:
-            print("landed " + git("rev-parse", "HEAD"))
-            return
-        if witness_paths:
-            # Drop only our own generated commit, with a clean tree, before
-            # rebasing authored work again. Never rebase allocated integers:
-            # the next main may already have allocated the same values.
-            if git("status", "--porcelain", "--untracked-files=all"):
-                raise RuntimeError("dirty tree after push; cannot regenerate witnesses")
-            run("git", "reset", "--keep", authored)
-        if attempt < 5:
-            print(f"main moved; retrying rebase ({attempt + 1}/5)", flush=True)
-    raise RuntimeError("main kept moving: exhausted five rebase retries")
+    run("git", "fetch", "origin", "main")
+    main_sha = git("rev-parse", "origin/main")
+    rebase()
+    changed = sorted(path.name for path, digest in LOADED.items() if code_digest(path) != digest)
+    if changed:
+        restart("changed " + ", ".join(changed))
+    authored = git("rev-parse", "HEAD")
+    witness_paths = apply_format_witnesses(Path.cwd(), main_sha)
+    if witness_paths:
+        run("git", "add", "--", *witness_paths)
+        ticket = re.search(r"\(FIG-\d+\)$", git("log", "-1", "--format=%s"))
+        subject = "Refresh format witnesses and schemas for the rebased shapes"
+        if ticket:
+            subject += " " + ticket.group()
+        run("git", "commit", "-m", subject, "-m",
+            "Hosts that retain stores or opaque bytes in the previous formats "
+            "must reset or recreate them before deployment. The generated "
+            "host-upgrade entry lists the changed stamps. No new opt-in, "
+            "migration or old-shape reader is provided.")
+    # Allocation validates the complete planned tree, including unchanged
+    # guards and the post-cut evidence. Do not project it a second time.
+    run("python3", "scripts/perf-gates.py", "check-sources", "--land-perf-gate")
+    run("python3", "scripts/apply_format_witnesses.py", "--check-artifacts")
+    run("kiln", "build", "//:schema_checks", "//:workspace_clippy")
+    run("python3", "scripts/check_format_registry.py")
+    # ADR 0149's release law: a changed helper or native answer lands
+    # only with its recorded release and native version. It is a test,
+    # so the build above cannot run it (FIG-7640).
+    run("kiln", "test", "//crates/lash-kernel-releases:lash-kernel-releases__unit_test",
+        "--test_arg=--exact",
+        "--test_arg=tests::checked_archive_covers_current_release_and_native_implementations")
+    qualified_head = git("rev-parse", "HEAD")
+    run("python3", "scripts/continuation_compat.py", "--base", main_sha)
+    receipt = Path(".kiln/perf-land") / f"land-{time.time_ns()}-{os.getpid()}"
+    run("python3", "scripts/perf_land_gate.py", "--base", main_sha, "--out", str(receipt))
+    # The gate's measured ceiling ratchet rides with the land as its own
+    # commit, like the format witnesses: only the lowered ceilings of the
+    # qualified tree, so the measured binary is unchanged.
+    lowered = json.loads((receipt / "receipt.json").read_text())["ratchet"]
+    for key, ceiling in lowered.items():
+        print(f"ratchet {key}: ceiling lowered to {ceiling}", flush=True)
+    if args.dry_run:
+        print("dry-run: ratchet not committed, push skipped; HEAD " + git("rev-parse", "HEAD"))
+        return
+    landed = False
+    try:
+        if lowered:
+            Path(CEILINGS).write_text(apply_ratchet(Path(CEILINGS).read_text(), lowered))
+            run("git", "add", "--", CEILINGS)
+            ticket = re.search(r"\(FIG-\d+\)$", git("log", "-1", "--format=%s", authored))
+            subject = "Instruction ceilings ratchet down to the land's measured medians times 1.03"
+            run("git", "commit", "-m", subject + (" " + ticket.group() if ticket else ""), "-m",
+                "Generated by scripts/land from the perf gate's receipt: "
+                + ", ".join(f"{key} {ceiling!r}" for key, ceiling in lowered.items()) + ".")
+            if paths("diff", "--name-only", "-z", qualified_head, "HEAD") != [CEILINGS]:
+                raise RuntimeError("ratchet commit changed more than the ceilings file")
+        with land_lock():
+            run("git", "fetch", "origin", "main")
+            landed = git("rev-parse", "origin/main") == main_sha and push(main_sha, git("rev-parse", "HEAD"))
+    finally:
+        # A ratchet that did not land is measured again on the next attempt.
+        if not landed and git("rev-parse", "HEAD") != qualified_head:
+            run("git", "reset", "--keep", qualified_head)
+    if landed:
+        print("landed " + git("rev-parse", "HEAD"))
+        return
+    if witness_paths:
+        # Drop only our own generated commit, with a clean tree, before
+        # rebasing authored work again. Never rebase allocated integers:
+        # the next main may already have allocated the same values.
+        if git("status", "--porcelain", "--untracked-files=all"):
+            raise RuntimeError("dirty tree after push; cannot regenerate witnesses")
+        run("git", "reset", "--keep", authored)
+    restart("main moved")
 
 
 if __name__ == "__main__":

@@ -563,6 +563,8 @@ def judge(samples, calibrate, sides=("base", "candidate"), exempt=None):
                     errors.append(f"{side}/{key}/{engine}: repeat noise >={policy.NOISE:.0%}; calibration required")
             result["references"] = reference_medians
             result["ratios"] = {engine: median / count for engine, count in reference_medians.items()}
+            if side != "candidate" and "monty" in result["ratios"]:
+                print(f"perf {side}/{key}: {result['ratios']['monty']:.6f}x Monty, information only", flush=True)
             try:
                 note = check_instruction_ceiling(side, key, median, row["ceiling"],
                                                  reference_medians.get("monty"), calibrate)
@@ -572,11 +574,14 @@ def judge(samples, calibrate, sides=("base", "candidate"), exempt=None):
                 if note:
                     notes.append(note)
                     print(f"perf report-only: {note}", flush=True)
+    # A land is held to what it produces: the candidate side alone decides
+    # the reference rule, so the land that brings an exempt row to 3x or
+    # under removes its exemption whatever the base is.
     for key in policy.MONTY_EXEMPT_ROWS:
-        ratios = [rows.get(f"{side}/{key}", {}).get("ratios", {}).get("monty") for side in sides]
-        if all(ratio is not None and ratio <= policy.MONTY_MAX_RATIO for ratio in ratios):
+        ratio = rows.get(f"candidate/{key}", {}).get("ratios", {}).get("monty")
+        if ratio is not None and ratio <= policy.MONTY_MAX_RATIO:
             errors.append(f"{key}: exemption no longer needed: remove it "
-                          f"(at or under {policy.MONTY_MAX_RATIO:.2f}x on both sides)")
+                          f"(candidate at {ratio:.6f}x, at or under {policy.MONTY_MAX_RATIO:.2f}x)")
     for key in policy.ROWS:
         populations = [[s["results"] for s in samples if s["side"] == side and s["row"] == key]
                        for side in sides]
