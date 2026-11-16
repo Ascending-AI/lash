@@ -223,6 +223,9 @@ fn dense_numeric_reads_and_plain_record_stores_preserve_source_boundaries() {
         "const key = {toString() { console.log('key'); return 'x'; }}; const r = {}; r[key] = 7; console.log(r.x);",
         "const r = {x: 1}; r.x = 2; r.__lash_brand = ['typescript', 'template']; try { r.x = 3; } catch (e) { console.log(e.name); } console.log(r);",
         "const a = [1]; const r = {}; r.a = a; r.b = r; a[0] = 7; console.log(r.a[0]);",
+        "const r = {a: 1, b: 2}; for (let i = 0; i < 5; i++) { r.a = i; delete r.a; r.b = i; r.a = i + 1; } console.log(r); console.log(Object.keys(r));",
+        "function put(r, v) { r.x = v; } const a = {x: 1}; const b = {y: 2, x: 3}; for (let i = 0; i < 4; i++) { put(a, i); put(b, [i]); } console.log(a); console.log(b);",
+        "function put(r, v) { r.x = v; } const r = {x: 1}; for (let i = 0; i < 4; i++) { put(r, i); } r.__lash_brand = true; try { put(r, 99); } catch(e) { console.log(e.name); } console.log(r);",
     ] {
         let case = runner::Case {
             id: "resident access".into(),

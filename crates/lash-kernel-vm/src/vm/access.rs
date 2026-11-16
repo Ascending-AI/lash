@@ -2,6 +2,7 @@
 //! publication starts only after the original frame, fee and growth fit.
 
 use lash_kernel_doc::Value;
+use lash_kernel_state::arena::Key;
 
 use super::{Run, Vm};
 use crate::bytecode::program::{Access, CallSite, Callee, Checked, Program, UnitId};
@@ -156,7 +157,32 @@ impl<H: Heap> Vm<H> {
             let [target, key, value] = self.cx.stack[base..] else {
                 return Ok(false);
             };
-            self.set_index(target, key, value)?;
+            let (Value::Record(record), Value::Text(text)) = (target, key) else {
+                return Ok(false);
+            };
+            let proof = self.lookups.key(text.word());
+            let mut slot = proof.get();
+            if slot.is_none() {
+                slot = self
+                    .heap
+                    .arena()
+                    .table_read(record, None, &Key::text(&text))
+                    .ok()
+                    .and_then(|(_, slot)| slot);
+                proof.set(slot);
+            }
+            let written = match slot {
+                Some(slot) => slot.write(self.heap.arena_mut(), record, &text, value),
+                None => Ok(false),
+            };
+            match written {
+                Ok(true) => self.heap.settle(record, 0),
+                Ok(false) => {
+                    self.lookups.key(text.word()).set(None);
+                    self.set_index(target, key, value)?;
+                }
+                Err(error) => return Err(self.native(error)),
+            }
         }
         self.meter.leave();
         self.exact = true;

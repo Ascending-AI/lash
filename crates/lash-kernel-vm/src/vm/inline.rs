@@ -466,6 +466,14 @@ pub(crate) struct Lookups([Cell<Option<PropertySlot>>; LOOKUPS]);
 const LOOKUPS: usize = 32;
 
 impl Lookups {
+    /// A store's position proof shares the bounded read cache. Collisions
+    /// are misses because the arena rechecks object, version and key.
+    #[inline]
+    pub(super) fn key(&self, word: u128) -> &Cell<Option<PropertySlot>> {
+        let at = (word as usize).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        &self.0[at >> (usize::BITS - LOOKUPS.trailing_zeros())]
+    }
+
     /// The proof cell of the read at `step`.
     #[inline]
     pub(super) fn cell(&self, step: &Step) -> &Cell<Option<PropertySlot>> {
