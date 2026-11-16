@@ -194,6 +194,8 @@ pub const WORDS: usize = 32;
 /// The number of slots reserved for primary operation handlers.
 pub const PLAIN_KINDS: usize = 512;
 pub const OTHER: usize = 16;
+/// Four counted-loop handlers: local/constant bound, with/without Copy.
+pub const COUNTED: usize = OTHER + 7;
 pub const SMALL_STRIDE: usize = 32;
 pub const GENERIC_BUNDLE: usize = 8192;
 pub const SMALL_BUNDLE: usize = GENERIC_BUNDLE + PLAIN_KINDS;
@@ -927,8 +929,8 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
         }
     }
     unit.micros = groups
-        .into_iter()
-        .map(|(first, main, end)| {
+        .iter()
+        .map(|&(first, main, end)| {
             if first == main && end == main + 1 {
                 steps[main]
             } else {
@@ -943,6 +945,43 @@ fn bundle(unit: &mut Unit, mut steps: Vec<Step>) {
             }
         })
         .collect();
+    for (n, pair) in groups.windows(2).enumerate() {
+        let [(first, compare, end), (body, update, tail)] = *pair else {
+            unreachable!("two adjacent groups");
+        };
+        // Exactly Trip + comparison, then Then + optional Copy + increment
+        // + back edge. No prefix or trailing operation may be discarded.
+        if compare != first + 1
+            || end != compare + 1
+            || !(update == body + 1 || update == body + 2)
+            || tail != update + 2
+            || steps[first].kind() != Kind::Trip as usize
+            || steps[body].kind() != Kind::Then as usize
+            || (update == body + 2 && steps[body + 1].kind() != Kind::Copy as usize)
+            || steps[update].kind() != word_kind(0, 1, SET_LOCAL)
+            || steps[update + 1].kind() != Kind::Jump as usize
+            || steps[update + 1].b() != n as u32
+        {
+            continue;
+        }
+        let shape = if steps[compare].kind() == word_kind(8, 0, BRANCH) {
+            0
+        } else if steps[compare].kind() == word_kind(8, 1, BRANCH) {
+            1
+        } else {
+            continue;
+        };
+        // The raw steps are retained, including their original fee bits and
+        // redirected group targets. The second group remains independently
+        // enterable, and every miss returns its original dispatcher op.
+        unit.micros[n] = Step::new(
+            COUNTED + shape * 2 + update - body - 1,
+            steps[first].pc(),
+            0,
+            compare as u32,
+            update as u32,
+        );
+    }
     unit.trace_steps = steps;
 }
 

@@ -22,8 +22,9 @@ use lash_kernel_doc::Value;
 use super::{Flow, Run, Vm, fused};
 use crate::bytecode::program::{Fused, Program, Then, Unit};
 use crate::bytecode::trace::{
-    BRANCH, GENERIC_BUNDLE, KINDS, Kind, NO_PASS, NONE, OPERATIONS, OTHER, PLAIN_KINDS, POP, PUSH,
-    SET_LOCAL, SMALL_BUNDLE, SMALL_PREFIXES, SMALL_STRIDE, Step, WORD_PREFIXES, word_kind,
+    BRANCH, COUNTED, GENERIC_BUNDLE, KINDS, Kind, NO_PASS, NONE, OPERATIONS, OTHER, PLAIN_KINDS,
+    POP, PUSH, SET_LOCAL, SMALL_BUNDLE, SMALL_PREFIXES, SMALL_STRIDE, Step, WORD_PREFIXES,
+    word_kind,
 };
 use crate::heap::Heap;
 
@@ -32,12 +33,21 @@ thread_local! {
     /// The micro-ops run on this thread, for the laws: proof that a law's
     /// run took a trace.
     static RAN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Counted-loop handlers run on this thread, for the laws.
+    static COUNTED_RAN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The micro-ops run on this thread so far.
 #[cfg(test)]
 pub(crate) fn ran() -> u64 {
     RAN.with(std::cell::Cell::get)
+}
+
+/// The counted-loop handlers run on this thread so the law proves the
+/// specialized path was selected.
+#[cfg(test)]
+pub(crate) fn counted_ran() -> u64 {
+    COUNTED_RAN.with(std::cell::Cell::get)
 }
 
 /// What a trace's handlers share besides the machine: the running
@@ -91,6 +101,10 @@ struct Handlers<H, const COUNT: bool>(std::marker::PhantomData<H>);
 impl<H: Heap, const COUNT: bool> Handlers<H, COUNT> {
     const TABLE: [Handler<H>; KINDS] = {
         let mut table: [Handler<H>; KINDS] = [Vm::<H>::step_none::<COUNT>; KINDS];
+        table[COUNTED] = Vm::<H>::step_counted::<COUNT, 0, false>;
+        table[COUNTED + 1] = Vm::<H>::step_counted::<COUNT, 0, true>;
+        table[COUNTED + 2] = Vm::<H>::step_counted::<COUNT, 1, false>;
+        table[COUNTED + 3] = Vm::<H>::step_counted::<COUNT, 1, true>;
         table[Kind::Block as usize] = Vm::<H>::step_block::<COUNT>;
         table[Kind::Trip as usize] = Vm::<H>::step_trip::<COUNT>;
         table[Kind::Then as usize] = Vm::<H>::step_then::<COUNT>;
@@ -190,6 +204,7 @@ impl<H: Heap> Vm<H> {
                 [Kind::Block, Kind::Trip, Kind::Exit]
                     .iter()
                     .any(|&kind| step.kind() == kind as usize)
+                    || (COUNTED..COUNTED + 4).contains(&step.kind())
                     || step.kind() >= PLAIN_KINDS
                     || !self.exact,
                 "a trace runs on the prepaid path"
@@ -289,6 +304,58 @@ impl<H: Heap> Vm<H> {
             k if k == Kind::CellGet as usize => self.step_cell_get::<COUNT>(line, step, at, base),
             k if k == Kind::Jump as usize => self.step_jump::<COUNT>(line, step, at, base),
             _ => fault_out(line, "a bundled prefix of no small kind"),
+        }
+    }
+
+    /// Runs a proved counted-loop pair one trip at a time. Each raw step
+    /// keeps its original meter, witness, fallback and dispatcher boundary.
+    #[inline(always)]
+    fn step_counted<const COUNT: bool, const SHAPE: u8, const COPY: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+        base: usize,
+    ) -> usize {
+        #[cfg(test)]
+        if COUNT {
+            COUNTED_RAN.with(|ran| ran.set(ran.get() + 1));
+        }
+        let steps = &line.unit.trace_steps;
+        let compare_at = step.a() as usize;
+        let update_at = step.b() as usize;
+        let trip = steps[compare_at - 1];
+        let compare = steps[compare_at];
+        let then = steps[update_at - 1 - usize::from(COPY)];
+        let update = steps[update_at];
+        let jump = steps[update_at + 1];
+        loop {
+            let next = self.step_trip::<COUNT>(line, trip, at, base);
+            if next != at + 1 {
+                return next;
+            }
+            let next = self.step_words::<COUNT, 8, 2, BRANCH, SHAPE>(line, compare, at, base);
+            if next != at + 1 {
+                return next;
+            }
+            let next = self.step_then::<COUNT>(line, then, at + 1, base);
+            if next != at + 2 {
+                return next;
+            }
+            if COPY {
+                let next = self.step_copy::<COUNT>(line, steps[update_at - 1], at + 1, base);
+                if next != at + 2 {
+                    return next;
+                }
+            }
+            let next = self.step_words::<COUNT, 0, 2, SET_LOCAL, 1>(line, update, at + 1, base);
+            if next != at + 2 {
+                return next;
+            }
+            let next = self.step_jump::<COUNT>(line, jump, at + 1, base);
+            if next != at {
+                return next;
+            }
         }
     }
 
