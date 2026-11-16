@@ -952,6 +952,11 @@ impl Arena {
     pub fn create(&mut self, object: NewObject) -> Result<Value, NativeError> {
         let naming = object.naming();
         let empty = matches!(&object, NewObject::Tuple(members) if members.is_empty());
+        // The original construction discards these facts when the tuple is
+        // already interned. Its caller still admits and settles the object.
+        if empty && let Some(value) = self.resident_empty_tuple() {
+            return Ok(value);
+        }
         let (body, facts) = self.new_body(object)?;
         if empty {
             return Ok(naming(self.empty_tuple(facts)));

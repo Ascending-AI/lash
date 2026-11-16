@@ -384,3 +384,55 @@ fn resident_access_guards_keep_unproved_operands_on_the_helper() {
         }
     }
 }
+
+/// K-VAL-034 / K-BND-003: first construction, sharing, nonempty operands,
+/// collection and a cold restart keep the parent's admission and slice points.
+#[test]
+fn empty_tuple_construction_keeps_exact_parent_boundaries() {
+    let runner = runner::Runner::new("typescript").unwrap();
+    let runner::Lowered::Program(base) = runner
+        .lower(&runner::Case {
+            id: "empty tuple library".into(),
+            dialect: "typescript".into(),
+            source: "null;".into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        })
+        .unwrap()
+    else {
+        panic!("the library fixture lowers");
+    };
+    for source in [
+        "kernel 1\nnumbers by_spelling\nmain { return () }",
+        "kernel 1\nnumbers by_spelling\nmain { let a = () let b = () return [a, b, (a, 1), (1, 2)] }",
+        "kernel 1\nnumbers by_spelling\nmain { let a = [()] let b = () set a[0] = b let c = () set a[0] = c return a }",
+    ] {
+        let document = lash_kernel_doc::parse_document(source).unwrap();
+        let program = crate::linked::program(std::sync::Arc::new(document), base.library.clone());
+        let result = observe(&program, bounds(), u64::MAX, false);
+        assert!(result.end.is_ok());
+        let charged = result.stops.last().unwrap().1;
+        for slice in 1..=charged + 1 {
+            for cold in [false, true] {
+                observe(&program, bounds(), slice, cold);
+            }
+        }
+        for charge_limit in 0..=charged {
+            observe(
+                &program,
+                Bounds {
+                    charge_limit,
+                    ..bounds()
+                },
+                3,
+                false,
+            );
+        }
+        for memory in (0..=result.memory + 256).step_by(8) {
+            for slice in [3, u64::MAX] {
+                observe(&program, Bounds { memory, ..bounds() }, slice, false);
+            }
+        }
+    }
+}
