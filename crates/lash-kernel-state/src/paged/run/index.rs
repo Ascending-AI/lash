@@ -78,14 +78,14 @@ pub struct Part<K> {
 
 impl<K: Key> TokenCodec for Part<K> {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3 + K::FIELDS + u64::from(self.id.is_some()));
+        out.seq(2 + K::FIELDS + u64::from(self.id.is_some()));
         self.first.write(out);
         out.unsigned(self.count);
         self.page.encode(out);
         encode_digest(&self.id, out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let present = digest_arity(input.seq()?, 3 + K::FIELDS)?;
+        let present = digest_arity(input.seq()?, 2 + K::FIELDS)?;
         Ok(Self {
             first: K::read(input)?,
             count: input.unsigned()?,
@@ -287,6 +287,14 @@ fn corrupt(page: PageRef, reason: &str) -> HeapFault {
 
 /// Of keys in order, the one a key falls in: the last at most it, else
 /// the first.
+/// Whether any reference of `level` carries a content id.
+fn level_ids<L: Leaf>(level: &Level<L>) -> bool {
+    match level {
+        Level::Leaves(leaves) => leaves.iter().any(|leaf| leaf.id().is_some()),
+        Level::Parts(parts) => parts.iter().any(|part| part.id.is_some()),
+    }
+}
+
 fn placed<K: Key>(keys: impl Iterator<Item = K>, key: &K) -> usize {
     keys.take_while(|first| first <= key)
         .count()
@@ -488,7 +496,18 @@ impl<L: Leaf> Index<L> {
                 "an index page is not the one its parent names",
             ));
         }
-        if let Some(len) = shape.tuple {
+        let Some(len) = shape.tuple else {
+            // Only a tuple's index carries content ids, at its top and at
+            // every page below it alike ([`Self::check`]).
+            if level_ids(&level) {
+                return Err(corrupt(
+                    part.page,
+                    "an index page's content ids are another kind's",
+                ));
+            }
+            return Ok(level);
+        };
+        {
             let ids =
                 ids.ok_or_else(|| corrupt(part.page, "a tuple's index page has no content ids"))?;
             let id = identity::tuple_node(len, u32::from(height), start / span(height), &ids);
