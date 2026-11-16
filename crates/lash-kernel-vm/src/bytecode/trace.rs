@@ -674,7 +674,13 @@ fn step(unit: &Unit, micro: Micro) -> Step {
             let operation = match (&fused.words, &fused.numbers) {
                 (Some(words), Some(numbers)) if words.operation != numbers.operation => None,
                 (Some(form), _) | (None, Some(form)) => Some(form.operation),
-                (None, None) => None,
+                // A body-native comparison uses the same operation handler,
+                // retaining its runtime depth, representation and fee guards.
+                (None, None) => fused
+                    .guarded_numbers
+                    .as_ref()
+                    .filter(|form| form.operation.compares())
+                    .map(|form| form.operation),
             };
             let inputs = &unit.trace_operands[n as usize];
             let kind = match operation.and_then(|op| OPERATIONS.iter().position(|&at| at == op)) {

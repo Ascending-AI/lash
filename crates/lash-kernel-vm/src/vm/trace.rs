@@ -586,6 +586,11 @@ impl<H: Heap> Vm<H> {
             && (self.off || fee.is_none_or(|units| self.meter.prepay(units)))
         {
             return self.word_take::<COUNT, PUSHES, THEN>(line, fused, step, value, len, at, base);
+        } else if operation.compares()
+            && let Some(value) =
+                self.fused_float_comparison(line.program, line.unit, fused, args, operation)
+        {
+            return self.word_take::<COUNT, PUSHES, THEN>(line, fused, step, value, len, at, base);
         }
         self.fused_miss::<COUNT>(line, step, at, base)
     }

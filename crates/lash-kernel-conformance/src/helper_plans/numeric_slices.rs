@@ -166,3 +166,78 @@ fn numeric_natives_and_decline_bodies_stop_at_the_same_places_at_every_slice_siz
         }
     }
 }
+
+/// PLAN-INDEP / K-CHG-002 / K-MACH-008: a traced comparison starts on
+/// floats, then declines on a cold heap text whose numeric conversion is
+/// the ordinary helper's. Both paths retain every completion and stop.
+#[test]
+fn guarded_comparison_loops_keep_cold_fallback_stops() {
+    let runner = runner::Runner::new("typescript").unwrap();
+    let case = runner::Case {
+        id: "cold-comparison-loop".into(),
+        dialect: "typescript".into(),
+        source: "null;".into(),
+        bits: 0,
+        stride: 0,
+        nanoseconds: 0,
+    };
+    let runner::Lowered::Program(base) = runner.lower(&case).unwrap() else {
+        panic!("comparison fixture lowers")
+    };
+    let function = |name| {
+        *base
+            .library
+            .registry()
+            .iter()
+            .find(|(_, registered)| registered.definition().name.as_str() == name)
+            .unwrap()
+            .0
+    };
+    let less = function("ts.lt");
+    let add = function("ts.add");
+    // One byte beyond inline capacity, so reopening must read a heap text.
+    let bound = format!("{}3", "0".repeat(lash_kernel_doc::arena::ShortText::MAX));
+    let source = format!(
+        r#"kernel 1
+numbers by_spelling
+main {{
+  let bound = 3.0
+  let i = 0.0
+  while invoke @{less}(i, bound) {{
+    print i
+    set bound = "{bound}"
+    set i = invoke @{add}(i, 1.0)
+  }}
+  return i
+}}"#
+    );
+    let mut document = lash_kernel_doc::parse_document(&source).unwrap();
+    document.library.insert(less);
+    document.library.insert(add);
+    let alternatives = crate::declining_bodies(&base.library);
+    assert!(Arc::ptr_eq(base.library.helpers(), alternatives.helpers()));
+    let native = crate::linked::program(Arc::new(document), base.library.clone());
+    let body = Program {
+        library: alternatives,
+        ..native.clone()
+    };
+    let reference = observe(&native, u64::MAX, false);
+    assert_eq!(reference.1.len(), 3, "the heap-operand fallback must run");
+    let charged = reference.2.last().unwrap().1;
+    assert!(charged > 0);
+    for slice in 1..=charged + 1 {
+        let expected = observe(&native, slice, false);
+        for cold in [false, true] {
+            assert_eq!(
+                observe(&native, slice, cold),
+                expected,
+                "native slice {slice}, cold {cold}"
+            );
+            assert_eq!(
+                observe(&body, slice, cold),
+                expected,
+                "body slice {slice}, cold {cold}"
+            );
+        }
+    }
+}

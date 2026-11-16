@@ -115,12 +115,7 @@ impl<H: Heap> Vm<H> {
             return Some(Ok((value, fee.filter(|_| !self.off))));
         }
         if let Some(form) = &fused.guarded_numbers {
-            let entry = program.native(native);
-            let full = match entry.elided {
-                0 => self.depth_full(),
-                reach => self.short_of(reach),
-            };
-            if full {
+            if self.fused_number_depth_full(program, native) {
                 return None;
             }
             if let Some((value, fee)) = form.numbers(args) {
@@ -128,6 +123,48 @@ impl<H: Heap> Vm<H> {
             }
         }
         self.answer(program, native, charged, &args)
+    }
+
+    /// The body-native number form retains the body's full depth reach.
+    #[inline(always)]
+    fn fused_number_depth_full(&self, program: &Program, native: u32) -> bool {
+        match program.native(native).elided {
+            0 => self.depth_full(),
+            reach => self.short_of(reach),
+        }
+    }
+
+    /// A guarded comparison of two non-NaN floats needs no generic numeric
+    /// answer. The form proves the operation and float domain; the original
+    /// depth guard and completion fee still precede taking its answer.
+    /// Every decline leaves the operands and reservation untouched.
+    #[inline(always)]
+    pub(super) fn fused_float_comparison(
+        &mut self,
+        program: &Program,
+        unit: &Unit,
+        fused: &Fused,
+        args: [Value; 2],
+        operation: lash_kernel_doc::scalar::ScalarOp,
+    ) -> Option<Value> {
+        let form = fused.guarded_numbers.as_ref()?;
+        debug_assert_eq!(operation, form.operation);
+        let [Value::Float(a), Value::Float(b)] = args else {
+            return None;
+        };
+        if a.get().is_nan() || b.get().is_nan() {
+            return None;
+        }
+        let truth = lash_kernel_doc::scalar::float_truth(operation, a.get(), b.get())?;
+        let Callee::Native { native, .. } = unit.calls[fused.site as usize].callee else {
+            return None;
+        };
+        if self.fused_number_depth_full(program, native)
+            || !self.off && form.fee.is_some_and(|table| !self.meter.prepay(table[0]))
+        {
+            return None;
+        }
+        Some(Value::Bool(truth))
     }
 
     /// A fused run's two call arguments: its pushes read where they are,
