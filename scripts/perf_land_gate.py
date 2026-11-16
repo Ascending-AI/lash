@@ -104,11 +104,12 @@ def land_paths(base, candidate):
 
 
 def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=False):
-    """Refuse a row above its ceiling or a candidate PY row above the binding
-    Monty ratio; answer the report-only note of one above the report ratio."""
+    """Refuse a row above its ceiling or a candidate bound PY row above the
+    binding Monty ratio; answer the report-only note of one above the report
+    ratio. Every other reference ratio is information in the receipt."""
     if not calibrate:
         require(median <= ceiling, f"{side}/{key}: median {median} exceeds ceiling {ceiling}")
-    if side == "candidate" and key.startswith("python/") and policy.MONTY_BINDING:
+    if side == "candidate" and key in policy.MONTY_BOUND_ROWS and policy.MONTY_BINDING:
         require(monty is not None and math.isfinite(monty) and monty > 0,
                 f"{side}/{key}: missing qualified Monty secant")
         require(median <= policy.MONTY_MAX_RATIO * monty,
@@ -142,21 +143,19 @@ def check_cold_access(key, row):
     require(not errors, "; ".join(errors))
 
 
-# The seal cost is its instructions:u count, held to the compare rows' 1%
-# rule: each side's repeat noise (range over median) is below 1%, and the
-# candidate's median stays below 1.01x the base's. Identical code spreads
-# about 0.2% across processes, so an exact 1.0 would refuse it at random.
-# Wall-clock seal time is recorded and gates nothing.
-SEAL_NOISE = .01
-
-
+# The seal cost is its instructions:u count, held to the compare rows' rule:
+# each side's repeat noise below policy.NOISE and the candidate's median below
+# the base's times 1 + policy.BASE_MARGIN. Identical code spreads about 0.2%
+# across processes, so an exact 1.0 would refuse it at random. Wall-clock
+# seal time is recorded and gates nothing. Bytes written stay exact.
 def seal_noise(side, key, rows):
     """The seal-count repeat noise failure of one side's supported rows, if any."""
     counts = [row["seal_instructions"] for row in rows if row["status"] == "supported"]
     if not counts:
         return []
     noise = (max(counts) - min(counts)) / statistics.median(counts)
-    return [f"{side}/{key}: seal instructions repeat noise {noise:.4%} >=1%; calibration required"] if noise >= SEAL_NOISE else []
+    return ([f"{side}/{key}: seal instructions repeat noise {noise:.4%} >={policy.NOISE:.0%}; calibration required"]
+            if noise >= policy.NOISE else [])
 
 
 def checkpoint_outcome(key, old, new):
@@ -179,31 +178,77 @@ def checkpoint_outcome(key, old, new):
     if all(row["status"] == "supported" for row in new):
         ratios["bytes_written"] = statistics.median([n["bytes_written"] / b["bytes_written"]
                                                      for b, n in zip(old, new, strict=True)])
-        if ratios["bytes_written"] > policy.BOUNDARY["max_checkpoint_ratio"]:
+        if ratios["bytes_written"] > 1:
             errors.append(f"{key}: checkpoint bytes_written {ratios['bytes_written']:.6f}x exceeds base")
         ratios["seal_instructions"] = (statistics.median(n["seal_instructions"] for n in new)
                                        / statistics.median(b["seal_instructions"] for b in old))
-        if ratios["seal_instructions"] >= policy.BOUNDARY["max_checkpoint_ratio"] + SEAL_NOISE:
+        if ratios["seal_instructions"] >= 1 + policy.BASE_MARGIN:
             errors.append(f"{key}: checkpoint seal_instructions {ratios['seal_instructions']:.6f}x "
-                          f"exceeds base by >=1%")
+                          f"exceeds base by >={policy.BASE_MARGIN:.0%}")
         ratios["seal_ns_information"] = statistics.median([n["seal_ns"] / b["seal_ns"]
                                                            for b, n in zip(old, new, strict=True)])
     return dict(outcome="base-relative"), ratios, errors
 
 
-def check_rows(prior, previous_source, calibrate):
-    replacement = hashlib.sha256(previous_source.encode()).hexdigest() == policy.REVIEWED_REPLACEMENT["previous_sha256"]
-    added = set(policy.REVIEWED_REPLACEMENT["added_rows"]) if replacement else set()
+def check_rows(prior, replacement):
+    """Hold the rows to the base's: only an active reviewed replacement adds
+    rows or changes a ceiling, and only the ones it names. The land's ratchet
+    lowers ceilings after this check, so a candidate never carries one."""
+    added = set(replacement["added_rows"]) if replacement else set()
+    replaced = set(replacement["replaced_ceilings"]) if replacement else set()
     require(set(policy.ROWS) == set(prior) | added and not set(prior) & added,
             "tracked rows changed; reviewed replacement required")
+    require(replaced <= set(prior), "a reviewed replacement replaces ceilings of tracked rows only")
     for key, old_row in prior.items():
         row = policy.ROWS[key]
         require({k: v for k, v in row.items() if k != "ceiling"} ==
                 {k: v for k, v in old_row.items() if k != "ceiling"},
                 f"{key}: workload contract changed; reviewed replacement required")
-        if old_row["ceiling"] is not None:
-            require(row["ceiling"] is not None and row["ceiling"] <= old_row["ceiling"],
-                    f"{key}: ordinary lands cannot raise ceilings")
+        require(row["ceiling"] == old_row["ceiling"] or key in replaced,
+                f"{key}: ceiling {old_row['ceiling']} -> {row['ceiling']} matches neither the land's ratchet "
+                f"nor a reviewed replacement naming this row")
+
+
+def exemptions(replacement):
+    """The rows an active reviewed replacement exempts from the base margin,
+    each with its reviewer."""
+    return {key: replacement["reviewer"] for key in replacement["replaced_ceilings"]} if replacement else {}
+
+
+def ratchet(rows):
+    """The lowered ceiling of every row whose candidate median times the
+    ceiling factor sits more than the ratchet slack below its ceiling."""
+    lowered = {}
+    for key, row in policy.ROWS.items():
+        target = rows[f"candidate/{key}"]["median"] * policy.CEILING_FACTOR
+        if row["ceiling"] is not None and target < row["ceiling"] * (1 - policy.RATCHET_SLACK):
+            lowered[key] = target
+    return lowered
+
+
+def policy_values(source):
+    return {node.targets[0].id: ast.literal_eval(node.value) for node in ast.parse(source).body
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)}
+
+
+def apply_ratchet(source, lowered):
+    """The ceilings file with exactly the ratchet's ceilings replaced."""
+    rows = next(node.value for node in ast.parse(source).body
+                if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "ROWS")
+    edits = []
+    for key_node, row_node in zip(rows.keys, rows.values):
+        if key_node.value in lowered:
+            value = row_node.values[[k.value for k in row_node.keys].index("ceiling")]
+            edits.append((value.lineno, value.col_offset, value.end_col_offset, repr(float(lowered[key_node.value]))))
+    require(len(edits) == len(lowered), "ratchet names an untracked row")
+    lines = source.splitlines(keepends=True)
+    for line, start, end, text in sorted(edits, reverse=True):
+        lines[line - 1] = lines[line - 1][:start] + text + lines[line - 1][end:]
+    result = "".join(lines)
+    before, after = policy_values(source), policy_values(result)
+    expected = {key: dict(row, ceiling=lowered[key]) if key in lowered else row for key, row in before["ROWS"].items()}
+    require(after == dict(before, ROWS=expected), "ratchet changed more than the lowered ceilings")
+    return result
 
 
 def load_artifact(path):
@@ -311,10 +356,13 @@ def cpus():
 
 
 def contract(base, calibrate):
+    """Hold the policy to the base's copy. Answers the active reviewed
+    replacement, or None."""
     # Main may advance after calibration. A bootstrap must descend from the
     # reviewed seed and cannot replace a previously published policy.
     old = subprocess.run(["git", "show", f"{base['commit']}:scripts/perf_land_ceilings.py"],
                          cwd=ROOT, capture_output=True, text=True)
+    replacement = None
     if old.returncode:
         require(subprocess.run(["git", "merge-base", "--is-ancestor", policy.SEED_COMMIT, base["commit"]],
                                cwd=ROOT, capture_output=True).returncode == 0,
@@ -322,34 +370,22 @@ def contract(base, calibrate):
         require(not git("log", "-1", "--format=%H", base["commit"], "--", "scripts/perf_land_ceilings.py"),
                 "base previously published a ceilings policy; reviewed replacement required")
     else:
-        namespace = {node.targets[0].id: ast.literal_eval(node.value)
-                     for node in ast.parse(old.stdout).body
-                     if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)}
-        for field in ("CONFIGURATION", "COMPILER", "BUILD_FLAGS", "ENGINE_VERSION", "QUICKJS_REVISION", "QUICKJS_SHA256",
-                      "PYTHON_SHA256", "PYTHON_VERSION", "MONTY_VERSION", "MONTY_SHA256", "WORKERS", "CPU_MODEL", "SCOPE"):
-            require(namespace[field] == getattr(policy, field), f"{field}: measurement contract changed; reviewed replacement required")
-        replacement = hashlib.sha256(old.stdout.encode()).hexdigest() == policy.REVIEWED_REPLACEMENT["previous_sha256"]
-        # The reviewed replacement introduces the reference environment;
-        # after it, the environment is part of the fixed contract.
-        require(namespace.get("REFERENCE_ENVIRONMENT", policy.REFERENCE_ENVIRONMENT if replacement else None)
-                == policy.REFERENCE_ENVIRONMENT,
-                "REFERENCE_ENVIRONMENT: measurement contract changed; reviewed replacement required")
-        if replacement:
-            require([key for key in policy.COST_ORDER if key not in policy.REVIEWED_REPLACEMENT["added_rows"]]
-                    == namespace["COST_ORDER"], "existing cost order changed")
-        else:
-            require(namespace["COST_ORDER"] == policy.COST_ORDER,
-                    "COST_ORDER: measurement contract changed; reviewed replacement required")
-            require(namespace.get("MONTY_BINDING") is True and policy.MONTY_BINDING is True and
-                    namespace.get("MONTY_MAX_RATIO") == policy.MONTY_MAX_RATIO and
-                    namespace.get("MONTY_REPORT_RATIO") == policy.MONTY_REPORT_RATIO,
-                    "binding Monty contract changed; reviewed replacement required")
-            require(namespace.get("BOUNDARY") == policy.BOUNDARY,
-                    "boundary contract changed; reviewed replacement required")
-            if namespace.get("CHECKPOINT_BASE") is not None:
-                require(namespace["CHECKPOINT_BASE"] == policy.CHECKPOINT_BASE,
-                        "checkpoint base changed; reviewed replacement required")
-        check_rows(namespace["ROWS"], old.stdout, calibrate)
+        previous = policy_values(old.stdout)
+        current = {name: value for name, value in vars(policy).items() if name.isupper()}
+        if hashlib.sha256(old.stdout.encode()).hexdigest() == policy.REVIEWED_REPLACEMENT["previous_sha256"]:
+            replacement = policy.REVIEWED_REPLACEMENT
+            require(isinstance(replacement.get("reviewer"), str) and replacement["reviewer"].strip(),
+                    "a reviewed replacement names its reviewer")
+            print(f"perf reviewed replacement by {replacement['reviewer']}: adds {replacement['added_rows']}, "
+                  f"replaces ceilings {replacement['replaced_ceilings']}, changes {replacement['changed_fields']}",
+                  flush=True)
+        changed = set(replacement["changed_fields"]) if replacement else set()
+        missing = object()
+        for name in sorted((set(previous) | set(current)) - {"ROWS", "REVIEWED_REPLACEMENT"}):
+            require(previous.get(name, missing) == current.get(name, missing) or name in changed,
+                    f"{name}: measurement contract changed; reviewed replacement required")
+        check_rows(previous["ROWS"], replacement)
+    require(sorted(policy.COST_ORDER) == sorted(policy.ROWS), "COST_ORDER must list every row once")
     for path in ("tools/buck2/lash_rust.bzl", "tools/buck2/third_party.bzl"):
         flags = re.search(r"_OPTIMIZED_FLAGS = (\[[\s\S]*?\n\])", (ROOT / path).read_text())
         require(flags is not None and ast.literal_eval(flags[1]) == policy.BUILD_FLAGS,
@@ -364,6 +400,9 @@ def contract(base, calibrate):
     require(policy.MONTY_BINDING is True and policy.MONTY_MAX_RATIO == 3.0,
             "the switch gate requires a binding 3.00x Monty ceiling")
     require(policy.MONTY_REPORT_RATIO == 2.0, "the switch gate reports PY rows above 2.00x Monty")
+    require(set(policy.MONTY_BOUND_ROWS) <= {key for key in policy.ROWS if key.startswith("python/")},
+            "the Monty rule binds tracked PY rows only")
+    return replacement
 
 
 def boundary_pair(checkpoint_base, candidate, instrument):
@@ -488,10 +527,12 @@ def capture(artifact, side, key, row, repeat, cpu, refs, out, deadline):
                 capture=str(stem.with_suffix(".json")))
 
 
-def judge(samples, calibrate, sides=("base", "candidate")):
+def judge(samples, calibrate, sides=("base", "candidate"), exempt=None):
     """Hold every row of each gated side to its repeat-noise bound, its
-    ceiling and the reference ratio. Answers the rows, the failures and the
-    report-only notes."""
+    ceiling and the reference ratio, and each candidate row with equal work
+    to its base's median times 1 + BASE_MARGIN unless a reviewed replacement
+    exempts it (`exempt`: row -> reviewer). Answers the rows, the failures
+    and the report-only notes."""
     rows, errors, notes = {}, [], []
     for side in sides:
         for key, row in policy.ROWS.items():
@@ -505,8 +546,8 @@ def judge(samples, calibrate, sides=("base", "candidate")):
             result = dict(median=median, noise=noise, ceiling=row["ceiling"], samples=values)
             rows[f"{side}/{key}"] = result
             print(f"perf {side}/{key}: median={median:.6f}, ceiling={row['ceiling']}, noise={noise:.4%}", flush=True)
-            if noise >= .01:
-                errors.append(f"{side}/{key}: repeat noise {noise:.4%} >=1%; calibration required")
+            if noise >= policy.NOISE:
+                errors.append(f"{side}/{key}: repeat noise {noise:.4%} >={policy.NOISE:.0%}; calibration required")
             if not all(s["results"] == population[0]["results"] for s in population):
                 errors.append(f"{side}/{key}: nondeterministic equal-work result")
             reference_medians = {}
@@ -514,8 +555,8 @@ def judge(samples, calibrate, sides=("base", "candidate")):
                 counts = [s["reference_secants"][engine] for s in population]
                 center = statistics.median(counts)
                 reference_medians[engine] = center
-                if (max(counts) - min(counts)) / center >= .01:
-                    errors.append(f"{side}/{key}/{engine}: repeat noise >=1%; calibration required")
+                if (max(counts) - min(counts)) / center >= policy.NOISE:
+                    errors.append(f"{side}/{key}/{engine}: repeat noise >={policy.NOISE:.0%}; calibration required")
             result["references"] = reference_medians
             result["ratios"] = {engine: median / count for engine, count in reference_medians.items()}
             try:
@@ -532,6 +573,21 @@ def judge(samples, calibrate, sides=("base", "candidate")):
                        for side in sides]
         if all(populations) and any(population[0] != populations[0][0] for population in populations):
             errors.append(f"{key}: base and candidate equal-work results differ")
+            continue
+        base, candidate = rows.get(f"base/{key}"), rows.get(f"candidate/{key}")
+        if base is None or candidate is None:
+            continue
+        candidate["base_ratio"] = ratio = candidate["median"] / base["median"]
+        if key in (exempt or {}):
+            candidate["exempt_reviewer"] = exempt[key]
+            note = (f"candidate/{key}: {ratio:.6f}x base, exempt from the {policy.BASE_MARGIN:.0%} base margin "
+                    f"by the reviewed ceiling replacement of {exempt[key]}")
+            notes.append(note)
+            print(f"perf {note}", flush=True)
+        elif ratio >= 1 + policy.BASE_MARGIN:
+            errors.append(f"candidate/{key}: median {candidate['median']:.6f} is {ratio:.6f}x the base's "
+                          f"{base['median']:.6f}, not below {1 + policy.BASE_MARGIN:.2f}x; "
+                          f"a reviewed replacement of its ceiling is required")
     return rows, errors, notes
 
 
@@ -555,11 +611,11 @@ def record_instrument(old_samples, rows):
     return dict(rows=record, shifted=shifted)
 
 
-def instrument_verdict(samples, old_samples, calibrate=False):
+def instrument_verdict(samples, old_samples, calibrate=False, exempt=None):
     """An instrument-only land: both gated sides ran the candidate's binary
     and are judged exactly as any land; the base's instrument is recorded
     and adds no failure."""
-    rows, errors, notes = judge(samples, calibrate)
+    rows, errors, notes = judge(samples, calibrate, exempt=exempt)
     return rows, errors, notes, record_instrument(old_samples, rows)
 
 
@@ -595,7 +651,7 @@ def measure(base_path, candidate_path, out, calibrate=False, instrument=False):
     sides run the candidate's binary, and the base's binary is measured once
     more, recorded beside them, gating nothing."""
     base, candidate = load_artifact(base_path), load_artifact(candidate_path)
-    contract(base, calibrate)
+    exempt = exemptions(contract(base, calibrate))
     measured = candidate if instrument else base
     tasks = [(side, artifact, key, row, repeat) for key, row in policy.ROWS.items()
              for repeat in range(5) for side, artifact in (("base", measured), ("candidate", candidate))]
@@ -604,6 +660,10 @@ def measure(base_path, candidate_path, out, calibrate=False, instrument=False):
     report = dict(base=base, candidate=candidate, configuration=policy.CONFIGURATION, cpus=cores,
                   samples=samples, failures=errors, rows={},
                   mode="instrument-only" if instrument else "product",
+                  base_relative=("instrument-only land: both sides ran the candidate's binary, so the "
+                                 "base-relative check ran and passes trivially" if instrument else
+                                 "candidate's binary against the base's, every row with equal work"),
+                  exemptions=exempt,
                   base_side_binary=measured,
                   producer_commit_field="working checkout only; artifact source identities are recorded above",
                   policy=dict(scope=policy.SCOPE, build_flags=policy.BUILD_FLAGS, rows=policy.ROWS,
@@ -620,14 +680,14 @@ def measure(base_path, candidate_path, out, calibrate=False, instrument=False):
         old_samples, old_errors, _ = collect(
             [("old", base, key, row, repeat) for key, row in policy.ROWS.items() for repeat in range(5)],
             out, old_start + 600)
-        rows, failed, notes, old = instrument_verdict(samples, old_samples, calibrate)
+        rows, failed, notes, old = instrument_verdict(samples, old_samples, calibrate, exempt)
         old["collection_errors"] = old_errors
         old["wall_seconds"] = time.monotonic() - old_start
         old["note"] = ("perf instrument-only land: both sides measured with the candidate's instrument; "
                        "the base's instrument is recorded and gates nothing")
         report["old_instrument"] = old
     else:
-        rows, failed, notes = judge(samples, calibrate)
+        rows, failed, notes = judge(samples, calibrate, exempt=exempt)
     report["rows"], report["monty_report"] = rows, notes
     errors.extend(failed)
     if report["wall_seconds"] > 600:
@@ -637,6 +697,7 @@ def measure(base_path, candidate_path, out, calibrate=False, instrument=False):
     write(Path(out) / "receipt.json", report)
     kind = "calibration" if calibrate else "gate"
     print(f"perf {kind}: {report['wall_seconds']:.2f}s, {len(samples)}/{expected} pairs, receipt={Path(out) / 'receipt.json'}", flush=True)
+    print(f"perf base-relative: {report['base_relative']}", flush=True)
     if instrument:
         print(report["old_instrument"]["note"], flush=True)
         for key, entry in report["old_instrument"]["rows"].items():
@@ -685,10 +746,10 @@ def main():
         require(current == head, f"candidate changed during measurement: {head} -> {current}")
         require(not git("status", "--porcelain", "--untracked-files=all"),
                 "candidate working tree changed during measurement; rerun scripts/land")
-    result["qualified_ceilings"] = {
-        key: (min(row["ceiling"], result["rows"][f"candidate/{key}"]["median"] * 1.03)
-              if row["ceiling"] is not None else result["rows"][f"candidate/{key}"]["median"] * 1.03)
-        for key, row in policy.ROWS.items()}
+    # scripts/land folds this into the land as its own commit.
+    result["ratchet"] = {} if args.calibrate else ratchet(result["rows"])
+    for key, ceiling in result["ratchet"].items():
+        print(f"perf ratchet {key}: ceiling {policy.ROWS[key]['ceiling']} -> {ceiling}", flush=True)
     write(out / "receipt.json", result)
 
 

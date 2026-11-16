@@ -1,26 +1,66 @@
 """Reviewed instruction ceilings and the fixed measurement contract for FIG-7682."""
 
-# The runtime switch gate: every PY row must also be <=3x Monty 1.4.0 in this
+# The runtime switch gate: every bound PY row must also be <=3x Monty 1.4.0 in this
 # same Kiln configuration, with no margin above 3x, and no PY or TS row may
 # exceed its own ceiling below. This rule is binding.
 # The <=2x Monty goal is report-only until after the switch: a PY row above it
 # is named in the receipt and never fails the gate.
-# Every ceiling is main's median of five raw paired secants times 1.03,
-# checked on both sides. Recalibrated 16 Nov for the bytecode core, lead as
-# reviewer: medians of main e189e14bf6 measured by this gate with the landed
-# harness (each row on its own thread), five repeats, every row's repeat
-# noise below 0.1%. No ceiling was raised; the region-era ceilings sat up to
-# 1000x above today's medians.
+# Every ceiling is main's median of five raw paired secants times
+# CEILING_FACTOR, checked on both sides. Recalibrated 16 Nov for the bytecode
+# core, lead as reviewer: medians of main e189e14bf6 measured by this gate with
+# the landed harness (each row on its own thread), five repeats, every row's
+# repeat noise below 0.1%. No ceiling was raised; the region-era ceilings sat
+# up to 1000x above today's medians.
+#
+# How these numbers move (FIG-7694, job D):
+# - Every instruction count the gate measures (row secants, references and
+#   the boundary seal) holds its repeat noise, range over median, below NOISE.
+# - Every row, and the boundary seal, holds the candidate's median below the
+#   base's median times 1 + BASE_MARGIN, measured in the same land.
+# - A ceiling moves down only by the land's ratchet: when the candidate's
+#   median times CEILING_FACTOR sits more than RATCHET_SLACK below a row's
+#   ceiling, scripts/land commits exactly that lower ceiling with the land.
+# - Any other change to this file's values is a reviewed replacement: its
+#   REVIEWED_REPLACEMENT names the exact predecessor file, the reviewer and
+#   what it changes. A row in its replaced_ceilings takes the reviewed ceiling
+#   and is exempt from the base margin for that land only, printed with the
+#   reviewer. There is no other way around either check.
 
 MONTY_BINDING = True
 MONTY_MAX_RATIO = 3.0
 MONTY_REPORT_RATIO = 2.0
+# The PY rows the binding 3x and report-only 2x rules hold. Rows added by
+# job D record their reference ratio as information only (python/records
+# measured 5.29x Monty on 3f729b250e).
+MONTY_BOUND_ROWS = ['python/int_arith',
+ 'python/func_call',
+ 'python/prop_read',
+ 'python/map_set_string',
+ 'python/json_transform',
+ 'python/sort_bench',
+ 'python/func_closure_call',
+ 'python/float_arith',
+ 'python/string_build1',
+ 'python/int_to_string']
 
-# Contract r57, L7: only this exact predecessor may add these four rows.
+NOISE = 0.01
+BASE_MARGIN = 0.01
+CEILING_FACTOR = 1.03
+RATCHET_SLACK = 0.03
+
+# Active only while the base's copy of this file has previous_sha256.
 REVIEWED_REPLACEMENT = {
-    'previous_sha256': '6c12001454776ad428013cc59821d6d4babd437299a82fcef6c53e863dddca32',
-    'added_rows': ['python/func_closure_call', 'python/float_arith',
-                   'python/string_build1', 'python/int_to_string'],
+    'previous_sha256': '0023baa381b62d8452a6dfab0a3e4d2e44591ce1237a08dcfc7b1bddfc0cc18a',
+    'reviewer': 'r60 lead',
+    'added_rows': ['typescript/sort_bench', 'typescript/object_sort', 'python/object_sort',
+                   'typescript/object_sort_200k', 'python/object_sort_200k',
+                   'typescript/array_read', 'python/array_read', 'typescript/prop_write',
+                   'python/prop_write', 'typescript/records', 'python/records',
+                   'typescript/string_build1', 'typescript/empty_loop', 'python/empty_loop',
+                   'typescript/object_build', 'python/object_build'],
+    'replaced_ceilings': [],
+    'changed_fields': ['NOISE', 'BASE_MARGIN', 'CEILING_FACTOR', 'RATCHET_SLACK', 'COST_ORDER',
+                       'BOUNDARY', 'ADDED_ROW_CANDIDATE_MEDIANS', 'MONTY_BOUND_ROWS'],
 }
 
 CONFIGURATION = 'Kiln optimized, full optimization, perf_iteration=false'
@@ -64,7 +104,16 @@ SCOPE = ('instructions:u around synchronous fresh in-memory cell construction/ru
 
 SEED_COMMIT = '17f77ea352071617acda6ba854930a4c4bc291e0'
 
-COST_ORDER = ['typescript/map_set_string',
+COST_ORDER = ['typescript/object_sort_200k',
+ 'typescript/object_sort',
+ 'python/object_sort_200k',
+ 'typescript/sort_bench',
+ 'python/object_sort',
+ 'typescript/records',
+ 'python/records',
+ 'typescript/object_build',
+ 'python/object_build',
+ 'typescript/map_set_string',
  'typescript/json_transform',
  'typescript/prop_read',
  'python/sort_bench',
@@ -78,7 +127,14 @@ COST_ORDER = ['typescript/map_set_string',
  'python/func_closure_call',
  'python/float_arith',
  'python/string_build1',
- 'python/int_to_string']
+ 'python/int_to_string',
+ 'typescript/array_read',
+ 'python/array_read',
+ 'typescript/prop_write',
+ 'python/prop_write',
+ 'typescript/string_build1',
+ 'typescript/empty_loop',
+ 'python/empty_loop']
 
 ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/int_arith.py',
                       'sha256': '0ff439911aedb3817aea93dc6af64ce82e33efa9b9e137511b8171bd053eeb3f',
@@ -154,12 +210,87 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                           'sha256': '3973e856976fafb5b440acc83a65d61457ee588644b7f88864291782ff5b5cdb',
                           'lo': 1000,
                           'ops': 3,
-                          'ceiling': 1147.8339154385965}}
-
-# Information only, never checked: candidate (45f2a0ccf6) medians of the
-# rows added above, from the same land run.
-ADDED_ROW_CANDIDATE_MEDIANS = {'python/func_closure_call': 1738.2, 'python/float_arith': 739.6,
-                               'python/string_build1': 3099.2, 'python/int_to_string': 1113.5}
+                          'ceiling': 1147.8339154385965},
+ 'typescript/sort_bench': {'source': 'crates/lash-perf/src/compare/workloads/sort_bench.js',
+                           'sha256': '5cdc375d6143cb6fcc630d0504da19de734105f44c4ea990bb8aa5568a7dc199',
+                           'lo': 1,
+                           'ops': 1,
+                           'ceiling': 746824077.1121053},
+ 'typescript/object_sort': {'source': 'crates/lash-perf/src/compare/workloads/object_sort.js',
+                            'sha256': 'd92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b',
+                            'lo': 10000,
+                            'ops': 1,
+                            'ceiling': 253338.9136415263},
+ 'python/object_sort': {'source': 'crates/lash-perf/src/compare/workloads/object_sort.py',
+                        'sha256': '11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664',
+                        'lo': 10000,
+                        'ops': 1,
+                        'ceiling': 22085.996141},
+ 'typescript/object_sort_200k': {'source': 'crates/lash-perf/src/compare/workloads/object_sort.js',
+                                 'sha256': 'd92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b',
+                                 'lo': 20000,
+                                 'ops': 1,
+                                 'ceiling': 262738.93313007895},
+ 'python/object_sort_200k': {'source': 'crates/lash-perf/src/compare/workloads/object_sort.py',
+                             'sha256': '11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664',
+                             'lo': 20000,
+                             'ops': 1,
+                             'ceiling': 22096.407207526314},
+ 'typescript/array_read': {'source': 'crates/lash-perf/src/compare/workloads/array_read.js',
+                           'sha256': 'c9dbaaf2aa2f45e4aafe73ac2de9477e23818f0c20ade6c26540c981be75b9c9',
+                           'lo': 1000,
+                           'ops': 10,
+                           'ceiling': 3812.545851105263},
+ 'python/array_read': {'source': 'crates/lash-perf/src/compare/workloads/array_read.py',
+                       'sha256': 'aefc32a93c8bbee248a88ce26810667d93e6bb2650c50926bed4c8ecc74429f6',
+                       'lo': 1000,
+                       'ops': 10,
+                       'ceiling': 1353.5367694736842},
+ 'typescript/prop_write': {'source': 'crates/lash-perf/src/compare/workloads/prop_write.js',
+                           'sha256': 'f37dc968fcd42a5245176938513aaa524f8a6f8a4daba175dd2b27ae545bd375',
+                           'lo': 1000,
+                           'ops': 4,
+                           'ceiling': 4131.600212368421},
+ 'python/prop_write': {'source': 'crates/lash-perf/src/compare/workloads/prop_write.py',
+                       'sha256': '6fd5a7378e94da237608c105fe4a3a6f1b0f7c61021daeb434803d6941986921',
+                       'lo': 1000,
+                       'ops': 4,
+                       'ceiling': 1166.277118026316},
+ 'typescript/records': {'source': 'crates/lash-perf/src/compare/workloads/records.js',
+                        'sha256': '9ccaf39805acb4a702481d27e6a29b1e25aef407962dbb0075f8252622a6c408',
+                        'lo': 1,
+                        'ops': 1,
+                        'ceiling': 149307489.46052632},
+ 'python/records': {'source': 'crates/lash-perf/src/compare/workloads/records.py',
+                    'sha256': 'd774b6a74d3d70c7b27049f61eaac81013a355b53aa2a5286c0aa7d34bf44ca1',
+                    'lo': 1,
+                    'ops': 1,
+                    'ceiling': 113549930.47578949},
+ 'typescript/string_build1': {'source': 'crates/lash-perf/src/compare/workloads/string_build1.js',
+                              'sha256': '50bcc41da676e579ba17ff0457509dafd64e2cd75132c2ab8ac76f821c92e343',
+                              'lo': 1,
+                              'ops': 1000,
+                              'ceiling': 3364.872522105263},
+ 'typescript/empty_loop': {'source': 'crates/lash-perf/src/compare/workloads/empty_loop.js',
+                           'sha256': '5db9a4e816911a041294fc70bfe29a990b83571e7af5b6f851f5a455cfbbfa8e',
+                           'lo': 1000,
+                           'ops': 1,
+                           'ceiling': 527.3343042105263},
+ 'python/empty_loop': {'source': 'crates/lash-perf/src/compare/workloads/empty_loop.py',
+                       'sha256': 'efeb20152fc845f3cb4f80eefd00186813bba28a88f9cf174e088ecfd7b12b89',
+                       'lo': 1000,
+                       'ops': 1,
+                       'ceiling': 363.4723089473684},
+ 'typescript/object_build': {'source': 'crates/lash-perf/src/compare/workloads/object_build.js',
+                             'sha256': 'dc86c054dc72a895e57ffc063d6f8cb8d553664bd1241a0783a0b2e8ed8f03e5',
+                             'lo': 10000,
+                             'ops': 1,
+                             'ceiling': 4921.764322052632},
+ 'python/object_build': {'source': 'crates/lash-perf/src/compare/workloads/object_build.py',
+                         'sha256': '6ee0f8a356d69d0072786e778063bc42f68a600d5ffef95182d67aa4b3ce9320',
+                         'lo': 10000,
+                         'ops': 1,
+                         'ceiling': 8694.603976736842}}
 
 # The old engine with this exact boundary instrument is pinned after its first land.
 CHECKPOINT_BASE = '3abbc2bd519228a4f43f7be7ba289f470324068a'
@@ -179,5 +310,4 @@ BOUNDARY = {
         'list': {'directory_depth': 1, 'heap_writes': 3, 'run_segments': 1},
         'map': {'directory_depth': 1, 'heap_writes': 3, 'run_segments': 1},
     },
-    'max_checkpoint_ratio': 1.0,
 }

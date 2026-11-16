@@ -1,5 +1,8 @@
 """Rule-derived rejection witnesses for the cutover gate."""
+import ast
+import contextlib
 import copy
+import io
 import subprocess
 import tempfile
 from unittest.mock import patch
@@ -29,7 +32,7 @@ class GateLaws(unittest.TestCase):
         prior = copy.deepcopy(policy.ROWS)
         prior.pop('python/int_arith')
         with self.assertRaisesRegex(ValueError, 'tracked rows changed'):
-            gate.check_rows(prior, 'unreviewed policy', False)
+            gate.check_rows(prior, None)
 
     def test_cold_access_is_held_to_section_6_and_refuses_one_extra_read_or_write(self):
         # Section 6 by hand for the integer fixtures: d = 1, so a fully cold
@@ -125,14 +128,15 @@ class GateLaws(unittest.TestCase):
                       '.cargo/config.toml', 'crates/lash-perf/BUCK'):
             self.assertFalse(gate.instrument_only([*self.INSTRUMENT, fixed], self.PACKAGES), fixed)
 
-    # Every row well inside its ceiling and 1x Monty, five equal repeats a side.
+    # Every row at main's median under its ceiling (ceiling / factor) and
+    # below 2x Monty, five equal repeats a side.
     @staticmethod
     def population(sides, plant=None):
         samples = []
         for side in sides:
             for key, row in policy.ROWS.items():
                 for repeat in range(5):
-                    secant = row['ceiling'] / 2
+                    secant = row['ceiling'] / policy.CEILING_FACTOR
                     if plant:
                         secant = plant(side, key, repeat, secant)
                     samples.append(dict(side=side, row=key, repeat=repeat, secant=secant, results=[1, 2],
@@ -173,6 +177,69 @@ class GateLaws(unittest.TestCase):
                     for instrument in (False, True)]
         self.assertEqual(outcomes[0], outcomes[1])
         self.assertEqual(outcomes[1][0]['outcome'], 'base unsupported: no comparison')
+
+    # Job D: the candidate against the base per row, a reviewed way past it,
+    # and ceilings that move down by themselves and up only under review.
+    ROW = 'typescript/int_arith'
+
+    def regressed(self, factor):
+        return self.population(('base', 'candidate'), lambda side, key, repeat, secant:
+                               secant * factor if (side, key) == ('candidate', self.ROW) else secant)
+
+    def replacement(self, **changes):
+        return {**dict(previous_sha256='0' * 64, reviewer='r60 lead', added_rows=[], replaced_ceilings=[],
+                       changed_fields=[]), **changes}
+
+    def test_a_one_and_a_half_percent_regression_on_one_row_is_refused(self):
+        # Inside its ceiling (main x 1.03), so only the base comparison sees it.
+        _, errors, _ = gate.judge(self.regressed(1.015), False)
+        self.assertEqual([e.split(':')[0] for e in errors], [f'candidate/{self.ROW}'], errors)
+        self.assertIn('base', errors[0])
+
+    def test_the_same_regression_with_a_reviewed_ceiling_replacement_passes_and_is_printed(self):
+        replacement = self.replacement(replaced_ceilings=[self.ROW])
+        prior = copy.deepcopy(policy.ROWS)
+        prior[self.ROW]['ceiling'] /= 1.05
+        gate.check_rows(prior, replacement)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            _, errors, notes = gate.judge(self.regressed(1.015), False, exempt=gate.exemptions(replacement))
+        self.assertEqual(errors, [])
+        self.assertTrue(any(self.ROW in line and 'r60 lead' in line and 'exempt' in line
+                            for line in out.getvalue().splitlines()), out.getvalue())
+
+    def test_an_unreviewed_raised_ceiling_is_refused(self):
+        prior = copy.deepcopy(policy.ROWS)
+        prior[self.ROW]['ceiling'] /= 1.05
+        with self.assertRaisesRegex(ValueError, f'{self.ROW}: ceiling'):
+            gate.check_rows(prior, None)
+        # A replacement that does not name the row does not cover it.
+        with self.assertRaisesRegex(ValueError, f'{self.ROW}: ceiling'):
+            gate.check_rows(prior, self.replacement(replaced_ceilings=['python/int_arith']))
+
+    def test_a_hand_lowered_ceiling_is_refused(self):
+        prior = copy.deepcopy(policy.ROWS)
+        prior[self.ROW]['ceiling'] *= 1.05
+        with self.assertRaisesRegex(ValueError, f'{self.ROW}: ceiling'):
+            gate.check_rows(prior, None)
+
+    def ratcheted(self, factor):
+        rows, errors, _ = gate.judge(self.regressed(factor), False)
+        self.assertEqual(errors, [])
+        source = (gate.ROOT / 'scripts/perf_land_ceilings.py').read_text()
+        lowered = gate.apply_ratchet(source, gate.ratchet(rows))
+        return rows, {n.targets[0].id: ast.literal_eval(n.value) for n in ast.parse(lowered).body
+                      if isinstance(n, ast.Assign)}
+
+    def test_a_ten_percent_improvement_lowers_the_ceiling_in_the_land(self):
+        rows, lowered = self.ratcheted(.9)
+        expected = copy.deepcopy(policy.ROWS)
+        expected[self.ROW]['ceiling'] = rows[f'candidate/{self.ROW}']['median'] * 1.03
+        self.assertEqual(lowered['ROWS'], expected)
+
+    def test_a_one_percent_improvement_does_not_move_the_ceiling(self):
+        _, lowered = self.ratcheted(.99)
+        self.assertEqual(lowered['ROWS'], policy.ROWS)
+
 
 if __name__ == '__main__':
     unittest.main()
