@@ -45,7 +45,7 @@ pub const LIB: u32 = 1 << 31;
 /// The compiler's revision: advanced whenever the code it emits for one
 /// registry changes, so a process never runs one revision's library code
 /// under another.
-pub const COMPILER_REVISION: u32 = 2;
+pub const COMPILER_REVISION: u32 = 3;
 
 /// The most libraries a process keeps.
 const HELD: usize = 8;

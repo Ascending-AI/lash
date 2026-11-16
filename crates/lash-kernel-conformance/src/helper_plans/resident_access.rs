@@ -4,7 +4,7 @@
 use super::*;
 use lash_kernel_vm::KernelMachine;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, serde::Serialize)]
 struct AccessObserved {
     end: Result<crate::ExpectedEnd, String>,
     prints: Vec<Datum>,
@@ -14,6 +14,24 @@ struct AccessObserved {
 }
 
 fn observe(program: &Program, bounds: Bounds, slice: u64, cold: bool) -> AccessObserved {
+    let observed = observe_inner(program, bounds, slice, cold);
+    let key = format!(
+        "{:?};{bounds:?};{slice};{cold}",
+        program.document.identity()
+    );
+    // Captured before the candidate VM change, using the parent's authored
+    // lowering and execution. Library-plan ablation below is additional proof.
+    static PARENT: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    let parent = PARENT
+        .get_or_init(|| serde_json::from_str(include_str!("resident_access_parent.json")).unwrap());
+    let expected = parent["observations"]
+        .get(&key)
+        .expect("an exact-parent observation");
+    assert_eq!(&serde_json::to_value(&observed).unwrap(), expected, "{key}");
+    observed
+}
+
+fn observe_inner(program: &Program, bounds: Bounds, slice: u64, cold: bool) -> AccessObserved {
     let source = crate::pages::Source::default();
     let machine = KernelMachine::start(
         program.clone(),

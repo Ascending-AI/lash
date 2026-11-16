@@ -596,6 +596,9 @@ pub enum Callee {
     /// A unit. `charge` is the completion formula the call bills when it
     /// returns or raises (an outermost uncovered library call), if any.
     Unit { unit: UnitId, charge: Option<u32> },
+    /// A unit with a source-certified resident answer. Its identity and bill
+    /// are the original body's; the certificate remains on that unit.
+    Resident { unit: UnitId, charge: Option<u32> },
     /// An export's entry that a call through an import enters: the
     /// arguments, held to the site's `checked`, made the entry body's as
     /// `adapt` says, as a start makes them (`K-DOC-003`).
@@ -611,11 +614,19 @@ pub enum Callee {
     },
 }
 
+impl Callee {
+    /// Whether this call can answer in its caller without adding a frame.
+    pub fn may_answer(self) -> bool {
+        matches!(
+            self,
+            Self::Native { .. } | Self::Value | Self::Resident { .. }
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CallSite {
     pub callee: Callee,
-    /// The callee's source certificate, resolved by the inline pass.
-    pub access: Option<Access>,
     pub argc: u16,
     pub site: Site,
     /// Where the calling frame stands while the callee runs.

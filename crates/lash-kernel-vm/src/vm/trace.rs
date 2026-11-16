@@ -934,15 +934,15 @@ impl<H: Heap> Vm<H> {
             return exit_at(step.pc() as usize);
         }
         let call = &unit.calls[step.a() as usize];
-        let (
-            Some(access),
-            Callee::Unit {
-                unit: callee,
-                charge,
-            },
-        ) = (call.access, call.callee)
+        let Callee::Resident {
+            unit: callee,
+            charge,
+        } = call.callee
         else {
             return fault_out(line, "a resident trace has no certified body call");
+        };
+        let Some(access) = self.program.unit(callee).access else {
+            return fault_out(line, "a resident trace has no source certificate");
         };
         self.cx.frames[line.top].pc = step.pc() + 1;
         #[cfg(any(test, feature = "perf-witness"))]

@@ -146,9 +146,14 @@ impl<H: Heap> Vm<H> {
             (UnitKind::Spawn, Some(Callee::Native { native, .. })) => {
                 Some(&self.program.native(*native).name)
             }
-            (UnitKind::Spawn, Some(Callee::Unit { unit, .. } | Callee::Entry { unit, .. })) => {
-                Some(&self.program.unit(*unit).name)
-            }
+            (
+                UnitKind::Spawn,
+                Some(
+                    Callee::Unit { unit, .. }
+                    | Callee::Resident { unit, .. }
+                    | Callee::Entry { unit, .. },
+                ),
+            ) => Some(&self.program.unit(*unit).name),
             _ => None,
         };
         Arc::clone(called.unwrap_or(&unit.name))

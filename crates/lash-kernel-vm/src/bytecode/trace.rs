@@ -22,7 +22,7 @@
 use lash_kernel_doc::{Value, scalar::ScalarOp};
 
 use super::op::Op;
-use super::program::{Constant, Fused, LIB, Operand, Program, Then, Unit};
+use super::program::{Callee, Constant, Fused, LIB, Operand, Program, Then, Unit};
 
 /// The most micro-ops one trace runs before it gives control back.
 const LENGTH: usize = 64;
@@ -1108,7 +1108,7 @@ fn line(unit: &Unit, head: usize, readable: &impl Fn(u32) -> bool, micros: &mut 
             }
             Op::Call(n)
                 if matches!(unit.ops.get(pc + 1), Some(Op::Block(_)))
-                    && unit.calls[n as usize].access.is_some() =>
+                    && matches!(unit.calls[n as usize].callee, Callee::Resident { .. }) =>
             {
                 (Micro::Access { pc: at, n }, pc + 1)
             }

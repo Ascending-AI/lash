@@ -1289,9 +1289,7 @@ impl<H: Heap> Vm<H> {
                         sync!(pc);
                         self.call(&program, unit, site)?;
                         // A resident answer or completed leaf keeps this caller running.
-                        if !matches!(call.callee, Callee::Entry { .. } | Callee::Machine { .. })
-                            && self.cx.frames.len() == top + 1
-                        {
+                        if call.callee.may_answer() && self.cx.frames.len() == top + 1 {
                             continue;
                         }
                         if matches!(call.callee, Callee::Value) {

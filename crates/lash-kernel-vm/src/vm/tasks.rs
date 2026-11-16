@@ -1098,7 +1098,9 @@ impl<H: Heap> Vm<H> {
             return Ok(false);
         };
         let unit = match call.callee {
-            Callee::Unit { unit, .. } | Callee::Entry { unit, .. } => Some(unit),
+            Callee::Unit { unit, .. }
+            | Callee::Resident { unit, .. }
+            | Callee::Entry { unit, .. } => Some(unit),
             Callee::Value => match value {
                 Some(Value::Closure(handle)) => found(self.heap.arena().closure(handle))?
                     .and_then(|(identity, _, _)| self.closure_unit(&identity.callable)),
@@ -1106,7 +1108,7 @@ impl<H: Heap> Vm<H> {
                     .and_then(|callable| self.function_unit(&callable))
                     .and_then(|trampoline| program.unit(trampoline).calls.first())
                     .and_then(|call| match call.callee {
-                        Callee::Unit { unit, .. } => Some(unit),
+                        Callee::Unit { unit, .. } | Callee::Resident { unit, .. } => Some(unit),
                         _ => None,
                     }),
                 _ => None,

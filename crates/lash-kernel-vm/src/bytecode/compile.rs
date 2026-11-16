@@ -1269,7 +1269,6 @@ impl<'a> Compiler<'a> {
         let mark = self.mark(f, &site)?;
         f.calls.push(CallSite {
             callee,
-            access: None,
             argc,
             site,
             mark,

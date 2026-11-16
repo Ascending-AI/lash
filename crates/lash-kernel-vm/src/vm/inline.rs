@@ -162,7 +162,7 @@ impl<H: Heap> Vm<H> {
     ) -> Run<bool> {
         let site = unit.inlines[n as usize];
         let call = &unit.calls[site.call as usize];
-        let Callee::Unit { charge, .. } = call.callee else {
+        let (Callee::Unit { charge, .. } | Callee::Resident { charge, .. }) = call.callee else {
             return Ok(false);
         };
         if self.watch.is_some() || self.depth_full() {
@@ -217,7 +217,7 @@ impl<H: Heap> Vm<H> {
     fn activate(&mut self, unit: &Unit, n: u32) -> Run<(Option<u32>, usize)> {
         let site = unit.inlines[n as usize];
         let call = &unit.calls[site.call as usize];
-        let Callee::Unit { charge, .. } = call.callee else {
+        let (Callee::Unit { charge, .. } | Callee::Resident { charge, .. }) = call.callee else {
             return Err(fault("an inline site of no body call"));
         };
         self.meter.leave();

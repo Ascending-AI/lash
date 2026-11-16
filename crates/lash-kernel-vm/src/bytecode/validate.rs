@@ -182,6 +182,12 @@ impl Unit {
                     program.get_unit(unit).is_some()
                         && charge.is_none_or(|c| program.get_charge(c).is_some())
                 }
+                Callee::Resident { unit, charge } => {
+                    program
+                        .get_unit(unit)
+                        .is_some_and(|unit| unit.access.is_some())
+                        && charge.is_none_or(|c| program.get_charge(c).is_some())
+                }
                 Callee::Entry { unit, .. } => {
                     program.get_unit(unit).is_some() && site.checked.is_some()
                 }
@@ -362,7 +368,7 @@ impl Unit {
             let calls = self.calls.get(site.call as usize).map(|call| call.callee);
             let named = matches!(
                 calls,
-                Some(Callee::Unit { unit, .. }) if unit == site.callee
+                Some(Callee::Unit { unit, .. } | Callee::Resident { unit, .. }) if unit == site.callee
             ) && program.get_unit(site.callee).is_some()
                 && site.callee != id;
             if !named

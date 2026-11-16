@@ -4,7 +4,7 @@
 use lash_kernel_doc::Value;
 
 use super::{Run, Vm};
-use crate::bytecode::program::{Access, Checked, UnitId};
+use crate::bytecode::program::{Access, CallSite, Callee, Checked, Program, UnitId};
 use crate::heap::{Heap, meter};
 
 #[cfg(any(test, feature = "testing"))]
@@ -30,6 +30,28 @@ impl<H: Heap> Vm<H> {
             return None;
         }
         arena.table_get(map, &key).ok().flatten()
+    }
+
+    pub(super) fn call_access(&mut self, program: &Program, site: &CallSite) -> Run<()> {
+        let Callee::Resident { unit, charge } = site.callee else {
+            unreachable!("a resident call retains its unit")
+        };
+        let access = program
+            .unit(unit)
+            .access
+            .expect("a certified resident unit");
+        let argc = usize::from(site.argc);
+        if let Some(checked) = &site.checked {
+            self.check_arguments(checked, argc)?;
+        }
+        if self.access(access, unit, charge, argc, site.checked.as_deref())? {
+            return Ok(());
+        }
+        let bill = self.owed(charge, argc);
+        self.meter.leave();
+        self.exact = true;
+        let link = self.running_link();
+        self.enter(unit, argc, None, bill, link)
     }
 
     pub(super) fn access(

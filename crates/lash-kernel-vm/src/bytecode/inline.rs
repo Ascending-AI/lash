@@ -89,18 +89,6 @@ pub(crate) fn inline(program: &mut Program) -> Result<()> {
     }
     let mut taken = HashMap::new();
     for at in 0..program.units.len() {
-        let accesses: Vec<_> = program.units[at]
-            .calls
-            .iter()
-            .enumerate()
-            .filter_map(|(site, call)| match call.callee {
-                Callee::Unit { unit, .. } => program.unit(unit).access.map(|access| (site, access)),
-                _ => None,
-            })
-            .collect();
-        for (site, access) in accesses {
-            program.units[at].calls[site].access = Some(access);
-        }
         let caller = program.own_unit(at);
         let sites: Vec<(usize, u32, UnitId)> = program.units[at]
             .ops
@@ -121,6 +109,23 @@ pub(crate) fn inline(program: &mut Program) -> Result<()> {
             if let Some(region) = Region::of(program, callee) {
                 expand(program, at, pc, site, callee, &region, &mut taken)?;
             }
+        }
+    }
+    // Select after all expansions, including calls copied into inline regions.
+    for at in 0..program.units.len() {
+        let resident: Vec<_> = program.units[at]
+            .calls
+            .iter()
+            .enumerate()
+            .filter_map(|(site, call)| match call.callee {
+                Callee::Unit { unit, charge } if program.unit(unit).access.is_some() => {
+                    Some((site, Callee::Resident { unit, charge }))
+                }
+                _ => None,
+            })
+            .collect();
+        for (site, callee) in resident {
+            program.units[at].calls[site].callee = callee;
         }
     }
     Ok(())

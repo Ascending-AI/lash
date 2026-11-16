@@ -307,17 +307,13 @@ impl<H: Heap> Vm<H> {
                 if let Some(checked) = &site.checked {
                     self.check_arguments(checked, argc)?;
                 }
-                if let Some(access) = site.access
-                    && self.access(access, callee, charge, argc, site.checked.as_deref())?
-                {
-                    return Ok(());
-                }
                 let bill = self.owed(charge, argc);
                 self.meter.leave();
                 self.exact = true;
                 let link = self.running_link();
                 self.enter(callee, argc, None, bill, link)
             }
+            Callee::Resident { .. } => self.call_access(program, site),
             Callee::Entry {
                 unit: callee,
                 adapt,
