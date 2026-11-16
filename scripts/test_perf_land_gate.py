@@ -1,5 +1,8 @@
 """Rule-derived rejection witnesses for the cutover gate."""
 import copy
+import subprocess
+import tempfile
+from unittest.mock import patch
 from pathlib import Path
 import sys
 import unittest
@@ -62,6 +65,24 @@ class GateLaws(unittest.TestCase):
         self.assertTrue(gate.instrument_only(self.INSTRUMENT, self.PACKAGES))
         for product in ('crates/lash/src/lib.rs', 'crates/lash-durable/src/page.rs'):
             self.assertFalse(gate.instrument_only([*self.INSTRUMENT, product], self.PACKAGES), product)
+
+    def test_a_product_file_moved_into_the_perf_crate_is_not_instrument_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def run(*args):
+                return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=root,
+                                      check=True, capture_output=True, text=True).stdout.strip()
+            run("init", "-q")
+            for package in ("crates/lash-kernel", "crates/lash-perf"):
+                (root / package / "src").mkdir(parents=True)
+                (root / package / "Cargo.toml").write_text("[package]\nname = 'x'\n")
+            (root / "crates/lash-kernel/src/engine.rs").write_text("".join(f"fn f{i}() {{}}\n" for i in range(40)))
+            run("add", "-A"); run("commit", "-qm", "base")
+            base = run("rev-parse", "HEAD")
+            run("mv", "crates/lash-kernel/src/engine.rs", "crates/lash-perf/src/engine.rs")
+            run("commit", "-qm", "move")
+            with patch.object(gate, "ROOT", root):
+                self.assertFalse(gate.instrument_only(*gate.land_paths(base, run("rev-parse", "HEAD"))))
 
     def test_workload_baseline_ceiling_pin_manifest_or_build_change_is_not_instrument_only(self):
         for fixed in ('crates/lash-perf/src/compare/workloads/int_arith.py',

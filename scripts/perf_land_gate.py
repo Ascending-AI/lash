@@ -89,7 +89,9 @@ def instrument_only(paths, packages):
 
 def land_paths(base, candidate):
     """The land's changed paths and the Cargo package roots on either side."""
-    paths = [path for path in git("diff", "--name-only", f"{base}..{candidate}").splitlines() if path]
+    # Without --no-renames a move lists only its destination, so a product
+    # file moved into the perf crate would read as instrument-only.
+    paths = [path for path in git("diff", "--no-renames", "--name-only", f"{base}..{candidate}").splitlines() if path]
     packages = set()
     for commit in (base, candidate):
         listing = subprocess.run(["git", "grep", "-l", "-e", r"^\[package\]", commit, "--", "*Cargo.toml"],
