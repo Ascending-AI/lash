@@ -80,6 +80,16 @@ impl<H: Heap> Vm<H> {
         Some((value, self.frame_cost(guard)))
     }
 
+    /// A flat resident map and an inline key need no cold read. The
+    /// original helper frame and possible new pair still have to fit.
+    fn python_map_write(&self, callee: UnitId, map: lash_kernel_doc::arena::ArenaHandle) -> bool {
+        let unit = self.program.unit(callee);
+        self.value_depth > 1
+            && unit.boxed.is_empty()
+            && unit.cleanup.is_none()
+            && self.heap.arena().entries(map).is_ok()
+    }
+
     pub(super) fn access(
         &mut self,
         access: Access,
@@ -140,6 +150,12 @@ impl<H: Heap> Vm<H> {
                     return Ok(false);
                 };
                 (value, depth, guard_frame)
+            }
+            (Access::MapWrite { depth }, [Value::Map(map), Value::Text(_), _]) => {
+                if !self.python_map_write(callee, *map) {
+                    return Ok(false);
+                }
+                (Value::Null, depth, 2 * meter::VALUE)
             }
             (Access::MapRead { depth, room }, [Value::Map(map), key @ Value::Text(_)]) => {
                 let Some(value) = self.python_map_read(*map, *key) else {
@@ -215,6 +231,12 @@ impl<H: Heap> Vm<H> {
                 }
                 Err(error) => return Err(self.native(error)),
             }
+        }
+        if matches!(access, Access::MapWrite { .. }) {
+            let [target, key, value] = self.cx.stack[base..] else {
+                return Ok(false);
+            };
+            self.set_index(target, key, value)?;
         }
         self.meter.leave();
         self.exact = true;

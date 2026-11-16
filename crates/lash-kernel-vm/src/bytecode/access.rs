@@ -23,6 +23,11 @@ pub(super) fn derive(registry: &FunctionRegistry, id: FunctionId) -> Option<Acce
     {
         return Some(product);
     }
+    if heap.writes
+        && let Some(write) = python_map_write(registry, registered.definition(), heap.depth)
+    {
+        return Some(write);
+    }
     if let Some(path) = heap.element.as_ref()
         && path.requires.iter().all(|requirement| {
             registry.get(&requirement.function).is_some_and(|callee| {
@@ -402,4 +407,82 @@ fn python_number_guard(registry: &FunctionRegistry, function: FunctionId) -> Opt
         }]
     )
     .then_some(())
+}
+
+/// The first map arm writes unchanged arguments and returns null. Its
+/// completion fee observes only the immutable key, so the write cannot
+/// change the amount evaluated before publication.
+fn python_map_write(
+    registry: &FunctionRegistry,
+    definition: &lash_kernel_doc::FunctionDefinition,
+    depth: u32,
+) -> Option<Access> {
+    let [target, key, value] = definition.signature.params.as_slice() else {
+        return None;
+    };
+    if target.optional || key.optional || value.optional {
+        return None;
+    }
+    let lash_kernel_doc::Formula::Sum(terms) = definition.charge()? else {
+        return None;
+    };
+    let [
+        lash_kernel_doc::Formula::Constant(_),
+        lash_kernel_doc::Formula::DeepSize(lash_kernel_doc::Operand::Param(billed)),
+    ] = terms.as_slice()
+    else {
+        return None;
+    };
+    if billed != &key.name {
+        return None;
+    }
+    let [
+        Stmt::Let {
+            name: kind,
+            value: Rhs::Expr(kind_call),
+        },
+        Stmt::If {
+            condition,
+            then_block,
+            ..
+        },
+        ..,
+    ] = definition.body()?.block.as_slice()
+    else {
+        return None;
+    };
+    let [operand] = call(registry, kind_call, InlineOperation::Kind)? else {
+        return None;
+    };
+    variable(operand, &target.name)?;
+    let [left, Expr::Literal(Literal::Text(map))] =
+        call(registry, condition, InlineOperation::Same)?
+    else {
+        return None;
+    };
+    variable(left, kind)?;
+    if map != "map" {
+        return None;
+    }
+    let [
+        Stmt::Assign {
+            place:
+                Place::Member(Member::Index {
+                    target: written,
+                    index,
+                }),
+            value: Rhs::Expr(assigned),
+            ..
+        },
+        Stmt::Return {
+            value: Expr::Literal(Literal::Null),
+        },
+    ] = then_block.as_slice()
+    else {
+        return None;
+    };
+    variable(written, &target.name)?;
+    variable(index, &key.name)?;
+    variable(assigned, &value.name)?;
+    Some(Access::MapWrite { depth })
 }

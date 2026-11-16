@@ -321,6 +321,9 @@ pub enum Access {
     WordProduct {
         depth: u32,
     },
+    MapWrite {
+        depth: u32,
+    },
     RecordWrite {
         key: lash_kernel_doc::arena::ShortText,
         depth: u32,

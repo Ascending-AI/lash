@@ -13,6 +13,7 @@ mod numeric;
 mod numeric_slices;
 mod python_map_parent;
 mod python_multiply_parent;
+mod python_setter_parent;
 mod resident_access;
 
 use crate::projection::{Projector, Recorded};
