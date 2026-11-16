@@ -314,6 +314,10 @@ pub enum Access {
     ListRead {
         depth: u32,
     },
+    MapRead {
+        depth: u32,
+        room: u32,
+    },
     RecordWrite {
         key: lash_kernel_doc::arena::ShortText,
         depth: u32,

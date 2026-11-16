@@ -17,7 +17,6 @@ pub(super) fn derive(registry: &FunctionRegistry, id: FunctionId) -> Option<Acce
         return None;
     }
     if let Some(path) = heap.element.as_ref()
-        && path.operation == Element::Read
         && path.requires.iter().all(|requirement| {
             registry.get(&requirement.function).is_some_and(|callee| {
                 callee.definition().guard.is_none()
@@ -27,7 +26,16 @@ pub(super) fn derive(registry: &FunctionRegistry, id: FunctionId) -> Option<Acce
             })
         })
     {
-        return Some(Access::ListRead { depth: path.depth });
+        match path.operation {
+            Element::Read => return Some(Access::ListRead { depth: path.depth }),
+            Element::ReadMap if python_map_read(registry, registered.definition()).is_some() => {
+                return Some(Access::MapRead {
+                    depth: path.depth,
+                    room: path.room,
+                });
+            }
+            _ => {}
+        }
     }
     heap.record_write?;
     let definition = registered.definition();
@@ -143,4 +151,98 @@ fn call<'a>(
         .for_version(callee.definition().native_version)
         == Some(operation))
     .then_some(args)
+}
+
+/// The early map-hit arm, over unchanged arguments. Each primitive's
+/// installed native must still supply the operation the source proof used.
+fn python_map_read(
+    registry: &FunctionRegistry,
+    definition: &lash_kernel_doc::FunctionDefinition,
+) -> Option<()> {
+    let [target, index] = definition.signature.params.as_slice() else {
+        return None;
+    };
+    let [
+        Stmt::Let {
+            name: kind,
+            value: Rhs::Expr(kind_call),
+        },
+        Stmt::If {
+            condition,
+            then_block,
+            ..
+        },
+        ..,
+    ] = definition.body()?.block.as_slice()
+    else {
+        return None;
+    };
+    let [operand] = call(registry, kind_call, InlineOperation::Kind)? else {
+        return None;
+    };
+    variable(operand, &target.name)?;
+    let [left, Expr::Literal(Literal::Text(map))] =
+        call(registry, condition, InlineOperation::Same)?
+    else {
+        return None;
+    };
+    variable(left, kind)?;
+    if map != "map" {
+        return None;
+    }
+    let [
+        Stmt::If {
+            condition,
+            else_block,
+            ..
+        },
+    ] = then_block.as_slice()
+    else {
+        return None;
+    };
+    let [kind_call, Expr::Literal(Literal::Text(tuple))] =
+        call(registry, condition, InlineOperation::Same)?
+    else {
+        return None;
+    };
+    if tuple != "tuple" {
+        return None;
+    }
+    let [operand] = call(registry, kind_call, InlineOperation::Kind)? else {
+        return None;
+    };
+    variable(operand, &index.name)?;
+    let [
+        Stmt::If {
+            condition,
+            then_block,
+            ..
+        },
+    ] = else_block.as_slice()
+    else {
+        return None;
+    };
+    let [receiver, key] = call(registry, condition, InlineOperation::Membership(Table::Map))?
+    else {
+        return None;
+    };
+    variable(receiver, &target.name)?;
+    variable(key, &index.name)?;
+    let [
+        Stmt::Return {
+            value: Expr::Member(member),
+        },
+    ] = then_block.as_slice()
+    else {
+        return None;
+    };
+    let Member::Index {
+        target: receiver,
+        index: key,
+    } = member.as_ref()
+    else {
+        return None;
+    };
+    variable(receiver, &target.name)?;
+    variable(key, &index.name)
 }

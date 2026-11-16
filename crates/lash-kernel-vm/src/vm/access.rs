@@ -18,6 +18,20 @@ pub(crate) fn hits() -> u64 {
 }
 
 impl<H: Heap> Vm<H> {
+    /// Reads only an already resident map. Every miss retains the helper's
+    /// read and admission order, without loading anything in the guard.
+    fn python_map_read(
+        &self,
+        map: lash_kernel_doc::arena::ArenaHandle,
+        key: Value,
+    ) -> Option<Value> {
+        let arena = self.heap.arena();
+        if self.value_depth <= 1 || arena.entries(map).is_err() {
+            return None;
+        }
+        arena.table_get(map, &key).ok().flatten()
+    }
+
     pub(super) fn access(
         &mut self,
         access: Access,
@@ -71,6 +85,12 @@ impl<H: Heap> Vm<H> {
                     return Ok(false);
                 }
                 (value, depth, 0)
+            }
+            (Access::MapRead { depth, room }, [Value::Map(map), key @ Value::Text(_)]) => {
+                let Some(value) = self.python_map_read(*map, *key) else {
+                    return Ok(false);
+                };
+                (value, depth, u64::from(room) * meter::VALUE)
             }
             (
                 Access::RecordWrite { key, depth },
