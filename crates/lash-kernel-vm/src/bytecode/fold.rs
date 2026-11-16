@@ -43,7 +43,7 @@ use super::compile::{Result, coordinate};
 use super::op::Op;
 
 use super::program::{
-    Callee, Constant, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit, WordFold,
+    Access, Callee, Constant, FOLD_PATHS, FOLD_STEPS, Fold, Program, Slot, Step, Unit, WordFold,
 };
 
 /// Folds the guard path of every inline region of `program`.
@@ -52,7 +52,11 @@ pub(crate) fn fold(program: &mut Program) -> Result<()> {
     for at in 0..program.units.len() {
         // inline::expand admitted the inline-site count before insertion.
         for n in 0..program.units[at].inlines.len() {
-            let folds = derive(program, &program.units[at], n as u32);
+            let site = program.units[at].inlines[n];
+            let folds =
+                synthetic_access_fold(&program.units[at], site, program.unit(site.callee).access)
+                    .or_else(|| Some(derive(program, &program.units[at], n as u32)))
+                    .unwrap_or_default();
             let element = matches!(folds.as_slice(), [fold]
                 if fold.len == 1 && matches!(fold.steps[0], Step::Element { .. }));
             let unit = &mut program.units[at];
@@ -65,6 +69,33 @@ pub(crate) fn fold(program: &mut Program) -> Result<()> {
     }
     super::lookup::derive(program);
     Ok(())
+}
+
+fn synthetic_access_fold(
+    unit: &Unit,
+    site: super::program::InlineSite,
+    access: Option<Access>,
+) -> Option<Vec<Fold>> {
+    if !matches!(access, Some(Access::ListRead { .. })) || unit.calls[site.call as usize].argc != 2
+    {
+        return None;
+    }
+    let leave = (site.entry..site.end).find(|pc| matches!(unit.ops[*pc as usize], Op::Leave(_)))?;
+    let mut steps = [Step::Guard {
+        value: Slot::Made(0),
+        holds: false,
+    }; FOLD_STEPS];
+    steps[0] = Step::Element {
+        target: Slot::Local(0),
+        index: Slot::Local(1),
+    };
+    Some(vec![Fold {
+        steps,
+        len: 1,
+        result: Slot::Made(0),
+        leave,
+        words: None,
+    }])
 }
 
 /// What a path holds at an op: where each operand above the body's
