@@ -14,6 +14,8 @@ use super::large::{Counting, fresh, make, reopened, warm, warm_within};
 use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 
+mod heads;
+
 /// A 250-byte text, distinct for each `i`: its normal form is held inline
 /// in every head that names it, the largest a head's key is.
 fn wide(i: i64) -> String {
@@ -818,6 +820,9 @@ enum Substitute {
     /// are kept. Only the root tuple is a root of the seal. The function
     /// forges the field, `false` when the head is of another kind.
     NestedHead(fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool),
+    /// As [`Self::NestedHead`], the member's head held in the root
+    /// tuple's inline row.
+    InlineHead(fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool),
 }
 
 /// The root tuple of a [`Substitute::NestedHead`] case: 513 of the
@@ -849,7 +854,7 @@ fn filled(heap: &mut SlotHeap, fill: i64) -> Value {
 #[test]
 fn immutable_head_first_read() {
     use lash_kernel_state::paged::run::directory::Directory;
-    use lash_kernel_state::paged::run::objects::{Head, Record};
+    use lash_kernel_state::paged::run::objects::Record;
 
     use crate::heap::LoadError;
 
@@ -956,189 +961,6 @@ fn immutable_head_first_read() {
             Substitute::NestedRoot,
         ),
         (
-            "nested tuple, its length forged to zero",
-            |heap| {
-                let a = filled(heap, 10);
-                nested_of(heap, a)
-            },
-            Read::Nested,
-            Substitute::NestedHead(|head| match head {
-                Head::Tuple { len, .. } => {
-                    *len = 0;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested tuple, its length forged one short",
-            |heap| {
-                let a = filled(heap, 10);
-                nested_of(heap, a)
-            },
-            Read::Nested,
-            Substitute::NestedHead(|head| match head {
-                Head::Tuple { len, .. } => {
-                    *len -= 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested tuple, its shape's depth forged",
-            |heap| {
-                let a = filled(heap, 10);
-                nested_of(heap, a)
-            },
-            Read::Nested,
-            Substitute::NestedHead(|head| match head {
-                Head::Tuple { shape, .. } => {
-                    shape.depth += 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested tuple, its shape's edges forged",
-            |heap| {
-                let a = filled(heap, 10);
-                nested_of(heap, a)
-            },
-            Read::Nested,
-            Substitute::NestedHead(|head| match head {
-                Head::Tuple { shape, .. } => {
-                    shape.has_edges = true;
-                    shape.task_edges = 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested text, its byte count forged",
-            |heap| {
-                let a = text(heap, 'a');
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::LongText { summary, .. } => {
-                    summary.utf8_bytes += 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested text, its character count forged",
-            |heap| {
-                let a = text(heap, 'a');
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::LongText { summary, .. } => {
-                    summary.chars -= 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested text, its UTF-16 count forged",
-            |heap| {
-                let a = text(heap, 'a');
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::LongText { summary, .. } => {
-                    summary.utf16_units += 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested big integer, its bit count forged",
-            |heap| {
-                let a = make(heap, NewObject::BigInt(big(20_000)));
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::BigInt { summary, .. } => {
-                    summary.bits += 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested big integer, its sign forged",
-            |heap| {
-                let a = make(heap, NewObject::BigInt(big(20_000)));
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::BigInt { summary, .. } => {
-                    summary.negative = !summary.negative;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested timestamp, its bit count forged",
-            |heap| {
-                let a = make(heap, NewObject::Timestamp(big(20_000)));
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::Timestamp { summary, .. } => {
-                    summary.bits -= 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested bytes, their length forged",
-            |heap| {
-                let a = make(heap, NewObject::Bytes(vec![7; 9_000].into()));
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::Bytes { len, .. } => {
-                    *len -= 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
-            "nested error, its shape forged",
-            |heap| {
-                let a = heap
-                    .error("kind", "message", Value::Null)
-                    .expect("an error");
-                nested_of(heap, a)
-            },
-            Read::Item,
-            Substitute::NestedHead(|head| match head {
-                Head::Error { shape, .. } => {
-                    shape.depth += 1;
-                    true
-                }
-                _ => false,
-            }),
-        ),
-        (
             "tuple memberwise equality",
             |heap| {
                 let a = ints(heap, 0);
@@ -1209,7 +1031,9 @@ fn immutable_head_first_read() {
         let store = Counting::default();
         let mut heap = fresh(&store);
         let roots = build(&mut heap);
-        if let Substitute::NestedRoot | Substitute::NestedHead(_) = substitute {
+        if let Substitute::NestedRoot | Substitute::NestedHead(_) | Substitute::InlineHead(_) =
+            substitute
+        {
             match nested(&store, &mut heap, &roots, *substitute) {
                 Ok(root) => {
                     let (mut heap, cold) = reopened(&store, &root);
@@ -1252,7 +1076,8 @@ fn immutable_head_first_read() {
             Substitute::Row
             | Substitute::Stale
             | Substitute::NestedRoot
-            | Substitute::NestedHead(_) => other,
+            | Substitute::NestedHead(_)
+            | Substitute::InlineHead(_) => other,
             Substitute::Top | Substitute::Second => {
                 let mut row = directory.get(a).expect("a read").expect("a row");
                 match (&mut row.record, &other.record) {
@@ -1386,7 +1211,8 @@ fn first_read(
 /// the other tuple `roots[2]`), then rewrites the store as `substitute`
 /// says: the head of the root tuple's first member keeps the member's key
 /// and names the other tuple's root, the member's row then the other
-/// tuple's; or one field of that head is forged, every row kept.
+/// tuple's; or one field of that head is forged, in the first chunk or
+/// in the inline row, every other row kept.
 fn nested(
     store: &Counting,
     heap: &mut SlotHeap,
@@ -1415,6 +1241,20 @@ fn nested(
         .get(outer)
         .map_err(|error| format!("{error:?}"))?
         .ok_or("the root has no row")?;
+    if let Substitute::InlineHead(forge) = substitute {
+        if !matches!(row.record, Record::Tuple(_)) {
+            return Err("the root tuple is not inline".into());
+        }
+        let (_, head) = row.heads.0.first_mut().ok_or("the row names no head")?;
+        if !forge(head) {
+            return Err(format!("the member's head is another kind: {head:?}"));
+        }
+        directory
+            .put(outer, row)
+            .map_err(|error| format!("{error:?}"))?;
+        root.directory = directory.seal().map_err(|error| format!("{error:?}"))?;
+        return Ok(root);
+    }
     let replacement = match substitute {
         Substitute::NestedRoot => {
             let other = root.roots[1].id().ok_or("the other is no object")?;

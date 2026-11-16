@@ -1561,13 +1561,14 @@ fn an_object_grown_and_shrunk_across_each_boundary_keeps_its_contents_and_a_tupl
             failed.push(format!("list: {error}"));
         }
     }
-    // Seven chunks to eight; a map of 6,912 chunks (96 index pages of 72)
-    // to 6,913.
+    // Seven chunks to eight; a map and a record of 6,912 chunks (96 index
+    // pages of 72) to 6,913.
     for (kind, start, heights) in [
         ("map", 300, (1, 1)),
         ("set", 300, (1, 1)),
         ("record", 300, (1, 1)),
         ("map", 331_776, (1, 2)),
+        ("record", 331_776, (1, 2)),
     ] {
         if let Err(error) = table_case(kind, start, heights) {
             failed.push(error);
