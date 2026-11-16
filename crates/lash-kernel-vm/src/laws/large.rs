@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_state::kernel_internals::tree::Access;
 use lash_kernel_state::paged::run::chunked::{
-    CHUNK, Chunked, EDGE_REFS, EDGES, Members, chunk_page, edge_page, rewrite_edges,
+    CHUNK, Chunked, EDGE_REFS, EDGES, Members, chunk_page, edge_page, placement, rewrite_edges,
 };
 use lash_kernel_state::paged::run::directory::Directory;
 use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
@@ -700,48 +700,71 @@ fn unequal_prefixes_do_not_read_later_chunks() {
     assert!(reads <= 2 * 3, "the comparison read {reads} pages");
 }
 
-/// The chunked row of the one object `root` seals, read from its store.
-fn row(store: &Counting, root: &HeapRoot) -> Result<Chunked, String> {
+/// The record of the `at`th object `root` seals, read from its store.
+fn record(store: &Counting, root: &HeapRoot, at: usize) -> Result<Record, String> {
     let handle = root
         .roots
-        .first()
+        .get(at)
         .and_then(|root| root.id())
         .ok_or("the root names no object")?;
-    let row = Directory::open(root.directory, Box::new(store.clone()))
+    Ok(Directory::open(root.directory, Box::new(store.clone()))
         .get(handle)
         .map_err(|error| format!("{error:?}"))?
-        .ok_or("the object has no row")?;
-    match row.record {
+        .ok_or("the object has no row")?
+        .record)
+}
+
+/// The chunked row of the first object `root` seals, read from its store.
+fn row(store: &Counting, root: &HeapRoot) -> Result<Chunked, String> {
+    match record(store, root, 0)? {
         Record::Chunked(chunked) => Ok(*chunked),
         other => Err(format!("the row is no chunked record: {other:?}")),
     }
 }
 
-/// What a row's structure is: its chunks, its chunk index's height, its
-/// edge pages and its edge index's height.
-fn structure(chunked: &Chunked) -> (u64, u8, u64, u8) {
-    (
-        chunked.chunks(),
-        chunked.index.height(),
-        chunked.edges.leaves(),
-        chunked.edges.height(),
+/// The roots `root` seals, opened from `store`.
+fn opened_all(store: &Counting, root: &HeapRoot) -> Result<(SlotHeap, Vec<Value>), String> {
+    SlotHeap::open(
+        u64::MAX,
+        root,
+        Directory::open(root.directory, Box::new(store.clone())),
     )
+    .map_err(|error| format!("the reopen fails: {error:?}"))
 }
 
-/// A list of `0 .. n`, sealed alone into a store of its own: the row a
-/// list built directly at `n` has.
-fn direct_list(n: i64) -> Result<(u64, u8, u64, u8), String> {
-    let store = Counting::default();
-    let mut heap = fresh(&store);
-    let list = make(&mut heap, NewObject::List((0..n).map(Value::Int).collect()));
-    let root = heap.seal(&[list]).map_err(|error| format!("{error:?}"))?;
-    Ok(structure(&row(&store, &root)?))
+/// What a mutable container's row is whatever its history (lead ruling,
+/// l65e item 4): its chunk index and its edge index each at the least
+/// height their leaves give, every index page, read cold, the one its
+/// parent names and naming between one and `NODE_REFS` references, and
+/// no chunk empty. Its chunk layout and the widths of its index pages
+/// may depend on its history, and need not be a direct build's.
+fn well_formed(store: &Counting, chunked: &Chunked) -> Result<(), String> {
+    chunked.check()?;
+    chunked.index.check(&chunked.shape())?;
+    chunked.edges.check(&EDGES)?;
+    let access = Access::new(Box::new(store.clone()));
+    let mut empty = 0;
+    chunked
+        .index
+        .each(&access, &chunked.shape(), &mut |_, chunk| {
+            empty += u64::from(chunk.len == 0);
+            Ok(false)
+        })
+        .map_err(|error| format!("the chunk index reads otherwise: {error:?}"))?;
+    chunked
+        .edges
+        .each(&access, &EDGES, &mut |_, _| Ok(false))
+        .map_err(|error| format!("the edge index reads otherwise: {error:?}"))?;
+    if empty > 0 {
+        return Err(format!("{empty} chunks are empty"));
+    }
+    Ok(())
 }
 
 /// The list case: a list of `n` grown by one member and shrunk back, each
-/// step sealed and reopened cold, holds `0 .. len` and has the row of the
-/// list built directly at its length, whose chunk index is `heights`
-/// high before and after the growth.
+/// step sealed and reopened cold, holds `0 .. len`, its row
+/// [`well_formed`] with its chunk index `heights` high before and after
+/// the growth.
 fn list_case(n: i64, heights: (u8, u8)) -> Result<(), String> {
     let store = Counting::default();
     let mut heap = fresh(&store);
@@ -774,16 +797,110 @@ fn list_case(n: i64, heights: (u8, u8)) -> Result<(), String> {
                 return Err(format!("{n}, {step}: member {at} is not {at}"));
             }
         }
-        let got = structure(&row(&store, &root)?);
-        let direct = direct_list(len)?;
+        let chunked = row(&store, &root)?;
+        well_formed(&store, &chunked).map_err(|error| format!("{n}, {step}: {error}"))?;
         let height = if len > n { heights.1 } else { heights.0 };
-        if got != direct || got.1 != height {
+        if chunked.index.height() != height {
             return Err(format!(
-                "{n}, {step}: the row is {got:?}, the direct build's {direct:?}, height {height}"
+                "{n}, {step}: the chunk index is {} high, not {height}",
+                chunked.index.height()
             ));
         }
     }
     Ok(())
+}
+
+/// A tuple of `0 .. n`, sealed alone into a store of its own: the record
+/// a tuple built directly at `n` has.
+fn direct_tuple(n: i64) -> Result<Record, String> {
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let tuple = make(
+        &mut heap,
+        NewObject::Tuple((0..n).map(Value::Int).collect()),
+    );
+    let root = heap.seal(&[tuple]).map_err(|error| format!("{error:?}"))?;
+    record(&store, &root, 0)
+}
+
+/// The tuple case (lead ruling, l65e item 4): a tuple is a
+/// content-addressed immutable, so however it is built its record is the
+/// direct build's, every page of it (a page's id commits to its
+/// children's), and its key is the key of the tuple built anew. A tuple
+/// of `0 .. n` whose chunk index is `height` high (none: inline) is built
+/// in a store holding another object, sealed again after it is reopened
+/// cold and read and another object edited, and copied from its cold
+/// members; each is the direct build.
+fn tuple_case(n: i64, height: Option<u8>) -> Result<(), String> {
+    let seal = |heap: &mut SlotHeap, roots: &[Value]| {
+        heap.seal(roots)
+            .map_err(|error| format!("{n}: the seal fails: {error:?}"))
+    };
+    let direct = direct_tuple(n)?;
+    let direct_height = match &direct {
+        Record::Chunked(chunked) => Some(chunked.index.height()),
+        _ => None,
+    };
+    if direct_height != height {
+        return Err(format!(
+            "{n}: the direct build's index is {direct_height:?} high, not {height:?}"
+        ));
+    }
+    let same = |route: &str, got: Record| -> Result<(), String> {
+        if got == direct {
+            Ok(())
+        } else {
+            Err(format!(
+                "{n}, {route}: the record is not the direct build's"
+            ))
+        }
+    };
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let list = make(
+        &mut heap,
+        NewObject::List((0..300).map(|i| Value::Int(-i)).collect()),
+    );
+    let first = seal(&mut heap, &[list])?;
+    let (mut heap, list) = reopened(&store, &first);
+    let tuple = make(
+        &mut heap,
+        NewObject::Tuple((0..n).map(Value::Int).collect()),
+    );
+    let root = seal(&mut heap, &[tuple, list])?;
+    same("built in a store with history", record(&store, &root, 0)?)?;
+    let (mut heap, roots) = opened_all(&store, &root)?;
+    let [tuple, list] = roots[..] else {
+        return Err("two roots".into());
+    };
+    if int(item(&mut heap, &roots, tuple, n - 1)) != Some(n - 1) {
+        return Err(format!("{n}: the cold tuple's last member reads otherwise"));
+    }
+    let handle = list.handle().ok_or("no list")?;
+    warm(&mut heap, &roots, |heap| {
+        heap.arena_mut().list_set(handle, 0, Value::Int(1))
+    });
+    let root = seal(&mut heap, &[tuple, list])?;
+    same("sealed again cold", record(&store, &root, 0)?)?;
+    let (mut heap, roots) = opened_all(&store, &root)?;
+    let tuple = roots[0];
+    let members = (0..n)
+        .map(|at| item(&mut heap, &roots, tuple, at).ok_or(format!("{n}: no member {at}")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let copy = make(&mut heap, NewObject::Tuple(members));
+    let held = [tuple, copy];
+    let key = |heap: &mut SlotHeap, value: Value| {
+        warm(heap, &held, |heap| {
+            heap.arena().semantics().normal_key(&value)
+        })
+    };
+    let (cold_key, copy_key) = (key(&mut heap, tuple), key(&mut heap, copy));
+    if cold_key.is_none() || cold_key != copy_key {
+        return Err(format!("{n}: the copy's key is not the cold tuple's"));
+    }
+    let root = seal(&mut heap, &[copy, tuple])?;
+    same("copied from its cold members", record(&store, &root, 0)?)?;
+    same("its source, sealed beside it", record(&store, &root, 1)?)
 }
 
 /// The number a table key of the table cases names: `i`, or `k{i}`.
@@ -795,12 +912,13 @@ fn number(key: Value) -> Option<i64> {
     }
 }
 
-/// The table cases: a map, set or record of 300 entries (seven chunks) is
-/// grown one entry at a time, each step sealed and reopened cold, until a
-/// chunk splits, then shrunk back by one chunk, every entry of the last
-/// chunk holding a new one removed: each step holds exactly its entries,
-/// and its chunk index stays one level high.
-fn table_case(kind: &str) -> Result<(), String> {
+/// The table cases: a map, set or record of `start` entries is grown one
+/// entry at a time, each step sealed and reopened cold, until a chunk
+/// splits, then shrunk back by one chunk, every entry of the last chunk
+/// holding a new one removed. The table before the growth and at each
+/// end holds exactly its entries and its row is [`well_formed`], its
+/// chunk index `heights` high before and after the split.
+fn table_case(kind: &str, start: i64, heights: (u8, u8)) -> Result<(), String> {
     let key = |i: i64| -> Value {
         match kind {
             "record" => Value::Text(ShortText::new(&format!("k{i}")).expect("short")),
@@ -818,7 +936,9 @@ fn table_case(kind: &str) -> Result<(), String> {
             .map(|i| (key(*i), value(*i)))
             .collect::<Vec<_>>()
     };
-    let mut model: Vec<i64> = (0..300).collect();
+    let mut model: Vec<i64> = (0..start).collect();
+    // A write may load every chunk once, and join them.
+    let loads = usize::try_from(2 * start / 32 + 64).expect("a bound");
     let store = Counting::default();
     let mut heap = fresh(&store);
     let object = match kind {
@@ -828,61 +948,89 @@ fn table_case(kind: &str) -> Result<(), String> {
     };
     let table = make(&mut heap, object);
     let mut root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
-    let before = row(&store, &root)?.chunks();
-    let check = |root: &HeapRoot, model: &[i64], step: &str| -> Result<Chunked, String> {
-        let (mut cold, table) = reopened(&store, root);
-        let handle = table.handle().ok_or("no table")?;
-        let mut keys = Vec::new();
-        let mut last = None;
-        while let Some((seq, held)) = warm(&mut cold, &[table], |heap| {
-            heap.arena().table_next(handle, last)
-        }) {
-            keys.push(number(held));
-            last = Some(seq);
-        }
-        let expected: Vec<Option<i64>> = model.iter().map(|i| Some(*i)).collect();
-        if keys != expected {
-            return Err(format!(
-                "{kind}, {step}: the entries are not the ones written"
-            ));
-        }
-        for i in [model[0], model[model.len() / 2], model[model.len() - 1]] {
-            let held = get(&mut cold, &[table], table, key(i));
-            let right = match (kind, held) {
-                ("set", Some(Value::Absent)) => true,
-                (_, Some(Value::Int(held))) => held == -i,
-                _ => false,
-            };
-            if !right {
-                return Err(format!("{kind}, {step}: entry {i} reads otherwise"));
+    let check =
+        |root: &HeapRoot, model: &[i64], step: &str, height: u8| -> Result<Chunked, String> {
+            let (mut cold, table) = reopened(&store, root);
+            let handle = table.handle().ok_or("no table")?;
+            let mut keys = Vec::new();
+            let mut last = None;
+            while let Some((seq, held)) = warm_within(&mut cold, &[table], loads, |heap| {
+                heap.arena().table_next(handle, last)
+            }) {
+                keys.push(number(held));
+                last = Some(seq);
             }
-        }
-        let chunked = row(&store, root)?;
-        if chunked.index.height() != 1 {
-            return Err(format!(
-                "{kind}, {step}: the chunk index is not one level high"
-            ));
-        }
-        Ok(chunked)
-    };
-    let mut next = 1_000;
-    let split = loop {
+            let expected: Vec<Option<i64>> = model.iter().map(|i| Some(*i)).collect();
+            if keys != expected {
+                return Err(format!(
+                    "{kind}, {step}: the entries are not the ones written"
+                ));
+            }
+            for i in [model[0], model[model.len() / 2], model[model.len() - 1]] {
+                let probe = key(i);
+                let held = warm_within(&mut cold, &[table], loads, |heap| {
+                    heap.arena().table_get(handle, &probe)
+                });
+                let right = match (kind, held) {
+                    ("set", Some(Value::Absent)) => true,
+                    (_, Some(Value::Int(held))) => held == -i,
+                    _ => false,
+                };
+                if !right {
+                    return Err(format!("{kind}, {step}: entry {i} reads otherwise"));
+                }
+            }
+            let chunked = row(&store, root)?;
+            well_formed(&store, &chunked).map_err(|error| format!("{kind}, {step}: {error}"))?;
+            if chunked.index.height() != height {
+                return Err(format!(
+                    "{kind}, {step}: the chunk index is {} high, not {height}",
+                    chunked.index.height()
+                ));
+            }
+            Ok(chunked)
+        };
+    let built = check(&root, &model, "built", heights.0)?;
+    let before = built.chunks();
+    // The new entries' keys, past every key built, each placed in the
+    // last chunk, so that the growth splits it.
+    let new = start + 1_000;
+    let access = Access::new(Box::new(store.clone()));
+    let (_, last) = built
+        .index
+        .get(&access, &built.shape(), Seek::At(before - 1))
+        .map_err(|error| format!("{error:?}"))?
+        .ok_or("no last chunk")?;
+    let last = last.first.ok_or("the last chunk has no placement")?;
+    let scratch = fresh(&Counting::default());
+    let mut placed = (new..).filter(|i| {
+        scratch
+            .arena()
+            .semantics()
+            .normal_key(&key(*i))
+            .ok()
+            .flatten()
+            .is_some_and(|normal| placement(&normal) >= last)
+    });
+    let mut steps = 0;
+    loop {
+        let next = placed.next().ok_or("no key is placed in the last chunk")?;
         let (mut heap, table) = reopened(&store, &root);
         let handle = table.handle().ok_or("no table")?;
-        warm(&mut heap, &[table], |heap| {
+        warm_within(&mut heap, &[table], loads, |heap| {
             heap.arena_mut().table_write(handle, key(next), value(next))
         });
         model.push(next);
         root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
-        let chunked = check(&root, &model, "grown")?;
-        if chunked.chunks() > before {
-            break chunked;
+        if row(&store, &root)?.chunks() > before {
+            break;
         }
-        next += 1;
-        if next > 1_400 {
+        steps += 1;
+        if steps > 400 {
             return Err(format!("{kind}: 400 entries split no chunk"));
         }
-    };
+    }
+    let split = check(&root, &model, "grown", heights.1)?;
     // The chunk the split made: the later of the two, the first whose
     // first placement no chunk before the growth had.
     let access = Access::new(Box::new(store.clone()));
@@ -908,7 +1056,7 @@ fn table_case(kind: &str) -> Result<(), String> {
                 _ => None,
             })
             .collect();
-        if keys.iter().any(|i| *i >= 1_000) {
+        if keys.iter().any(|i| *i >= new) {
             removed = keys;
             break;
         }
@@ -920,13 +1068,13 @@ fn table_case(kind: &str) -> Result<(), String> {
     let handle = table.handle().ok_or("no table")?;
     for i in &removed {
         let gone = key(*i);
-        warm(&mut heap, &[table], |heap| {
+        warm_within(&mut heap, &[table], loads, |heap| {
             heap.arena_mut().table_delete(handle, &gone)
         });
     }
     model.retain(|i| !removed.contains(i));
     root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
-    let shrunk = check(&root, &model, "shrunk back")?;
+    let shrunk = check(&root, &model, "shrunk back", heights.0)?;
     if shrunk.chunks() + 1 != split.chunks() {
         return Err(format!(
             "{kind}: emptying a chunk left {} chunks of {}",
@@ -1260,6 +1408,7 @@ fn run_case() -> Result<(), String> {
         ..Counting::default()
     };
     record.sites.push(Vec::new());
+    let mut previous = None;
     for (count, height) in [(96usize, 0u8), (97, 1), (96, 0), (1, 0), (97, 1)] {
         // Two bytes per zero coordinate, half a segment past `count - 1`.
         *record.sites.last_mut().expect("a site table") =
@@ -1268,8 +1417,18 @@ fn run_case() -> Result<(), String> {
             return Err(format!("the record does not take {count} segments"));
         }
         let access = Access::new(Box::new(store.clone()));
-        let page =
+        // Written over the run root before it, it is the run written
+        // anew: its segment index is full, one shape for its count.
+        let page = continuation::write(&access, &record, previous)
+            .map_err(|error| format!("{error:?}"))?;
+        let anew =
             continuation::write(&access, &record, None).map_err(|error| format!("{error:?}"))?;
+        if page.id != anew.id {
+            return Err(format!(
+                "run of {count} segments: written over its last root, it is not the run written anew"
+            ));
+        }
+        previous = Some(page);
         let cold = Access::new(Box::new(store.clone()));
         let root: RunPage = decode_body(
             &cold
@@ -1377,17 +1536,24 @@ fn index_case() -> Result<(), String> {
     Ok(())
 }
 
-/// Contract §6 index rule (review astra-l65c items 2 and 3): an object
-/// grown by one across each boundary its structure has, the chunk count
-/// and each index height, and shrunk back, sealed and reopened cold at
-/// each step, holds what was written, and each index is at the height its
-/// leaves give, which is the direct build's; a list's row is the one a
-/// list built directly at its length has. Lists, maps, sets, records,
-/// edge lists and the run record are each grown and shrunk; the index's
-/// second level, which only lists reach here, is grown and shrunk for
-/// both widths at the index itself.
+/// Contract §6 index rule (review astra-l65c items 2 and 3; lead ruling,
+/// l65e item 4): an object grown by one across each boundary its
+/// structure has, the chunk count and each index height, and shrunk
+/// back, sealed and reopened cold at each step, holds what was written.
+/// A mutable container (a list, map, set, record or edge list) is
+/// identified by its object id, so its layout may depend on its history:
+/// its row is [`well_formed`], each index at the height its leaves give,
+/// and need not be a direct build's. Slack it may keep: a chunk with at
+/// least one member, an index page with at least one reference. A tuple
+/// is content-addressed: built in a store with history, sealed again
+/// cold, or copied from its cold members, inline and at index heights 1
+/// and 2, its record is the direct build's and its key
+/// the key of the tuple built anew. The run record, its segment index
+/// full, written over its last root is the run written anew. The index's
+/// second level is grown and shrunk for both widths at the index itself.
 #[test]
-fn an_object_grown_and_shrunk_across_each_boundary_is_the_one_built_there() {
+fn an_object_grown_and_shrunk_across_each_boundary_keeps_its_contents_and_a_tuple_is_its_direct_build()
+ {
     let mut failed = Vec::new();
     // Five chunks to six; 6,912 chunks (96 index pages of 72) to 6,913.
     for (n, heights) in [(5 * 64, (1, 1)), (6_912 * 64, (1, 2))] {
@@ -1395,16 +1561,37 @@ fn an_object_grown_and_shrunk_across_each_boundary_is_the_one_built_there() {
             failed.push(format!("list: {error}"));
         }
     }
-    for kind in ["map", "set", "record"] {
-        if let Err(error) = table_case(kind) {
+    // Seven chunks to eight; a map of 6,912 chunks (96 index pages of 72)
+    // to 6,913.
+    for (kind, start, heights) in [
+        ("map", 300, (1, 1)),
+        ("set", 300, (1, 1)),
+        ("record", 300, (1, 1)),
+        ("map", 331_776, (1, 2)),
+    ] {
+        if let Err(error) = table_case(kind, start, heights) {
             failed.push(error);
         }
+    }
+    for kind in ["map", "set", "record"] {
         if let Err(error) = table_cleared_case(kind) {
             failed.push(error);
         }
     }
     if let Err(error) = list_cleared_case() {
         failed.push(format!("list: {error}"));
+    }
+    // Inline; one index level from 257 members; 96 full index pages of
+    // 96 chunks of 64 members to one chunk more.
+    for (n, height) in [
+        (256, None),
+        (257, Some(1)),
+        (589_824, Some(1)),
+        (589_825, Some(2)),
+    ] {
+        if let Err(error) = tuple_case(n, height) {
+            failed.push(format!("tuple: {error}"));
+        }
     }
     if let Err(error) = edge_cleared_case() {
         failed.push(error);
