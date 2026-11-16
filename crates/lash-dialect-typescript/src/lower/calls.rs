@@ -204,9 +204,16 @@ impl Lowerer<'_> {
                     return self.array_branch(
                         object,
                         |this| {
-                            let read =
-                                this.native("list.get", vec![object.expr(), index.expr()])?;
-                            let read = this.let_expr(read, (**element).clone());
+                            // Keep numeric list reads on the shared helper
+                            // path. Its source-certified resident access
+                            // answers dense reads; the helper preserves the
+                            // list's hole and boundary behavior on a miss.
+                            let read = this.invoke(
+                                "ts.get_numeric",
+                                &[object.clone(), index.clone()],
+                                (**element).clone(),
+                            )?;
+                            let read = this.let_expr(read.expr(), (**element).clone());
                             this.absent_if_hole(&super::statements::variable_of(&read), &read)?;
                             Ok(read)
                         },
