@@ -340,6 +340,74 @@ class FreezeVerdicts(Harness):
         import apply_format_witnesses as automatic
         self.assertEqual(automatic.apply(self.repo, self.base), [])
 
+    def witness_rows(self, ticket: str) -> tuple[str, dict[str, tuple[str, str]]]:
+        """A ticket note's baseline and its rows as constant -> (from, witness)."""
+        text = (self.repo / f"docs/host-upgrades/unreleased/{ticket}.md").read_text()
+        rows = {m[1]: (m[2], m[3]) for m in re.finditer(
+            r"\| \[`([A-Z_]+)`\]\([^)]*\) = (absent|\d+) \| Witness (\d+)\.", text)}
+        return re.search(r"Baseline: `([0-9a-f]{40})`", text)[1], rows
+
+    def test_a_later_land_under_one_ticket_keeps_the_earlier_lands_rows(self) -> None:
+        # The ticket's note states the whole change since the last release: a
+        # land that changes only the peer keeps the record's row.
+        import apply_format_witnesses as automatic
+        self.write("crates/demo/src/peer.rs", PEER.replace('"coexist"', '"drain"'))
+        first = self.commit("a second stored surface")
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        self.commit("record shape (FIG-1)")
+        automatic.apply(self.repo, first)
+        second = self.commit("first land (FIG-1)")
+        self.write("crates/demo/src/dto/hello.rs", DTO.replace("String", "u64"))
+        self.commit("peer shape (FIG-1)")
+        automatic.apply(self.repo, second)
+        self.assertEqual(self.witness_rows("FIG-1")[1],
+                         {"WIRE_VERSION": ("3", "4"), "PEER_PROTOCOL_VERSION": ("1", "2")})
+
+    def test_a_later_land_keeps_the_oldest_from_value_and_baseline(self) -> None:
+        # Hand-derived: 3 at the first base, advanced once per land.
+        import apply_format_witnesses as automatic
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        self.commit("record shape (FIG-1)")
+        automatic.apply(self.repo, self.base)
+        second = self.commit("first land (FIG-1)")
+        self.write("crates/demo/src/lib.rs", (self.repo / "crates/demo/src/lib.rs").read_text()
+                   .replace("pub owner: String,", "pub owner: u64,"))
+        self.commit("record shape again (FIG-1)")
+        automatic.apply(self.repo, second)
+        baseline, rows = self.witness_rows("FIG-1")
+        self.assertEqual((baseline, rows["WIRE_VERSION"]), (self.base, ("3", "5")))
+
+    def test_a_note_row_the_script_cannot_resolve_is_refused_by_name(self) -> None:
+        import apply_format_witnesses as automatic
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        self.commit("record shape (FIG-1)")
+        for row in ("| `GONE_VERSION` was 2 | Witness 3. |",
+                    "| [`GONE_VERSION`](../../../crates/demo/src/gone.rs) = 2 | Witness 3. Reset. | FIG-1 | x |"):
+            self.write("docs/host-upgrades/unreleased/FIG-1.md",
+                       "# FIG-1\n\n<!-- BEGIN automatic format witnesses -->\n"
+                       f"Baseline: `{self.base}`.\n\n| Old contract | New |\n| --- | --- |\n{row}\n"
+                       "<!-- END automatic format witnesses -->\n")
+            with self.assertRaisesRegex(gate.CheckError, "GONE_VERSION"):
+                automatic.apply(self.repo, self.base)
+
+    def test_repair_from_an_older_revision_restores_the_oldest_from_value(self) -> None:
+        # A note the old script truncated to its last step (4 -> 5, baseline
+        # after the first land) is rebuilt from the first base: 3 -> 5.
+        import apply_format_witnesses as automatic
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD)
+        first_land = self.commit("first land (FIG-1)")
+        self.write("crates/demo/src/lib.rs", WIDER_RECORD.replace("pub owner: String,", "pub owner: u64,")
+                   .replace("WIRE_VERSION: u32 = 3", "WIRE_VERSION: u32 = 5"))
+        self.write("docs/host-upgrades/unreleased/FIG-1.md",
+                   "# FIG-1\n\nHand-written text stays.\n\n<!-- BEGIN automatic format witnesses -->\n"
+                   f"Baseline: `{first_land}`.\n\n| Old contract | New |\n| --- | --- |\n"
+                   "| [`WIRE_VERSION`](../../../crates/demo/src/lib.rs) = 4 | Witness 5. Reset. | FIG-1 | x |\n"
+                   "<!-- END automatic format witnesses -->\n")
+        self.commit("second land (FIG-1)")
+        automatic.repair_note(self.repo, "FIG-1", self.base)
+        self.assertEqual(self.witness_rows("FIG-1"), (self.base, {"WIRE_VERSION": ("3", "5")}))
+        self.assertIn("Hand-written text stays.", (self.repo / "docs/host-upgrades/unreleased/FIG-1.md").read_text())
+
     def test_parallel_shape_edits_rebase_and_allocate_against_current_main(self) -> None:
         import apply_format_witnesses as automatic
 

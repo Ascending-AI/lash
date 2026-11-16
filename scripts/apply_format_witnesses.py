@@ -5,6 +5,16 @@ Integer stamps remain the reader/writer contract. Allocation happens only after
 rebase, against that main's values, so parallel authored changes never compete
 for the next integer. The 1.0 switch is check_version_bumps.STRICT_VERSION_BUMPS;
 after the cut this command validates the strict policy and edits nothing.
+
+Each land that changes a witness records it in the ticket's unreleased host
+note (`docs/host-upgrades/unreleased/<ticket>.md`). That table states the whole
+change since the last release a host could run, so it is cumulative: a row
+keeps the oldest "from" value and baseline recorded, takes the current value
+as its witness, and is never dropped. A constant that changes for the first
+time gets a row from the land's base. A recorded row the script cannot
+resolve to a current witness is refused by name. `--repair-note TICKET
+--since REV` rebuilds a ticket's table from REV to the working tree with the
+same merge, for a note an earlier script truncated.
 """
 
 from __future__ import annotations
@@ -12,6 +22,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+from typing import Callable
 import sys
 import subprocess
 
@@ -206,6 +217,136 @@ def retire_replaced_build(base_view: gate.TreeView, view: gate.TreeView) -> dict
     return {path: updated} if updated != text else {}
 
 
+TABLE = re.compile(r"(?s)\n<!-- BEGIN automatic format witnesses -->\n(?P<body>.*?)<!-- END automatic format witnesses -->\n")
+BASELINE = re.compile(r"(?m)^Baseline: `(?P<revision>[0-9a-f]{40})`\.$")
+ROW = re.compile(r"\| \[`(?P<constant>[A-Za-z_][A-Za-z0-9_]*)`\]\(\.\./\.\./\.\./(?P<path>[^)\s]+)\) = "
+                 r"(?P<old>absent|[0-9]+) \| Witness [0-9]+\. ")
+
+
+def recorded_table(note: str) -> tuple[str | None, dict[str, tuple[str, str, int | None]]]:
+    """A note's recorded baseline and rows, keyed by surface key, each row's
+    (constant, path, from-value). A row it cannot read is refused by name."""
+    match = TABLE.search(note)
+    if match is None:
+        return None, {}
+    baseline = BASELINE.search(match["body"])
+    if baseline is None:
+        raise gate.CheckError("host note witness table has no baseline")
+    rows = {}
+    for line in match["body"].splitlines():
+        if not line.startswith("| ") or line.startswith(("| Old contract", "| ---")):
+            continue
+        row = ROW.match(line)
+        if row is None:
+            raise gate.CheckError(f"unrecognised host note row: {line}")
+        rows[f"{row['path']}:{row['constant']}"] = (
+            row["constant"], row["path"], None if row["old"] == "absent" else int(row["old"]))
+    return baseline["revision"], rows
+
+
+def cumulative(older: Callable[[str, str], bool], recorded_baseline: str | None,
+               recorded: dict[str, tuple[str, str, int | None]], base: str,
+               changed: dict[str, tuple[gate.Surface, int | None, int]],
+               current: dict[str, tuple[gate.Surface, int]]) -> tuple[str, list[tuple[gate.Surface, int | None, int]]]:
+    """Merge a note's recorded table with one land's (or repair's) changes.
+
+    `changed` maps surface keys to (surface, value at `base`, current value);
+    `current` maps every current surface key to (surface, current value).
+    Whichever of `base` and the recorded baseline is older supplies the
+    baseline and, for rows in both, the from-value. Every recorded row stays
+    and takes its current value as witness."""
+    if recorded_baseline is None or recorded_baseline == base:
+        baseline, recorded_older = base, True
+    elif older(recorded_baseline, base):
+        baseline, recorded_older = recorded_baseline, True
+    elif older(base, recorded_baseline):
+        baseline, recorded_older = base, False
+    else:
+        raise gate.CheckError(f"host note baseline {recorded_baseline} and base {base} are unrelated")
+    rows: dict[str, tuple[gate.Surface, int | None, int]] = {}
+    claimed = set(recorded)
+    for key, (constant, path, before) in recorded.items():
+        if key in current:
+            surface, after = current[key]
+        else:
+            moved = [entry for other, entry in current.items()
+                     if entry[0].constant == constant and other not in claimed]
+            if len(moved) != 1:
+                raise gate.CheckError(f"host note row `{constant}` ({path}) names no current witness")
+            surface, after = moved[0]
+        rows[surface.key] = (surface, before, after)
+    for key, (surface, before, after) in changed.items():
+        if key not in rows or not recorded_older:
+            rows[key] = (surface, before, after)
+    return baseline, [rows[key] for key in sorted(rows)]
+
+
+def write_note(repo: Path, identity: str, base: str, changed: dict[str, tuple[gate.Surface, int | None, int]],
+               view: gate.TreeView, known: tuple[gate.Surface, ...] = ()) -> tuple[str, str]:
+    """The ticket's host note with its cumulative witness table. `known` are
+    current surfaces already discovered; the tree is scanned again only when a
+    recorded row is not among them."""
+    path = f"docs/host-upgrades/unreleased/{identity}.md"
+    target = repo / path
+    note = target.read_text(encoding="utf-8") if target.exists() else f"# {identity}: Automatic format witnesses\n"
+    recorded_baseline, recorded = recorded_table(note)
+    surfaces = {surface.key: surface for surface in known}
+    if not surfaces or any(key not in surfaces for key in recorded):
+        surfaces = {surface.key: surface for surface in gate.discovered_surfaces(view, enforce=False)}
+    current = {key: (surface, gate.version_at(view, surface)) for key, surface in surfaces.items()}
+
+    def older(first: str, second: str) -> bool:
+        return subprocess.run(["git", "merge-base", "--is-ancestor", first, second], cwd=repo).returncode == 0
+
+    baseline, rows = cumulative(older, recorded_baseline, recorded, base, changed, current)
+    note = TABLE.sub("", note)
+    lines = ["", "<!-- BEGIN automatic format witnesses -->",
+             "This table is generated by `scripts/land` after rebase. It is cumulative: each row",
+             "keeps the oldest recorded value and shows the current witness.", "",
+             f"Baseline: `{baseline}`.", "",
+             "Before 1.0, changed formats require reset or recreation before deployment.",
+             "No migration, old-shape reader, feature or configuration opt-in is provided.", "",
+             "| Old contract | New contract / host action | Commit and ticket | Missed-change diagnostic or symptom |",
+             "| --- | --- | --- | --- |"]
+    for surface, before, after in rows:
+        source = f"../../../{surface.constant_path}"
+        old = "absent" if before is None else str(before)
+        lines.append(f"| [`{surface.constant}`]({source}) = {old} | Witness {after}. Reset affected stores or recreate retained bytes. | {identity} | Version survey reports a changed witness; previous bytes are unsupported. |")
+    lines += ["<!-- END automatic format witnesses -->"]
+    return path, note.rstrip() + "\n" + "\n".join(lines) + "\n"
+
+
+def changed_between(base_view: gate.TreeView, view: gate.TreeView) -> dict[str, tuple[gate.Surface, int | None, int]]:
+    """Every witness that differs between two trees, and every non-coexist
+    surface the later one registers."""
+    originals = {surface.key: surface for surface in gate.discovered_surfaces(base_view, enforce=False)}
+    surfaces = gate.discovered_surfaces(view, enforce=False)
+    keys = {surface.key for surface in surfaces}
+    changed = {}
+    for surface in surfaces:
+        previous = gate._base_surface(surface, originals, keys)
+        after = gate.version_at(view, surface)
+        if previous is None:
+            if surface.upgrade != "coexist":
+                changed[surface.key] = (surface, None, after)
+        elif gate.version_at(base_view, previous) != after:
+            changed[surface.key] = (surface, gate.version_at(base_view, previous), after)
+    return changed
+
+
+def repair_note(repo: Path, identity: str, since: str) -> list[str]:
+    """Rebuild a ticket's witness table from `since` to the working tree."""
+    base_view = gate.RevisionView(repo, gate.resolve_revision(repo, since))
+    view = gate.WorktreeView(repo)
+    path, text = write_note(repo, identity, base_view.revision, changed_between(base_view, view), view)
+    target = repo / path
+    if target.exists() and target.read_text(encoding="utf-8") == text:
+        return []
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return [path]
+
+
 def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
     strict = gate.STRICT_VERSION_BUMPS if strict is None else strict
     base_view = gate.RevisionView(repo, gate.resolve_revision(repo, base))
@@ -265,23 +406,9 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
         subject = gate.git(repo, "log", "-1", "--format=%s").stdout.strip()
         ticket = re.search(r"FIG-\d+", subject)
         identity = ticket.group() if ticket else f"auto-formats-{base_view.revision[:12]}"
-        path = f"docs/host-upgrades/unreleased/{identity}.md"
-        target = repo / path
-        note = target.read_text(encoding="utf-8") if target.exists() else f"# {identity}: Automatic format witnesses\n"
-        note = re.sub(r"(?s)\n<!-- BEGIN automatic format witnesses -->.*?<!-- END automatic format witnesses -->\n", "", note)
-        lines = ["", "<!-- BEGIN automatic format witnesses -->",
-                 "This table is generated by `scripts/land` after rebase.", "",
-                 f"Baseline: `{base_view.revision}`.", "",
-                 "Before 1.0, changed formats require reset or recreation before deployment.",
-                 "No migration, old-shape reader, feature or configuration opt-in is provided.", "",
-                 "| Old contract | New contract / host action | Commit and ticket | Missed-change diagnostic or symptom |",
-                 "| --- | --- | --- | --- |"]
-        for key, (surface, before, after) in sorted(changed.items()):
-            source = f"../../../{surface.constant_path}"
-            old = "absent" if before is None else str(before)
-            lines.append(f"| [`{surface.constant}`]({source}) = {old} | Witness {after}. Reset affected stores or recreate retained bytes. | This commit, {identity} | Version survey reports a changed witness; previous bytes are unsupported. |")
-        lines += ["<!-- END automatic format witnesses -->"]
-        files[path] = note.rstrip() + "\n" + "\n".join(lines) + "\n"
+        path, text = write_note(repo, identity, base_view.revision, changed, PlannedView(repo, files),
+                                (*result.evaluated, *result.unshaped, *result.registered))
+        files[path] = text
     written = []
     for path, text in sorted(files.items()):
         target = repo / path
@@ -298,6 +425,9 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--base")
     mode.add_argument("--check-artifacts", action="store_true")
+    mode.add_argument("--repair-note", metavar="TICKET",
+                      help="rebuild TICKET's cumulative witness table from --since to the working tree")
+    parser.add_argument("--since", help="the revision --repair-note's table starts from")
     parser.add_argument("--repo", type=Path, default=gate.ROOT)
     parser.add_argument("--strict", action="store_true", default=gate.STRICT_VERSION_BUMPS)
     args = parser.parse_args()
@@ -307,6 +437,12 @@ def main():
             if errors:
                 raise gate.CheckError("; ".join(errors))
             print("witness-keyed stamps and tables are current")
+            return
+        if args.repair_note:
+            if not args.since:
+                raise gate.CheckError("--repair-note needs --since")
+            for path in repair_note(args.repo, args.repair_note, args.since):
+                print(path)
             return
         for path in apply(args.repo, args.base, strict=args.strict):
             print(path)
