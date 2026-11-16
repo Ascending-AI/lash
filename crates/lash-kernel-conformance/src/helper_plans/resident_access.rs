@@ -167,6 +167,30 @@ fn reference(program: &Program, bounds: Bounds, slice: u64, cold: bool) -> Acces
 }
 
 #[test]
+fn numeric_array_lowering_keeps_the_parent_charge_schedule() {
+    // K-CHG-002 / K-CHG-007: specializing an access must retain the
+    // established lowering's expression events and native-call fees.
+    let runner = runner::Runner::new("typescript").unwrap();
+    let runner::Lowered::Program(program) = runner
+        .lower(&runner::Case {
+            id: "numeric array charge schedule".into(),
+            dialect: "typescript".into(),
+            source: "const xs = [1, 2, 3]; console.log(xs[0]);".into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        })
+        .unwrap()
+    else {
+        panic!("the charge fixture lowers");
+    };
+    let result = observe(&program, bounds(), u64::MAX, false);
+    assert!(result.end.is_ok());
+    assert_eq!(result.prints, vec![Datum::Text("1".into())]);
+    assert_eq!(result.stops.last().unwrap(), &("ended".into(), 57));
+}
+
+#[test]
 fn dense_numeric_reads_and_plain_record_stores_preserve_source_boundaries() {
     let runner = runner::Runner::new("typescript").unwrap();
     let mut successful = 0;

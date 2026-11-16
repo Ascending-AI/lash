@@ -190,18 +190,6 @@ impl Lowerer<'_> {
                 Ty::Unknown,
             );
         }
-        if object.ty == Ty::Array
-            && let Key::Computed(index) = key
-            && index.ty.is_number()
-        {
-            // Source-built arrays have no element type facet, but numeric
-            // reads still use the same helper and resident dense path.
-            return self.invoke(
-                "ts.get_numeric",
-                &[object.clone(), index.clone()],
-                Ty::Unknown,
-            );
-        }
         if matches!(object.ty, Ty::List(_)) {
             let object = self.reuse(object.clone());
             return self.get_list_member(&object, key);
@@ -216,16 +204,9 @@ impl Lowerer<'_> {
                     return self.array_branch(
                         object,
                         |this| {
-                            // Keep numeric list reads on the shared helper
-                            // path. Its source-certified resident access
-                            // answers dense reads; the helper preserves the
-                            // list's hole and boundary behavior on a miss.
-                            let read = this.invoke(
-                                "ts.get_numeric",
-                                &[object.clone(), index.clone()],
-                                (**element).clone(),
-                            )?;
-                            let read = this.let_expr(read.expr(), (**element).clone());
+                            let read =
+                                this.native("list.get", vec![object.expr(), index.expr()])?;
+                            let read = this.let_expr(read, (**element).clone());
                             this.absent_if_hole(&super::statements::variable_of(&read), &read)?;
                             Ok(read)
                         },
