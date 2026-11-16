@@ -629,12 +629,12 @@ pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::
 /// hand; `scripts/check_format_registry.py` holds it to the named build's
 /// stamps and refuses a stamp moved since without it.
 ///
-/// Replaced build: `a64c166bac83d33de97928ea2c124ee315a0e8ed`.
+/// Replaced build: `6b57c0ca4f60fa9365b8c7d140301f529dff9009`.
 const RETIRED_BUILD: &[(&str, u32)] = &[
-    ("codemode-snapshot", 22),
+    ("codemode-snapshot", 23),
     ("engine/lashvm", 1),
-    ("kernel-parked-state", 21),
-    ("kernel-saved-function", 10),
+    ("kernel-parked-state", 22),
+    ("kernel-saved-function", 11),
     ("outcome-material", 1),
     ("run-record", 19),
     ("session-state", 3),
