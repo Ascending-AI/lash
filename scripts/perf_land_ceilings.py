@@ -151,7 +151,7 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                            'sha256': '7881cb629936ab28c552588d7a74ac29d63acfadc811691d4688b23bf9eba5ab',
                            'lo': 1,
                            'ops': 1,
-                           'ceiling': 2906064.4431578945},
+                           'ceiling': 2700401.9036842105},
  'python/sort_bench': {'source': 'crates/lash-perf/src/compare/workloads/sort_bench.py',
                        'sha256': 'dc9d0f1b7fd397c2bcba5db1bb4e43de61ecc421bf80dad0e657bc17bfec4cf2',
                        'lo': 1,
