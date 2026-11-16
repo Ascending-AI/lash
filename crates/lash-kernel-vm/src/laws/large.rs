@@ -1008,9 +1008,241 @@ fn edge_case() -> Result<(), String> {
     Ok(())
 }
 
+/// The list's members, read cold, or the fault that stops the read.
+fn list_members(heap: &mut SlotHeap, list: Value) -> Result<Vec<i64>, String> {
+    let handle = list.handle().ok_or("no list")?;
+    let roots = [list];
+    let len = try_warm(heap, &roots, |heap| heap.arena().len(handle))?;
+    (0..len)
+        .map(
+            |at| match try_warm(heap, &roots, |heap| heap.arena().item(handle, at))? {
+                Some(Value::Int(i)) => Ok(i),
+                other => Err(format!("member {at} is {other:?}")),
+            },
+        )
+        .collect()
+}
+
+/// What `op` answers once every chunk it asks for is loaded, or the
+/// fault a load or the op meets.
+fn try_warm<T>(
+    heap: &mut SlotHeap,
+    roots: &[Value],
+    mut op: impl FnMut(&mut SlotHeap) -> Result<T, NativeError>,
+) -> Result<T, String> {
+    for _ in 0..=(N as usize).div_ceil(32) {
+        match op(heap) {
+            Ok(out) => return Ok(out),
+            Err(NativeError::Retry(Retry::Cold { object, chunk })) => heap
+                .load(object, chunk, &mut |visit| {
+                    roots.iter().for_each(&mut *visit)
+                })
+                .map_err(|error| format!("a load fails: {error:?}"))?,
+            Err(other) => return Err(format!("a read fails: {other:?}")),
+        }
+    }
+    Err("a read asked for more loads than its object has chunks".into())
+}
+
+/// The list's last members removed until it holds `len`.
+fn truncate(heap: &mut SlotHeap, list: Value, len: u64) {
+    let handle = list.handle().expect("a list");
+    while warm(heap, &[list], |heap| heap.arena().len(handle)) > len {
+        let last = warm(heap, &[list], |heap| heap.arena().len(handle)) - 1;
+        warm(heap, &[list], |heap| {
+            heap.arena_mut().list_remove(handle, last)
+        });
+    }
+}
+
+/// `from .. to` appended to the list.
+fn append(heap: &mut SlotHeap, list: Value, from: i64, to: i64) {
+    let handle = list.handle().expect("a list");
+    for i in from..to {
+        warm(heap, &[list], |heap| {
+            heap.arena_mut().list_set(handle, i as u64, Value::Int(i))
+        });
+    }
+}
+
+/// Review astra-l65d item 1: a large list of five chunks shrunk to one
+/// chunk, grown past it, cleared, and grown again past 256, each
+/// step sealed and reopened cold, holds `0 .. len`.
+fn list_cleared_case() -> Result<(), String> {
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let list = make(
+        &mut heap,
+        NewObject::List((0..320).map(Value::Int).collect()),
+    );
+    let steps: [(&str, &dyn Fn(&mut SlotHeap, Value), i64); 4] = [
+        (
+            "shrunk to one chunk",
+            &|heap, list| truncate(heap, list, 64),
+            64,
+        ),
+        (
+            "grown past one chunk",
+            &|heap, list| append(heap, list, 64, 65),
+            65,
+        ),
+        ("shrunk to zero", &|heap, list| truncate(heap, list, 0), 0),
+        (
+            "cleared, then grown again",
+            &|heap, list| append(heap, list, 0, 320),
+            320,
+        ),
+    ];
+    let mut root = heap.seal(&[list]).map_err(|error| format!("{error:?}"))?;
+    for (step, edit, len) in steps {
+        let (mut heap, list) = reopened(&store, &root);
+        edit(&mut heap, list);
+        root = heap
+            .seal(&[list])
+            .map_err(|error| format!("{step}: {error:?}"))?;
+        let (mut cold, list) = SlotHeap::open(
+            u64::MAX,
+            &root,
+            Directory::open(root.directory, Box::new(store.clone())),
+        )
+        .map(|(heap, roots)| (heap, roots[0]))
+        .map_err(|error| format!("{step}: the reopen fails: {error:?}"))?;
+        let held = list_members(&mut cold, list).map_err(|error| format!("{step}: {error}"))?;
+        if held != (0..len).collect::<Vec<_>>() {
+            return Err(format!("{step}: {} members, not 0 .. {len}", held.len()));
+        }
+    }
+    Ok(())
+}
+
+/// Review astra-l65d item 1, for tables: a map, set or record of 300
+/// entries, each entry deleted, then 300 new ones written, each step
+/// sealed and reopened cold, holds exactly its entries.
+fn table_cleared_case(kind: &str) -> Result<(), String> {
+    let key = |i: i64| -> Value {
+        match kind {
+            "record" => Value::Text(ShortText::new(&format!("k{i}")).expect("short")),
+            _ => Value::Int(i),
+        }
+    };
+    let value = |i: i64| -> Value {
+        match kind {
+            "set" => Value::Absent,
+            _ => Value::Int(-i),
+        }
+    };
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let entries: Vec<(Value, Value)> = (0..300).map(|i| (key(i), value(i))).collect();
+    let object = match kind {
+        "map" => NewObject::Map(entries),
+        "record" => NewObject::Record(entries),
+        _ => NewObject::Set((0..300).map(key).collect()),
+    };
+    let table = make(&mut heap, object);
+    let mut root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
+    for (step, model) in [
+        ("shrunk to zero", Vec::new()),
+        (
+            "cleared, then grown again",
+            (1_000..1_300).collect::<Vec<i64>>(),
+        ),
+    ] {
+        let (mut heap, table) = reopened(&store, &root);
+        let handle = table.handle().ok_or("no table")?;
+        if model.is_empty() {
+            for i in 0..300 {
+                let gone = key(i);
+                warm(&mut heap, &[table], |heap| {
+                    heap.arena_mut().table_delete(handle, &gone)
+                });
+            }
+        } else {
+            for i in &model {
+                warm(&mut heap, &[table], |heap| {
+                    heap.arena_mut().table_write(handle, key(*i), value(*i))
+                });
+            }
+        }
+        root = heap
+            .seal(&[table])
+            .map_err(|error| format!("{kind}, {step}: {error:?}"))?;
+        let (mut cold, table) = SlotHeap::open(
+            u64::MAX,
+            &root,
+            Directory::open(root.directory, Box::new(store.clone())),
+        )
+        .map(|(heap, roots)| (heap, roots[0]))
+        .map_err(|error| format!("{kind}, {step}: the reopen fails: {error:?}"))?;
+        let handle = table.handle().ok_or("no table")?;
+        let mut keys = Vec::new();
+        let mut last = None;
+        while let Some((seq, held)) = try_warm(&mut cold, &[table], |heap| {
+            heap.arena().table_next(handle, last)
+        })
+        .map_err(|error| format!("{kind}, {step}: {error}"))?
+        {
+            keys.push(number(held));
+            last = Some(seq);
+        }
+        if keys != model.iter().map(|i| Some(*i)).collect::<Vec<_>>() {
+            return Err(format!(
+                "{kind}, {step}: {} entries, not the {} written",
+                keys.len(),
+                model.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Review astra-l65d item 1, for edge lists: 73,729 ids (97 pages under
+/// one index level) all removed, then 73,729 others added, each read back
+/// cold: the counts written.
+fn edge_cleared_case() -> Result<(), String> {
+    let store = Counting::default();
+    let mut edges = Index::empty(&EDGES);
+    let built: BTreeMap<ObjectId, i64> = (0..73_729).map(|i| (ObjectId(2 * i), 1)).collect();
+    let cleared: BTreeMap<ObjectId, i64> = built.keys().map(|id| (*id, -1)).collect();
+    let regrown: BTreeMap<ObjectId, i64> = (0..73_729).map(|i| (ObjectId(2 * i + 1), 2)).collect();
+    for (step, delta) in [
+        ("built", &built),
+        ("shrunk to zero", &cleared),
+        ("cleared, then grown again", &regrown),
+    ] {
+        let access = Access::new(Box::new(store.clone()));
+        edges =
+            rewrite_edges(&access, &edges, delta).map_err(|error| format!("{step}: {error:?}"))?;
+        edges
+            .check(&EDGES)
+            .map_err(|error| format!("edges, {step}: {error}"))?;
+        let cold = Access::new(Box::new(store.clone()));
+        let mut held = BTreeMap::new();
+        edges
+            .each(&cold, &EDGES, &mut |_, part| {
+                held.extend(edge_page(&cold, part)?.0);
+                Ok(false)
+            })
+            .map_err(|error| format!("{step}: {error:?}"))?;
+        let model: BTreeMap<ObjectId, u64> = match step {
+            "shrunk to zero" => BTreeMap::new(),
+            _ => delta.iter().map(|(id, n)| (*id, *n as u64)).collect(),
+        };
+        if held != model {
+            return Err(format!(
+                "edges, {step}: {} ids read back, not {}",
+                held.len(),
+                model.len()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The run record case: a parked run whose encoded record takes 96, 97
-/// and 96 segments, written and read back cold each time: its state
-/// whole, and its segment index at height 0, 1 and 0.
+/// and 96 segments, then one (its nearest to cleared) and 97 again,
+/// written and read back cold each time: its state whole, and its
+/// segment index at height 0, 1, 0, 0 and 1.
 fn run_case() -> Result<(), String> {
     use lash_kernel_state::paged::run::continuation::{self, RunPage, SEGMENT_BYTES};
     use lash_kernel_value::tokens::{decode_body, encode_body};
@@ -1025,7 +1257,7 @@ fn run_case() -> Result<(), String> {
         ..Counting::default()
     };
     record.sites.push(Vec::new());
-    for (count, height) in [(96usize, 0u8), (97, 1), (96, 0)] {
+    for (count, height) in [(96usize, 0u8), (97, 1), (96, 0), (1, 0), (97, 1)] {
         // Two bytes per zero coordinate, half a segment past `count - 1`.
         *record.sites.last_mut().expect("a site table") =
             vec![0; ((count - 1) * SEGMENT_BYTES + SEGMENT_BYTES / 2) / 2];
@@ -1164,6 +1396,15 @@ fn an_object_grown_and_shrunk_across_each_boundary_is_the_one_built_there() {
         if let Err(error) = table_case(kind) {
             failed.push(error);
         }
+        if let Err(error) = table_cleared_case(kind) {
+            failed.push(error);
+        }
+    }
+    if let Err(error) = list_cleared_case() {
+        failed.push(format!("list: {error}"));
+    }
+    if let Err(error) = edge_cleared_case() {
+        failed.push(error);
     }
     for (name, case) in [
         ("edges", edge_case as fn() -> Result<(), String>),
