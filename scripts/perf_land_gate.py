@@ -104,20 +104,24 @@ def land_paths(base, candidate):
 
 
 def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=False):
-    """Refuse a row above its ceiling or a candidate bound PY row above the
-    binding Monty ratio; answer the report-only note of one above the report
-    ratio. Every other reference ratio is information in the receipt."""
+    """Refuse a row above its ceiling or a candidate PY row above the binding
+    Monty ratio unless it is listed exempt; answer the notes of an exempt row
+    above it and of any PY row above the report ratio."""
     if not calibrate:
         require(median <= ceiling, f"{side}/{key}: median {median} exceeds ceiling {ceiling}")
-    if side == "candidate" and key in policy.MONTY_BOUND_ROWS and policy.MONTY_BINDING:
+    notes = []
+    if side == "candidate" and key.startswith("python/") and policy.MONTY_BINDING:
         require(monty is not None and math.isfinite(monty) and monty > 0,
                 f"{side}/{key}: missing qualified Monty secant")
-        require(median <= policy.MONTY_MAX_RATIO * monty,
-                f"{side}/{key}: {median / monty:.6f}x Monty exceeds {policy.MONTY_MAX_RATIO:.2f}x")
+        if median > policy.MONTY_MAX_RATIO * monty:
+            require(key in policy.MONTY_EXEMPT_ROWS,
+                    f"{side}/{key}: {median / monty:.6f}x Monty exceeds {policy.MONTY_MAX_RATIO:.2f}x")
+            notes.append(f"{side}/{key}: {median / monty:.6f}x Monty, exempt from the binding "
+                         f"{policy.MONTY_MAX_RATIO:.2f}x: {policy.MONTY_EXEMPT_ROWS[key]['reason']}")
         if median > policy.MONTY_REPORT_RATIO * monty:
-            return (f"{side}/{key}: {median / monty:.6f}x Monty above the report-only "
-                    f"{policy.MONTY_REPORT_RATIO:.2f}x")
-    return None
+            notes.append(f"{side}/{key}: {median / monty:.6f}x Monty above the report-only "
+                         f"{policy.MONTY_REPORT_RATIO:.2f}x")
+    return "; ".join(notes) or None
 
 
 def check_cold_access(key, row):
@@ -400,8 +404,8 @@ def contract(base, calibrate):
     require(policy.MONTY_BINDING is True and policy.MONTY_MAX_RATIO == 3.0,
             "the switch gate requires a binding 3.00x Monty ceiling")
     require(policy.MONTY_REPORT_RATIO == 2.0, "the switch gate reports PY rows above 2.00x Monty")
-    require(set(policy.MONTY_BOUND_ROWS) <= {key for key in policy.ROWS if key.startswith("python/")},
-            "the Monty rule binds tracked PY rows only")
+    require(set(policy.MONTY_EXEMPT_ROWS) <= {key for key in policy.ROWS if key.startswith("python/")},
+            "only tracked PY rows can be exempt from the Monty rule")
     return replacement
 
 
@@ -568,6 +572,11 @@ def judge(samples, calibrate, sides=("base", "candidate"), exempt=None):
                 if note:
                     notes.append(note)
                     print(f"perf report-only: {note}", flush=True)
+    for key in policy.MONTY_EXEMPT_ROWS:
+        ratios = [rows.get(f"{side}/{key}", {}).get("ratios", {}).get("monty") for side in sides]
+        if all(ratio is not None and ratio <= policy.MONTY_MAX_RATIO for ratio in ratios):
+            errors.append(f"{key}: exemption no longer needed: remove it "
+                          f"(at or under {policy.MONTY_MAX_RATIO:.2f}x on both sides)")
     for key in policy.ROWS:
         populations = [[s["results"] for s in samples if s["side"] == side and s["row"] == key]
                        for side in sides]

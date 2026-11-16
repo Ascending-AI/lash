@@ -1,6 +1,6 @@
 """Reviewed instruction ceilings and the fixed measurement contract for FIG-7682."""
 
-# The runtime switch gate: every bound PY row must also be <=3x Monty 1.4.0 in this
+# The runtime switch gate: every PY row not exempt below must also be <=3x Monty 1.4.0 in this
 # same Kiln configuration, with no margin above 3x, and no PY or TS row may
 # exceed its own ceiling below. This rule is binding.
 # The <=2x Monty goal is report-only until after the switch: a PY row above it
@@ -29,19 +29,16 @@
 MONTY_BINDING = True
 MONTY_MAX_RATIO = 3.0
 MONTY_REPORT_RATIO = 2.0
-# The PY rows the binding 3x and report-only 2x rules hold. Rows added by
-# job D record their reference ratio as information only (python/records
-# measured 5.29x Monty on 3f729b250e).
-MONTY_BOUND_ROWS = ['python/int_arith',
- 'python/func_call',
- 'python/prop_read',
- 'python/map_set_string',
- 'python/json_transform',
- 'python/sort_bench',
- 'python/func_closure_call',
- 'python/float_arith',
- 'python/string_build1',
- 'python/int_to_string']
+# Every PY row is held to the binding 3x and report-only 2x rules, a row
+# added later included, except the rows listed here. Only a reviewed
+# replacement adds an entry; the gate refuses an entry whose row is at or
+# under 3x on both sides of a land, so the list empties itself.
+MONTY_EXEMPT_ROWS = {
+    'python/records': {
+        'ratio': 5.293161273203291,
+        'reason': 'above 3x Monty on main 036b440867 (5.29x); owned by the r60 perf round',
+    },
+}
 
 NOISE = 0.01
 BASE_MARGIN = 0.01
@@ -50,17 +47,11 @@ RATCHET_SLACK = 0.03
 
 # Active only while the base's copy of this file has previous_sha256.
 REVIEWED_REPLACEMENT = {
-    'previous_sha256': '0023baa381b62d8452a6dfab0a3e4d2e44591ce1237a08dcfc7b1bddfc0cc18a',
+    'previous_sha256': '1a1c1b4235bbeeb46dc0df70f690fd4b710b4c8e731cbd0e3f20a3b01d9474e2',
     'reviewer': 'r60 lead',
-    'added_rows': ['typescript/sort_bench', 'typescript/object_sort', 'python/object_sort',
-                   'typescript/object_sort_200k', 'python/object_sort_200k',
-                   'typescript/array_read', 'python/array_read', 'typescript/prop_write',
-                   'python/prop_write', 'typescript/records', 'python/records',
-                   'typescript/string_build1', 'typescript/empty_loop', 'python/empty_loop',
-                   'typescript/object_build', 'python/object_build'],
+    'added_rows': [],
     'replaced_ceilings': [],
-    'changed_fields': ['NOISE', 'BASE_MARGIN', 'CEILING_FACTOR', 'RATCHET_SLACK', 'COST_ORDER',
-                       'BOUNDARY', 'ADDED_ROW_CANDIDATE_MEDIANS', 'MONTY_BOUND_ROWS'],
+    'changed_fields': ['MONTY_BOUND_ROWS', 'MONTY_EXEMPT_ROWS'],
 }
 
 CONFIGURATION = 'Kiln optimized, full optimization, perf_iteration=false'

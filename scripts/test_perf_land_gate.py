@@ -15,7 +15,16 @@ import perf_land_gate as gate
 import perf_land_ceilings as policy
 
 
+# Main's real exemptions; each law runs without them unless it is about them.
+EXEMPT_ROWS = dict(policy.MONTY_EXEMPT_ROWS)
+
+
 class GateLaws(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.dict(policy.MONTY_EXEMPT_ROWS, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_switch_gate_refuses_301_even_inside_own_ceiling_and_reports_201(self):
         with self.assertRaises(ValueError):
             gate.check_instruction_ceiling('candidate', 'python/int_arith', 301, 1000, 100)
@@ -129,9 +138,11 @@ class GateLaws(unittest.TestCase):
             self.assertFalse(gate.instrument_only([*self.INSTRUMENT, fixed], self.PACKAGES), fixed)
 
     # Every row at main's median under its ceiling (ceiling / factor) and
-    # below 2x Monty, five equal repeats a side.
+    # below 2x Monty, five equal repeats a side; a row listed exempt stays
+    # near 8x on the base side, so its exemption is not stale.
     @staticmethod
-    def population(sides, plant=None):
+    def population(sides, plant=None, exempt_divisor=None):
+        exempt_divisor = exempt_divisor or {'base': 8}
         samples = []
         for side in sides:
             for key, row in policy.ROWS.items():
@@ -139,8 +150,9 @@ class GateLaws(unittest.TestCase):
                     secant = row['ceiling'] / policy.CEILING_FACTOR
                     if plant:
                         secant = plant(side, key, repeat, secant)
+                    monty = row['ceiling'] / (exempt_divisor.get(side, 2) if key in policy.MONTY_EXEMPT_ROWS else 2)
                     samples.append(dict(side=side, row=key, repeat=repeat, secant=secant, results=[1, 2],
-                                        reference_secants={'monty': row['ceiling'] / 2} if key.startswith('python/') else {}))
+                                        reference_secants={'monty': monty} if key.startswith('python/') else {}))
         return samples
 
     def test_instrument_only_land_still_fails_a_noisy_candidate_row(self):
@@ -239,6 +251,39 @@ class GateLaws(unittest.TestCase):
     def test_a_one_percent_improvement_does_not_move_the_ceiling(self):
         _, lowered = self.ratcheted(.99)
         self.assertEqual(lowered['ROWS'], policy.ROWS)
+
+
+    # Job E: the binding 3x rule holds every PY row unless a reviewed
+    # replacement lists it as exempt, and a stale exemption is refused.
+    EXEMPT = 'python/records'
+
+    def test_a_formerly_unbound_row_over_three_times_the_reference_is_refused(self):
+        policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
+        with self.assertRaisesRegex(ValueError, 'exceeds 3.00x'):
+            gate.check_instruction_ceiling('candidate', 'python/object_sort', 301, 1000, 100)
+
+    def test_a_python_row_added_later_is_bound_without_being_listed(self):
+        policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
+        with self.assertRaisesRegex(ValueError, 'exceeds 3.00x'):
+            gate.check_instruction_ceiling('candidate', 'python/added_later', 301, 1000, 100)
+
+    def test_the_exempt_row_over_three_times_passes_and_is_printed(self):
+        policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            _, errors, _ = gate.judge(self.population(('base', 'candidate'), exempt_divisor={'base': 8, 'candidate': 8}),
+                                      False)
+        self.assertEqual(errors, [])
+        lines = [line for line in out.getvalue().splitlines() if f'candidate/{self.EXEMPT}' in line]
+        self.assertTrue(any('exempt' in line and 'report-only 2.00x' in line for line in lines), lines)
+
+    def test_an_exempt_row_at_or_under_three_times_on_both_sides_is_refused_as_stale(self):
+        policy.MONTY_EXEMPT_ROWS.update(EXEMPT_ROWS)
+        _, errors, _ = gate.judge(self.population(('base', 'candidate'), exempt_divisor={'base': 2}), False)
+        self.assertEqual(errors, [f'{self.EXEMPT}: exemption no longer needed: remove it '
+                                  f'(at or under 3.00x on both sides)'], errors)
+        # Over 3x on the base side only: the exemption is still needed.
+        _, errors, _ = gate.judge(self.population(('base', 'candidate')), False)
+        self.assertEqual(errors, [])
 
 
 if __name__ == '__main__':
