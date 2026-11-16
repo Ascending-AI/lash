@@ -49,6 +49,50 @@ class ContinuationLaws(unittest.TestCase):
             path.write_text(json.dumps(dict(version=2, runs=[run])))
             compat.refusals(path, {('case', '0')}, before, after)
 
+    def changed(self, directory, host_pin=False, receipt=None, **run):
+        """The changed-format branch against one base image the candidate
+        refuses as the contract requires, unless `run` overrides it."""
+        before = {name: 1 for name in compat.FORMAT_NAMES}
+        after = dict(before, KERNEL_PARKED_STATE_VERSION=2)
+        refused = dict(case='case', pause='0', opened=False, mutations=[], executed_steps=0,
+                       refusal=dict(error='OpenError', kind='format',
+                                    surface='KERNEL_PARKED_STATE_VERSION', expected=2, observed=1))
+        path = Path(directory) / 'runs.json'
+        path.write_text(json.dumps(dict(version=2, runs=[dict(refused, **run)])))
+        inputs = {} if receipt is None else dict(deployment_receipt=str(receipt))
+        return compat.changed_format(path, {('case', '0')}, before, after, inputs, 'base', 'head', host_pin)
+
+    def test_pre_1_0_changed_format_passes_on_refusal_alone_and_declares_it(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(compat.check_version_bumps, 'STRICT_VERSION_BUMPS', False):
+            self.assertEqual(self.changed(directory),
+                             dict(deployment='not required', reason='pre-1.0, no host pin'))
+            with self.assertRaisesRegex(ValueError, 'predecessor opened'):
+                self.changed(directory, opened=True)
+            with self.assertRaises(ValueError):
+                self.changed(directory, mutations=['session_root'])
+
+    def test_strict_version_bumps_require_the_deployment_receipt(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(compat.check_version_bumps, 'STRICT_VERSION_BUMPS', True):
+            with self.assertRaisesRegex(ValueError, 'deployment receipt'):
+                self.changed(directory)
+
+    def test_host_pin_requires_the_deployment_receipt(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(compat.check_version_bumps, 'STRICT_VERSION_BUMPS', False):
+            with self.assertRaisesRegex(ValueError, 'deployment receipt'):
+                self.changed(directory, host_pin=True)
+
+    def test_supplied_receipt_is_verified_before_1_0(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(compat.check_version_bumps, 'STRICT_VERSION_BUMPS', False):
+            receipt = Path(directory) / 'deployment.json'
+            receipt.write_text(json.dumps(dict(version=2, base_commit='base',
+                                               ticket_url='https://example.com/FIG-1')))
+            with self.assertRaisesRegex(ValueError, 'not linked'):
+                self.changed(directory, receipt=receipt)
+
 
 if __name__ == '__main__':
     unittest.main()

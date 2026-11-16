@@ -2,7 +2,23 @@
 """Gate continuation interpretation across two source-bound production builds.
 
 Version 2: equal actual witnesses select resume equivalence. Changed witnesses
-select typed predecessor refusal plus L5's completed deployment evidence.
+select typed predecessor refusal: every base image is refused by the candidate
+with a typed format OpenError bound to the changed witness, with no mutation
+and no executed step. That check holds in every mode.
+
+The deployment receipt (L5's ticket-linked, completed deployment evidence) is
+upgrade evidence and follows the repository's one switch for upgrade
+evidence, `check_version_bumps.STRICT_VERSION_BUMPS` (flipped at the 1.0 cut,
+FIG-4494). It is required when that switch is on, and in `--host-pin` mode.
+The lead's host pin qualification runs that mode by hand, with `--base` at the
+commit the host currently runs:
+
+    python3 scripts/continuation_compat.py --host-pin --base <host commit>
+
+Otherwise (`scripts/land`, before 1.0) a changed format passes on the refusal
+check alone, and the gate declares "deployment evidence not required
+(pre-1.0, no host pin)" on stdout and in its receipt. A receipt supplied in
+`--inputs` is verified in every mode; one that fails still fails the gate.
 """
 import argparse
 from contextlib import contextmanager
@@ -16,6 +32,7 @@ import subprocess
 import sys
 import time
 
+import check_version_bumps
 from perf_land_gate import ROOT, build, digest, git, load_artifact, read, require, write
 
 LABEL = "//crates/lash-kernel-conformance:continuation_compat__bin"
@@ -241,6 +258,20 @@ def deployment(path, base, head):
     return receipt
 
 
+def changed_format(path, pauses, before, after, inputs, base, head, host_pin):
+    """The changed-format branch: typed predecessor refusal in every mode,
+    then the deployment receipt when strict version bumps or a host pin
+    require it. Answers the declared deployment outcome."""
+    refusals(path, pauses, before, after)
+    reason = ("strict version bumps" if check_version_bumps.STRICT_VERSION_BUMPS
+              else "host pin" if host_pin else None)
+    if "deployment_receipt" in inputs:
+        deployment(inputs["deployment_receipt"], base, head)
+        return dict(deployment="verified", required_by=reason)
+    require(reason is None, f"changed formats require L5's ticket-linked deployment receipt ({reason})")
+    return dict(deployment="not required", reason="pre-1.0, no host pin")
+
+
 def execute(binary, args, log):
     with log.open("w") as output:
         subprocess.run(["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--", binary, *args],
@@ -253,6 +284,9 @@ def main():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--inputs", type=Path, default=ROOT / ".kiln/continuation-compat-inputs.json")
     parser.add_argument("--always", action="store_true", help="qualify even if no dependency changed")
+    parser.add_argument("--host-pin", action="store_true",
+                        help="qualify a host pin: --base is the commit the host runs, and a changed "
+                             "format requires the deployment receipt")
     args = parser.parse_args()
     require(not git("status", "--porcelain", "--untracked-files=all"), "compatibility requires a clean tree")
     base, head = git("rev-parse", args.base + "^{commit}"), git("rev-parse", "HEAD")
@@ -299,12 +333,15 @@ def main():
         execute(candidate["binary"], ["resume", "--expect-refusal",
                   *(arg for name in ADMISSION_WITNESSES
                     for arg in ("--stated", f"{name}={after[name]}:{before[name]}")), "--corpus", str(corpus), "--imports", str(exports), "--out", str(out / "refusals.json")], out / "refusal.log")
-        refusals(out / "refusals.json", pauses, before, after)
-        require("deployment_receipt" in inputs, "changed formats require L5's ticket-linked deployment receipt")
-        deployment(inputs["deployment_receipt"], base, head)
+        evidence = changed_format(out / "refusals.json", pauses, before, after, inputs, base, head, args.host_pin)
+        if evidence["deployment"] == "not required":
+            print(f"continuation compatibility: deployment evidence not required ({evidence['reason']})")
         failures = []
     require(files(exports) == hashes and files(corpus) == corpus_hashes, "runner changed frozen inputs")
-    report = dict(previous=previous, candidate=candidate, mode=mode, witnesses=dict(previous=before, candidate=after),
+    report = dict(previous=previous, candidate=candidate, mode=mode, host_pin=args.host_pin,
+                  strict_version_bumps=check_version_bumps.STRICT_VERSION_BUMPS,
+                  deployment=evidence if mode == "refusal" else None,
+                  witnesses=dict(previous=before, candidate=after),
                   changed=changed, dependency_inputs=sorted(sources), corpus=corpus_hashes,
                   exports=hashes, cases=len(cases), pauses=len(pauses), failures=failures)
     write(out / "receipt.json", report)
