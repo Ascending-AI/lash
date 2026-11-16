@@ -120,6 +120,12 @@ pub enum Micro {
         pc: u32,
         n: u32,
     },
+    /// A source-certified resident call, using the inline handler and
+    /// the original call site for its guards and miss continuation.
+    Access {
+        pc: u32,
+        n: u32,
+    },
     /// A `JumpIfFalse` or, when `looping`, a `WhileFalse`.
     Branch {
         pc: u32,
@@ -155,6 +161,7 @@ impl Micro {
             | Self::CellGet { pc, .. }
             | Self::Fused { pc, .. }
             | Self::Inline { pc, .. }
+            | Self::Access { pc, .. }
             | Self::Branch { pc, .. }
             | Self::Jump { pc, .. }
             | Self::Exit { pc } => pc,
@@ -698,6 +705,7 @@ fn step(unit: &Unit, micro: Micro) -> Step {
             })
         }
         Micro::Inline { pc, n } => plain(Kind::Inline, pc, 0, n, 0),
+        Micro::Access { pc, n } => plain(Kind::Inline, pc, 1, n, 0),
         Micro::Branch {
             pc,
             to,
@@ -1097,6 +1105,13 @@ fn line(unit: &Unit, head: usize, readable: &impl Fn(u32) -> bool, micros: &mut 
                         .is_none() =>
             {
                 (Micro::Inline { pc: at, n }, pc + 1)
+            }
+            Op::Call(n)
+                if matches!(unit.ops.get(pc + 1), Some(Op::Block(_)))
+                    && unit.calls[n as usize].access.is_some()
+                    && unit.calls[n as usize].entry.is_none() =>
+            {
+                (Micro::Access { pc: at, n }, pc + 1)
             }
             Op::JumpIfFalse(to) | Op::WhileFalse(to) => {
                 let looping = matches!(op, Op::WhileFalse(_));

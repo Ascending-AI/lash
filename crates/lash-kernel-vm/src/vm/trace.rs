@@ -20,7 +20,7 @@
 use lash_kernel_doc::Value;
 
 use super::{Flow, Run, Vm, fused};
-use crate::bytecode::program::{Fused, Program, Then, Unit};
+use crate::bytecode::program::{Callee, Fused, Program, Then, Unit};
 use crate::bytecode::trace::{
     BRANCH, COUNTED, GENERIC_BUNDLE, KINDS, Kind, NO_PASS, NONE, OPERATIONS, OTHER, PLAIN_KINDS,
     POP, PUSH, SET_LOCAL, SMALL_BUNDLE, SMALL_PREFIXES, SMALL_STRIDE, Step, WORD_PREFIXES,
@@ -893,6 +893,9 @@ impl<H: Heap> Vm<H> {
         _: usize,
     ) -> usize {
         let unit = line.unit;
+        if step.small() == 1 {
+            return self.step_access::<COUNT>(line, step, at);
+        }
         let site = &unit.inlines[step.a() as usize];
         let call = &unit.calls[site.call as usize];
         debug_assert!(call.entry.is_none(), "a traced call counts no entry");
@@ -907,6 +910,52 @@ impl<H: Heap> Vm<H> {
         }
         let (start, end) = site.folds;
         match self.inline_fast(unit, step.a(), &unit.folds[start as usize..end as usize]) {
+            Ok(true) => {
+                #[cfg(any(test, feature = "perf-witness"))]
+                self.witness::<COUNT>(unit, step);
+                at + 1
+            }
+            Ok(false) => exit_at(step.pc() as usize),
+            Err(flow) => leave(line, Err(flow)),
+        }
+    }
+
+    /// A certified call shares the inline handler even when its body's
+    /// guard region cannot expand. Every miss resumes the original call.
+    fn step_access<const COUNT: bool>(
+        &mut self,
+        line: &mut Line<'_>,
+        step: Step,
+        at: usize,
+    ) -> usize {
+        let unit = line.unit;
+        if unit.steps && self.meter.spent() {
+            return exit_at(step.pc() as usize);
+        }
+        let call = &unit.calls[step.a() as usize];
+        let (
+            Some(access),
+            Callee::Unit {
+                unit: callee,
+                charge,
+            },
+        ) = (call.access, call.callee)
+        else {
+            return fault_out(line, "a resident trace has no certified body call");
+        };
+        self.cx.frames[line.top].pc = step.pc() + 1;
+        if let Some(checked) = &call.checked
+            && let Err(flow) = self.check_arguments(checked, usize::from(call.argc))
+        {
+            return leave(line, Err(flow));
+        }
+        match self.access(
+            access,
+            callee,
+            charge,
+            usize::from(call.argc),
+            call.checked.as_deref(),
+        ) {
             Ok(true) => {
                 #[cfg(any(test, feature = "perf-witness"))]
                 self.witness::<COUNT>(unit, step);

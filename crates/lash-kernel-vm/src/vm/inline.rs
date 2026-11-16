@@ -363,17 +363,10 @@ impl<H: Heap> Vm<H> {
 
     #[inline]
     fn element(&self, target: Value, index: Value) -> Option<Value> {
-        let Value::List(object) = target else {
+        let (Value::List(object), Value::Int(index)) = (target, index) else {
             return None;
         };
-        let index = match index {
-            Value::Int(index) => u64::try_from(index).ok()?,
-            Value::Float(index) => {
-                let index = index.get();
-                (index >= 0.0 && index.fract() == 0.0).then_some(index as u64)?
-            }
-            _ => return None,
-        };
+        let index = u64::try_from(index).ok()?;
         let arena = self.heap.arena();
         i64::try_from(arena.len(object).ok()?).ok()?;
         arena.item(object, index).ok()?

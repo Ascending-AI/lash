@@ -154,6 +154,8 @@ fn dense_numeric_reads_and_plain_record_stores_preserve_source_boundaries() {
     let mut source_library = None;
     for source in [
         "const xs = [1, 2, 3]; let i = 1; console.log(xs[i]); console.log(xs[-0]);",
+        "const xs = [1, 2, 3]; let sum = 0; for (let i = 0; i < 4; i++) { sum += xs[0]; sum += xs[1]; sum += xs[2]; } console.log(sum);",
+        "const r = {a: 1, b: 2, c: 3, d: 4}; for (let i = 0; i < 4; i++) { r.a = i; r.b = i; r.c = i; r.d = i; } console.log(r);",
         "const r = {a: 1}; const alias = r; r.a = 2; r.b = [3]; console.log(alias); console.log(Object.keys(r));",
         "const xs = [1, , undefined, 4]; for (const i of [0, 1, 2, 3, -1, 9, 1.5, NaN, Infinity]) { console.log(xs[i]); } console.log(xs['1']); console.log(xs.length);",
         "const r = Object.create(null); r.x = 2; r['0'] = 3; console.log(r.x); console.log(Object.keys(r));",
@@ -207,11 +209,13 @@ fn dense_numeric_reads_and_plain_record_stores_preserve_source_boundaries() {
                 call_depth,
                 ..bounds()
             };
-            assert_eq!(
-                observe(&program, bounds, 13, false),
-                reference(&general, bounds, 13, false),
-                "{source}; depth {call_depth}"
-            );
+            for slice in [13, u64::MAX] {
+                assert_eq!(
+                    observe(&program, bounds, slice, false),
+                    reference(&general, bounds, slice, false),
+                    "{source}; depth {call_depth}; slice {slice}"
+                );
+            }
         }
         // Include the operation's frame and a new member's growth in the
         // boundary sweep, rather than testing only an ample-memory run.
