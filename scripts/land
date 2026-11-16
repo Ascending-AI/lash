@@ -14,7 +14,7 @@ import sys
 import time
 
 from apply_format_witnesses import apply as apply_format_witnesses
-from perf_land_gate import apply_ratchet
+from perf_land_gate import apply_ratchet, cache
 
 CEILINGS = "scripts/perf_land_ceilings.py"
 
@@ -211,6 +211,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="rebase, regenerate and check, without pushing")
     args = parser.parse_args()
+    cache()  # the gate's store: refuse before touching the tree
     os.chdir(git("rev-parse", "--show-toplevel"))
     if rebasing():
         raise RuntimeError("rebase already in progress")

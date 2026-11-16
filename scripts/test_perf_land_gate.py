@@ -292,5 +292,35 @@ class GateLaws(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn(f'perf base/{self.EXEMPT}: 5.290000x Monty, information only', out.getvalue())
 
+
+class NoSecondCache(unittest.TestCase):
+    """The gate runs only against the fork's store: without the fork
+    environment it refuses, naming the variable and the fix, and builds
+    nothing in a second cache (FIG-7694, job G1)."""
+
+    def refusal(self, store):
+        with tempfile.TemporaryDirectory() as home:
+            env = {k: v for k, v in __import__('os').environ.items() if k != 'LASH_BUCK2_STORE'}
+            env['HOME'] = home
+            if store is not None:
+                env['LASH_BUCK2_STORE'] = store
+            argv = ['perf_land_gate.py', '--out', f'{home}/out',
+                    '--base-artifact', f'{home}/base.json', '--candidate-artifact', f'{home}/candidate.json']
+            with patch.dict('os.environ', env, clear=True), patch.object(sys, 'argv', argv), \
+                    contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as refused:
+                gate.main()
+            self.assertFalse(Path(home, '.cache').exists())
+        return str(refused.exception)
+
+    def test_the_gate_refuses_without_the_fork_store(self):
+        message = self.refusal(None)
+        self.assertIn('LASH_BUCK2_STORE is unset', message)
+        self.assertIn('. ./env.sh', message)
+
+    def test_the_gate_refuses_a_store_that_is_not_an_absolute_path(self):
+        message = self.refusal('off')
+        self.assertIn("LASH_BUCK2_STORE is 'off'", message)
+        self.assertIn('. ./env.sh', message)
+
 if __name__ == '__main__':
     unittest.main()

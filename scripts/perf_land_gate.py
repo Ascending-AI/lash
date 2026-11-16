@@ -27,7 +27,18 @@ LABEL = "//crates/lash-perf:lash-perf__bin"
 BUILD_ARGS = ["kiln", "build", "--config=optimized", "-c", "kiln.perf_iteration=false",
               LABEL, "--materializations", "final"]
 ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-CACHE = Path(os.environ.get("LASH_BUCK2_STORE", str(Path.home() / ".cache/lash/buck2-store"))).parent / "perf-land-cache"
+STORE = "LASH_BUCK2_STORE"
+
+
+def cache():
+    """The perf cache beside the fork's Buck2 store. There is no fallback:
+    without the fork environment the gate would build and pin references in
+    a second, silent cache."""
+    store = os.environ.get(STORE, "")
+    if not os.path.isabs(store):
+        raise SystemExit(f"{STORE} is {'unset' if not store else repr(store)}, not the fork's store path: "
+                         "load the fork environment with `. ./env.sh` in the fork")
+    return Path(store).parent / "perf-land-cache"
 
 
 def digest(path):
@@ -268,7 +279,7 @@ def load_artifact(path):
 
 def build(commit, out, label=LABEL):
     commit = git("rev-parse", commit + "^{commit}")
-    directory = CACHE / "artifacts" / commit
+    directory = cache() / "artifacts" / commit
     if label != LABEL:
         directory /= hashlib.sha256(label.encode()).hexdigest()[:16]
     directory.mkdir(parents=True, exist_ok=True)
@@ -321,7 +332,7 @@ def build(commit, out, label=LABEL):
 
 
 def references(out):
-    directory = CACHE / "references"
+    directory = cache() / "references"
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "references.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -732,6 +743,7 @@ def main():
     parser.add_argument("--candidate-artifact", type=Path)
     parser.add_argument("--calibrate", action="store_true", help="report medians without enforcing unseeded ceilings")
     args = parser.parse_args()
+    cache()
     out = (args.out or ROOT / ".kiln/perf-land" / f"{time.time_ns()}-{os.getpid()}").resolve()
     out.mkdir(parents=True, exist_ok=True)
     require(bool(args.base_artifact) == bool(args.candidate_artifact), "supply both artifact receipts or neither")

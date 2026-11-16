@@ -49,8 +49,11 @@ class Repositories:
         git(self.other, "commit", "-qm", message)
         git(self.other, "push", "-q", "origin", "HEAD:main")
 
-    def land(self, runs=None):
-        env = {k: v for k, v in os.environ.items() if k != "LASH_LAND_RUNS"}
+    def land(self, runs=None, store=True):
+        env = {k: v for k, v in os.environ.items() if k not in ("LASH_LAND_RUNS", "LASH_BUCK2_STORE")}
+        env["HOME"] = str(self.other.parent)
+        if store:
+            env["LASH_BUCK2_STORE"] = str(self.other.parent / "buck2-store")
         if runs:
             env["LASH_LAND_RUNS"] = str(runs)
         env.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
@@ -93,6 +96,15 @@ class LandRunsItsOwnTree(unittest.TestCase):
         self.assertIn("land: main kept moving: 12 runs of scripts/land", output)
         self.assertNotIn("the rebased scripts/land ran", output)
 
+    def test_a_land_without_the_fork_environment_refuses_before_touching_the_tree(self):
+        self.repos.publish("other work", README="moved\n")
+        before = git(self.repos.candidate, "rev-parse", "HEAD")
+        output = self.repos.land(store=False)
+        self.assertIn("LASH_BUCK2_STORE is unset", output)
+        self.assertIn(". ./env.sh", output)
+        self.assertEqual(git(self.repos.candidate, "rev-parse", "HEAD"), before)
+        self.assertFalse((self.repos.other.parent / ".cache").exists())
+
 
 class Restart(Exception):
     pass
@@ -134,7 +146,8 @@ class ALostPushRestarts(unittest.TestCase):
                         patch.object(land.os, "execv", execv), \
                         patch.object(sys, "argv", ["scripts/land"]), \
                         patch.dict(os.environ, {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                                                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}), \
+                                                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                                                "LASH_BUCK2_STORE": str(Path(directory) / "buck2-store")}), \
                         contextlib.redirect_stdout(io.StringIO()):
                     os.environ.pop("LASH_LAND_RUNS", None)
                     with self.assertRaises(Restart):
