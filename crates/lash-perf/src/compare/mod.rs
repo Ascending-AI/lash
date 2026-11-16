@@ -307,6 +307,34 @@ fn row(
         ratios: BTreeMap::new(),
     })
 }
+/// Measures one lash row on a thread of its own, from its kernel onward.
+///
+/// The process allocator's main arena holds whatever argument parsing,
+/// paths and receipt text left in it, and their lengths differ between
+/// otherwise identical captures (an output path one character longer).
+/// The allocator's bookkeeping on a measured allocation (consolidating and
+/// sorting free chunks) depends on that history, so the same program could
+/// count a hundred thousand instructions more in one process than another.
+/// A new thread allocates from an arena with no history but its own, so
+/// every window starts from the same allocator state in every process.
+fn apart(
+    args: &Args,
+    workload: &workloads::Workload,
+    python: bool,
+    trips: [u64; 2],
+) -> Result<Row> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("compare-lash".into())
+            .stack_size(8 << 20)
+            .spawn_scoped(scope, || {
+                lash(args, &args.kernel()?, workload, python, trips)
+            })?
+            .join()
+            .map_err(|_| anyhow::anyhow!("lash measurement thread panicked"))?
+    })
+}
+
 fn lash(
     args: &Args,
     kernel: &kernel::Kernel,
@@ -464,7 +492,6 @@ pub fn run(args: &Args) -> Result<()> {
         unsupported: Vec::new(),
         durable: Vec::new(),
     };
-    let kernel = args.kernel()?;
     let references = reference::engines(args)?;
     for workload in workloads::ALL
         .iter()
@@ -483,7 +510,7 @@ pub fn run(args: &Args) -> Result<()> {
                 continue;
             }
             let start = receipt.rows.len();
-            match lash(args, &kernel, workload, python, trips) {
+            match apart(args, workload, python, trips) {
                 Ok(row) => receipt.rows.push(row),
                 Err(e) => receipt
                     .errors
