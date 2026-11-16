@@ -357,10 +357,8 @@ impl Code {
 impl TokenCodec for Code {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
-            Self::Inline(code) => {
-                out.sum(0, 1);
-                code.encode(out);
-            }
+            // The form every closure row held before code paged.
+            Self::Inline(code) => code.encode(out),
             Self::Paged { bytes, root } => {
                 out.sum(1, 2);
                 out.unsigned(*bytes);
@@ -369,12 +367,11 @@ impl TokenCodec for Code {
         }
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        if input.peek_tag()? != lash_kernel_value::tokens::Tag::Sum {
+            return Ok(Self::Inline(ClosureCode::decode(input)?));
+        }
         let (tag, fields) = input.sum()?;
         match tag {
-            0 => {
-                TokenReader::expect_fields(fields, 1)?;
-                Ok(Self::Inline(ClosureCode::decode(input)?))
-            }
             1 => {
                 TokenReader::expect_fields(fields, 2)?;
                 let bytes = input.unsigned()?;
