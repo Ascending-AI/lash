@@ -54,6 +54,32 @@ impl<H: Heap> Vm<H> {
         self.enter(unit, argc, None, bill, link)
     }
 
+    /// The source's scalar answer still reserves its helper frame and
+    /// the original guard body's full frame. Near a boundary the body runs.
+    fn python_word_product(&self, callee: UnitId, left: i64, right: i64) -> Option<(Value, u64)> {
+        let unit = self.program.unit(callee);
+        if self.value_depth <= 1 || !unit.boxed.is_empty() || unit.cleanup.is_some() {
+            return None;
+        }
+        // The certified prefix's first invoke is the shared numeric guard.
+        // Library calls have no durable occurrence or public argument check.
+        let call = unit.calls.first()?;
+        let crate::bytecode::program::Callee::Unit { unit: guard, .. } = call.callee else {
+            return None;
+        };
+        let guard_body = self.program.unit(guard);
+        if call.entry.is_some()
+            || call.checked.is_some()
+            || !guard_body.boxed.is_empty()
+            || guard_body.cleanup.is_some()
+        {
+            return None;
+        }
+        let value =
+            lash_kernel_doc::scalar::ints(lash_kernel_doc::scalar::ScalarOp::Mul, left, right)?;
+        Some((value, self.frame_cost(guard)))
+    }
+
     pub(super) fn access(
         &mut self,
         access: Access,
@@ -107,6 +133,13 @@ impl<H: Heap> Vm<H> {
                     return Ok(false);
                 }
                 (value, depth, 0)
+            }
+            (Access::WordProduct { depth }, [Value::Int(left), Value::Int(right)]) => {
+                let Some((value, guard_frame)) = self.python_word_product(callee, *left, *right)
+                else {
+                    return Ok(false);
+                };
+                (value, depth, guard_frame)
             }
             (Access::MapRead { depth, room }, [Value::Map(map), key @ Value::Text(_)]) => {
                 let Some(value) = self.python_map_read(*map, *key) else {

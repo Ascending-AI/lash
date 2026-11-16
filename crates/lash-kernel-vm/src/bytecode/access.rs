@@ -4,7 +4,9 @@
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::arena::native::InlineOperation;
 use lash_kernel_doc::plan::{Element, Table};
-use lash_kernel_doc::{Expr, FunctionRegistry, Literal, Member, Place, Rhs, Stmt};
+use lash_kernel_doc::{
+    Action, Atom, Callee, Expr, FunctionRegistry, Literal, Member, Place, Rhs, Stmt,
+};
 use lash_kernel_value::names::{FunctionId, Name};
 
 use super::program::Access;
@@ -15,6 +17,11 @@ pub(super) fn derive(registry: &FunctionRegistry, id: FunctionId) -> Option<Acce
     let heap = plan.template.as_ref()?.heap.as_ref()?;
     if registered.native().is_some() || registered.definition().guard.is_some() {
         return None;
+    }
+    if let Some(product) =
+        python_word_product(registry, registered.definition(), plan.template.as_ref()?)
+    {
+        return Some(product);
     }
     if let Some(path) = heap.element.as_ref()
         && path.requires.iter().all(|requirement| {
@@ -245,4 +252,154 @@ fn python_map_read(
     };
     variable(receiver, &target.name)?;
     variable(key, &index.name)
+}
+
+/// A formula-covered numeric arm forwarding the unchanged words to the
+/// installed multiplication kernel. Its guards remain source bodies.
+fn python_word_product(
+    registry: &FunctionRegistry,
+    definition: &lash_kernel_doc::FunctionDefinition,
+    template: &lash_kernel_doc::plan::HelperTemplate,
+) -> Option<Access> {
+    definition.charge()?;
+    let [left, right] = definition.signature.params.as_slice() else {
+        return None;
+    };
+    let [
+        Stmt::Let {
+            name: left_test,
+            value:
+                Rhs::Action(Action::Call {
+                    callee: Callee::Local(first),
+                    args: first_args,
+                }),
+        },
+        Stmt::Let {
+            name: right_test,
+            value:
+                Rhs::Action(Action::Call {
+                    callee: Callee::Local(second),
+                    args: second_args,
+                }),
+        },
+        Stmt::If {
+            condition,
+            then_block,
+            ..
+        },
+        ..,
+    ] = definition.body()?.block.as_slice()
+    else {
+        return None;
+    };
+    if first != second || left.optional || right.optional {
+        return None;
+    }
+    let [Atom::Variable(first_arg)] = first_args.as_slice() else {
+        return None;
+    };
+    let [Atom::Variable(second_arg)] = second_args.as_slice() else {
+        return None;
+    };
+    if first_arg != &left.name || second_arg != &right.name {
+        return None;
+    }
+    python_number_guard(registry, *first)?;
+    variable(condition, left_test)?;
+    let [
+        Stmt::If {
+            condition,
+            then_block,
+            ..
+        },
+    ] = then_block.as_slice()
+    else {
+        return None;
+    };
+    variable(condition, right_test)?;
+    let [
+        Stmt::Return {
+            value: Expr::Call { function, args },
+        },
+    ] = then_block.as_slice()
+    else {
+        return None;
+    };
+    let [first_arg, second_arg] = args.as_slice() else {
+        return None;
+    };
+    variable(first_arg, &left.name)?;
+    variable(second_arg, &right.name)?;
+    let forwarded = template.forwards.ints?;
+    if template.callees.get(usize::from(forwarded)) != Some(function) {
+        return None;
+    }
+    let native = registry.get(function)?;
+    if native.has_body() || native.definition().guard.is_some() {
+        return None;
+    }
+    let InlineOperation::Scalar { operation, domain } =
+        native
+            .native()?
+            .specialization()
+            .inline?
+            .for_version(native.definition().native_version)?
+    else {
+        return None;
+    };
+    if operation != lash_kernel_doc::scalar::ScalarOp::Mul || !domain.words() {
+        return None;
+    }
+    Some(Access::WordProduct {
+        depth: template.depth,
+    })
+}
+
+/// On a word, this body proves true using only installed kind/same facts.
+/// Every other source path and every changed native fact keeps the body.
+fn python_number_guard(registry: &FunctionRegistry, function: FunctionId) -> Option<()> {
+    let registered = registry.get(&function)?;
+    let definition = registered.definition();
+    definition.charge()?;
+    if registered.native().is_some() || definition.guard.is_some() {
+        return None;
+    }
+    let [parameter] = definition.signature.params.as_slice() else {
+        return None;
+    };
+    let [
+        Stmt::Let {
+            name: kind,
+            value: Rhs::Expr(kind_call),
+        },
+        Stmt::If {
+            condition,
+            then_block,
+            ..
+        },
+        ..,
+    ] = definition.body()?.block.as_slice()
+    else {
+        return None;
+    };
+    let [argument] = call(registry, kind_call, InlineOperation::Kind)? else {
+        return None;
+    };
+    variable(argument, &parameter.name)?;
+    let [kind_arg, Expr::Literal(Literal::Text(integer))] =
+        call(registry, condition, InlineOperation::Same)?
+    else {
+        return None;
+    };
+    variable(kind_arg, kind)?;
+    if integer != "integer" {
+        return None;
+    }
+    matches!(
+        then_block.as_slice(),
+        [Stmt::Return {
+            value: Expr::Literal(Literal::Bool(true))
+        }]
+    )
+    .then_some(())
 }

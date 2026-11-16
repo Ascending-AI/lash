@@ -33,12 +33,7 @@ MONTY_REPORT_RATIO = 2.0
 # added later included, except the rows listed here. Only a reviewed
 # replacement adds an entry; the gate refuses an entry whose candidate is at
 # or under 3x, so the list empties itself.
-MONTY_EXEMPT_ROWS = {
-    'python/records': {
-        'ratio': 5.293161273203291,
-        'reason': 'above 3x Monty on main 036b440867 (5.29x); owned by the r60 perf round',
-    },
-}
+MONTY_EXEMPT_ROWS = {}
 
 NOISE = 0.01
 BASE_MARGIN = 0.01
@@ -47,11 +42,11 @@ RATCHET_SLACK = 0.03
 
 # Active only while the base's copy of this file has previous_sha256.
 REVIEWED_REPLACEMENT = {
-    'previous_sha256': 'bc8b4094721f72bbe8387e694be0268e951c57d2dfa5c3b415304685d4dbfc6d',
-    'reviewer': 'r60 lead',
+    'previous_sha256': '72f9aaa19737ad560442ce256a1d26f417875cd7329de2e9a59297c06fb55dd5',
+    'reviewer': 'lead',
     'added_rows': [],
     'replaced_ceilings': [],
-    'changed_fields': ['QUICKJS_COMPILER', 'QUICKJS_SHA256'],
+    'changed_fields': ['MONTY_EXEMPT_ROWS'],
 }
 
 CONFIGURATION = 'Kiln optimized, full optimization, perf_iteration=false'
