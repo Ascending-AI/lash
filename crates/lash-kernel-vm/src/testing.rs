@@ -38,6 +38,11 @@ pub fn without_lookup_words<R>(f: impl FnOnce() -> R) -> R {
     crate::vm::lookup::without(f)
 }
 
+/// Resident access specializations completed on this thread.
+pub fn resident_accesses() -> u64 {
+    crate::vm::access::hits()
+}
+
 /// A compiled and validated bytecode program, without a running machine.
 pub struct BytecodeProgram {
     code: crate::bytecode::program::Program,

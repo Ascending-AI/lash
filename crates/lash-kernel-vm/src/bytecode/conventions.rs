@@ -55,6 +55,7 @@ pub(crate) fn entry(compiler: &mut Compiler<'_>, entry: &Entry<'_>) -> Result<Un
     let call = coordinate(unit.calls.len(), "call sites of one function")?;
     unit.calls.push(CallSite {
         callee,
+        access: None,
         argc: 1,
         site: site.statement.clone(),
         mark,
@@ -174,6 +175,7 @@ fn clean_up(
     let call = coordinate(unit.calls.len(), "call sites of one function")?;
     unit.calls.push(CallSite {
         callee,
+        access: None,
         argc: 0,
         site: site.statement.clone(),
         mark,

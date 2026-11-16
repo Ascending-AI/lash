@@ -879,7 +879,16 @@ impl<'a> Compiler<'a> {
             UnitKind::Body(id)
         };
         match self.function(id, None, None, at, covered, kind) {
-            Ok(_) => Ok(at),
+            Ok(_) => {
+                if covered {
+                    let access = super::access::derive(self.registry, id);
+                    let local = (at & !LIB) as usize - self.base.units;
+                    if let Some(unit) = self.units[local].as_mut() {
+                        unit.access = access;
+                    }
+                }
+                Ok(at)
+            }
             Err(error) => {
                 self.scope.bodies.remove(&(id, covered));
                 // The reserved index keeps a unit that says why it cannot run.
@@ -1260,6 +1269,7 @@ impl<'a> Compiler<'a> {
         let mark = self.mark(f, &site)?;
         f.calls.push(CallSite {
             callee,
+            access: None,
             argc,
             site,
             mark,
@@ -1575,6 +1585,7 @@ impl<'a> Compiler<'a> {
             link: self.link,
             covered,
             steps,
+            access: None,
             params,
             locals: locals.max(params),
             captures,

@@ -10,6 +10,7 @@
 //! reaches are compiled once per prepared library and instantiated into
 //! it ([`library`]).
 
+mod access;
 pub(crate) mod charge_tables;
 pub(crate) mod compile;
 pub(crate) mod conventions;

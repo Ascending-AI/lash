@@ -141,6 +141,8 @@ pub struct Unit {
     /// alternative body, entered by Decline, and the other covered units
     /// make none.
     pub steps: bool,
+    /// A source-derived resident access, resolved against the installed natives.
+    pub access: Option<Access>,
     pub params: u16,
     /// Locals, parameters first.
     pub locals: u16,
@@ -303,6 +305,19 @@ pub struct InlineSite {
     /// folds and where they end, an empty span when no path folds.
     pub folds: (u32, u32),
     pub lookup_words: Option<u32>,
+}
+
+/// A helper path certified by its installed source plan. The body remains
+/// the continuation and the fallback at every unproved input or bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    ListRead {
+        depth: u32,
+    },
+    RecordWrite {
+        key: lash_kernel_doc::arena::ShortText,
+        depth: u32,
+    },
 }
 
 /// A guarded read and a word update with their original bills and blocks.
@@ -595,6 +610,8 @@ pub enum Callee {
 #[derive(Clone, Debug)]
 pub struct CallSite {
     pub callee: Callee,
+    /// The callee's source certificate, resolved by the inline pass.
+    pub access: Option<Access>,
     pub argc: u16,
     pub site: Site,
     /// Where the calling frame stands while the callee runs.

@@ -10,6 +10,7 @@
 //! costs, which only place the slice's end: no limit, no dynamic fee and
 //! no charge readout.
 
+pub(crate) mod access;
 pub(crate) mod callable;
 pub(crate) mod calls;
 pub(crate) mod catches;
@@ -1287,8 +1288,8 @@ impl<H: Heap> Vm<H> {
                         }
                         sync!(pc);
                         self.call(&program, unit, site)?;
-                        // An answered native or completed leaf keeps this caller running.
-                        if matches!(call.callee, Callee::Native { .. } | Callee::Value)
+                        // A resident answer or completed leaf keeps this caller running.
+                        if !matches!(call.callee, Callee::Entry { .. } | Callee::Machine { .. })
                             && self.cx.frames.len() == top + 1
                         {
                             continue;

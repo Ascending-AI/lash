@@ -45,7 +45,7 @@ pub const LIB: u32 = 1 << 31;
 /// The compiler's revision: advanced whenever the code it emits for one
 /// registry changes, so a process never runs one revision's library code
 /// under another.
-pub const COMPILER_REVISION: u32 = 1;
+pub const COMPILER_REVISION: u32 = 2;
 
 /// The most libraries a process keeps.
 const HELD: usize = 8;
@@ -280,6 +280,11 @@ pub(crate) fn digest(registry: &FunctionRegistry) -> [u8; 32] {
     let mut bytes = Vec::new();
     for (function, registered) in registry.iter() {
         bytes.extend_from_slice(function.as_bytes());
+        // Plans and the installed native facts can withdraw a resident
+        // certificate without changing the function's source identity.
+        let access = format!("{:?}", super::access::derive(registry, *function));
+        bytes.extend_from_slice(&(access.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(access.as_bytes());
         match registered.native() {
             None => bytes.push(0),
             Some(native) => {

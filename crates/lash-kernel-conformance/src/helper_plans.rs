@@ -11,6 +11,7 @@ mod conversions;
 mod numeric;
 #[cfg(feature = "shipped-library")]
 mod numeric_slices;
+mod resident_access;
 
 use crate::projection::{Projector, Recorded};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle};

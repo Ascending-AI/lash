@@ -864,6 +864,7 @@ mod tests {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             covered: false,
             steps: true,
+            access: None,
             params: 0,
             locals: 0,
             captures: 0,
