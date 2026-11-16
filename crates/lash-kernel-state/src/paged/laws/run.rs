@@ -304,3 +304,47 @@ fn head_encoding_preserves_high_water_and_exhaustion() {
     root.heads = Heads::default();
     assert!(decode_body::<HeapRoot>(&encode_body(&root)).is_err());
 }
+
+/// A closure row whose code and captures fit inline encodes exactly as
+/// every closure row did before code and captures could page: the record's
+/// variant, then the bare code (capture names, callable, link, site), then
+/// the capture cells. Paging only adds forms; it never rewrites the small
+/// row. The oracle writes that form token by token.
+#[test]
+fn a_small_closure_row_keeps_the_form_it_had_before_code_paged() {
+    use super::super::run::objects::{Captures, ClosureCode, Code};
+    use lash_kernel_value::Name;
+    use lash_kernel_value::content_ids::LinkId;
+    use lash_kernel_value::names::{CallableId, FunctionId};
+    use lash_kernel_value::sites::{Site, Unit};
+    use lash_kernel_value::tokens::{TokenCodec, TokenWriter};
+
+    let link = LinkId::from_bytes([3; 32]);
+    let code = ClosureCode {
+        capture_names: vec![Name::new("x"), Name::new("y")],
+        callable: CallableId {
+            link,
+            function: FunctionId::from_bytes([5; 32]),
+        },
+        link,
+        site: Site::new(Unit::Main, [2, 7]),
+    };
+    let cells = vec![ObjectId(4), ObjectId(9)];
+    let record = Record::Closure {
+        code: Code::Inline(code.clone()),
+        captures: Captures::Inline(cells.clone()),
+    };
+    let mut oracle = TokenWriter::new();
+    oracle.sum(5, 2);
+    oracle.seq(4);
+    oracle.seq(2);
+    oracle.text("x");
+    oracle.text("y");
+    code.callable.encode(&mut oracle);
+    link.encode(&mut oracle);
+    code.site.encode(&mut oracle);
+    cells.encode(&mut oracle);
+    let oracle = oracle.into_bytes();
+    assert_eq!(encode_body(&record), oracle);
+    assert_eq!(decode_body::<Record>(&oracle).unwrap(), record);
+}

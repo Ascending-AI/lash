@@ -37,6 +37,8 @@ pub(crate) mod payload;
 #[cfg(test)]
 mod laws {
     mod boundaries;
+    mod digests;
+    mod grammar;
     mod identity;
     mod metadata;
     mod pages;
