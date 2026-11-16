@@ -119,8 +119,9 @@ pub(crate) fn inline(program: &mut Program) -> Result<()> {
             .collect();
         for (pc, site, callee) in sites {
             if program.unit(callee).access.is_some() {
-                // The call's resident path retains the original call on a miss.
-                continue;
+                // Certified helpers still use the ordinary fold path. Its
+                // element fold answers the resident case and deopts to the
+                // unchanged body on every miss.
             }
             if let Some(region) = Region::of(program, callee) {
                 expand(program, at, pc, site, callee, &region, &mut taken)?;
