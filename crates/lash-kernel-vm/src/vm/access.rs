@@ -4,7 +4,7 @@
 use lash_kernel_doc::Value;
 use lash_kernel_state::arena::Key;
 
-use super::{Run, Vm};
+use super::{Run, Vm, fault};
 use crate::bytecode::program::{Access, CallSite, Callee, Checked, Program, UnitId};
 use crate::heap::{Heap, meter};
 
@@ -37,10 +37,9 @@ impl<H: Heap> Vm<H> {
         let Callee::Resident { unit, charge } = site.callee else {
             unreachable!("a resident call retains its unit")
         };
-        let access = program
-            .unit(unit)
-            .access
-            .expect("a certified resident unit");
+        let Some(access) = program.unit(unit).access else {
+            return Err(fault("a resident call has no source certificate"));
+        };
         let argc = usize::from(site.argc);
         if let Some(checked) = &site.checked {
             self.check_arguments(checked, argc)?;
