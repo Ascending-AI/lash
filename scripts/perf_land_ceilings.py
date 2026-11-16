@@ -256,7 +256,7 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                     'sha256': 'd774b6a74d3d70c7b27049f61eaac81013a355b53aa2a5286c0aa7d34bf44ca1',
                     'lo': 1,
                     'ops': 1,
-                    'ceiling': 73224623.44368422},
+                    'ceiling': 63145863.377894744},
  'typescript/string_build1': {'source': 'crates/lash-perf/src/compare/workloads/string_build1.js',
                               'sha256': '50bcc41da676e579ba17ff0457509dafd64e2cd75132c2ab8ac76f821c92e343',
                               'lo': 1,
