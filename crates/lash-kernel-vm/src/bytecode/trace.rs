@@ -1108,8 +1108,7 @@ fn line(unit: &Unit, head: usize, readable: &impl Fn(u32) -> bool, micros: &mut 
             }
             Op::Call(n)
                 if matches!(unit.ops.get(pc + 1), Some(Op::Block(_)))
-                    && unit.calls[n as usize].access.is_some()
-                    && unit.calls[n as usize].entry.is_none() =>
+                    && unit.calls[n as usize].access.is_some() =>
             {
                 (Micro::Access { pc: at, n }, pc + 1)
             }

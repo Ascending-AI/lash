@@ -921,7 +921,8 @@ impl<H: Heap> Vm<H> {
     }
 
     /// A certified call shares the inline handler even when its body's
-    /// guard region cannot expand. Every miss resumes the original call.
+    /// guard region cannot expand. A miss enters the original body after
+    /// the call's entry and argument checks, each performed once.
     fn step_access<const COUNT: bool>(
         &mut self,
         line: &mut Line<'_>,
@@ -929,7 +930,7 @@ impl<H: Heap> Vm<H> {
         at: usize,
     ) -> usize {
         let unit = line.unit;
-        if unit.steps && self.meter.spent() {
+        if self.sites || unit.steps && self.meter.spent() {
             return exit_at(step.pc() as usize);
         }
         let call = &unit.calls[step.a() as usize];
@@ -944,6 +945,13 @@ impl<H: Heap> Vm<H> {
             return fault_out(line, "a resident trace has no certified body call");
         };
         self.cx.frames[line.top].pc = step.pc() + 1;
+        #[cfg(any(test, feature = "perf-witness"))]
+        self.witness::<COUNT>(unit, step);
+        if let Some(entry) = call.entry
+            && let Err(flow) = self.tasks.all[self.tasks.running].count(entry)
+        {
+            return leave(line, Err(flow));
+        }
         if let Some(checked) = &call.checked
             && let Err(flow) = self.check_arguments(checked, usize::from(call.argc))
         {
@@ -956,12 +964,15 @@ impl<H: Heap> Vm<H> {
             usize::from(call.argc),
             call.checked.as_deref(),
         ) {
-            Ok(true) => {
-                #[cfg(any(test, feature = "perf-witness"))]
-                self.witness::<COUNT>(unit, step);
-                at + 1
+            Ok(true) => at + 1,
+            Ok(false) => {
+                let bill = self.owed(charge, usize::from(call.argc));
+                self.meter.leave();
+                self.exact = true;
+                let link = self.running_link();
+                let entered = self.enter(callee, usize::from(call.argc), None, bill, link);
+                leave(line, entered.map(|()| None))
             }
-            Ok(false) => exit_at(step.pc() as usize),
             Err(flow) => leave(line, Err(flow)),
         }
     }

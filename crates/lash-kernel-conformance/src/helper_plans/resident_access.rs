@@ -9,6 +9,7 @@ struct AccessObserved {
     end: Result<crate::ExpectedEnd, String>,
     prints: Vec<Datum>,
     stops: Vec<(String, u64)>,
+    occurrences: Vec<Vec<(lash_kernel_value::sites::Site, u64)>>,
     memory: u64,
 }
 
@@ -34,12 +35,14 @@ fn observe(program: &Program, bounds: Bounds, slice: u64, cold: bool) -> AccessO
                 end: Err(error.to_string()),
                 prints: Vec::new(),
                 stops: Vec::new(),
+                occurrences: Vec::new(),
                 memory: 0,
             };
         }
     };
     let mut world = World::default();
     let mut stops = Vec::new();
+    let mut occurrences = Vec::new();
     loop {
         let step = machine.run(&mut world, slice).unwrap();
         stops.push((
@@ -56,12 +59,28 @@ fn observe(program: &Program, bounds: Bounds, slice: u64, cold: bool) -> AccessO
                 end: Ok(crate::ExpectedEnd::from_end(end)),
                 prints: world.prints,
                 stops,
+                occurrences,
                 memory: machine.meters().memory,
             };
         }
         assert!(matches!(step, Step::Slice), "the fixture has no effects");
         if cold {
             let sealed = machine.checkpoint().unwrap();
+            let (run, _) = lash_kernel_state::paged::run::continuation::open(
+                Box::new(source.clone()),
+                lash_kernel_vm::kernel_internals::sealed_root(&sealed).heap,
+            )
+            .unwrap();
+            occurrences.push(
+                run.tasks
+                    .iter()
+                    .flat_map(|task| {
+                        task.occurrences
+                            .iter()
+                            .map(|at| (at.site.clone(), at.count))
+                    })
+                    .collect(),
+            );
             machine = KernelMachine::open(
                 program.clone(),
                 bounds,
