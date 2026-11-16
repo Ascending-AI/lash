@@ -424,12 +424,17 @@ pub fn write_list(access: &Access<'_>, values: &[RunValue]) -> Result<Chunked, H
 /// hold a table's entries or another count than its row names.
 pub fn read_list(access: &Access<'_>, chunked: &Chunked) -> Result<Vec<RunValue>, HeapFault> {
     let mut values = Vec::with_capacity(usize::try_from(chunked.len).unwrap_or(0));
-    let mut table = false;
+    let (mut table, mut over) = (false, false);
+    // Staging stops at the count the row records: a tree that holds more
+    // is refused before it grows past it.
     each_members(access, chunked, &mut |members| match members {
-        Members::List(held) => values.extend(held.iter().cloned()),
+        Members::List(held) if !over && (values.len() + held.len()) as u64 <= chunked.len => {
+            values.extend(held.iter().cloned());
+        }
+        Members::List(_) => over = true,
         Members::Table(_) => table = true,
     })?;
-    if table || values.len() as u64 != chunked.len {
+    if table || over || values.len() as u64 != chunked.len {
         let page = chunked.index.pages().first().copied().ok_or_else(|| {
             HeapFault::Malformed("a chunked list's row names no index page".into())
         })?;

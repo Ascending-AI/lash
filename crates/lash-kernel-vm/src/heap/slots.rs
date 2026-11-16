@@ -15,8 +15,11 @@ use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 
 use lash_kernel_state::arena::{LOOKUP, ProxyKind};
 use lash_kernel_state::paged::run::chunked::{Chunked, Members, Placement, placement};
+use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::ObjectId;
-use lash_kernel_state::paged::run::objects::{Head, ObjectKind, Paged, PagedNode, Record};
+use lash_kernel_state::paged::run::objects::{
+    Captures, Code, Head, ObjectKind, Paged, PagedNode, Record,
+};
 
 use super::open;
 use super::{Heap, LoadError, MemoryRefused};
@@ -901,7 +904,7 @@ impl Heap for SlotHeap {
                     if let Some(edges) = summaries.get(&id) {
                         return Ok(edges.clone());
                     }
-                    let edges: Vec<_> = match durable.directory.get(id)? {
+                    let edges: Vec<_> = match durable.directory.held(id)? {
                         Some(row) => durable
                             .directory
                             .edges(&row)?
@@ -960,12 +963,13 @@ impl Heap for SlotHeap {
             };
             let corrupt = |reason: String| LoadError::Store(durable.corrupt(reason));
             let id = open::id_of(&self.arena, object).map_err(malformed)?;
+            // The row as its page holds it: a closure's paged code and
+            // captures are admitted below before they are read.
             let row = durable
                 .directory
-                .get(id)
+                .held(id)
                 .map_err(LoadError::Store)?
                 .ok_or_else(|| corrupt(format!("object {} has no row", id.0)))?;
-            open::referents(&row.record, &row.heads).map_err(corrupt)?;
             // The head decides what the row may be: an immutable opens only
             // from a row of its head's kind, and an object no head names
             // only from a mutable one. Every form below (chunked, scalar
@@ -995,17 +999,28 @@ impl Heap for SlotHeap {
             .copied()
             .unwrap_or(0);
         // A scalar payload reads whole: an integer or a host handle is one
-        // value. Admission comes before materialization: the scalar it
-        // decodes to (at most its tokens) and the tokens it is decoded
-        // from are admitted before a page of it is read, then released for
-        // the admission below of the scalar it held. Its pages are checked
-        // against the row's root as they are read, and the scalar against
-        // its referrers' head below, before the run sees it.
-        let row = match &row.record {
-            Record::Scalar(scalar) => {
+        // value; so do a closure's paged code and captures. Admission comes
+        // before materialization: what the row holds, and a scalar's tokens,
+        // are admitted before a page of them is read, then released for the
+        // admission below of what the row holds. Their pages are checked
+        // against the row's roots as they are read, and a scalar against its
+        // referrers' head below, before the run sees it.
+        let staging = match &row.record {
+            Record::Scalar(scalar) => Some(scalar.summary.utf8_bytes),
+            // The meter counts a closure as its captures, as it did before
+            // code paged; its code is not counted. What reading them stages
+            // is bounded by the counts the row records.
+            Record::Closure { code, captures } => (matches!(code, Code::Paged { .. })
+                || matches!(captures, Captures::Paged(_)))
+            .then_some(0),
+            _ => None,
+        };
+        let row = match staging {
+            None => row,
+            Some(staging) => {
                 let staged = |heap: &Self| {
                     heap.load_units(&row)
-                        .saturating_add(scalar.summary.utf8_bytes)
+                        .saturating_add(staging)
                         .saturating_sub(placeholder)
                 };
                 let mut wanted = staged(self);
@@ -1017,16 +1032,26 @@ impl Heap for SlotHeap {
                 let read = self
                     .durable
                     .as_ref()
-                    .map(|durable| scalar.read(durable.directory.access()))
+                    .map(|durable| {
+                        let access = durable.directory.access();
+                        match &row.record {
+                            Record::Scalar(scalar) => scalar.read(access).map(|record| Row {
+                                record,
+                                heads: row.heads.clone(),
+                                edges: row.edges.clone(),
+                            }),
+                            _ => row.clone().read(access),
+                        }
+                    })
                     .ok_or_else(|| malformed("a cold object in a heap with no directory".into()));
                 self.held = self.held.saturating_sub(wanted);
-                lash_kernel_state::paged::run::directory::Row {
-                    record: read?.map_err(LoadError::Store)?,
-                    ..row
-                }
+                read?.map_err(LoadError::Store)?
             }
-            _ => row,
         };
+        if let Some(durable) = self.durable.as_ref() {
+            open::referents(&row.record, &row.heads)
+                .map_err(|reason| LoadError::Store(durable.corrupt(reason)))?;
+        }
 
         // Admission of the growth: the body replaces the proxy's
         // placeholder. Then one collection from the roots, and once more.

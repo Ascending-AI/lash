@@ -353,6 +353,10 @@ fn a_cold_closure_is_admitted_before_its_code_and_captures_are_read() {
     );
     let directory = Directory::open(root.directory, Box::new(store.clone()));
     let (_, depth, _) = store.during(|| directory.held(id).expect("a read").expect("a row"));
+    // The collection a refused admission runs first traces the closure's
+    // edges through its edge pages, never its code or captures: it runs
+    // once here, so what the load itself reads is measured.
+    heap.collect(&mut |visit| visit(&cold));
     let bound = heap.held() + 1024;
     heap.rebound(bound);
     let before = heap.held();
