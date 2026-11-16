@@ -5,11 +5,12 @@
 # exceed its own ceiling below. This rule is binding.
 # The <=2x Monty goal is report-only until after the switch: a PY row above it
 # is named in the receipt and never fails the gate.
-# Current ceilings use the median of five raw paired secants times 1.03.
-# The four rows the reviewed replacement adds follow the same convention,
-# lead as reviewer: main d709cfaf7f's medians times 1.03, from the L7 land run
-# of 45f2a0ccf6 (14 Nov), whose candidate binary carries the diagnostic
-# statement counters. Ceilings are checked on both sides.
+# Every ceiling is main's median of five raw paired secants times 1.03,
+# checked on both sides. Recalibrated 16 Nov for the bytecode core, lead as
+# reviewer: medians of main e189e14bf6 measured by this gate with the landed
+# harness (each row on its own thread), five repeats, every row's repeat
+# noise below 0.1%. No ceiling was raised; the region-era ceilings sat up to
+# 1000x above today's medians.
 
 MONTY_BINDING = True
 MONTY_MAX_RATIO = 3.0
@@ -83,77 +84,77 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                       'sha256': '0ff439911aedb3817aea93dc6af64ce82e33efa9b9e137511b8171bd053eeb3f',
                       'lo': 1,
                       'ops': 1000,
-                      'ceiling': 79407.95641526315},
+                      'ceiling': 660.8321705263157},
  'python/func_call': {'source': 'crates/lash-perf/src/compare/workloads/func_call.py',
                       'sha256': '08c224d8bf1cfef23bd6442cf3a1b597b14da8eff9df776bab133a5112ccf3d7',
                       'lo': 1000,
                       'ops': 4,
-                      'ceiling': 124624.25296592106},
+                      'ceiling': 1231.1553272368421},
  'python/prop_read': {'source': 'crates/lash-perf/src/compare/workloads/prop_read.py',
                       'sha256': '8d208e04816c73ef8785cde508434d4266ed489200aad36bce34886ee18c18d4',
                       'lo': 1000,
                       'ops': 4,
-                      'ceiling': 1712642.6642975002},
+                      'ceiling': 966.3934748684211},
  'python/map_set_string': {'source': 'crates/lash-perf/src/compare/workloads/map_set_string.py',
                            'sha256': '693596e060cdc7bc1836d7dcbbf23fb1e4ee2941d94718dba82db13adc7f49b7',
                            'lo': 1,
                            'ops': 1000,
-                           'ceiling': 1412393.818128421},
+                           'ceiling': 5025.334925789474},
  'python/json_transform': {'source': 'crates/lash-perf/src/compare/workloads/json_transform.py',
                            'sha256': '7881cb629936ab28c552588d7a74ac29d63acfadc811691d4688b23bf9eba5ab',
                            'lo': 1,
                            'ops': 1,
-                           'ceiling': 3272729399.2489476},
+                           'ceiling': 3275669.4263157896},
  'python/sort_bench': {'source': 'crates/lash-perf/src/compare/workloads/sort_bench.py',
                        'sha256': 'dc9d0f1b7fd397c2bcba5db1bb4e43de61ecc421bf80dad0e657bc17bfec4cf2',
                        'lo': 1,
                        'ops': 1,
-                       'ceiling': 7530501267.586843},
+                       'ceiling': 7646384.274210527},
  'typescript/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/int_arith.js',
                           'sha256': '9c2b9a8eebc3fc780e4127e511c64d5bbce36e099f449480768e1403e33cb3d1',
                           'lo': 1,
                           'ops': 1000,
-                          'ceiling': 1434843.2556621053},
+                          'ceiling': 613.7909321052632},
  'typescript/func_call': {'source': 'crates/lash-perf/src/compare/workloads/func_call.js',
                           'sha256': '3fdcf149dca1fb86431b5101990fb2abfe2f5e503ef017f31c4274b0c186614f',
                           'lo': 1000,
                           'ops': 4,
-                          'ceiling': 472169.0596325},
+                          'ceiling': 1148.4343331578948},
  'typescript/prop_read': {'source': 'crates/lash-perf/src/compare/workloads/prop_read.js',
                           'sha256': 'eced51007902ff8150e551a60f778195dbcfaa7a860f56b316559f717ecd2c4e',
                           'lo': 1000,
                           'ops': 4,
-                          'ceiling': 2910306.9838028946},
+                          'ceiling': 921.0549484210527},
  'typescript/map_set_string': {'source': 'crates/lash-perf/src/compare/workloads/map_set_string.js',
                                'sha256': 'cc1167209575863657c87be02c813598f26a7e0b7eb37adb2947a1e458c8e515',
                                'lo': 1,
                                'ops': 1000,
-                               'ceiling': 29076898.77104737},
+                               'ceiling': 6075.842930526315},
  'typescript/json_transform': {'source': 'crates/lash-perf/src/compare/workloads/json_transform.js',
                                'sha256': 'eb67836ac3d63d22ae77797a30d8f6bd454175f00b6f1fb38622a6ebbb2a336d',
                                'lo': 1,
                                'ops': 1,
-                               'ceiling': 13405047694.847895},
+                               'ceiling': 5263590.62263158},
  'python/func_closure_call': {'source': 'crates/lash-perf/src/compare/workloads/func_closure_call.py',
                               'sha256': '37e6120f7e3f91f05d4cad4303562de365c1295741a2df39aa573a625558e6c7',
                               'lo': 1000,
                               'ops': 4,
-                              'ceiling': 166471.98706013156},
+                              'ceiling': 1790.416595657895},
  'python/float_arith': {'source': 'crates/lash-perf/src/compare/workloads/float_arith.py',
                         'sha256': '096caf1f86bc46450ea51f55bd0c53074ac9c7ea82d0b05555fe8893684a45ac',
                         'lo': 1,
                         'ops': 1000,
-                        'ceiling': 96336.92663894738},
+                        'ceiling': 761.6916678947368},
  'python/string_build1': {'source': 'crates/lash-perf/src/compare/workloads/string_build1.py',
                           'sha256': 'f7f211a6d7b28ddca506ffeb9f1fd3a62b0a2db0b8dc48292d1a1be1f821d7b9',
                           'lo': 1,
                           'ops': 1000,
-                          'ceiling': 569673.8072510527},
+                          'ceiling': 3234.189808421053},
  'python/int_to_string': {'source': 'crates/lash-perf/src/compare/workloads/int_to_string.py',
                           'sha256': '3973e856976fafb5b440acc83a65d61457ee588644b7f88864291782ff5b5cdb',
                           'lo': 1000,
                           'ops': 3,
-                          'ceiling': 524099.4512266667}}
+                          'ceiling': 1147.8339154385965}}
 
 # Information only, never checked: candidate (45f2a0ccf6) medians of the
 # rows added above, from the same land run.
