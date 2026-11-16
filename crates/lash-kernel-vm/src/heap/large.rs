@@ -352,7 +352,10 @@ fn list_outcomes(
 ) -> Result<Vec<Outcome>, SealError> {
     let mut groups: Vec<Option<&[Value]>> = Vec::new();
     match &sequence.chunks {
-        Chunks::Split(chunks) => {
+        // One resident chunk is the whole list (a list shrunk to its
+        // first chunk, or joined for a removal), however long it has
+        // grown since: positional chunks again, as a whole list's are.
+        Chunks::Split(chunks) if !matches!(&chunks[..], [Chunk::Resident(_)]) => {
             if old.is_none() {
                 return Err(fault("a chunked list the heap did not open"));
             }
@@ -446,6 +449,32 @@ fn entry_heads(arena: &Arena, pairs: &[Value]) -> Result<Heads, SealError> {
     heads(arena, pairs)
 }
 
+/// A table's chunks written for the first time, or again after its row
+/// named none: by placement, `FILL` to a chunk, with each chunk's first
+/// placement.
+#[allow(clippy::type_complexity)]
+fn first_written(
+    arena: &Arena,
+    resident: &[Value],
+    mut entries: Vec<Placed>,
+) -> Result<(Vec<Outcome>, Option<Vec<Option<Placement>>>), SealError> {
+    let heads = entry_heads(arena, resident)?;
+    entries.sort_unstable_by_key(|entry| entry.placement);
+    let mut outcomes = Vec::new();
+    let mut firsts = Vec::new();
+    for run in entries.chunks(FILL) {
+        let first = run.first().map(|entry| entry.placement);
+        let mut members = run.to_vec();
+        members.sort_unstable_by_key(|entry| entry.seq);
+        firsts.push(first);
+        outcomes.push(Outcome::New {
+            pieces: vec![table_piece(members, &heads, first)?],
+            keep_first: false,
+        });
+    }
+    Ok((outcomes, Some(firsts)))
+}
+
 /// What becomes of each chunk of a table, and, for a table written whole
 /// for the first time, every chunk's first placement.
 #[allow(clippy::type_complexity)]
@@ -518,29 +547,16 @@ fn table_outcomes(
                     }
                     groups.extend(by_chunk.into_iter().map(Group::Entries));
                 }
-                _ => {
-                    // First written: by placement, `FILL` to a chunk.
-                    let heads = entry_heads(arena, &resident)?;
-                    let mut entries = entries;
-                    entries.sort_unstable_by_key(|entry| entry.placement);
-                    let mut outcomes = Vec::new();
-                    let mut firsts = Vec::new();
-                    for run in entries.chunks(FILL) {
-                        let first = run.first().map(|entry| entry.placement);
-                        let mut members = run.to_vec();
-                        members.sort_unstable_by_key(|entry| entry.seq);
-                        firsts.push(first);
-                        outcomes.push(Outcome::New {
-                            pieces: vec![table_piece(members, &heads, first)?],
-                            keep_first: false,
-                        });
-                    }
-                    return Ok((outcomes, Some(firsts)));
-                }
+                _ => return first_written(arena, &resident, entries),
             }
         }
     }
     let opened = old.ok_or_else(|| fault("a chunked table the heap did not open"))?;
+    if groups.is_empty() {
+        // Its row names no chunk (every entry was deleted): what it holds
+        // now is written as a table's first.
+        return first_written(arena, &resident, extra);
+    }
 
     // New entries go to the chunks their keys' placements name; a cold
     // chunk read back here names its immutables by its page's heads.
