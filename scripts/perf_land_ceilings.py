@@ -31,8 +31,8 @@ MONTY_MAX_RATIO = 3.0
 MONTY_REPORT_RATIO = 2.0
 # Every PY row is held to the binding 3x and report-only 2x rules, a row
 # added later included, except the rows listed here. Only a reviewed
-# replacement adds an entry; the gate refuses an entry whose row is at or
-# under 3x on both sides of a land, so the list empties itself.
+# replacement adds an entry; the gate refuses an entry whose candidate is at
+# or under 3x, so the list empties itself.
 MONTY_EXEMPT_ROWS = {
     'python/records': {
         'ratio': 5.293161273203291,
@@ -47,11 +47,11 @@ RATCHET_SLACK = 0.03
 
 # Active only while the base's copy of this file has previous_sha256.
 REVIEWED_REPLACEMENT = {
-    'previous_sha256': '1a1c1b4235bbeeb46dc0df70f690fd4b710b4c8e731cbd0e3f20a3b01d9474e2',
+    'previous_sha256': 'bc8b4094721f72bbe8387e694be0268e951c57d2dfa5c3b415304685d4dbfc6d',
     'reviewer': 'r60 lead',
     'added_rows': [],
     'replaced_ceilings': [],
-    'changed_fields': ['MONTY_BOUND_ROWS', 'MONTY_EXEMPT_ROWS'],
+    'changed_fields': ['QUICKJS_COMPILER', 'QUICKJS_SHA256'],
 }
 
 CONFIGURATION = 'Kiln optimized, full optimization, perf_iteration=false'
@@ -64,7 +64,12 @@ ENGINE_VERSION = 'Lash 0.0.0-dev; library/native versions are bound by each arti
 
 QUICKJS_REVISION = '04be246001599f5995fa2f2d8c91a0f198d3f34c'
 
-QUICKJS_SHA256 = '6b74c81e8b8929e1d2d89e2091ac1731e55106087d7e7a7c7d8d014501a3e11e'
+QUICKJS_SHA256 = 'a82e1ad094bad69d8a904ddc8c05367d4f5b1509415d0c931d14c3abd5349a34'
+
+# The QuickJS pin is its revision built by exactly this compiler, from a
+# pristine export with the build directory mapped out of the binary, so the
+# digest does not depend on where the cache lives.
+QUICKJS_COMPILER = 'gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0'
 
 PYTHON_SHA256 = 'e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f'
 

@@ -8,8 +8,14 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from perf_land_ceilings import REFERENCE_ENVIRONMENT  # noqa: E402
 
 PINS = {
     "quickjs": ("https://github.com/bellard/quickjs.git", "04be246001599f5995fa2f2d8c91a0f198d3f34c"),
@@ -17,8 +23,38 @@ PINS = {
 }
 
 
-def run(*cmd, cwd=None):
-    subprocess.run(cmd, cwd=cwd, check=True)
+def run(*cmd, cwd=None, env=None):
+    subprocess.run(cmd, cwd=cwd, env=env, check=True)
+
+
+def fetch(root, url, revision):
+    if not root.exists():
+        run("git", "init", str(root))
+        run("git", "remote", "add", "origin", url, cwd=root)
+    have = subprocess.run(["git", "cat-file", "-e", revision + "^{commit}"], cwd=root, capture_output=True)
+    if have.returncode:
+        run("git", "fetch", "--depth=1", "origin", revision, cwd=root)
+
+
+def build_quickjs(cache, url, revision):
+    """Build the pinned revision from a pristine export in a fresh directory,
+    under the reference environment, with the build directory mapped out of
+    the binary, and install it under its own digest. The bytes depend on the
+    revision and the compiler, not on where the cache lives. The upstream
+    Makefile appends its flags to CFLAGS, so its optimization is unchanged."""
+    mirror = cache / f"quickjs-{revision}"
+    fetch(mirror, url, revision)
+    with tempfile.TemporaryDirectory(dir=cache, prefix=".build-quickjs-") as build:
+        source = subprocess.run(["git", "archive", revision], cwd=mirror, check=True, capture_output=True).stdout
+        subprocess.run(["tar", "-x", "-C", build], input=source, check=True)
+        env = dict(REFERENCE_ENVIRONMENT["env"], CFLAGS=f"-ffile-prefix-map={build}=quickjs")
+        run("make", "-j2", "qjs", cwd=build, env=env)
+        binary = Path(build) / "qjs"
+        sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+        target = cache / f"qjs-{sha256}"
+        binary.chmod(0o755)
+        os.replace(binary, target)
+    return {"repository": url, "revision": revision, "qjs": str(target), "sha256": sha256}
 
 
 def main():
@@ -43,6 +79,9 @@ def main():
                               "binary_sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest()}
             continue
         url, revision = PINS[name]
+        if name == "quickjs":
+            receipts[name] = build_quickjs(cache, url, revision)
+            continue
         root = cache / f"{name}-{revision}"
         if not root.exists():
             run("git", "init", str(root))
@@ -52,12 +91,10 @@ def main():
             run("git", "fetch", "--depth=1", "origin", revision, cwd=root)
             run("git", "checkout", "--detach", revision, cwd=root)
         run("make", "-j2", "qjs", cwd=root)
-        if name == "dquickts":
-            run("make", "-j2", "build/hibernate", cwd=root / "tests/snapshot")
+        run("make", "-j2", "build/hibernate", cwd=root / "tests/snapshot")
         receipts[name] = {"repository": url, "revision": revision, "qjs": str(root / "qjs")}
-        if name == "dquickts":
-            receipts[name]["hibernate"] = str(root / "tests/snapshot/build/hibernate")
-            receipts[name]["script"] = str(root / "tests/snapshot/js/hibernate-sync.js")
+        receipts[name]["hibernate"] = str(root / "tests/snapshot/build/hibernate")
+        receipts[name]["script"] = str(root / "tests/snapshot/js/hibernate-sync.js")
     (cache / "engines.json").write_text(json.dumps(receipts, indent=2) + "\n")
     print(json.dumps(receipts, indent=2))
 

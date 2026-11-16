@@ -2,7 +2,9 @@
 import ast
 import contextlib
 import copy
+import hashlib
 import io
+import json
 import subprocess
 import tempfile
 from unittest.mock import patch
@@ -321,6 +323,49 @@ class NoSecondCache(unittest.TestCase):
         message = self.refusal('off')
         self.assertIn("LASH_BUCK2_STORE is 'off'", message)
         self.assertIn('. ./env.sh', message)
+
+
+class ReferencePin(unittest.TestCase):
+    """The QuickJS reference is its pinned revision built by the recorded
+    compiler, trusted by its bytes (FIG-7694, job H)."""
+
+    def references(self, plant=None, built=None, compiler=policy.QUICKJS_COMPILER):
+        import os
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root, 'perf-land-cache', 'references')
+            directory.mkdir(parents=True)
+            (directory / 'monty-bin').write_bytes(b'monty')
+            if plant is not None:
+                (directory / f'qjs-{policy.QUICKJS_SHA256}').write_bytes(plant)
+
+            def build(*args, **kwargs):  # the reference build, producing `built`
+                if built is None:
+                    raise AssertionError('the reference build ran')
+                (directory / f'qjs-{hashlib.sha256(built).hexdigest()}').write_bytes(built)
+                (directory / 'engines.json').write_text(
+                    json.dumps({'quickjs': {'sha256': hashlib.sha256(built).hexdigest()}}))
+
+            with patch.dict(os.environ, {'LASH_BUCK2_STORE': f'{root}/buck2-store'}), \
+                    patch.object(gate, 'reference_compiler', lambda: compiler, create=True), \
+                    patch.object(gate.subprocess, 'run', build), \
+                    self.assertRaises(ValueError) as refused:
+                gate.references(root)
+            return str(refused.exception)
+
+    def test_a_cached_binary_is_trusted_by_its_bytes_not_its_name(self):
+        message = self.references(plant=b'not the pinned build')
+        self.assertTrue(message.startswith('QuickJS executable differs from frozen reference: '
+                                           + hashlib.sha256(b'not the pinned build').hexdigest()), message)
+
+    def test_a_build_that_produces_another_binary_is_refused_naming_it(self):
+        message = self.references(built=b'another compiler output')
+        self.assertTrue(message.startswith('QuickJS executable differs from frozen reference: '
+                                           + hashlib.sha256(b'another compiler output').hexdigest()), message)
+
+    def test_a_different_compiler_is_refused_by_name_before_any_digest(self):
+        message = self.references(plant=b'not the pinned build', compiler='gcc (Other) 14.1.0')
+        self.assertTrue(message.startswith("reference compiler differs from the recorded one: 'gcc (Other) 14.1.0'"),
+                        message)
 
 if __name__ == '__main__':
     unittest.main()

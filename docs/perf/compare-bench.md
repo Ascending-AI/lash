@@ -57,8 +57,13 @@ It is the optimized Linux x86_64 manylinux_2_28 wheel, requiring glibc 2.28+.
 
 The cache's `engines.json` names paths and pinned revisions, and records
 Monty's URL, version, archive checksum and executable checksum. Builds use the
-upstream Makefile defaults, two compiler jobs, and build dquickts' snapshot
-host separately. Run measurements under the same hard memory cap and retain
+upstream Makefile defaults and two compiler jobs, and build dquickts' snapshot
+host separately. Upstream QuickJS is built from a pristine export of its pinned
+revision in a fresh directory, under the reference environment, with only
+`-ffile-prefix-map` added so the binary does not embed where it was built; it is
+installed as `qjs-<sha256>`. The perf gate pins it by that digest and by the
+recorded compiler (`QUICKJS_COMPILER` in `scripts/perf_land_ceilings.py`), and
+refuses a different compiler by name before it compares digests. Run measurements under the same hard memory cap and retain
 RSS and instruction evidence:
 
 ```sh

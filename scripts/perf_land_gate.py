@@ -331,19 +331,33 @@ def build(commit, out, label=LABEL):
         return metadata
 
 
+def reference_compiler():
+    """The C compiler the QuickJS reference is built with: the upstream
+    Makefile's gcc under the reference environment, named by its version."""
+    return subprocess.check_output(["gcc", "--version"], env=policy.REFERENCE_ENVIRONMENT["env"],
+                                   text=True).splitlines()[0]
+
+
 def references(out):
+    # The QuickJS pin is its revision built by the recorded compiler; the
+    # binary lives under its own digest, so a wiped cache rebuilds to it.
+    compiler = reference_compiler()
+    require(compiler == policy.QUICKJS_COMPILER,
+            f"reference compiler differs from the recorded one: {compiler!r}, recorded {policy.QUICKJS_COMPILER!r}")
     directory = cache() / "references"
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "references.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        qjs = directory / ("quickjs-" + policy.QUICKJS_REVISION) / "qjs"
+        qjs = directory / f"qjs-{policy.QUICKJS_SHA256}"
         monty = directory / "monty-bin"
         if not qjs.exists() or not monty.exists():
             with (Path(out) / "references-build.log").open("w") as log:
                 subprocess.run(["bash", "-c", 'ulimit -v 8388608; exec "$@"', "--", sys.executable,
                                 "scripts/build-compare-references.py", "--cache", str(directory),
                                 "--engine", "quickjs", "--engine", "monty"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
-        require(digest(qjs) == policy.QUICKJS_SHA256, "QuickJS executable differs from frozen reference")
+        # A file is trusted by its bytes, never by its name.
+        built = digest(qjs) if qjs.exists() else read(directory / "engines.json")["quickjs"]["sha256"]
+        require(built == policy.QUICKJS_SHA256, f"QuickJS executable differs from frozen reference: {built}")
         require(digest(monty) == policy.MONTY_SHA256, "Monty executable differs from frozen reference")
     python = Path(shutil.which("python3")).resolve()
     require(digest(python) == policy.PYTHON_SHA256, "CPython executable differs from frozen reference")
