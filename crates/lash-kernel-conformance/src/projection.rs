@@ -218,7 +218,7 @@ impl Machine for Recorded {
 
 /// The durable ids each checkpoint reaches, in graph order: PLAN-INDEP
 /// over ids holds when two plans' lists are equal (seam C of
-/// `docs/design/kernel-end-state.md`).
+/// `docs/kernel/design.md`).
 #[cfg(test)]
 pub(crate) fn ids(states: &[Checkpoint]) -> Vec<Vec<lash_kernel_doc::heap::EntityId>> {
     states.iter().map(|state| state.ids().to_vec()).collect()

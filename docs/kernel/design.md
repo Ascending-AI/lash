@@ -157,7 +157,7 @@ text and pair capabilities through `NativeFunction::specialization`.
 
 ## 6. Parked runs
 
-A parked run is a checkpoint root over the run's persistent heap ([ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)). The machine executes on that heap, so a park seals the pages the stretch since the last park changed and writes one root; there is no separate image of the run. The types are `lash-kernel-state`'s `paged` module; each page is a canonical tree page of the semantic kinds 1000 to 1008, and a root is complete: nothing else is needed to resume it.
+A parked run is a checkpoint root over the run's persistent heap ([ADR 0145](../adr/0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)). The machine executes on plain memory, the arena, and projects to that heap only at projection points (appendix, seams D and G), so a park seals the pages the stretch since the last park changed and writes one root; there is no separate image of the run. The types are `lash-kernel-state`'s `paged` module; each page is a canonical tree page of the semantic kinds 1000 to 1008, and a root is complete: nothing else is needed to resume it.
 
 | `CheckpointRoot` field | What it holds |
 | --- | --- |
@@ -325,3 +325,362 @@ and never invokes a resolver. General durable-format migration remains a separat
 port and must prove callable, frame, Site and Link correspondence before publication.
 Guest authored bodies charge statements; shipped guest helpers carry an explicit
 formula. Native and Both implementations carry their formula at the implementation.
+
+## Appendix: running-state seams
+
+These rules were the binding contracts of the kernel end-state design
+(FIG-6691), moved here when that design was retired. The machine executes on
+plain memory, the arena, and projects to the paged heap of §6 only at
+projection points (park, slice return, end); a park seals the changed pages
+and writes one root. Code cites the seams by letter.
+
+**Kept across every seam.** The equality domain does not move: canonical
+continuation bytes are exactly equal and the persisted graph is equivalent
+(allocator headers, garbage and census metadata may differ). A change that
+makes more of the graph byte-equal (seam H) still states its laws over this
+domain. A guest error is a raised value; a guest bound is `Bound::*`; an
+infrastructure failure (`HeapFault`, a page refusal, a durable error) is never
+catchable and ends the activation, which resumes from its last committed root.
+
+### A. Coordinates
+
+A saved run names where it stands by semantic coordinates only: sites as path
+suffixes under a frame's statement site, phases, roles by the site of the
+operand that produced them, and table cursors by insertion ordinal. It never
+holds a pc, a register, an arena handle or a compiled table's index, so any
+layout of any build of the same document restores it.
+
+- **Liveness.** Semantic bindings and roles stay live, and are saved, even when
+  optimized code no longer reads them.
+- **Holdings.** Registers, borrowed transfers, pins and fresh objects are
+  holdings, never checkpoint coordinates.
+- **Fail closed.** Restore never guesses a nearest site or phase: a saved
+  coordinate the grammar does not admit refuses the open, naming its site
+  (CONT-GRAMMAR, `lash-kernel-vm`'s `laws::continuation`).
+
+### B. The charge event program
+
+Charge is the ordered sequence of a run's semantic charge events. Passing the
+bound ends the run at the event that passes it, charged with that event;
+nothing after it is charged.
+
+- **Weights.** `Weight::Units(n)` is n one-unit events: a run passing the bound
+  inside it is charged up to the unit that passes. `Weight::Atomic(n)` is one
+  event charged whole (`K-CHG-003`). Addition saturates and the bound is
+  strict: a run is over its bound when it is charged more than the bound.
+- **Anchors** (which units are tested together) are a function of the
+  document. The per-unit expansion of the program (`Weight::expand`) is equal
+  under every layout.
+- **Start.** What a start decodes (an entry's arguments, a cell's host
+  bindings) charges nothing, so no charge bound stops it; the run's first
+  statement meets the bound.
+- **Library charge.** Every library function, native-stating or body-only, is
+  charged its declared formula at completion, as one atomic event, on a raise
+  with an absent result. Its own body forms are uncharged. Guest callbacks it
+  calls and closures it creates stay ordinary charged code. A helper is atomic
+  for the bound and for slices; its work guard still caps it.
+- **The oracle.** `ReferenceCharger` charges one unit at a time with
+  `K-CHG-002`'s saturating, strict rule. `record_charges` records every charge
+  the run makes, in order; it is an observation and changes no result, charge,
+  park or export. The law
+  (`lash-kernel-conformance`, `tests::charge::every_corpus_charge_bound_ends_where_the_per_unit_reference_charger_ends`):
+  on every corpus case, every layout makes the same run and the same expanded
+  charge program, and a run bounded at the least and the greatest bound each
+  event passes, and at its whole charge, ends where the reference ends it:
+  charged with the event that passes, after the same charges, prints, parks
+  and requests; past its whole charge, exactly as the unbounded run.
+
+Owner: `lash-kernel-vm` (`observe/charge.rs`): `Weight`, `Ending`,
+`ReferenceCharger` and `Crossed`.
+
+### C. Values, kinds and the three namespaces
+
+A running value is 16 bytes (`lash_kernel_doc::arena::Value`, size asserted).
+Immediates are inline; everything else is an arena handle. `Value` is `Copy`:
+the machine keeps reference counts at the holding locations it writes, so no
+value carries a release protocol (seam F).
+
+| Kind (K-VAL-001) | Running value | Sharing | Projection |
+| --- | --- | --- | --- |
+| null, absent, bool | immediate | value | inline token |
+| int | `Int(i64)`; a larger one `BigInt(handle)` | immutable, shared | inline digits up to 256 bytes, else a payload tree (`IntRef`) |
+| float | `Float` | value | its kernel spelling |
+| text | `Text(ShortText)` up to 14 bytes; else `LongText(handle)`, scalar-bounded chunks | immutable, shared | `TextRef`: inline up to 256 bytes, else canonical payload leaves |
+| bytes | `Bytes(handle)` | immutable, shared | `BytesRef`, as text |
+| timestamp | `Timestamp(i64)` nanoseconds; else `BigTimestamp(handle)` | value | `Timestamp` |
+| tuple | `Tuple(handle)` | immutable, shared | `TupleRef`, frozen family kept |
+| list | `List(handle)`, positional chunks | mutable, by identity | directory head and body tree |
+| map, set, record | `Map`, `Set`, `Record(handle)`, content-placed chunks of entries | mutable, by identity | directory head and body tree |
+| closure | `Closure(handle)`: code site and capture cells | by identity | `ObjectInit::Closure` |
+| error | `Error(handle)`: kind, message, data | immutable, shared | `ErrorRef` |
+| task | `Task(TaskId)` | value; a task edge | task number |
+| function | `Function(handle)` | value | the function name |
+| handle | `Handle(handle)` | immutable, shared | `Handle` |
+| ref | `TaskRef(TaskId)`, `ObjectRef(handle)`: strong (K-KEY-004) | value | the referent's identity |
+| variable cell (not a kind) | `Body::Cell(Value)`: a closure's shared variable (K-CLO-001), a fresh cell per `for` iteration (K-CLO-002) | by identity | a variable entity |
+
+- **Canonical immediates.** A text, integer or timestamp that fits its
+  immediate is always the immediate, never an arena object, so an immediate and
+  a boxed value of one kind are never equal.
+- **Text.** UTF-8 with its summary (bytes, chars, UTF-16 units). An ASCII text
+  answers char positions by byte offset.
+- **Interning.** Static keys are interned at compile time. Intern ids are cache
+  state, never persisted.
+
+**Three namespaces**, none convertible to another:
+
+1. `ArenaHandle`: slot index and generation, process-local, never persisted. It
+   has no `Hash` or `Ord`, so nothing observed, keyed or saved can depend on
+   where the arena put an object.
+2. `EntityId (family, ordinal)`: a mutable object's durable identity.
+3. `PageRef`: an immutable page, by content.
+
+**Ids at projection.** A primary-family object gets its durable id at the first
+projection point that saves it, never at creation, and keeps it. Objects that
+die before a projection point never get one, so a native and a body allocating
+different temporaries do not shift ids in the continuation bytes. The canonical
+walk assigns them. From the semantic roots, in order:
+
+1. session bindings written since the last projection point, in the order
+   their values were last bound. A write keeps its value in the arena until a
+   projection point (FIG-6748), and a value the run saves first, as a task's
+   result or an effect's argument, walks the bindings written so far in the
+   same order: so where those points fall moves no id;
+2. tasks by number; in each task, its incoming outcome or ended result, then
+   its frames by index from the bottom. In each frame, in this order: bindings
+   by name, retained arguments by position, roles by site, loop held values by
+   loop site, departing payloads by `try` site;
+3. inside each object, its members in canonical order: a sequence by index; a
+   table by insertion order, key before value; a closure's captures by name;
+   an error's kind, message and data.
+
+The walk is depth-first and pre-order. It visits only new or dirty objects: a
+clean object cannot reach a new one without having been written, so it is not
+descended. Each object without an id takes the next primary ordinal when the
+walk first reaches it. Objects of frozen or lazy families keep their
+family-relative ids.
+
+A ref used as a map key is keyed in the arena by its referent's process-local
+token, whether or not the referent has an id yet. A page keys it by the
+referent's durable id, which the projection that writes the table computes
+from the entries' page forms, so the arena never re-keys a table. No page ever
+holds a handle or a token.
+
+**Invariant.** PLAN-INDEP over ids: a layout where every native beside a body
+declines and the body allocates other temporaries produces equal canonical
+continuation bytes, ids included, at every projection point. Resume under
+another layout keeps every assigned id.
+
+### D. Arena, chunks and proxies
+
+Running state lives in the arena; pages are its projection.
+
+- **Bodies and lifecycle are split.** What a native reads (bodies by handle) is
+  `lash_kernel_doc::arena::Objects`. The arena's per-slot facts (reference
+  count, durable id, base page, dirty chunks, residency) live beside it, in
+  `lash-kernel-state`'s arena module, so a native call's reads touch only
+  bodies.
+- **Small objects** (one chunk) materialize whole on first read and carry one
+  dirty bit.
+- **Large collections** keep a base `PageRef` per chunk. A chunk is one leaf of
+  the object's canonical body tree (seam H): a sequence chunk holds
+  `Sequence::CHUNK` (64) values by position, a table chunk the whole entries
+  between two content-placed boundaries. Chunks materialize lazily
+  (`Chunk::Cold` to `Chunk::Resident`).
+- **Resident chunks own their storage by value** (FIG-6708). A whole body (what
+  the run built, or one joined once every chunk is resident) holds up to
+  `Chunks::INLINE` (2) values inline, so a fresh `[n]` or pair allocates no
+  storage and frees none at release, and is otherwise one `Vec<Value>` with no
+  chunk list; only a large object opened from its pages is `Chunks::Split`
+  (FIG-6794). The inline values fit beside the widest body, so no arena slot
+  widens.
+- **Dirty-chunk worklist.** Each object keeps its dirty chunk indexes; the
+  arena keeps the set of objects with dirty chunks. The worklist says which
+  chunks; the canonical walk (seam C) says in what order they are projected.
+- **Materialization happens outside native calls.** A view that reaches a cold
+  chunk answers `Retry::Cold`; the machine decodes that chunk, and, doubling,
+  the ones after it in the same object, then runs the call again (seam F). A
+  scan of a cold object therefore costs O(n) decode in O(log n) retries, and a
+  point read decodes one chunk.
+- **Proxies** are interned per entity within one heap version: decoding a page
+  that names entity X gives X's one handle, creating a cold slot from X's
+  directory head whose chunks are all cold.
+- **Eviction** happens only at statement boundaries: a clean resident chunk may
+  drop to `Cold` on its retained base page.
+
+**Reachability.** Acyclic objects are released by reference count. A cold
+object's outgoing edges are its persisted summaries, never decoded eagerly.
+Cycles are collected on allocation pressure or bounded debt, with a fast exit
+when there are no candidates. An ordinary projection does no global traversal.
+
+**Invariants.**
+
+1. A point write to one large list and to one large table reads, encodes and
+   seals at most one chunk plus its index path.
+2. A growing retained task, frame and binding state with one changed frame
+   projects with visits bounded by the change.
+3. A no-op session carry over a million names reads nothing.
+4. An ordinary park performs no global traversal.
+
+Owners: `lash_kernel_doc::arena` (bodies, views), `lash-kernel-state` (lifecycle,
+projection), `lash-kernel-vm` (holding locations).
+
+### E. Calls and frames
+
+- **Depth** is checked at every logical entry, before a native, an opcode or a
+  body runs, even when a physical frame is reused (K-BND-002).
+- **Frames project by change.** A resident frame is projected to its record only
+  at a projection point, and only when it changed since the last projection or
+  is its task's top frame (seam D invariant 2; `lash-kernel-vm`'s
+  `laws::frames`).
+
+### F. The native ABI: typed views over call-scoped borrows
+
+A native receives `&'call [Value]` and reads what the values name through
+concrete views that borrow the arena for the call: a list's or tuple's values
+as `&'call [Value]` chunks, a table's entries as chunks of pairs, a text as
+`&'call str` chunks. There is no dynamic dispatch per element and no value
+cloned out. It builds into a `Nursery` whose slots the arena reserves without
+writing; the machine installs them after the call returns. Guest semantics that
+are not immediates (deep equality, key checks, keyed lookup) go through the
+arena's `Semantics`, one dynamic call per question; immediates are compared
+inline (`Args::equal`).
+
+- **No release protocol.** Every borrow ends with the call. A result is
+  returned by value (16 bytes, `Copy`); the machine counts it where it installs
+  it.
+- **No limit on plugins.** Any crate implements the trait with full read access
+  to every kind and full allocation. Reads and allocations interleave freely,
+  because reads borrow `&Objects` and allocation borrows `&mut Nursery`.
+- **No unsafe aliasing.** No `unsafe` anywhere. A call never writes an arena
+  slot: reservation pops a free index through a `RefCell` or counts past the
+  end through a `Cell`, and the install writes after the borrows end.
+- **Retry, not fault.** A call never reads a page. A view reaching a cold chunk
+  answers `Retry::Cold`, and a reservation past the granted headroom answers
+  `Retry::Room`. The machine decodes or collects and runs the call again.
+  Natives are pure, so the retried call does what it did; the abandoned
+  attempt's nursery is discarded (`K-LIB-002`).
+- **Also kept:** a prepared entry over immediates for an opcode's guarded fast
+  path, the purity rules, declining before anything observable, and
+  `WorkCounter`.
+
+The decision was made on measurement (FIG-6691): over the logic of
+`list.index_of`, `text.find` and `list.slice`, typed views read a collection
+3.1x cheaper in instructions than a `dyn` heap that clones values out and 2.4x
+cheaper than a `dyn` heap with borrowed bulk reads, and allocate within 5% of
+the cheapest; durable ids with an id-to-handle map were slowest everywhere and
+contradict ids at projection (seam C).
+
+Owner: `lash_kernel_doc::arena::native`. Natives answer the same through the
+views as the body they stand beside: the native conformance harness
+(`check_native`, cold and warm), the helper differential and the corpus, with
+retries forced at every chunk.
+
+### G. Projection and candidate publication
+
+A projection is a producer of the existing fenced owner candidate.
+
+- **Projection points:** park, slice return, end. A seal is legal at each
+  (K-MACH-007).
+- **What a projection walks:** dirty tasks, dirty frames and every task's top
+  frame, dirty session slots, the dirty object worklist, and objects newly
+  reachable from them. It assigns ids (seam C) and encodes in canonical order,
+  independent of arena slots, page-in order and cache warmth. Clean references
+  are retained as they are.
+- **Resumable under `SealBudget`.** A projection that runs out of budget keeps
+  its walk cursor and every dirty mark; the next seal continues it. No guest
+  step runs between an incomplete seal and its completion. Otherwise ids
+  assigned by the abandoned walk would depend on when the budget ran out.
+- **Dirty state and the baseline.** The embedder publishes the root with the
+  owner commit that carries it (`CandidatePublication`, `lash-durable`
+  `domain/pages.rs`). On commit the activation's baseline is the new root. On
+  abort or an ambiguous acknowledgement the activation ends and the next one
+  resumes from whichever root the row holds. So no machine ever runs on past an
+  uncommitted candidate, and the machine clears its dirty marks when seal
+  returns a root. No dispatch escapes from an uncommitted candidate: admissions
+  commit with the root.
+
+**Invariant.** A crash before and after the candidate commit, a lost
+acknowledgement, and a seal budget exhausted mid-projection all select the
+committed root, and no effect dispatches from an uncommitted candidate.
+
+### H. The canonical page constructor
+
+Equal semantic state seals to the same pages, whatever history built it.
+
+- **Sequences** (lists, tuples, a sequence tree) chunk by position: leaf `k`
+  holds indexes `64k ..< 64(k+1)` (`SEQUENCE_LEAF_CELLS`). This is
+  history-independent and makes index arithmetic O(1) on the hot path. A point
+  write or an append rewrites one leaf and its path. An insert or removal in
+  the middle rewrites the leaves after it at the next projection.
+- **Keyed trees** (tables, directories, bindings) place a leaf boundary after
+  row `i` when the low 6 bits of `H(0, key_i)` are zero, which gives a mean of
+  64 rows per leaf (`KEYED_LEAF_ROWS`). A leaf that would pass 128 rows or
+  `PAGE_TARGET_BYTES` (8,192) instead ends at that cap, counted from its own
+  start. A cap moves only the boundaries up to the next natural one, so an edit
+  stays local. Index levels apply the same rule to their children's first keys
+  under `H(level, key)`, with fanout as the mean (`INDEX_FANOUT`, 32). `H` is a
+  fixed, seedless 64-bit hash written in the kernel, never a page digest: FNV-1a
+  over the level's little-endian bytes and the key, then the SplitMix64
+  finalizer.
+- **Inline bodies** stay inline exactly when their encoding fits
+  `INLINE_BODY_MAX` (256 bytes) or `INLINE_TREE_BYTES`: a function of content.
+- **Caps close after the item** that reaches them (the 128th row, or the row
+  that brings the chunk's encoded rows to 8,192 bytes), so a boundary depends
+  only on the items since the previous one. Index caps are twice the mean
+  fanout (64) for keyed trees and the fanout (32) for sequences, and an index
+  entry counts its first key plus 96 bytes. Sequence chunks also close at the
+  byte cap.
+- **Sealing.** Edits keep working nodes bounded by cutting an overflowing node
+  with the same rule from its own start, and a seal streams the dirty ranges
+  bottom-up through one chunker per level, taking a sealed subtree whole once
+  every level below it is at a boundary. A budget-exhausted seal keeps the
+  chunks it sealed as pages and the rest as working nodes, and the next seal
+  continues.
+
+**Invariant.** The same table built by different insert and delete orders,
+including deletes of keys that were present, seals to equal root `PageId`s. A
+point edit re-encodes at most a bounded number of leaves plus the index path.
+Owner: `lash-kernel-state/src/paged/tree/canonical.rs`.
+
+### I. Bound verdicts and limiters
+
+- **Verdict after a sweep.** Growth past the memory bound first sweeps: what
+  nothing holds is freed and what the run holds is recounted exactly. The first
+  sweep keeps every retained ended-task result; only if that leaves no room
+  does a second retire the results no handle reaches. Only when the recount
+  with what the verdict asks for still does not fit does the machine ask the
+  host's `MemoryLimiter`, with `used` = what the run holds plus what it asks
+  for. Recounting is not a host choice. The charge bound is decided the same
+  way by the host's `ChargeLimiter`, at the unit the reference charger crosses
+  (seam B), the crossing unit charged.
+- **Limiters.** Both are shaped as Wasmtime's `ResourceLimiter` and
+  `epoch_deadline_callback` (wasmtime 25.0.0): `limit_reached(used, limit)`
+  answers `Grow(by)`, which raises the limit by `by` and runs on (a limit still
+  reached is asked again), or `Refuse`, the default, which ends the run with
+  the typed bound exactly as before. A worker asks its parent with one
+  `HostReadKind::Bound` read naming the bound, what the run used and its
+  limit. The checkpoint root saves the run's current limits (`SavedLimits`),
+  and an open continues with them whatever bounds its machine was given, so a
+  grown limit survives a resume. A crash before the seal that would save a
+  grown limit resumes from the seal before it, which reaches the same point
+  and asks again, with nothing observable done in between.
+- **Off.** `MemoryMeter::Off` removes the meter and every memory limiter call.
+  Semantic value summaries, persistence and reference ownership remain active.
+- **Plan and residency dependence.** The refusal point may depend on the plan
+  and on what the run holds resident (a cold reopen holds less until it reads),
+  within the declared slack (K-BND-003, K-MACH-008).
+- **Physical fidelity.** The meter counts values, not allocator bytes, so a
+  record-heavy guest's RSS is a multiple of its bound. The OS ceiling
+  (FIG-6787) is the hard physical limit.
+
+**Invariant.** Two plans agree up to the earlier refusal: the same host
+answers, delivery order and committed waits, and no committed effect repeats.
+
+### Long text append (requirement, not met)
+
+Appending to a long text must cost amortized O(1) (FIG-6795): building a text
+of n bytes by repeated appends costs O(n) in total, not O(n²). **The bytecode
+core does not meet this yet.** It is the string-building row of the
+performance plan (`kernel/python/string_build1` and
+`kernel/typescript/string_build1`); nothing here claims it holds.

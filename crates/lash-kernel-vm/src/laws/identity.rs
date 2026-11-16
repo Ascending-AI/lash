@@ -1,5 +1,5 @@
 //! Durable identity and projection (seams C, D and G of
-//! `docs/design/kernel-end-state.md`): an object takes its durable id at
+//! `docs/kernel/design.md`): an object takes its durable id at
 //! the first projection point that saves it, in the canonical walk's order,
 //! so what a body allocates on the way never shifts an id; an ordinary
 //! park projects what changed and traverses nothing else; and a seal that

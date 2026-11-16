@@ -32,7 +32,7 @@ impl Checkpoint {
 
     /// The durable ids of the objects the checkpoint reaches, in the order
     /// its graph first reaches them: what PLAN-INDEP over ids compares
-    /// (seam C of `docs/design/kernel-end-state.md`).
+    /// (seam C of `docs/kernel/design.md`).
     pub fn ids(&self) -> &[EntityId] {
         &self.ids
     }

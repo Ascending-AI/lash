@@ -1,5 +1,5 @@
 //! The native ABI over the arena (seam F, decided by measurement in
-//! `docs/design/kernel-end-state.md` §F): typed views over call-scoped
+//! `docs/kernel/design.md` seam F): typed views over call-scoped
 //! borrows.
 //!
 //! A native receives its arguments as `&'call [Value]` and reads what

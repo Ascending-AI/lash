@@ -698,7 +698,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
     assert_eq!((end, embedder.world.printed, asked, charged), whole);
 }
 
-/// Seam E (`docs/design/kernel-end-state.md`, §D invariant 2): a frame is
+/// Seam E (`docs/kernel/design.md`, seam D invariant 2): a frame is
 /// projected only when it changed since the last projection or is its
 /// task's top frame. A run 40 calls deep, every frame holding bindings,
 /// projects at every slice return and every resume into a nested action,

@@ -1,6 +1,6 @@
 //! The persistent semantic heap's page vocabulary (FIG-6187, seams S1 and
 //! S2 of `docs/design/persistent-heap-seams.md`; seam C of
-//! `docs/design/kernel-end-state.md`).
+//! `docs/kernel/design.md`).
 //!
 //! Running state lives in the arena (`crate::arena`); pages are its
 //! projection. [`PageValue`] is a value as a page, a saved tree row or a
@@ -356,7 +356,7 @@ pub enum Identity {
 }
 
 /// A value in its page form: what a page, a saved tree row or a census root
-/// holds (`docs/design/kernel-end-state.md` §C, the projection column).
+/// holds (`docs/kernel/design.md` seam C, the projection column).
 /// Immutable data is in place or by descriptor; a mutable object is its
 /// durable entity identity. It is the arena value's projection, never a
 /// running value.

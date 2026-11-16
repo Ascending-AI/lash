@@ -1,5 +1,5 @@
 //! The charge oracle on the corpus (`K-CHG-001`, `K-CHG-002`, PLAN-INDEP;
-//! `docs/design/kernel-end-state.md` §B): the per-unit reference charger
+//! `docs/kernel/design.md` seam B): the per-unit reference charger
 //! equals the machine at every bound around every event of every case's
 //! charge program.
 

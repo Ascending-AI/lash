@@ -1,5 +1,5 @@
 //! The arena: the objects a run executes on, and the facts the machine
-//! keeps beside each one (seam D of `docs/design/kernel-end-state.md`).
+//! keeps beside each one (seam D of `docs/kernel/design.md`).
 //!
 //! Bodies are [`Objects`], what a native call borrows. Beside them, by slot
 //! index, each object's [`Facts`]: its durable identity once a projection

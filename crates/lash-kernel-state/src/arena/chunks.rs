@@ -1,5 +1,5 @@
-//! Large objects by chunk (seam D of `docs/design/kernel-end-state.md`,
-//! swap 2.4(b)): the arena's side of opening a proxy's head, decoding one
+//! Large objects by chunk (seam D of `docs/kernel/design.md`):
+//! the arena's side of opening a proxy's head, decoding one
 //! chunk, joining resident chunks, resolving a key through the heap's key
 //! index, and dropping clean large objects back to their pages.
 //!

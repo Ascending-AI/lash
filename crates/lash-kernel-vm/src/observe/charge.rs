@@ -64,7 +64,7 @@ pub enum Ending {
 }
 
 /// The per-unit reference charger: the oracle every machine's charge
-/// equals (`K-CHG-002`, `docs/design/kernel-end-state.md` §B).
+/// equals (`K-CHG-002`, `docs/kernel/design.md` seam B).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReferenceCharger {
     charged: u64,

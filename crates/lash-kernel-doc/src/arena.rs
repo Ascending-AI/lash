@@ -1,5 +1,5 @@
 //! The arena's value vocabulary and native ABI
-//! (`docs/design/kernel-end-state.md`, seams C, D and F): what a run's
+//! (`docs/kernel/design.md`, seams C, D and F): what a run's
 //! values and objects are while it executes. [`Value`] and the native ABI
 //! ([`native`]) are the crate root's. Pages hold their projection,
 //! [`crate::heap::PageValue`].
@@ -202,7 +202,7 @@ impl std::fmt::Debug for ShortText {
 }
 
 /// A kernel value in the end state: one of the 19 kinds of `K-VAL-001`.
-/// The table in `docs/design/kernel-end-state.md` §C gives each kind's
+/// The table in `docs/kernel/design.md` seam C gives each kind's
 /// representation and projection rule.
 ///
 /// It has no Rust equality: guest equality is [`native::Args::equal`].
