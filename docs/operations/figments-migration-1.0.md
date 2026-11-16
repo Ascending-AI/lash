@@ -31,8 +31,8 @@ render those details directly instead of issuing a read for each card.
 The message is at most 4,096 bytes, cut on a UTF-8 boundary. Call
 `DurableSession::read_tool_call` when the full message or typed cause is needed.
 A cancelled call carries code `cancelled` and its cancellation message.
-Update host mirror decoders with the pin; the pre-1.0 version freeze provides
-no legacy decoder or migration between these development shapes.
+Update host mirror decoders with the pin; before 1.0 there is no legacy
+decoder or migration between these development shapes.
 
 ## Provider file refusals (FIG-7265)
 

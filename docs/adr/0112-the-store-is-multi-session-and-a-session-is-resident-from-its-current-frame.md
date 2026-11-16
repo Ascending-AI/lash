@@ -14,8 +14,9 @@ with a request. An active session needs its current frame and pending
 changes; reading earlier history needs explicit paging costs.
 
 A frame is the context window. Compaction and `continue_as` open a frame.
-Resident memory follows that frame, rather than a fixed byte cap. The
-pre-1.0 version freeze applies to durable shapes.
+Resident memory follows that frame, rather than a fixed byte cap. Before
+1.0, `scripts/land` advances the format witness of a changed durable shape
+(ADR 0115 §7).
 
 ## Decision
 
@@ -315,7 +316,7 @@ Graph windows carry an anchor. Model results carry reported usage and attempt
 history in the model call's committed phase.
 
 Both SQL backends store these facts. Decoding validates body size and the
-window's anchor. The pre-1.0 version freeze applies; durable-format admission,
+window's anchor. Format witnesses advance at land before 1.0; durable-format admission,
 writer fences and drain by release follow
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 A compaction's identity includes its window and token inputs, so resume

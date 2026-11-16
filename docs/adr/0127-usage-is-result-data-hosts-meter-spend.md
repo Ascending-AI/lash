@@ -149,8 +149,8 @@ This is no accounting ledger: it has no admission policy, delivery,
 reconciliation, money, host receipts or deletion drain.
 Session deletion and process pruning have no accounting dependency.
 
-The pre-1.0 cutover removes accounting shapes in place, without a version
-bump, migration or compatibility reader. ADR 0106 owns the version freeze.
+The pre-1.0 cutover removes accounting shapes without a migration or
+compatibility reader; their format witnesses advance at land (ADR 0115 §7).
 
 ## Consequences
 

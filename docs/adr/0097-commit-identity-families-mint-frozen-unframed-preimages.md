@@ -66,5 +66,5 @@ encoder also changes append number identity and typed projection spelling.
 - Idempotent retries compare exact persisted evidence with a pinned grammar.
 - The unframed allowlist has exactly three members.
 - Other identity owners retain their own domains and preimages.
-- Format evolution follows the pre-1.0 freeze and
+- Format evolution follows
   [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).

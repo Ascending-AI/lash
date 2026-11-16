@@ -614,5 +614,5 @@ another continuation owner; ingress and the engine supply one durable path.
 Order spans both admission tables. Commands precede fresh turns at boundaries.
 Recorded admission cannot widen on retry. Hosts observe durable handles, and
 keyed host deliveries retain their original identity. Follow-ons survive worker loss
-as mail their switch committed. Durable shape evolution follows the pre-1.0 freeze and
+as mail their switch committed. Durable shape evolution follows
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).

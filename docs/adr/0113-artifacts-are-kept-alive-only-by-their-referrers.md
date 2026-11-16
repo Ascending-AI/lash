@@ -53,6 +53,12 @@ Every operation that acts on edges (local and relay ends, reclamation,
 carries) decodes the edges it acts on and refuses such an edge as above
 (FIG-7701).
 
+A pruned process takes its prompt snapshots: pruning a finished process
+deletes the prompt snapshots of its model calls, with their text edges, in
+the same transaction as the rest of its history, and a later read of one
+answers `None` (FIG-7701,
+`crates/lash-durable-test/tests/core_node_processes/pruned_prompts.rs`).
+
 A frame id combines the session and the admitted frame node. Host registrations
 hold their definitions with an explicit `host_pin` under ADR 0137; a host
 record or copied definition id alone acquires no artifact edge.

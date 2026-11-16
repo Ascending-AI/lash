@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. Stored formats remain frozen until 1.0.
+Accepted. Before 1.0, `scripts/land` advances the format witness of a
+changed stored shape (ADR 0115 §7).
 
 ## Decision
 

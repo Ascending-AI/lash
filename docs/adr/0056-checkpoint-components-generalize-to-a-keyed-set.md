@@ -60,8 +60,8 @@ Node identity is the blob-domain BLAKE3 digest of the canonical node bytes; a no
 exactly its child table, which is what collection walks. The commit budget
 counts the encoded nodes the commit stages; installed nodes it names add no
 bytes. Canonical structure and decode limits are checked at the boundary.
-Shape edits during the pre-1.0 freeze change shapes in place, with no
-version bump or upcaster.
+Before 1.0, `scripts/land` advances the format witness of a changed shape
+(ADR 0115 §7); there is no upcaster.
 
 JSON-text roots retain the exact stored string as their identity. In
 `ModelCallFact` and the round/head environment roots, whitespace and member

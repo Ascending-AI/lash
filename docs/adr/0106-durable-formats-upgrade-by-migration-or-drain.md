@@ -4,8 +4,8 @@ Recovery and external-effect guarantees follow [What survives a crash](../../REA
 
 ## Status
 
-Accepted. The pre-1.0 version freeze applies: stored shapes change in place
-without version bumps or upcasters. The 1.0 release boundary is governed by
+Accepted. Before 1.0, `scripts/land` advances the format witness of a
+changed stored shape (ADR 0115 §7), with no upcaster. The 1.0 release boundary is governed by
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 
 ## Context
@@ -20,8 +20,8 @@ distinct rules for shared values, immutable history, identities and in-flight
 state.
 The current code declares compatibility ranges and synthetic-next surfaces;
 these declarations alone are not a two-build upgrade proof (ADR 0115 §6).
-The freeze supplies no compatibility between arbitrary
-pre-1.0 builds.
+Advancing a format witness supplies no compatibility
+between pre-1.0 builds.
 
 ## Decision
 
@@ -134,7 +134,8 @@ reader still enforces its own surface window, as specified by
 
 Some surfaces have an exact range until a compatibility change supplies its
 predecessor conversion. A registry policy does not grant blanket additive
-compatibility. The freeze changes normal shapes in place; synthetic-next
+compatibility. Before 1.0 a normal shape change advances its format witness;
+synthetic-next
 widens the selected ranges and registries for successor-format testing;
 that does not establish an executed rolling-upgrade or rollback choreography.
 
@@ -240,8 +241,8 @@ Evidence: `crates/lash-core-store/src/compat.rs`,
 The current tree carries compatibility descriptors, writer pins and migration
 runners. Synthetic-next supplies successor format and schema declarations.
 Tagged fixture capture is unavailable, and the retained read-back recipe
-cannot import its verifier's missing capture definitions. The normal build remains under
-the version freeze. The 1.0 cut owns the release baseline, strict version and
+cannot import its verifier's missing capture definitions. Before the cut, the normal
+build advances changed format witnesses (ADR 0115 §7). The 1.0 cut owns the release baseline, strict version and
 upgrade gates, the baseline migration catalog, fixture capture at `v1.0.0`,
 and the fixture read-back target. ADR 0115 specifies that cut; the presence of
 its mechanisms here does not make a pre-1.0 build a compatibility release.
@@ -265,5 +266,5 @@ drain path. The rollback boundary is the fleet-epoch flip, which requires that
 no node of the older build is live. Operators run schema migration, then
 drain by release. Immutable history retains its bytes and identities. The current
 format tests cover only their registered assertions; synthetic-next source
-alone is not upgrade evidence. The version freeze does not
-promise migration or rollback between arbitrary development builds.
+alone is not upgrade evidence. Advancing a format witness does not
+promise migration or rollback between development builds.

@@ -189,7 +189,8 @@ Tolerant fields do not imply tolerant variants. The current constants below name
 the ordinary build; synthetic-next declares its supported next tier for upgrade
 proofs. Fleet-selected read windows and upcasters follow
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
-The pre-1.0 freeze governs changes in place.
+Before 1.0, `scripts/land` advances the format witness of a changed shape
+(§7 there).
 
 | Shape | Version owner | Version admission | Fields and variants |
 | --- | --- | --- | --- |

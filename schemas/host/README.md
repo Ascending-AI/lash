@@ -8,8 +8,9 @@ in `x-lash-version-constant` and its numeric value in
 
 Schemars-generated documents use JSON Schema Draft 2020-12, with `$defs`
 references and `prefixItems` for tuples. The runtime-owned process-event
-documents retain Draft 7. Before 1.0, the version freeze permits refreshing
-these documents and their generated TypeScript in place without version bumps.
+documents retain Draft 7. Before 1.0, these documents and their generated
+TypeScript are refreshed in place without version bumps; they are not format
+witnesses.
 
 Every document here ships through `lash::schema::host`: directory names become
 snake_case module names, each with `JSON_SCHEMA` and, where shipped,

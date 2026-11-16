@@ -16,8 +16,8 @@ corrupt values; DDL constraints protect rows from every writer under ADR 0067.
 The PostgreSQL structural fingerprint excludes `CHECK` constraints under
 ADR 0052, so constraint conformance has independent executable evidence.
 
-The pre-1.0 version freeze applies to shape edits. There is no blanket rule
-that each destructive edit adds a component-version bump. Physical migrations,
+Before 1.0, `scripts/land` advances the format witness of each changed
+guarded shape (ADR 0115 §7); nobody adds a component-version bump by hand. Physical migrations,
 reader windows, and the clean-slate compatibility floor follow
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 SQLite's production migration catalog starts empty at that floor; the

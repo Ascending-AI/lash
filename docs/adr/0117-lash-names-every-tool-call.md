@@ -256,8 +256,9 @@ Recorded keys are durable data under their format. The claim filter of
 [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1 keeps a
 node from claiming an actor whose recorded formats it cannot decode, so no
 node reinterprets keys it does not read. A recorded key is never reminted to
-fit a new derivation. Shapes change
-in place during the pre-1.0 version freeze; upgrade read contracts belong to
+fit a new derivation. Before 1.0,
+`scripts/land` advances the format witness of a changed shape; that rule
+and upgrade read contracts belong to
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md).
 
 Source: `crates/lash-protocol-types/src/tool_call_id.rs`.

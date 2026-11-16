@@ -121,8 +121,8 @@ ancestor session does not invalidate descendant rows that name it. A lineage
 row dies only with its own session.
 
 Current schema and format admission comes from the compatibility registry and
-fleet windows. ADR 0115 governs upgrades; shape edits during the pre-1.0 freeze
-do not add version bumps or upcasters.
+fleet windows. ADR 0115 governs upgrades; before 1.0, `scripts/land` advances the format
+witness of a changed shape (§7), with no upcaster.
 
 ## Consequences
 

@@ -399,8 +399,9 @@ command scope.
 
 Changing kernel code never requires a drain; a node of a new build claims a
 Run's actor when it reads the Run's stored formats
-([ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1). Stored
-shapes change in place during the pre-1.0 freeze. See the
+([ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain.md) §1). Before
+1.0, `scripts/land` advances the format witness of a changed stored shape
+(ADR 0115 §7). See the
 [deployment guide](../operations/deploying-and-upgrading.md).
 
 ### 15. Cost evidence (L15)

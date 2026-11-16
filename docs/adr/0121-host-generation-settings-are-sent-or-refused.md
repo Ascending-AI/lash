@@ -161,6 +161,7 @@ refuses an `omitted_sampling_pinned` outcome.
 - `crates/lash-core-llm/src/provider/tests/generation_policy_tests.rs` and
   the providers' generation tests pin refusal and emission.
 
-The pre-1.0 freeze changes these shapes in place. Exact effort matching and
+Before 1.0, `scripts/land` advances the format witness of a changed shape
+(ADR 0115 §7). Exact effort matching and
 refusal avoid guessing a substitute sampling contract. Provider defaults stay
 provider-owned when the host omits a setting.

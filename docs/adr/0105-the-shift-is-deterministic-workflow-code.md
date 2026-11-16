@@ -248,11 +248,12 @@ the validation of §1. The stale-epoch boundary of §9 has two turn-config laws:
 `a_committed_run_redriven_after_a_profile_change_answers_from_its_receipt` and
 `an_older_admission_redriven_after_a_profile_change_is_fenced_out`.
 
-### 12. Stored formats and the version freeze
+### 12. Stored formats
 
 Durable formats, the format gate and drain are owned by ADR 0106 and
-[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). The
-pre-1.0 freeze changes shapes in place, without version bumps or upcasters.
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Before
+1.0, `scripts/land` advances the format witness of a changed shape
+(ADR 0115 §7), with no upcaster.
 
 ## Rejected alternatives
 
@@ -267,8 +268,8 @@ and its fenced commits.
 Resume loads committed decisions and repeats fenced, idempotent writes. Live
 observation and cancellation transport do not replace committed facts. Core
 owns commit and terminal evidence. The contract applies to drivers and
-engines; opaque tool bodies are admitted executions. Changes under the pre-1.0
-freeze carry no cross-build compatibility guarantee.
+engines; opaque tool bodies are admitted executions. A format change before 1.0
+carries no cross-build compatibility guarantee.
 
 ## Model usage
 

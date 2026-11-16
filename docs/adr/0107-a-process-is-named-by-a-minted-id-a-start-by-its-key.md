@@ -123,7 +123,8 @@ Persisted and wire process references use the minted id. Start envelopes
 carry the key separately, and the start's recorded receipt carries its
 result. Process identity parsing is strict. Durable-format compatibility is
 owned by [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md);
-the pre-1.0 version freeze applies to these shapes.
+before 1.0, `scripts/land` advances the format witness of a changed shape
+(§7 there).
 
 Evidence: `crates/lash-vocabulary/src/identity.rs:304` and
 `crates/lash-core-store/src/process_identity.rs:303`.

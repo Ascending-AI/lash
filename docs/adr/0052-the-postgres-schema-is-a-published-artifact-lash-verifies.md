@@ -127,8 +127,9 @@ introduced write restrictions needed for coexistence.
 - Schema changes require regenerating the expectation and teardown artifacts.
 - Hosts own provisioning and migration coordination. A report describes its
   catalog snapshot rather than an unbounded promise about later host DDL.
-- Format compatibility follows the registry and ADR 0115. During the pre-1.0
-  freeze, stored-shape edits do not introduce version bumps or upcasters.
+- Format compatibility follows the registry and ADR 0115. Before 1.0,
+  `scripts/land` advances the format witness of a changed stored shape
+  (ADR 0115 §7); there is no upcaster.
 
 ## Code evidence
 

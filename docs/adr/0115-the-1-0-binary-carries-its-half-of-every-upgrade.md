@@ -430,6 +430,14 @@ changed (FIG-7517); nobody hand-edits a constant. Compatibility descriptors
 and refusal machinery are part of the binary. Synthetic-only changes do not
 advance a format witness.
 
+A land whose continuation format changed must show typed predecessor refusal:
+the previous build's sealed runs are refused, typed, by the candidate.
+Deployment evidence (the completed, ticket-linked deployment receipt) is
+upgrade evidence, not land evidence: it is required at a host pin, with the
+base being the commit that host runs, and at every land from the 1.0 cut
+(`STRICT_VERSION_BUMPS`, FIG-4494), not at every land before it. A receipt
+supplied in any mode is verified (`scripts/continuation_compat.py`).
+
 ### 8. Upgrade operations
 
 The release design's sequence is expand, roll, drain by release, finalize,

@@ -63,8 +63,9 @@ does not invent a converter for unsupported state or reset its contents.
 `synthetic-next`, as declared in
 `crates/lash-core-store/src/store/state_version.rs`. The marker's admitted
 window, rather than historical cutover numbers, decides what a build reads.
-The pre-1.0 freeze changes shapes in place; equal numbers do not establish
-compatibility between development builds.
+Before 1.0, `scripts/land` advances the format witness of a changed shape
+(ADR 0115 §7); equal numbers do not establish compatibility between
+development builds.
 
 ### Executable state remains pinned
 

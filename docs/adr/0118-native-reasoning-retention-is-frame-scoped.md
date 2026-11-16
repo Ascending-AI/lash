@@ -59,7 +59,8 @@ decode as provider-default. A missing message-boundary marker decodes as
 never introduce a client-side retention cut. The explicit `true` marker is
 written only for committed `TurnInput` and direct API user messages.
 
-The durable model snapshot carries the selected policy across reopen. The pre-1.0 version freeze changes shapes in place;
+The durable model snapshot carries the selected policy across reopen. Before 1.0, `scripts/land` advances the format witness of a changed shape
+(ADR 0115 §7);
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs
 upgrade read contracts.
 

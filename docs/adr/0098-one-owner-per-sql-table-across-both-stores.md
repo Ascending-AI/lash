@@ -69,8 +69,7 @@ Evidence: `crates/lash-store-sql/src/render.rs:175`, `:201`,
 - Templating dialect forks obscures their differing contracts. Every fork has
   its own literal, name, and owner.
 - Adding a conflict clause merely to share SQL changes observable failures.
-Under the pre-1.0 version freeze, both stores use `session_head` with the
-same column order. Shared head and cancellation statements have one owner;
+Both stores use `session_head` with the same column order. Shared head and cancellation statements have one owner;
 locks and conflict semantics remain backend-owned.
 
 Schema artifacts and migration SQL have their own ownership. Migrations can

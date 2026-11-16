@@ -280,8 +280,8 @@ a stand-in for its own id.
   process holds is keyed by a session it does not have.
 - A turn's scratch puts that nothing commits are reclaimed without an age
   window.
-- The pre-1.0 version freeze changes shapes in place; ADR 0115 governs
-  upgrade read contracts.
+- Before 1.0, `scripts/land` advances the format witness of a changed shape
+  (ADR 0115 §7); ADR 0115 governs upgrade read contracts.
 
 ## Implementation
 

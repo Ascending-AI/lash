@@ -95,4 +95,4 @@ law proves it on the reset tree with red mutants.
 `scripts/ci/version-bump-gate.sh <head> [<base>]` prepares the strict gate.
 An explicit base selects that comparison. Without a base it selects the newest
 preceding v1-or-later tag, or checks the initial release baseline. Required
-workflow wiring remains deferred until the cut ends the version freeze.
+workflow wiring remains deferred until the cut turns on strict version bumps.

@@ -111,7 +111,8 @@ survives a worker and tolerates repeated writes in the uncommitted window.
 A worker-local spill file cannot provide either guarantee. An unrecorded
 presentation hook would let a resumed turn change what the model sees.
 
-The pre-1.0 freeze changes shapes in place. The reader still validates the
+Before 1.0, `scripts/land` advances the format witness of a changed shape
+(ADR 0115 §7). The reader still validates the
 presentation format it declares; [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
 governs the 1.0 upgrade contract.
 
