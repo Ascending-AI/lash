@@ -246,7 +246,7 @@ ROWS = {'python/int_arith': {'source': 'crates/lash-perf/src/compare/workloads/i
                            'sha256': 'f37dc968fcd42a5245176938513aaa524f8a6f8a4daba175dd2b27ae545bd375',
                            'lo': 1000,
                            'ops': 4,
-                           'ceiling': 1682.7689646052631},
+                           'ceiling': 1315.054343157895},
  'python/prop_write': {'source': 'crates/lash-perf/src/compare/workloads/prop_write.py',
                        'sha256': '6fd5a7378e94da237608c105fe4a3a6f1b0f7c61021daeb434803d6941986921',
                        'lo': 1000,
