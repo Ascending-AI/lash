@@ -298,6 +298,78 @@ fn a_cold_payload_is_admitted_before_its_pages_are_read() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// Contract §2, admission before materialization, for a closure: its row
+/// names its code (capture names and site) and its captures by their pages
+/// once they outgrow the row. A closure of 300 captures, each named by a
+/// 300-byte name, so both its code and its captures are paged, reopened
+/// under a bound with room for 1 KiB more than the heap holds: its load
+/// refuses as `Memory` at that bound, the heap holds what it held, and the
+/// refused load read at most its row's pages and one node, never the code
+/// or the captures.
+#[test]
+fn a_cold_closure_is_admitted_before_its_code_and_captures_are_read() {
+    use std::sync::Arc;
+
+    use lash_kernel_doc::arena::ClosureIdentity;
+    use lash_kernel_doc::linked_site::LinkedSite;
+    use lash_kernel_state::paged::run::directory::Directory;
+    use lash_kernel_state::paged::run::ids::ObjectId;
+    use lash_kernel_value::Name;
+    use lash_kernel_value::content_ids::LinkId;
+    use lash_kernel_value::names::{CallableId, FunctionId};
+    use lash_kernel_value::sites::{Site, Unit};
+
+    use crate::heap::LoadError;
+
+    const CAPTURES: usize = 300;
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let cells: Vec<_> = (0..CAPTURES).map(|_| heap.cell(Value::Int(1))).collect();
+    let link = LinkId::from_bytes([4; 32]);
+    let identity = Arc::new(ClosureIdentity {
+        capture_names: (0..CAPTURES)
+            .map(|i| Name::new(format!("{i:0>300}")))
+            .collect(),
+        callable: CallableId {
+            link,
+            function: FunctionId::from_bytes([5; 32]),
+        },
+        site: LinkedSite {
+            link,
+            site: Site::new(Unit::Main, [1]),
+        },
+    });
+    let closure = Value::Closure(heap.closure(identity, cells));
+    let root = heap.seal(&[closure]).expect("a seal");
+    let (mut heap, cold) = reopened(&store, &root);
+    let handle = cold.handle().expect("an object");
+    let id = ObjectId(
+        heap.arena()
+            .facts(handle)
+            .expect("live")
+            .entity()
+            .expect("an id")
+            .ordinal,
+    );
+    let directory = Directory::open(root.directory, Box::new(store.clone()));
+    let (_, depth, _) = store.during(|| directory.held(id).expect("a read").expect("a row"));
+    let bound = heap.held() + 1024;
+    heap.rebound(bound);
+    let before = heap.held();
+    let (loaded, reads, _) = store.during(|| heap.load(handle, 0, &mut |visit| visit(&cold)));
+    match loaded {
+        Err(LoadError::Memory(refusal)) => {
+            assert_eq!(refusal.bound, bound);
+            assert_eq!(heap.held(), before, "the refusal moved the holding");
+            assert!(
+                reads <= depth + 1,
+                "{reads} pages read by the refused load, past its row's {depth} and one node"
+            );
+        }
+        other => panic!("the load answered {other:?}"),
+    }
+}
+
 /// What `value` copies out to the host as, every page it reaches loaded
 /// first.
 fn copied(heap: &mut SlotHeap, roots: &[Value], value: Value) -> lash_kernel_doc::Datum {

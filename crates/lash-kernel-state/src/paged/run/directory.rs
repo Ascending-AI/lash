@@ -263,8 +263,13 @@ impl Directory {
     }
 
     /// The row of `id` as its page holds it: a closure's code and captures
-    /// not read.
-    fn held(&self, id: ObjectId) -> Result<Option<Row>, HeapFault> {
+    /// not read, so a load can admit them before it reads them
+    /// ([`Row::read`]).
+    ///
+    /// # Errors
+    ///
+    /// The page port's faults.
+    pub fn held(&self, id: ObjectId) -> Result<Option<Row>, HeapFault> {
         self.tree.get(&id.key(), &self.access)
     }
 
