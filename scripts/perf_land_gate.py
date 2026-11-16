@@ -55,6 +55,52 @@ def require(ok, message):
         raise ValueError(message)
 
 
+# What an instrument-only land may touch: the measuring crate's own sources,
+# and paths outside every Cargo package. Nothing that decides what is
+# measured, what it is held to, or how the binary is built.
+PERF_CRATE = "crates/lash-perf"
+WORKLOADS = ("crates/lash-perf/src/compare/workloads/", "crates/lash-perf/src/compare/workloads.rs",
+             "crates/lash-perf/src/boundary/kernel_cold_workload.rs",
+             *(row["source"] for row in policy.ROWS.values()), policy.BOUNDARY["source"])
+PINS = ("scripts/perf_land_ceilings.py", "scripts/build-compare-references.py")
+BUILD_CONFIGURATION = ("tools/", "third-party/", ".cargo/", ".buckconfig", ".github/actions/rust-toolchain",
+                       "env.sh", "rust-toolchain")
+BUILD_FILES = ("Cargo.toml", "Cargo.lock", "BUCK", "PACKAGE")
+
+
+def instrument_only(paths, packages):
+    """Whether a land changes the instrument and nothing it measures. `paths`
+    is the land's diff; `packages` the root of every Cargo package on either
+    side ("" for a package at the repository root)."""
+    def inside(path, root):
+        return root == "" or path == root or path.startswith(root + "/")
+
+    def fixed(path):
+        name = path.rsplit("/", 1)[-1]
+        return (any(path == item or (item.endswith("/") and path.startswith(item)) for item in WORKLOADS)
+                or "baseline" in name or "ceiling" in name or path in PINS
+                or name in BUILD_FILES or name.endswith(".bzl")
+                or any(path.startswith(item) for item in BUILD_CONFIGURATION))
+
+    return bool(paths) and all(
+        not fixed(path) and (inside(path, PERF_CRATE) or not any(inside(path, root) for root in packages))
+        for path in paths)
+
+
+def land_paths(base, candidate):
+    """The land's changed paths and the Cargo package roots on either side."""
+    paths = [path for path in git("diff", "--name-only", f"{base}..{candidate}").splitlines() if path]
+    packages = set()
+    for commit in (base, candidate):
+        listing = subprocess.run(["git", "grep", "-l", "-e", r"^\[package\]", commit, "--", "*Cargo.toml"],
+                                 cwd=ROOT, capture_output=True, text=True)
+        require(listing.returncode in (0, 1), f"package listing failed at {commit}")
+        for line in listing.stdout.splitlines():
+            manifest = line.split(":", 1)[1]
+            packages.add(manifest.rsplit("/", 1)[0] if "/" in manifest else "")
+    return paths, packages
+
+
 def check_instruction_ceiling(side, key, median, ceiling, monty=None, calibrate=False):
     """Refuse a row above its ceiling or a candidate PY row above the binding
     Monty ratio; answer the report-only note of one above the report ratio."""
@@ -291,6 +337,12 @@ def contract(base, calibrate):
     require(policy.MONTY_REPORT_RATIO == 2.0, "the switch gate reports PY rows above 2.00x Monty")
 
 
+def boundary_pair(checkpoint_base, candidate, instrument):
+    """The boundary rows' sides. Their base is the pinned checkpoint base, not
+    the land's base, so the instrument-only mode does not apply to them."""
+    return checkpoint_base, candidate
+
+
 def boundary(base, candidate, out):
     receipts = []
     captures = {"base": {"list": [], "map": []}, "candidate": {"list": [], "map": []}}
@@ -407,47 +459,12 @@ def capture(artifact, side, key, row, repeat, cpu, refs, out, deadline):
                 capture=str(stem.with_suffix(".json")))
 
 
-def measure(base_path, candidate_path, out, calibrate=False):
-    base, candidate = load_artifact(base_path), load_artifact(candidate_path)
-    contract(base, calibrate)
-    refs, cores = references(out), cpus()
-    tasks = [(side, artifact, key, row, repeat) for key, row in policy.ROWS.items()
-             for repeat in range(5) for side, artifact in (("base", base), ("candidate", candidate))]
-    tasks.sort(key=lambda t: policy.COST_ORDER.index(t[2]))
-    assigned = queue.Queue()
-    for cpu in cores:
-        assigned.put(cpu)
-    local = threading.local()
-    def initialize():
-        local.cpu = assigned.get_nowait()
-    start = time.monotonic()
-    deadline = start + 600
-    samples, errors = [], []
-    report = dict(base=base, candidate=candidate, configuration=policy.CONFIGURATION, cpus=cores,
-                  samples=samples, failures=errors, rows={},
-                  producer_commit_field="working checkout only; artifact source identities are recorded above",
-                  policy=dict(scope=policy.SCOPE, build_flags=policy.BUILD_FLAGS, rows=policy.ROWS,
-                              compiler=policy.COMPILER, engine=policy.ENGINE_VERSION,
-                              references=dict(quickjs=policy.QUICKJS_REVISION, python=policy.PYTHON_VERSION,
-                                              monty=policy.MONTY_VERSION, monty_binding=policy.MONTY_BINDING,
-                                              environment=policy.REFERENCE_ENVIRONMENT,
-                                              monty_max_ratio=policy.MONTY_MAX_RATIO,
-                                              monty_report_ratio=policy.MONTY_REPORT_RATIO)),
-                  monty_report=[])
-    def run(task):
-        side, artifact, key, row, repeat = task
-        return capture(artifact, side, key, row, repeat, local.cpu, refs[key.split("/")[0]], out, deadline)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cores), initializer=initialize) as pool:
-        futures = {pool.submit(run, task): task for task in tasks}
-        for future in concurrent.futures.as_completed(futures):
-            task = futures[future]
-            try:
-                samples.append(future.result())
-            except (ValueError, OSError, KeyError) as error:
-                errors.append(f"{task[0]}/{task[2]}/{task[4]}: {error}")
-            write(Path(out) / "receipt.json", report)
-    report["wall_seconds"] = time.monotonic() - start
-    for side in ("base", "candidate"):
+def judge(samples, calibrate, sides=("base", "candidate")):
+    """Hold every row of each gated side to its repeat-noise bound, its
+    ceiling and the reference ratio. Answers the rows, the failures and the
+    report-only notes."""
+    rows, errors, notes = {}, [], []
+    for side in sides:
         for key, row in policy.ROWS.items():
             population = [s for s in samples if s["side"] == side and s["row"] == key]
             if len(population) != 5:
@@ -457,7 +474,7 @@ def measure(base_path, candidate_path, out, calibrate=False):
             median = statistics.median(values)
             noise = (max(values) - min(values)) / median
             result = dict(median=median, noise=noise, ceiling=row["ceiling"], samples=values)
-            report["rows"][f"{side}/{key}"] = result
+            rows[f"{side}/{key}"] = result
             print(f"perf {side}/{key}: median={median:.6f}, ceiling={row['ceiling']}, noise={noise:.4%}", flush=True)
             if noise >= .01:
                 errors.append(f"{side}/{key}: repeat noise {noise:.4%} >=1%; calibration required")
@@ -479,21 +496,127 @@ def measure(base_path, candidate_path, out, calibrate=False):
                 errors.append(str(error))
             else:
                 if note:
-                    report["monty_report"].append(note)
+                    notes.append(note)
                     print(f"perf report-only: {note}", flush=True)
-    report["wall_seconds"] = time.monotonic() - start
-    if report["wall_seconds"] > 600:
-        errors.append(f"base plus candidate measurement exceeded 600s: {report['wall_seconds']:.2f}s")
     for key in policy.ROWS:
         populations = [[s["results"] for s in samples if s["side"] == side and s["row"] == key]
-                       for side in ("base", "candidate")]
-        if populations[0] and populations[1] and populations[0][0] != populations[1][0]:
+                       for side in sides]
+        if all(populations) and any(population[0] != populations[0][0] for population in populations):
             errors.append(f"{key}: base and candidate equal-work results differ")
+    return rows, errors, notes
+
+
+def record_instrument(old_samples, rows):
+    """The base's instrument on every row, beside the candidate's: recorded,
+    never gating. Answers the per-row record and the rows that shift >0.5%."""
+    record, shifted = {}, []
+    for key in policy.ROWS:
+        values = [s["secant"] for s in old_samples if s["row"] == key]
+        new = rows.get(f"candidate/{key}")
+        if not values or new is None:
+            record[key] = dict(old_samples=values, incomplete=True)
+            continue
+        median = statistics.median(values)
+        shift = (new["median"] - median) / median
+        record[key] = dict(old_median=median, old_noise=(max(values) - min(values)) / median,
+                           old_samples=values, new_median=new["median"], shift=shift,
+                           old_results=sorted({json.dumps(s["results"]) for s in old_samples if s["row"] == key}))
+        if abs(shift) > .005:
+            shifted.append(key)
+    return dict(rows=record, shifted=shifted)
+
+
+def instrument_verdict(samples, old_samples, calibrate=False):
+    """An instrument-only land: both gated sides ran the candidate's binary
+    and are judged exactly as any land; the base's instrument is recorded
+    and adds no failure."""
+    rows, errors, notes = judge(samples, calibrate)
+    return rows, errors, notes, record_instrument(old_samples, rows)
+
+
+def collect(tasks, out, deadline):
+    """Run every (side, artifact, row key, row, repeat) capture on the pinned
+    cores. Answers the samples and the capture failures."""
+    refs, cores = references(out), cpus()
+    assigned = queue.Queue()
+    for cpu in cores:
+        assigned.put(cpu)
+    local = threading.local()
+
+    def initialize():
+        local.cpu = assigned.get_nowait()
+
+    def run(task):
+        side, artifact, key, row, repeat = task
+        return capture(artifact, side, key, row, repeat, local.cpu, refs[key.split("/")[0]], out, deadline)
+    samples, errors = [], []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cores), initializer=initialize) as pool:
+        futures = {pool.submit(run, task): task for task in sorted(tasks, key=lambda t: policy.COST_ORDER.index(t[2]))}
+        for future in concurrent.futures.as_completed(futures):
+            task = futures[future]
+            try:
+                samples.append(future.result())
+            except (ValueError, OSError, KeyError) as error:
+                errors.append(f"{task[0]}/{task[2]}/{task[4]}: {error}")
+    return samples, errors, cores
+
+
+def measure(base_path, candidate_path, out, calibrate=False, instrument=False):
+    """Gate the candidate against the base. In an instrument-only land both
+    sides run the candidate's binary, and the base's binary is measured once
+    more, recorded beside them, gating nothing."""
+    base, candidate = load_artifact(base_path), load_artifact(candidate_path)
+    contract(base, calibrate)
+    measured = candidate if instrument else base
+    tasks = [(side, artifact, key, row, repeat) for key, row in policy.ROWS.items()
+             for repeat in range(5) for side, artifact in (("base", measured), ("candidate", candidate))]
+    start = time.monotonic()
+    samples, errors, cores = collect(tasks, out, start + 600)
+    report = dict(base=base, candidate=candidate, configuration=policy.CONFIGURATION, cpus=cores,
+                  samples=samples, failures=errors, rows={},
+                  mode="instrument-only" if instrument else "product",
+                  base_side_binary=measured,
+                  producer_commit_field="working checkout only; artifact source identities are recorded above",
+                  policy=dict(scope=policy.SCOPE, build_flags=policy.BUILD_FLAGS, rows=policy.ROWS,
+                              compiler=policy.COMPILER, engine=policy.ENGINE_VERSION,
+                              references=dict(quickjs=policy.QUICKJS_REVISION, python=policy.PYTHON_VERSION,
+                                              monty=policy.MONTY_VERSION, monty_binding=policy.MONTY_BINDING,
+                                              environment=policy.REFERENCE_ENVIRONMENT,
+                                              monty_max_ratio=policy.MONTY_MAX_RATIO,
+                                              monty_report_ratio=policy.MONTY_REPORT_RATIO)),
+                  monty_report=[])
+    report["wall_seconds"] = time.monotonic() - start
+    if instrument:
+        old_start = time.monotonic()
+        old_samples, old_errors, _ = collect(
+            [("old", base, key, row, repeat) for key, row in policy.ROWS.items() for repeat in range(5)],
+            out, old_start + 600)
+        rows, failed, notes, old = instrument_verdict(samples, old_samples, calibrate)
+        old["collection_errors"] = old_errors
+        old["wall_seconds"] = time.monotonic() - old_start
+        old["note"] = ("perf instrument-only land: both sides measured with the candidate's instrument; "
+                       "the base's instrument is recorded and gates nothing")
+        report["old_instrument"] = old
+    else:
+        rows, failed, notes = judge(samples, calibrate)
+    report["rows"], report["monty_report"] = rows, notes
+    errors.extend(failed)
+    if report["wall_seconds"] > 600:
+        errors.append(f"base plus candidate measurement exceeded 600s: {report['wall_seconds']:.2f}s")
     expected = len(policy.ROWS) * 10
     require(len(samples) == expected or errors, "incomplete gate population")
     write(Path(out) / "receipt.json", report)
     kind = "calibration" if calibrate else "gate"
     print(f"perf {kind}: {report['wall_seconds']:.2f}s, {len(samples)}/{expected} pairs, receipt={Path(out) / 'receipt.json'}", flush=True)
+    if instrument:
+        print(report["old_instrument"]["note"], flush=True)
+        for key, entry in report["old_instrument"]["rows"].items():
+            if "shift" in entry:
+                print(f"perf old instrument {key}: median={entry['old_median']:.6f}, noise={entry['old_noise']:.4%}, "
+                      f"shift={entry['shift']:+.3%}", flush=True)
+        shifted = report["old_instrument"]["shifted"]
+        print("perf instrument-only land: rows shifting more than 0.5%: " + (", ".join(
+            f"{key} {report['old_instrument']['rows'][key]['shift']:+.3%}" for key in shifted) or "none"), flush=True)
     return report
 
 
@@ -517,10 +640,12 @@ def main():
         candidate = build(head, out)
         require(git("rev-parse", "HEAD") == head, "candidate checkout was not restored")
     require(policy.CHECKPOINT_BASE is not None, "checkpoint base has not been pinned")
+    commits = (read(base)["commit"], read(candidate)["commit"])
+    instrument = None not in commits and instrument_only(*land_paths(*commits))
     checkpoint_base = load_artifact(build(policy.CHECKPOINT_BASE, out))
-    result = measure(base, candidate, out, args.calibrate)
+    result = measure(base, candidate, out, args.calibrate, instrument)
     try:
-        result["boundary"] = boundary(checkpoint_base, load_artifact(candidate), out)
+        result["boundary"] = boundary(*boundary_pair(checkpoint_base, load_artifact(candidate), instrument), out)
     except (ValueError, OSError, KeyError, subprocess.SubprocessError) as error:
         result["failures"].append(f"boundary: {error}")
     result["status"] = "failed" if result["failures"] else ("calibrated" if args.calibrate else "qualified")

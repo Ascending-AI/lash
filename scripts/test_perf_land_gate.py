@@ -54,5 +54,72 @@ class GateLaws(unittest.TestCase):
             gate.checkpoint_outcome('list', [dict(status='unsupported', error='store fault')] * 5, candidate)
 
 
+    # An instrument-only land is decided by its diff alone.
+    PACKAGES = {'crates/lash', 'crates/lash-perf', 'crates/lash-durable'}
+    INSTRUMENT = ['crates/lash-perf/src/compare/mod.rs', 'scripts/perf_land_gate.py', 'docs/perf.md']
+
+    def test_one_product_path_makes_a_land_not_instrument_only(self):
+        self.assertTrue(gate.instrument_only(self.INSTRUMENT, self.PACKAGES))
+        for product in ('crates/lash/src/lib.rs', 'crates/lash-durable/src/page.rs'):
+            self.assertFalse(gate.instrument_only([*self.INSTRUMENT, product], self.PACKAGES), product)
+
+    def test_workload_baseline_ceiling_pin_manifest_or_build_change_is_not_instrument_only(self):
+        for fixed in ('crates/lash-perf/src/compare/workloads/int_arith.py',
+                      'crates/lash-perf/src/compare/workloads.rs',
+                      'crates/lash-perf/src/boundary/kernel_cold_workload.rs',
+                      'crates/lash-perf/fixtures/heap-baseline.txt', 'scripts/perf_land_ceilings.py',
+                      'scripts/build-compare-references.py', 'crates/lash-perf/Cargo.toml', 'Cargo.toml',
+                      'Cargo.lock', 'rust-toolchain.toml', 'tools/buck2/lash_rust.bzl', '.buckconfig',
+                      '.cargo/config.toml', 'crates/lash-perf/BUCK'):
+            self.assertFalse(gate.instrument_only([*self.INSTRUMENT, fixed], self.PACKAGES), fixed)
+
+    # Every row well inside its ceiling and 1x Monty, five equal repeats a side.
+    @staticmethod
+    def population(sides, plant=None):
+        samples = []
+        for side in sides:
+            for key, row in policy.ROWS.items():
+                for repeat in range(5):
+                    secant = row['ceiling'] / 2
+                    if plant:
+                        secant = plant(side, key, repeat, secant)
+                    samples.append(dict(side=side, row=key, repeat=repeat, secant=secant, results=[1, 2],
+                                        reference_secants={'monty': row['ceiling'] / 2} if key.startswith('python/') else {}))
+        return samples
+
+    def test_instrument_only_land_still_fails_a_noisy_candidate_row(self):
+        noisy = self.population(('base', 'candidate'), lambda side, key, repeat, secant:
+                                secant * (1.02 if (side, key, repeat) == ('candidate', 'typescript/int_arith', 3) else 1))
+        _, errors, _, _ = gate.instrument_verdict(noisy, self.population(('old',)))
+        self.assertTrue(any(e.startswith('candidate/typescript/int_arith: repeat noise') for e in errors), errors)
+
+    def test_instrument_only_land_still_fails_an_over_ceiling_row(self):
+        over = self.population(('base', 'candidate'), lambda side, key, repeat, secant:
+                               policy.ROWS[key]['ceiling'] * 1.01 if key == 'typescript/int_arith' else secant)
+        _, errors, _, _ = gate.instrument_verdict(over, self.population(('old',)))
+        self.assertTrue(any(e.startswith('candidate/typescript/int_arith: median') and 'exceeds ceiling' in e
+                            for e in errors), errors)
+
+    def test_old_instrument_noise_is_recorded_and_does_not_fail_the_land(self):
+        # The land 2 base repeats of python/string_build1 differ by 2.9%.
+        old = self.population(('old',), lambda side, key, repeat, secant:
+                              secant * (1, 1.0291, 1, .9999, 1)[repeat] if key == 'python/string_build1' else secant)
+        _, errors, _, record = gate.instrument_verdict(self.population(('base', 'candidate')), old)
+        self.assertEqual(errors, [])
+        self.assertGreater(record['rows']['python/string_build1']['old_noise'], .01)
+
+    def test_instrument_only_mode_leaves_the_boundary_rows_on_the_checkpoint_base(self):
+        # The pinned checkpoint base cannot do the cold point edit, so today's
+        # boundary rows make no comparison; the instrument-only mode must not
+        # switch one on.
+        rows = {'checkpoint': [dict(status='unsupported', error='cold point edit: canonical region reached an '
+                                    'unintegrated boundary at path [5] Commit')] * 5,
+                'candidate': [dict(status='supported', bytes_written=6251, seal_ns=ns) for ns in (5, 1, 4, 2, 3)]}
+        outcomes = [gate.checkpoint_outcome('list', *(rows[side] for side in
+                                                      gate.boundary_pair('checkpoint', 'candidate', instrument)))
+                    for instrument in (False, True)]
+        self.assertEqual(outcomes[0], outcomes[1])
+        self.assertEqual(outcomes[1][0]['outcome'], 'base unsupported: no comparison')
+
 if __name__ == '__main__':
     unittest.main()
