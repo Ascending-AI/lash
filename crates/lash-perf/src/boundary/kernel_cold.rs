@@ -12,6 +12,8 @@ use lash_kernel_vm::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+use crate::perf_support::instructions::InstructionCounter;
+
 include!("kernel_cold_workload.rs");
 const ELEMENTS: usize = 200_000;
 const INDEX: i64 = 100_003;
@@ -320,11 +322,17 @@ fn population(program: &Program, map: bool) -> Result<serde_json::Value> {
     )?;
     machine.deliver(before_edit, Outcome::Completed(Datum::Int(0.into())))?;
     let after_edit = park(&mut machine, &mut console).context("cold point edit")?;
+    // The seal is synchronous on this thread over in-memory pages, so the
+    // compare rows' qualified instructions:u window brackets exactly it. The
+    // gate compares these counts; wall time is recorded only.
+    let counter = InstructionCounter::open_inherited().context("seal instructions:u counter")?;
+    let before = counter.snapshot()?;
     let began = Instant::now();
     let root = machine
         .seal(BUDGET)?
         .ok_or_else(|| anyhow!("point edit seal incomplete"))?;
     let seal_ns = began.elapsed().as_nanos();
+    let seal_instructions = counter.snapshot()?.since(before)?.instructions;
     let edit_reads = pages.0.borrow().reads;
     let total_edit_reads = pages.0.borrow().total_reads;
     let total_writes = pages.0.borrow().total_writes;
@@ -350,7 +358,7 @@ fn population(program: &Program, map: bool) -> Result<serde_json::Value> {
         "cold edited value differs after reopen"
     );
     Ok(
-        json!({"status": "supported", "elements": ELEMENTS, "reads": reads, "total_reads": total_reads, "edit_reads": edit_reads, "total_edit_reads": total_edit_reads, "total_writes": total_writes, "path_depth": geometry.index_depth, "cold_leaf_pages": geometry.chunk_pages, "index_pages": geometry.index_pages, "directory_depth": geometry.directory_depth, "writes": writes, "bytes_written": bytes_written, "seal_ns": seal_ns, "results": [INDEX, -1]}),
+        json!({"status": "supported", "elements": ELEMENTS, "reads": reads, "total_reads": total_reads, "edit_reads": edit_reads, "total_edit_reads": total_edit_reads, "total_writes": total_writes, "path_depth": geometry.index_depth, "cold_leaf_pages": geometry.chunk_pages, "index_pages": geometry.index_pages, "directory_depth": geometry.directory_depth, "writes": writes, "bytes_written": bytes_written, "seal_instructions": seal_instructions, "seal_ns": seal_ns, "results": [INDEX, -1]}),
     )
 }
 

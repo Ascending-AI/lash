@@ -142,10 +142,29 @@ def check_cold_access(key, row):
     require(not errors, "; ".join(errors))
 
 
+# The seal cost is its instructions:u count, held to the compare rows' 1%
+# rule: each side's repeat noise (range over median) is below 1%, and the
+# candidate's median stays below 1.01x the base's. Identical code spreads
+# about 0.2% across processes, so an exact 1.0 would refuse it at random.
+# Wall-clock seal time is recorded and gates nothing.
+SEAL_NOISE = .01
+
+
+def seal_noise(side, key, rows):
+    """The seal-count repeat noise failure of one side's supported rows, if any."""
+    counts = [row["seal_instructions"] for row in rows if row["status"] == "supported"]
+    if not counts:
+        return []
+    noise = (max(counts) - min(counts)) / statistics.median(counts)
+    return [f"{side}/{key}: seal instructions repeat noise {noise:.4%} >=1%; calibration required"] if noise >= SEAL_NOISE else []
+
+
 def checkpoint_outcome(key, old, new):
-    """The checkpoint comparison of one row: base-relative ratios, or the
-    declared outcome of a base that cannot perform the cold point edit
-    (FIG-7669), which records the candidate's cost as the next baseline."""
+    """The checkpoint comparison of one row: base-relative seal instructions
+    and bytes written, or the declared outcome of a base that cannot perform
+    the cold point edit (FIG-7669), which records the candidate's cost as the
+    next baseline. The candidate's seal noise is held in both."""
+    errors = seal_noise("candidate", key, new)
     unsupported = [row for row in old if row["status"] == "unsupported"]
     if unsupported:
         require(len(unsupported) == len(old) and all(
@@ -153,14 +172,22 @@ def checkpoint_outcome(key, old, new):
             for row in unsupported), f"base/{key}: unqualified failure, not FIG-7669")
         supported = [row for row in new if row["status"] == "supported"]
         baseline = {field: statistics.median(row[field] for row in supported) if supported else None
-                    for field in ("bytes_written", "seal_ns")}
-        return dict(outcome="base unsupported: no comparison", baseline=baseline), {}, []
-    ratios, errors = {}, []
+                    for field in ("bytes_written", "seal_instructions", "seal_ns")}
+        return dict(outcome="base unsupported: no comparison", baseline=baseline), {}, errors
+    ratios = {}
+    errors += seal_noise("base", key, old)
     if all(row["status"] == "supported" for row in new):
-        for field in ("seal_ns", "bytes_written"):
-            ratios[field] = statistics.median([n[field] / b[field] for b, n in zip(old, new, strict=True)])
-            if ratios[field] > policy.BOUNDARY["max_checkpoint_ratio"]:
-                errors.append(f"{key}: checkpoint {field} {ratios[field]:.6f}x exceeds base")
+        ratios["bytes_written"] = statistics.median([n["bytes_written"] / b["bytes_written"]
+                                                     for b, n in zip(old, new, strict=True)])
+        if ratios["bytes_written"] > policy.BOUNDARY["max_checkpoint_ratio"]:
+            errors.append(f"{key}: checkpoint bytes_written {ratios['bytes_written']:.6f}x exceeds base")
+        ratios["seal_instructions"] = (statistics.median(n["seal_instructions"] for n in new)
+                                       / statistics.median(b["seal_instructions"] for b in old))
+        if ratios["seal_instructions"] >= policy.BOUNDARY["max_checkpoint_ratio"] + SEAL_NOISE:
+            errors.append(f"{key}: checkpoint seal_instructions {ratios['seal_instructions']:.6f}x "
+                          f"exceeds base by >=1%")
+        ratios["seal_ns_information"] = statistics.median([n["seal_ns"] / b["seal_ns"]
+                                                           for b, n in zip(old, new, strict=True)])
     return dict(outcome="base-relative"), ratios, errors
 
 
@@ -375,9 +402,9 @@ def boundary(base, candidate, out):
                 require(row["status"] in ("supported", "unsupported"), f"{side}/{key}: missing completion status")
                 if row["status"] == "supported":
                     require(row["results"] == [100_003, -1], f"{side}/{key}: wrong boundary equal-work result")
-                    for field in ("seal_ns", "bytes_written"):
-                        require(type(row[field]) is int and row[field] > 0,
-                                f"{side}/{key}: missing checkpoint measurement")
+                    for field in ("seal_instructions", "seal_ns", "bytes_written"):
+                        require(type(row.get(field)) is int and row[field] > 0,
+                                f"{side}/{key}: missing checkpoint measurement {field}")
                 captures[side][key].append(row)
     report, errors = {}, []
     for key in ("list", "map"):

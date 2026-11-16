@@ -48,14 +48,45 @@ class GateLaws(unittest.TestCase):
     def test_unsupported_base_is_a_declared_no_comparison_that_still_holds_the_candidate(self):
         base = [dict(status='unsupported', error='cold point edit: canonical region reached an '
                      'unintegrated boundary at path [5] Commit')] * 5
-        candidate = [dict(status='supported', bytes_written=6226, seal_ns=ns) for ns in (5, 1, 4, 2, 3)]
+        candidate = [dict(status='supported', bytes_written=6226, seal_instructions=1_562_000 + ns, seal_ns=ns)
+                     for ns in (5, 1, 4, 2, 3)]
         checkpoint, ratios, errors = gate.checkpoint_outcome('list', base, candidate)
         self.assertEqual(checkpoint['outcome'], 'base unsupported: no comparison')
-        self.assertEqual(checkpoint['baseline'], dict(bytes_written=6226, seal_ns=3))
+        self.assertEqual(checkpoint['baseline'], dict(bytes_written=6226, seal_instructions=1_562_003, seal_ns=3))
         self.assertEqual((ratios, errors), ({}, []))
         with self.assertRaisesRegex(ValueError, 'unqualified failure'):
             gate.checkpoint_outcome('list', [dict(status='unsupported', error='store fault')] * 5, candidate)
 
+
+    # The seal cost is its instruction count. Same-binary seals spread about
+    # 0.2% across processes (measured 16 Nov); wall time spread up to 60%.
+    def seals(self, counts, ns=None):
+        return [dict(status='supported', bytes_written=6251, seal_instructions=count, seal_ns=(ns or 300_000))
+                for count in counts]
+
+    def test_wall_clock_seal_time_gates_nothing(self):
+        base = self.seals([1_562_082] * 5, ns=200_000)
+        checkpoint, ratios, errors = gate.checkpoint_outcome('list', base, self.seals([1_562_082] * 5, ns=600_000))
+        self.assertEqual(errors, [])
+        self.assertEqual(ratios['seal_ns_information'], 3.0)
+
+    def test_a_seal_one_percent_dearer_than_the_base_fails(self):
+        base = self.seals([1_562_082] * 5)
+        _, _, errors = gate.checkpoint_outcome('list', base, self.seals([round(1_562_082 * 1.01)] * 5))
+        self.assertTrue(any('seal_instructions' in error for error in errors), errors)
+
+    def test_seal_within_same_binary_spread_of_the_base_passes(self):
+        # 0.18% above, as identical code measured across processes.
+        base = self.seals([1_562_082, 1_562_089, 1_562_084, 1_564_813, 1_564_875])
+        _, _, errors = gate.checkpoint_outcome('list', base, self.seals([1_564_900] * 5))
+        self.assertEqual(errors, [])
+
+    def test_a_noisy_candidate_seal_fails_even_without_a_comparable_base(self):
+        base = [dict(status='unsupported', error='cold point edit: canonical region reached an '
+                     'unintegrated boundary at path [5] Commit')] * 5
+        noisy = self.seals([1_562_000, 1_562_000, 1_562_000, 1_562_000, 1_562_000 + 15_620])
+        _, _, errors = gate.checkpoint_outcome('list', base, noisy)
+        self.assertTrue(any('repeat noise' in error for error in errors), errors)
 
     # An instrument-only land is decided by its diff alone.
     PACKAGES = {'crates/lash', 'crates/lash-perf', 'crates/lash-durable'}
@@ -135,7 +166,8 @@ class GateLaws(unittest.TestCase):
         # switch one on.
         rows = {'checkpoint': [dict(status='unsupported', error='cold point edit: canonical region reached an '
                                     'unintegrated boundary at path [5] Commit')] * 5,
-                'candidate': [dict(status='supported', bytes_written=6251, seal_ns=ns) for ns in (5, 1, 4, 2, 3)]}
+                'candidate': [dict(status='supported', bytes_written=6251, seal_instructions=1_562_000, seal_ns=ns)
+                              for ns in (5, 1, 4, 2, 3)]}
         outcomes = [gate.checkpoint_outcome('list', *(rows[side] for side in
                                                       gate.boundary_pair('checkpoint', 'candidate', instrument)))
                     for instrument in (False, True)]
