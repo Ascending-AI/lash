@@ -1065,6 +1065,9 @@ fn append(heap: &mut SlotHeap, list: Value, from: i64, to: i64) {
     }
 }
 
+/// One step done to a list in place.
+type ListStep = dyn Fn(&mut SlotHeap, Value);
+
 /// Review astra-l65d item 1: a large list of five chunks shrunk to one
 /// chunk, grown past it, cleared, and grown again past 256, each
 /// step sealed and reopened cold, holds `0 .. len`.
@@ -1075,7 +1078,7 @@ fn list_cleared_case() -> Result<(), String> {
         &mut heap,
         NewObject::List((0..320).map(Value::Int).collect()),
     );
-    let steps: [(&str, &dyn Fn(&mut SlotHeap, Value), i64); 4] = [
+    let steps: [(&str, &ListStep, i64); 4] = [
         (
             "shrunk to one chunk",
             &|heap, list| truncate(heap, list, 64),
