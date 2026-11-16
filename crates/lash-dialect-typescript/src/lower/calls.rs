@@ -190,6 +190,18 @@ impl Lowerer<'_> {
                 Ty::Unknown,
             );
         }
+        if object.ty == Ty::Array
+            && let Key::Computed(index) = key
+            && index.ty.is_number()
+        {
+            // Source-built arrays have no element type facet, but numeric
+            // reads still use the same helper and resident dense path.
+            return self.invoke(
+                "ts.get_numeric",
+                &[object.clone(), index.clone()],
+                Ty::Unknown,
+            );
+        }
         if matches!(object.ty, Ty::List(_)) {
             let object = self.reuse(object.clone());
             return self.get_list_member(&object, key);
