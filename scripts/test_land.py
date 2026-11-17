@@ -113,12 +113,17 @@ class Restart(Exception):
     pass
 
 
-def land_in_process(repos, ratchet=None, inside_lock=None):
+def land_in_process(repos, ratchet=None, at=None, lost_push=False):
     """Run this tree's scripts/land main() against the fixture repositories,
-    with qualification stubbed: every git operation, commit and hook is
-    real. The perf gate's receipt carries `ratchet`; `inside_lock` runs on
-    entering the land lock. Answers the land, the qualified head, the heads
-    handed to push, and what main() raised."""
+    with qualification stubbed: every git operation, commit, hook and push to
+    the fixture origin is real. The perf gate's receipt carries `ratchet`.
+    `at` maps a moment to a callable run there: "qualified" (after the
+    gate), "committed" (after the land's commit), "lock" (entering the land
+    lock), "push" (before git push) and "cleanup" (before the land rewrites
+    the branch after a refusal). `lost_push` replaces push with one that
+    loses to a moving main. Answers the qualified heads, the push sources,
+    what main() raised, and the output."""
+    at = at or {}
     loader = importlib.machinery.SourceFileLoader("land_under_test", str(SCRIPTS / "land"))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     land = importlib.util.module_from_spec(spec)
@@ -128,23 +133,31 @@ def land_in_process(repos, ratchet=None, inside_lock=None):
 
     def run(*args, check=True, quiet=False):
         if args[0] == "git":
-            return real_run(*args, check=check, quiet=quiet)
+            if args[1] == "push":
+                pushes.append(args[-1].split(":")[0])
+                at.get("push", lambda: None)()
+            if args[1] in ("reset", "update-ref"):
+                at.get("cleanup", lambda: None)()
+            result = real_run(*args, check=check, quiet=quiet)
+            if args[1] == "commit":
+                at.get("committed", lambda: None)()
+            return result
         if "--out" in args:  # the perf gate: a qualified receipt
             qualified.append(land.git("rev-parse", "HEAD"))
             out = Path(args[args.index("--out") + 1])
             out.mkdir(parents=True, exist_ok=True)
             (out / "receipt.json").write_text(json.dumps({"ratchet": ratchet or {}}))
+            at.get("qualified", lambda: None)()
         return subprocess.CompletedProcess(args, 0, "", "")
 
     @contextlib.contextmanager
     def lock():
-        if inside_lock:
-            inside_lock()
+        at.get("lock", lambda: None)()
         yield
 
-    def push(main, head):
+    def lose(main, head):
         pushes.append(head)
-        return len(pushes) > 1  # the first push loses to a moving main
+        return False
 
     def execv(*args):
         raise Restart(args)
@@ -152,17 +165,20 @@ def land_in_process(repos, ratchet=None, inside_lock=None):
     cwd = os.getcwd()
     os.chdir(repos.candidate)
     raised = None
+    output = io.StringIO()
     try:
-        with patch.object(land, "run", run), \
-                patch.object(land, "apply_format_witnesses", lambda *a: []), \
-                patch.object(land, "land_lock", lock), \
-                patch.object(land, "push", push), \
-                patch.object(land.os, "execv", execv), \
-                patch.object(sys, "argv", ["scripts/land"]), \
-                patch.dict(os.environ, {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-                                        "LASH_BUCK2_STORE": str(repos.other.parent / "buck2-store")}), \
-                contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(land, "run", run))
+            stack.enter_context(patch.object(land, "apply_format_witnesses", lambda *a: []))
+            stack.enter_context(patch.object(land, "land_lock", lock))
+            if lost_push:
+                stack.enter_context(patch.object(land, "push", lose))
+            stack.enter_context(patch.object(land.os, "execv", execv))
+            stack.enter_context(patch.object(sys, "argv", ["scripts/land"]))
+            stack.enter_context(patch.dict(os.environ, {
+                "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t", "LASH_BUCK2_STORE": str(repos.other.parent / "buck2-store")}))
+            stack.enter_context(contextlib.redirect_stdout(output))
             os.environ.pop("LASH_LAND_RUNS", None)
             try:
                 land.main()
@@ -170,7 +186,37 @@ def land_in_process(repos, ratchet=None, inside_lock=None):
                 raised = error
     finally:
         os.chdir(cwd)
-    return land, qualified, pushes, raised
+    return qualified, pushes, raised, output.getvalue()
+
+
+def foreign_commit(repo, made, text="foreign work\n"):
+    """Commit someone else's work on the checked-out branch."""
+    (repo / "foreign.txt").write_text(text)
+    git(repo, "add", "foreign.txt")
+    git(repo, "commit", "-qm", "foreign work")
+    made.append(git(repo, "rev-parse", "HEAD"))
+
+
+def shadow(repo, made, ceilings_raised_to=None):
+    """Point a branch named after the object HEAD names at an unqualified
+    commit, without moving HEAD: push must still send HEAD's object."""
+    head = git(repo, "rev-parse", "HEAD")
+    if ceilings_raised_to:
+        path = repo / "scripts/perf_land_ceilings.py"
+        old, new = ceilings_raised_to
+        path.write_text(path.read_text().replace(repr(old), repr(new)))
+        git(repo, "add", "scripts/perf_land_ceilings.py")
+    else:
+        (repo / "foreign.txt").write_text("unqualified ref-only work\n")
+        git(repo, "add", "foreign.txt")
+    tree = git(repo, "write-tree")
+    git(repo, "reset", "-q", "--hard", head)
+    made.append(git(repo, "commit-tree", tree, "-p", head, "-m", "unqualified ref-only work"))
+    git(repo, "update-ref", "refs/heads/" + head, made[-1])
+
+
+def preserved(repo, commit):
+    return subprocess.run(["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=repo).returncode == 0
 
 
 class LandInProcess(unittest.TestCase):
@@ -179,40 +225,67 @@ class LandInProcess(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.repos = Repositories(Path(directory.name))
 
+    def fresh(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return Repositories(Path(directory.name))
+
     def test_a_push_lost_to_a_moving_main_restarts_instead_of_rebasing_in_process(self):
         """A push lost to a moving main restarts the land, so the next rebase
         is again the first of a process and is checked for changed land code."""
-        _, _, pushes, raised = land_in_process(self.repos)
+        _, pushes, raised, _ = land_in_process(self.repos, lost_push=True)
         self.assertIsInstance(raised, Restart)
         self.assertEqual(len(pushes), 1)
 
     def test_a_head_changed_after_qualification_is_never_pushed(self):
-        """Job I1: the land pushes the head it qualified, or its own verified
-        ceiling commit on it; a commit made after qualification is refused,
-        and left in place."""
-        candidate = self.repos.candidate
+        """Jobs I and I2: main receives exactly the qualified head, or the
+        land's own verified ceiling commit on it, whatever ref names it. A
+        refused land removes only a commit it can prove it made, by a
+        compare-and-swap on the branch, and leaves anyone else's work."""
+        key = "typescript/int_arith"
 
-        def commit_changed_land():
-            (candidate / "scripts/land").write_text("raise SystemExit('unqualified land code')\n")
-            git(candidate, "add", "scripts/land")
-            git(candidate, "commit", "-qm", "unqualified change after the gate")
+        def changed_land(repos, made):
+            (repos.candidate / "scripts/land").write_text("raise SystemExit('unqualified land code')\n")
+            git(repos.candidate, "add", "scripts/land")
+            git(repos.candidate, "commit", "-qm", "unqualified change after the gate")
+            made.append(git(repos.candidate, "rev-parse", "HEAD"))
 
-        _, qualified, pushes, raised = land_in_process(self.repos, inside_lock=commit_changed_land)
-        self.assertEqual(len(qualified), 1)
-        self.assertEqual(pushes, [], f"an unqualified head reached push; qualified {qualified[0]}")
-        self.assertIn("changed after qualification", str(raised))
-        self.assertEqual(git(candidate, "log", "-1", "--format=%s"), "unqualified change after the gate")
+        refused = {  # moment -> what is done there; the land must refuse
+            "a changed scripts/land committed inside the lock": (None, "lock", changed_land),
+        }
+        for name, (factor, moment, act) in refused.items():
+            with self.subTest(name):
+                repos = self.fresh()
+                main = git(repos.origin, "rev-parse", "main")
+                old = policy_values((repos.candidate / "scripts/perf_land_ceilings.py").read_text())["ROWS"][key]["ceiling"]
+                made = []
+                at = {moment: lambda: (act or (lambda r, m: foreign_commit(r.candidate, m)))(repos, made)}
+                if moment == "cleanup":  # a refusal after the land's own verified commit
+                    at["lock"] = lambda: (_ for _ in ()).throw(RuntimeError("refused inside the lock"))
+                qualified, pushes, raised, output = land_in_process(
+                    repos, ratchet={key: old * factor} if factor else None, at=at)
+                self.assertIsNotNone(raised)
+                self.assertNotIsInstance(raised, Restart)
+                self.assertEqual(git(repos.origin, "rev-parse", "main"), main, "main moved")
+                self.assertEqual(len(made), 1)
+                self.assertTrue(preserved(repos.candidate, made[0]), f"{name}: the refused land dropped {made[0]}")
+
+        with self.subTest("a branch named after the qualified head at push"):
+            repos = self.fresh()
+            made = []
+            qualified, _, raised, _ = land_in_process(repos, at={"push": lambda: shadow(repos.candidate, made)})
+            self.assertIsNone(raised)
+            self.assertEqual(git(repos.origin, "rev-parse", "main"), qualified[0])
 
     def test_the_land_ceiling_commit_only_lowers_ceilings(self):
-        """Job I2: what the land commits is exactly the qualified policy with
-        finite, positive decreases. A receipt that raises, keeps or poisons
-        a ceiling is refused, and so is a commit hook that rewrites the
-        generated commit; nothing reaches push and the head returns to the
-        qualified one."""
-        candidate = self.repos.candidate
-        ceilings = candidate / "scripts/perf_land_ceilings.py"
+        """Jobs I and I2: what main receives from the land's ceiling commit
+        is exactly the qualified policy with finite, positive decreases. A
+        receipt that raises, keeps or poisons a ceiling is refused, and so is
+        a commit hook that rewrites the generated commit; nothing reaches
+        main and the head returns to the qualified one. A branch named after
+        the ceiling commit does not redirect its push."""
         key = "typescript/int_arith"
-        old = policy_values(ceilings.read_text())["ROWS"][key]["ceiling"]
+        old = policy_values((self.repos.candidate / "scripts/perf_land_ceilings.py").read_text())["ROWS"][key]["ceiling"]
         hook = ("#!/usr/bin/env python3\nfrom pathlib import Path\nimport subprocess\n"
                 "p = Path('scripts/perf_land_ceilings.py')\n"
                 f"p.write_text(p.read_text().replace({repr(old * .9)!r}, {repr(old * 2)!r}))\n"
@@ -224,17 +297,33 @@ class LandInProcess(unittest.TestCase):
                  "raised by a commit hook": ({key: old * .9}, hook)}
         for name, (ratchet, hook_source) in cases.items():
             with self.subTest(name):
-                hooks = candidate / ".git/hooks/pre-commit"
-                hooks.unlink(missing_ok=True)
+                repos = self.fresh()
+                main = git(repos.origin, "rev-parse", "main")
+                ceilings = repos.candidate / "scripts/perf_land_ceilings.py"
                 if hook_source:
+                    hooks = repos.candidate / ".git/hooks/pre-commit"
                     hooks.write_text(hook_source)
                     hooks.chmod(0o755)
-                _, qualified, pushes, raised = land_in_process(self.repos, ratchet=ratchet)
+                qualified, pushes, raised, _ = land_in_process(repos, ratchet=ratchet)
                 self.assertEqual(pushes, [], f"a ceiling commit {name} reached push")
+                self.assertEqual(git(repos.origin, "rev-parse", "main"), main)
                 self.assertIsNotNone(raised)
                 self.assertNotIsInstance(raised, Restart)
-                self.assertEqual(git(candidate, "rev-parse", "HEAD"), qualified[0])
+                self.assertEqual(git(repos.candidate, "rev-parse", "HEAD"), qualified[0])
                 self.assertEqual(policy_values(ceilings.read_text())["ROWS"][key]["ceiling"], old)
+
+        with self.subTest("a branch named after the ceiling commit at push"):
+            repos = self.fresh()
+            made = []
+            qualified, _, raised, _ = land_in_process(
+                repos, ratchet={key: old * .9},
+                at={"push": lambda: shadow(repos.candidate, made, (old * .9, old * 2))})
+            self.assertIsNone(raised)
+            landed = git(repos.origin, "rev-parse", "main")
+            self.assertEqual(git(repos.origin, "rev-parse", landed + "^"), qualified[0])
+            self.assertEqual(policy_values(git(repos.origin, "show", landed + ":scripts/perf_land_ceilings.py"))
+                             ["ROWS"][key]["ceiling"], old * .9)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -140,7 +140,9 @@ def push(main, qualified_head):
         current = git("rev-parse", "HEAD")
         if current != qualified_head:
             raise RuntimeError(f"candidate changed after qualification: {qualified_head} -> {current}; rerun scripts/land")
-        result = run("git", "push", "origin", f"{qualified_head}:main", check=False)
+        # A push source is read as a ref name first, so a branch named after
+        # the SHA would redirect a bare one; peel it to the object instead.
+        result = run("git", "push", "origin", f"{qualified_head}^{{commit}}:refs/heads/main", check=False)
         if result.returncode == 0:
             return True
         output = result.stdout
