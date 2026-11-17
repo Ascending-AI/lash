@@ -30,6 +30,9 @@ use crate::refusal::{RefusalReason, Refused, refused};
 use crate::types::{common, disjoint, function_of, stable, union};
 
 pub(crate) struct Typer<'a> {
+    /// Fresh admission checks enum literals; inspection of retained code does not.
+    pub(crate) literal_enums: bool,
+    pub(crate) literal_uses: std::cell::OnceCell<Vec<usize>>,
     pub(crate) graph: &'a mut Graph,
     pub(crate) presentations: &'a BTreeMap<NodeId, lash_kernel_doc::CallablePresentation>,
     pub(crate) catalog: &'a dyn FunctionCatalog,
@@ -302,6 +305,7 @@ impl Typer<'_> {
                 for (index, found) in found.iter().enumerate() {
                     let site = self.graph.node(args[index]).site.clone();
                     self.argument(&callee, &signature, index, found, &site);
+                    self.literal_argument(&callee, &signature, index, args[index]);
                 }
                 signature.result
             }
@@ -337,6 +341,7 @@ impl Typer<'_> {
                             for (index, found) in found.iter().enumerate() {
                                 let site = self.graph.node(args[index]).site.clone();
                                 self.argument("Import", &signature, index, found, &site);
+                                self.literal_argument("Import", &signature, index, args[index]);
                             }
                             if disjoint(&result, &signature.result) {
                                 let site = self.graph.node(id).site.clone();
@@ -394,6 +399,7 @@ impl Typer<'_> {
         for (index, found) in found.iter().enumerate() {
             let site = self.graph.node(args[index]).site.clone();
             self.argument(&name, &signature, index, found, &site);
+            self.literal_argument(&name, &signature, index, args[index]);
         }
         signature.result
     }
@@ -428,11 +434,129 @@ impl Typer<'_> {
         }
     }
 
+    fn literal_argument(&mut self, callee: &str, signature: &Signature, index: usize, id: NodeId) {
+        if !self.literal_enums {
+            return;
+        }
+        let Some(param) = signature.params.get(index) else {
+            return;
+        };
+        if has_enum(&param.ty) {
+            self.enum_argument(callee, &param.ty, &parameter_path(param.name.as_str()), id);
+        }
+    }
+
+    fn enum_refusal(
+        &mut self,
+        callee: &str,
+        path: &str,
+        expected: &Type,
+        text: &str,
+        site: &lash_kernel_value::sites::Site,
+    ) {
+        self.errors.push(refused(
+            Some(site),
+            RefusalReason::ArgumentType {
+                callee: callee.to_owned(),
+                param: Name::new(path),
+                expected: expected.clone(),
+                found: Type::Enum(vec![text.to_owned()]),
+            },
+        ));
+    }
+
+    /// Only literal constructions and value-preserving argument glue carry
+    /// literal evidence. Authored variables and computed values stay dynamic.
+    fn enum_argument(&mut self, callee: &str, expected: &Type, path: &str, id: NodeId) {
+        if !has_enum(expected) {
+            return;
+        }
+        match self.graph.node(id).kind.clone() {
+            NodeKind::Expr(ExprNode::Literal(Literal::Text(text))) => {
+                if let Type::Enum(allowed) = expected
+                    && !allowed.contains(&text)
+                {
+                    let site = self.graph.node(id).site.clone();
+                    self.enum_refusal(callee, path, expected, &text, &site);
+                }
+            }
+            NodeKind::Expr(ExprNode::Record(entries)) => {
+                if let Type::Record(record) = expected {
+                    for field in &record.fields {
+                        if let Some(entry) =
+                            entries.iter().rev().find(|entry| entry.field == field.name)
+                        {
+                            self.enum_argument(
+                                callee,
+                                &field.ty,
+                                &format!("{path}{}", parameter_path(&field.name)),
+                                entry.value,
+                            );
+                        }
+                    }
+                }
+            }
+            NodeKind::Expr(
+                ExprNode::Call { function, args }
+                | ExprNode::Act {
+                    kind: ActNode::Call(CalleeNode::Local(function)),
+                    args,
+                },
+            ) if self.catalog.header(&function).is_some_and(|header| {
+                header.projection == lash_kernel_doc::ProjectionRole::ArgumentCopy
+            }) =>
+            {
+                if let Some(first) = args.first() {
+                    self.enum_argument(callee, expected, path, *first);
+                }
+            }
+            NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding))) => {
+                let bound = self.graph.binding(binding);
+                // A single-use expression binding cannot expose or mutate its
+                // fresh record before the call. Statement bindings are variables.
+                if !bound.assigned
+                    && !bound.captured
+                    && let NodeKind::Expr(ExprNode::Let { value, .. }) =
+                        self.graph.node(bound.declared_at).kind
+                    && self.literal_uses.get_or_init(|| {
+                        let mut counts = vec![0; self.graph.bindings().len()];
+                        for node in self.graph.nodes() {
+                            for reference in crate::binding_references(&node.kind) {
+                                if let Reference::Binding(binding) = reference {
+                                    counts[binding.index()] += 1;
+                                }
+                            }
+                        }
+                        counts
+                    })[binding.index()]
+                        == 1
+                {
+                    self.enum_argument(callee, expected, path, value);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn arguments(&mut self, id: NodeId, callee: &str, signature: &Signature, args: &[AtomNode]) {
         let site = self.graph.node(id).site.clone();
         for (index, arg) in args.iter().enumerate() {
             let found = self.atom(arg);
             self.argument(callee, signature, index, &found, &site);
+            if self.literal_enums
+                && let (AtomNode::Literal(Literal::Text(text)), Some(param)) =
+                    (arg, signature.params.get(index))
+                && let Type::Enum(allowed) = &param.ty
+                && !allowed.contains(text)
+            {
+                self.enum_refusal(
+                    callee,
+                    &parameter_path(param.name.as_str()),
+                    &param.ty,
+                    text,
+                    &site,
+                );
+            }
         }
     }
 
@@ -535,5 +659,17 @@ fn target_callee(target: &FunctionTarget) -> CalleeNode {
     match target {
         FunctionTarget::Local(id) => CalleeNode::Local(*id),
         FunctionTarget::Import(slot) => CalleeNode::Import(*slot),
+    }
+}
+
+fn parameter_path(name: &str) -> String {
+    format!("/{}", name.replace('~', "~0").replace('/', "~1"))
+}
+
+fn has_enum(ty: &Type) -> bool {
+    match ty {
+        Type::Enum(_) => true,
+        Type::Record(record) => record.fields.iter().any(|field| has_enum(&field.ty)),
+        _ => false,
     }
 }

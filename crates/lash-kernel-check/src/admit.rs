@@ -30,10 +30,10 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     lash_kernel_doc::validate_document(document, catalog).map_err(|error| Refusal {
         errors: vec![error.into()],
     })?;
-    derive_checked(document, catalog)
+    derive_checked(document, catalog, false)
 }
 
-/// Derive immutable code while sharing its admission with later inspections
+/// Admit immutable code while sharing its validation with later inspections
 /// through the owner's memo.
 pub fn derive_shared(
     document: &std::sync::Arc<Document>,
@@ -43,10 +43,14 @@ pub fn derive_shared(
     checks.check(document, helpers).map_err(|error| Refusal {
         errors: vec![error.into()],
     })?;
-    derive_checked(document, helpers)
+    derive_checked(document, helpers, true)
 }
 
-fn derive_checked(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Graph, Refusal> {
+fn derive_checked(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    literal_enums: bool,
+) -> Result<Graph, Refusal> {
     let context = lash_kernel_doc::DocumentCatalog::new(document, catalog);
     let mut linker = Linker::new(&context);
     if let Some(main) = &document.main {
@@ -86,6 +90,8 @@ fn derive_checked(document: &Document, catalog: &dyn FunctionCatalog) -> Result<
     let mut errors = linker.errors;
     let mut graph = linker.graph;
     Typer {
+        literal_uses: Default::default(),
+        literal_enums,
         graph: &mut graph,
         presentations: &linker.presentations,
         catalog: &context,
@@ -162,6 +168,8 @@ fn derive_bound_definition(
     let mut errors = linker.errors;
     let mut graph = linker.graph;
     Typer {
+        literal_uses: Default::default(),
+        literal_enums: false,
         graph: &mut graph,
         presentations: &linker.presentations,
         catalog,
@@ -177,7 +185,12 @@ fn derive_bound_definition(
     }
 }
 pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admitted, Refusal> {
-    let graph = derive(document, environment.functions)?;
+    lash_kernel_doc::validate_document(document, environment.functions).map_err(|error| {
+        Refusal {
+            errors: vec![error.into()],
+        }
+    })?;
+    let graph = derive_checked(document, environment.functions, true)?;
     let mut errors = Vec::new();
     for (name, nodes) in graph.session_reads() {
         if !environment.bindings.contains(name) {
