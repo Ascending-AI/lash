@@ -15,7 +15,7 @@ use {
 
 use lash_kernel_doc::{FunctionCatalog, JoinMode, Literal};
 
-use lash_kernel_value::names::Name;
+use lash_kernel_value::names::{FunctionId, Name};
 use lash_kernel_value::types::MapType;
 use lash_kernel_value::types::RecordType;
 use lash_kernel_value::types::RecordTypeField;
@@ -465,8 +465,7 @@ impl Typer<'_> {
         ));
     }
 
-    /// Only literal constructions and value-preserving argument glue carry
-    /// literal evidence. Authored variables and computed values stay dynamic.
+    /// Check literal constructions. Computed values keep the call-time check.
     fn enum_argument(&mut self, callee: &str, expected: &Type, path: &str, id: NodeId) {
         if !has_enum(expected) {
             return;
@@ -482,32 +481,36 @@ impl Typer<'_> {
             }
             NodeKind::Expr(ExprNode::Record(entries)) => {
                 if let Type::Record(record) = expected {
-                    for field in &record.fields {
-                        if let Some(entry) =
-                            entries.iter().rev().find(|entry| entry.field == field.name)
-                        {
+                    for entry in entries {
+                        let field_type = record
+                            .fields
+                            .iter()
+                            .find(|field| field.name == entry.field)
+                            .map(|field| &field.ty)
+                            .or_else(|| record.rest.kept_type());
+                        if let Some(ty) = field_type.filter(|ty| has_enum(ty)) {
                             self.enum_argument(
                                 callee,
-                                &field.ty,
-                                &format!("{path}{}", parameter_path(&field.name)),
+                                ty,
+                                &format!("{path}{}", parameter_path(&entry.field)),
                                 entry.value,
                             );
                         }
                     }
                 }
             }
-            NodeKind::Expr(
-                ExprNode::Call { function, args }
-                | ExprNode::Act {
-                    kind: ActNode::Call(CalleeNode::Local(function)),
-                    args,
-                },
-            ) if self.catalog.header(&function).is_some_and(|header| {
-                header.projection == lash_kernel_doc::ProjectionRole::ArgumentCopy
-            }) =>
-            {
-                if let Some(first) = args.first() {
-                    self.enum_argument(callee, expected, path, *first);
+            NodeKind::Expr(ExprNode::Act {
+                kind: ActNode::Call(CalleeNode::Local(function)),
+                args,
+            }) if function == LITERAL_RECORD_COPY => {
+                if let [value, _] = args.as_slice()
+                    && matches!(
+                        self.graph.node(*value).kind,
+                        NodeKind::Expr(ExprNode::Record(_))
+                    )
+                    && self.plain_literal(*value)
+                {
+                    self.enum_argument(callee, expected, path, *value);
                 }
             }
             NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding))) => {
@@ -535,6 +538,16 @@ impl Typer<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn plain_literal(&self, id: NodeId) -> bool {
+        match &self.graph.node(id).kind {
+            NodeKind::Expr(ExprNode::Literal(literal)) => !matches!(literal, Literal::Function(_)),
+            NodeKind::Expr(ExprNode::Record(entries)) => {
+                entries.iter().all(|entry| self.plain_literal(entry.value))
+            }
+            _ => false,
         }
     }
 
@@ -669,7 +682,18 @@ fn parameter_path(name: &str) -> String {
 fn has_enum(ty: &Type) -> bool {
     match ty {
         Type::Enum(_) => true,
-        Type::Record(record) => record.fields.iter().any(|field| has_enum(&field.ty)),
+        Type::Record(record) => {
+            record.fields.iter().any(|field| has_enum(&field.ty))
+                || record.rest.kept_type().is_some_and(has_enum)
+        }
         _ => false,
     }
 }
+
+// The immutable ts.copy_boundary body returns its input record when it holds
+// no tuples. Plain literal records establish that condition without reading a
+// callee body or trusting its name or projection. A different body has a
+// different identity and needs its own proof.
+const LITERAL_RECORD_COPY: FunctionId = lash_kernel_doc::plan::function(
+    "7e3ace0d3d0473cdad08cc218f189817922abeb015ef508eb4eef8e9b2702f00",
+);

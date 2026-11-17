@@ -261,3 +261,60 @@ fn a_captured_view_does_not_grant_retired_helper_authority() {
     );
     assert!(!BuildHelpers::empty().admits(&document.library, &helper_id));
 }
+
+/// K-ADM-005: a projection role does not prove that a call returns operand zero.
+#[test]
+fn enum_argument_does_not_follow_document_projection() {
+    let mut document = lash_kernel_doc::parse_document(
+        r#"kernel 1
+numbers float
+import 0 code fixture.choose(account: Enum("a@x", "b@x")) -> Any direct
+"#,
+    )
+    .unwrap();
+    let helper = lash_kernel_doc::parse_definition(
+        r#"function fixture.pick(label: Text, account: Enum("a@x", "b@x")) -> Enum("a@x", "b@x")
+kernel 1
+projection argument_copy
+metering statements
+body { return account }"#,
+    )
+    .unwrap();
+    let pick = helper.identity();
+    document.functions.insert(pick, helper);
+    let document = lash_kernel_doc::core_support::parse_document_over(
+        &format!(r#"main {{ do call import 0(invoke @{pick}("label", "a@x")) }}"#),
+        document,
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
+    )
+    .unwrap();
+    crate::admit(&document, &crate::Environment::new(&document.functions))
+        .expect("the call returns the enum account");
+}
+
+/// K-ADM-005: a retained field inherits the rest type and keeps its name.
+#[test]
+fn enum_literal_in_retained_record_field_is_refused() {
+    use lash_kernel_value::Type;
+
+    let document = lash_kernel_doc::parse_document(
+        r#"kernel 1
+numbers float
+import 0 operation fixture.search(input: Record{..Enum("a@x", "b@x")}) -> Any
+main { do perform 0({"route/~": "wrong@x"}) as Any }"#,
+    )
+    .unwrap();
+    let refusal = crate::admit(&document, &crate::Environment::new(&document.functions))
+        .expect_err("the retained field must be an account");
+    assert!(
+        refusal.errors.iter().any(|error| matches!(
+            &error.reason,
+            crate::RefusalReason::ArgumentType {
+                param, expected: Type::Enum(allowed), found: Type::Enum(actual), ..
+            } if param.as_str() == "/input/route~1~0"
+                && allowed == &["a@x", "b@x"]
+                && actual == &["wrong@x"]
+        )),
+        "{refusal}"
+    );
+}

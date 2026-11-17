@@ -188,6 +188,10 @@ fn typescript_enum_literals_are_checked_at_admission() {
                 r#"await apps.linear.search({account: "wrong@x"});"#,
                 Some("/input/account"),
             ),
+            (
+                r#"await apps.linear.searchRetained({route: "wrong@x"});"#,
+                Some("/input/route"),
+            ),
             (r#"apps.linear.as("wrong@x");"#, Some("/account")),
             (
                 r#"apps.linear.Account.choose("wrong@x");"#,
@@ -230,6 +234,10 @@ fn python_enum_literals_are_checked_at_admission() {
             (
                 r#"await apps.linear.search(account="wrong@x")"#,
                 Some("/input/account"),
+            ),
+            (
+                r#"await apps.linear.search_retained({"route": "wrong@x"})"#,
+                Some("/input/route"),
             ),
             (r#"apps.linear.for_account("wrong@x")"#, Some("/account")),
             (r#"apps.linear.Account.choose("wrong@x")"#, Some("/account")),
@@ -361,6 +369,23 @@ fn enum_admission(dialect: &str, cases: &[(&str, Option<&str>)]) {
                 mode: OperationMode::Waited,
             }),
         ),
+        (
+            Segment::new("search_retained").unwrap(),
+            NamespaceKind::Operation(OperationSignature {
+                signature: Signature {
+                    params: vec![param(
+                        "input",
+                        Type::Record(RecordType {
+                            fields: vec![],
+                            rest: RecordRest::Keep(Box::new(account.clone())),
+                        }),
+                    )],
+                    result: Type::Any,
+                },
+                controls: TurnControls::none(),
+                mode: OperationMode::Waited,
+            }),
+        ),
     ])
     .into_iter()
     .map(|(name, kind)| {
@@ -423,11 +448,39 @@ fn enum_admission(dialect: &str, cases: &[(&str, Option<&str>)]) {
             retained = Some(saved);
         }
     }
+    let retained = retained.unwrap();
+    let mut projected = retained.clone();
+    let choose = projected.imports.keys().next().unwrap().0;
+    let helper = lash_kernel_doc::parse_definition(
+        r#"function fixture.pick(label: Text, account: Enum("a@x", "b@x")) -> Enum("a@x", "b@x")
+kernel 1
+projection argument_copy
+metering statements
+body { return account }"#,
+    )
+    .unwrap();
+    let pick = helper.identity();
+    projected.functions.insert(pick, helper);
+    // Projection roles are document metadata, so inject one beside the
+    // dialect's lowered import rather than inventing a source spelling.
+    projected.main = None;
+    let projected = lash_kernel_doc::core_support::parse_document_over(
+        &format!(r#"main {{ do call import {choose}(invoke @{pick}("label", "a@x")) }}"#),
+        projected,
+        lash_kernel_value::data_limits::KernelDataLimits::standard(),
+    )
+    .unwrap();
+    let projection =
+        lash_kernel_check::admit(&projected, &lash_kernel_check::Environment::new(library));
+    if let Err(refusal) = &projection {
+        println!("WRONGLY REFUSED ArgumentCopy result: {refusal}");
+    }
     assert!(
-        missed.is_empty(),
-        "wrong enum literals admitted: {missed:?}"
+        missed.is_empty() && projection.is_ok(),
+        "wrong enum literals admitted: {missed:?}; ArgumentCopy admitted: {}",
+        projection.is_ok(),
     );
-    retained_enum_call(dialect, retained.unwrap(), &built, &namespaces);
+    retained_enum_call(dialect, retained, &built, &namespaces);
 }
 
 #[expect(
