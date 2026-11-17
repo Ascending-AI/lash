@@ -560,3 +560,232 @@ async fn an_undeclared_package_release_leaves_a_published_workflow_and_its_resum
     );
     second.core.shutdown().await.unwrap();
 }
+
+const LINEAR_TOOLS: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("r61-linear", lash::plugins::FormatVersion::ONE);
+struct LinearRunner;
+#[lash::async_trait]
+impl lash::tools::StaticToolExecute for LinearRunner {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        lash::tools::ToolOutcome::ok(call.args.clone()).into()
+    }
+}
+fn linear_definitions() -> Vec<lash::tools::ToolDefinition> {
+    [
+        ("search", serde_json::json!({"account":{"type":"string"},"query":{"type":"string"}}), vec!["account", "query"]),
+        ("run", serde_json::json!({"account":{"type":"string"},"action":{"type":"string"},"args":{}}), vec!["account", "action", "args"]),
+    ].into_iter().map(|(name, properties, required)| {
+        lash::tools::ToolDefinition::raw(
+            format!("tool:linear_{name}"), format!("apps.linear.internal_{name}"), "Fake account operation",
+            serde_json::json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}),
+            serde_json::json!({"type":"object","additionalProperties":true}),
+        ).unwrap().declared_contract(lash_kernel_value::operations::ContractId::new(format!("linear.{name}/1"))).with_execution(std::time::Duration::from_secs(30))
+    }).collect()
+}
+struct LinearPackages;
+#[lash::async_trait]
+impl lash::package::PackageProvider for LinearPackages {
+    fn environment_tool_sources(
+        &self,
+        publisher: &lash_core::plugin::ToolProviderHandle,
+    ) -> std::collections::BTreeSet<lash_core::plugin::ToolProviderHandle> {
+        [lash_core::plugin::ToolProviderHandle::new(
+            publisher.registry(),
+            LINEAR_TOOLS.component(),
+            lash::tool_provider_key!("linear"),
+        )]
+        .into()
+    }
+    fn roots(
+        &self,
+        _: &lash_core::OwnerConfigView,
+    ) -> std::collections::BTreeSet<lash::package::Segment> {
+        [lash::package::Segment::new("apps").unwrap()].into()
+    }
+    fn advertise(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        context: &lash::package::PublicationContext,
+    ) -> Result<Vec<lash::package::PackageContribution>, lash_execution_contracts::PluginError>
+    {
+        let handle = lash_core::plugin::ToolProviderHandle::new(
+            config.registry_kind(),
+            LINEAR_TOOLS.component(),
+            lash::tool_provider_key!("linear"),
+        );
+        let mut contributions = lash_core::plugin::packages::operation_packages(
+            &handle,
+            linear_definitions(),
+            |_| None,
+            context,
+        )?;
+        for contribution in &mut contributions {
+            if let lash::package::PackageAdvertisement::Enumerated(package) =
+                &mut contribution.advertisement
+            {
+                for member in package.members.values_mut() {
+                    member.visibility = lash::package::Visibility::Internal;
+                }
+            }
+            contribution.publication = lash_core::plugin::packages::operation_publication(
+                context,
+                &contribution.advertisement,
+            )
+            .unwrap();
+        }
+        Ok(contributions)
+    }
+    async fn hold(
+        &self,
+        _: &lash::persistence::ReferrerClaim,
+        _: &[&lash::package::PackageAdvertisement],
+    ) -> Result<(), lash::package::EnginePortError> {
+        Ok(())
+    }
+}
+fn linear_component() -> lash::process::StaticProcessComponent {
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(LINEAR_TOOLS.component()),
+        lash::plugins::PluginSpec::new()
+            .with_package_provider(lash::tool_provider_key!("linear"), Arc::new(LinearPackages))
+            .with_tool_provider(
+                lash::tool_provider_key!("linear"),
+                Arc::new(lash::tools::StaticToolProvider::new(
+                    linear_definitions(),
+                    LinearRunner,
+                )),
+            ),
+    )
+    .as_component(LINEAR_TOOLS.format())
+    .unwrap()
+}
+fn linear_document(plain: bool) -> Document {
+    use lash::workflow::document::{Export, FunctionExport, StartConvention, TypeDef, TypeMember};
+    let brand = lash_kernel_dialect::brand_type("apps.linear", "account");
+    let receiver = lash_kernel_value::type_text::print_type(&brand);
+    let constructor = lash_kernel_doc::parse_definition(&format!(
+        "function bind(account: Text) -> {receiver}\nkernel 1\nmetering statements\nbody {{ return {{__lash_brand: (\"apps.linear\", \"account\"), account: account}} }}"
+    )).unwrap();
+    let checker = lash_kernel_doc::parse_definition(
+        "function check(value: Any) -> Bool\nkernel 1\nmetering statements\nbody { return true }",
+    )
+    .unwrap();
+    let mut document = function_document(constructor, "as");
+    document.exports.insert(
+        Name::new("for_account"),
+        document.exports[&Name::new("as")].clone(),
+    );
+    let mut members = std::collections::BTreeMap::new();
+    if plain {
+        document.exports.clear();
+        document.functions.clear();
+    }
+    for (slot, tool) in linear_definitions().iter().enumerate() {
+        let (slot, import) = operation_import(lash::package::ImportSlot(slot as u32), tool);
+        document.imports.insert(slot, import);
+    }
+    let imports = lash_kernel_doc::print_document(&document)
+        .lines()
+        .filter(|s| s.starts_with("import "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for (name, params, call) in [
+        (
+            "search",
+            "query: Text",
+            "perform 0({account: self.account, query: query}) as Any",
+        ),
+        (
+            "run",
+            "action: Text, args: Json",
+            "perform 1({account: self.account, action: action, args: args}) as Any",
+        ),
+    ] {
+        let params = if plain {
+            params.to_owned()
+        } else {
+            format!("self: {receiver}, {params}")
+        };
+        let call = if plain {
+            call.replace("self.account", "\"a@x\"")
+        } else {
+            call.to_owned()
+        };
+        let body = if call.is_empty() {
+            "return self.account".to_owned()
+        } else {
+            format!("let reply = {call} return reply")
+        };
+        let function = lash_kernel_doc::parse_definition(&format!("function {name}({params}) -> Any\nkernel 1\nmetering statements\n{imports}\nbody {{ {body} }}")).unwrap();
+        let export = FunctionExport {
+            function: function.identity(),
+            signature: function.signature.clone(),
+            convention: StartConvention::Direct,
+            asynchronous: true,
+            rest: false,
+        };
+        if plain {
+            document
+                .exports
+                .insert(Name::new(name), Export::Function(export));
+        } else {
+            members.insert(
+                lash::package::Segment::new(name).unwrap(),
+                TypeMember::Method(export),
+            );
+        }
+        document.functions.insert(function.identity(), function);
+    }
+    if !plain {
+        document.exports.insert(
+            Name::new("account"),
+            Export::Type(TypeDef {
+                brand: lash::package::Brand {
+                    package: lash::package::PackagePath::parse("apps.linear").unwrap(),
+                    name: lash::package::Segment::new("account").unwrap(),
+                },
+                representation: brand,
+                checker: checker.identity(),
+                members,
+            }),
+        );
+        document.functions.insert(checker.identity(), checker);
+    }
+    // Run the exact kernel text that is supplied as the worked example.
+    lash_kernel_doc::parse_document(&lash_kernel_doc::print_document(&document)).unwrap()
+}
+
+/// A disposable host package for PRINT-LINKED-DECLARATIONS: a branded type
+/// with two asynchronous methods, or plain asynchronous default-account functions.
+pub(super) async fn account_print_fixture(
+    plain: bool,
+) -> (
+    lash::LashCore,
+    lash::process::HostArtifactPin,
+    lash::vm::WorkflowEnvironmentRequest,
+) {
+    let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let core = builder_with_process_tools(stores, false, EchoComponent::Installed)
+        .await
+        .process_component(Arc::new(linear_component()), LINEAR_TOOLS)
+        .build(node_identity("account-print"))
+        .unwrap();
+    let pin = lash::process::HostArtifactPin::mint();
+    let base = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(LINEAR_TOOLS, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
+        .build()
+        .unwrap();
+    let (packages, namespace) = namespace(&core, &pin, &base).await;
+    let mut fixture = Packages {
+        core,
+        pin,
+        base,
+        packages,
+        namespace,
+    };
+    fixture
+        .code_package("apps.linear", linear_document(plain))
+        .await;
+    (fixture.core, fixture.pin, fixture.namespace)
+}

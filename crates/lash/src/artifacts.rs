@@ -819,7 +819,15 @@ impl HostArtifacts {
                         ));
                     }
                 };
-                self.print_materialized(opened, format, Default::default())
+                let namespaces =
+                    printing::linked_namespaces(&content, &opened.document).map_err(|error| {
+                        crate::EmbedError::WorkflowSource(
+                            lash_vm_client::service::SourceServiceError::Print(
+                                crate::dialect::PrintError::Namespace(error),
+                            ),
+                        )
+                    })?;
+                self.print_materialized(opened, &namespaces, format, Default::default())
                     .await?;
                 Ok((request, starts))
             },
@@ -949,7 +957,14 @@ impl HostArtifacts {
             async {
                 match checked
                     .worker_service()
-                    .read_exported(source, base, format, Default::default(), limits)
+                    .read_exported(
+                        source,
+                        base,
+                        checked.namespaces(),
+                        format,
+                        Default::default(),
+                        limits,
+                    )
                     .await
                 {
                     Ok((document, captions)) => Ok(crate::workflow::WorkflowImport::Read {
@@ -1038,7 +1053,7 @@ impl HostArtifacts {
                 tracing::debug_span!("lash.artifacts.lower"),
                 async {
                     let (compiled, compiled_map, _) = if typed.document().exports.is_empty() {
-                        let (document, captions) = checked.worker_service().read_exported(text, &typed, format, Default::default(), limits).await.map_err(crate::EmbedError::WorkflowSource)?;
+                        let (document, captions) = checked.worker_service().read_exported(text, &typed, checked.namespaces(), format, Default::default(), limits).await.map_err(crate::EmbedError::WorkflowSource)?;
                         (document, None, captions)
                     } else {
                         let (document, map, captions) = checked.worker_service().import_workflow(map.language, text, checked.namespaces(), limits).await.map_err(crate::EmbedError::WorkflowSource)?;
@@ -1560,7 +1575,7 @@ impl HostArtifacts {
         definition: &ProcessDefinitionId,
         captions: Option<&crate::workflow::document::Captions>,
     ) -> Result<crate::workflow::OpenedWorkflow> {
-        let opened = self.materialized_workflow(definition, captions).await?;
+        let (opened, _) = self.materialized_workflow(definition, captions).await?;
         Ok(crate::workflow::OpenedWorkflow {
             draft: lash_kernel_edit::Draft::open(opened.document)?,
             selector: opened.selector,
@@ -1572,7 +1587,10 @@ impl HostArtifacts {
         &self,
         definition: &ProcessDefinitionId,
         captions: Option<&crate::workflow::document::Captions>,
-    ) -> Result<lash_kernel_package::MaterializedWorkflow> {
+    ) -> Result<(
+        lash_kernel_package::MaterializedWorkflow,
+        lash_kernel_package::LinkedContent,
+    )> {
         let draft = self
             .definition_ports
             .read_definition_draft(definition)
@@ -1615,7 +1633,7 @@ impl HostArtifacts {
             captions,
             documents.helpers(),
         )?;
-        Ok(opened)
+        Ok((opened, content))
     }
 }
 

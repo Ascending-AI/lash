@@ -693,6 +693,9 @@ impl Lifter<'_> {
                 Ok(Expr::Unary("await ", Box::new(self.expr(value)?)))
             }
             k::ActKind::Call(k::Callee::Import(slot)) => {
+                if let Some(call) = self.package_member_call(slot, &act.args)? {
+                    return Ok(call);
+                }
                 let callee = self.operation(slot)?;
                 let held_argument = act.args.iter().any(|arg| {
                     matches!(arg, k::Expr::Variable(name)
@@ -763,14 +766,26 @@ impl Lifter<'_> {
             .get(slot)
             .ok_or_else(|| "missing operation import".to_owned())?
             .name;
-        let operation = lash_kernel_value::QualifiedOperation {
-            package: name.package.clone(),
-            name: name.member.clone(),
-        };
-        let path = lash_kernel_dialect::spell_operation(
-            lash_kernel_dialect::Spelling::TypeScript,
-            &operation,
-        );
+        use lash_kernel_dialect::{SpellKind, Spelling};
+        let spelling = Spelling::TypeScript;
+        let kind = self
+            .namespaces
+            .packages()
+            .get(&name.package)
+            .and_then(|members| members.get(&name.member))
+            .map_or(SpellKind::Member, |member| member.kind.spell_kind());
+        let path = name
+            .package
+            .iter()
+            .map(|segment| spelling.spell(SpellKind::PathSegment, segment))
+            .chain(std::iter::once(spelling.spell(kind, &name.member)))
+            .chain(
+                name.type_member
+                    .iter()
+                    .map(|segment| spelling.spell(SpellKind::Member, segment)),
+            )
+            .collect::<Vec<_>>()
+            .join(".");
         let mut segments = path.split('.');
         let Some(root) = segments.next().filter(|root| source::identifier(root)) else {
             return refuse("an operation whose root TypeScript cannot spell");
@@ -780,6 +795,70 @@ impl Lifter<'_> {
             callee = Expr::Field(Box::new(callee), segment.to_owned());
         }
         Ok(callee)
+    }
+
+    /// A type member's receiver and argument slots come from its linked declaration.
+    fn package_member_call(
+        &mut self,
+        slot: &lash_kernel_value::ImportSlot,
+        args: &[k::Expr],
+    ) -> Lift<Option<Expr>> {
+        use lash_kernel_dialect::{NamespaceKind, SpellKind, Spelling, TypeMember};
+        let Some(import) = self.imports.get(slot) else {
+            return refuse("missing code import");
+        };
+        let Some(segment) = &import.name.type_member else {
+            return Ok(None);
+        };
+        let Some(NamespaceKind::Type(ty)) = self
+            .namespaces
+            .packages()
+            .get(&import.name.package)
+            .and_then(|members| members.get(&import.name.member))
+            .map(|member| &member.kind)
+        else {
+            return refuse("missing linked type declaration");
+        };
+        let member = ty
+            .members
+            .get(segment)
+            .ok_or_else(|| "missing linked member declaration".to_owned())?;
+        if matches!(member, TypeMember::Static(_)) {
+            return Ok(None);
+        }
+        let (receiver, arguments) = args
+            .split_first()
+            .ok_or_else(|| "a type member needs its receiver".to_owned())?;
+        let callee = Expr::Field(
+            Box::new(self.expr(receiver)?),
+            Spelling::TypeScript.spell(SpellKind::Member, segment),
+        );
+        if matches!(member, TypeMember::Property(_)) {
+            return if arguments.is_empty() {
+                Ok(Some(callee))
+            } else {
+                refuse("a property takes only its receiver")
+            };
+        }
+        let mut lifted = Vec::new();
+        for (index, arg) in arguments.iter().enumerate() {
+            if member.member().rest && index + 1 == arguments.len() {
+                match arg {
+                    k::Expr::List(values) => {
+                        for value in values {
+                            lifted.push(self.expr(value)?);
+                        }
+                    }
+                    value => lifted.push(Expr::Spread(Box::new(self.expr(value)?))),
+                }
+            } else {
+                lifted.push(self.expr(arg)?);
+            }
+        }
+        let call = Expr::Call(Box::new(callee), lifted);
+        // The enclosing await in an async imported call is already represented
+        // by the document's await expression.
+        Ok(Some(call))
     }
 
     /// Positional built-ins may lower to either native expressions or actions.

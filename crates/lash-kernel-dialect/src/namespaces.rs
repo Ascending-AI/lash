@@ -24,6 +24,14 @@ pub fn spell_operation(spelling: Spelling, operation: &QualifiedOperation) -> St
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum NamespaceRefusal {
+    #[error("no linked source declaration for `{name}`")]
+    MissingDeclaration {
+        name: lash_kernel_value::QualifiedName,
+    },
+    #[error("conflicting linked source declarations for `{name}`")]
+    DeclarationConflict {
+        name: lash_kernel_value::QualifiedName,
+    },
     #[error("conflicting source requirements {first:?} and {second:?}")]
     ImportNameConflict {
         first: Box<lash_kernel_value::Import>,

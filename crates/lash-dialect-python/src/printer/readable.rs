@@ -309,6 +309,14 @@ impl Renderer<'_> {
         }
         match &act.kind {
             k::ActKind::Call(callee) => {
+                if let k::Callee::Import(slot) = callee
+                    && self.package_member_call(*slot, &act.args)
+                {
+                    if grouped {
+                        self.out.write(")");
+                    }
+                    return;
+                }
                 if self.direct_call(callee, &act.args, true)
                     || self.projected_call(callee, &act.args, true)
                 {
@@ -322,7 +330,7 @@ impl Renderer<'_> {
                     && matches!(import.kind, lash_kernel_value::ImportKind::Code { .. })
                 {
                     self.out.write("callable.invoke(");
-                    self.operation_path(&import.name.to_string());
+                    self.code_path(&import.name);
                     if !act.args.is_empty() {
                         self.out.write(", ");
                         self.authored_args(&act.args, true);
@@ -861,6 +869,116 @@ impl Renderer<'_> {
             }
             value => self.write_inline_rhs(value),
         }
+    }
+
+    fn package_member_call(
+        &mut self,
+        slot: lash_kernel_value::ImportSlot,
+        args: &[k::Expr],
+    ) -> bool {
+        use lash_kernel_dialect::{NamespaceKind, SpellKind, Spelling, TypeMember};
+        let Some(import) = self.document.imports.get(&slot) else {
+            return false;
+        };
+        let Some(export) = self
+            .namespaces
+            .packages()
+            .get(&import.name.package)
+            .and_then(|members| members.get(&import.name.member))
+        else {
+            return false;
+        };
+        let (function, member) = match (&export.kind, &import.name.type_member) {
+            (NamespaceKind::Type(ty), Some(segment)) => {
+                let Some(member) = ty.members.get(segment) else {
+                    return false;
+                };
+                (member.member(), Some((segment, member)))
+            }
+            (NamespaceKind::Function(function), None)
+                if lash_kernel_dialect::dispatch::Brand::of_type(&function.signature.result)
+                    .is_some() =>
+            {
+                (function, None)
+            }
+            _ => return false,
+        };
+        let (arguments, property) = match member {
+            Some((segment, TypeMember::Method(_) | TypeMember::Property(_))) => {
+                let Some((receiver, arguments)) = args.split_first() else {
+                    return false;
+                };
+                let property = matches!(member, Some((_, TypeMember::Property(_))));
+                let member = Spelling::Python.spell(SpellKind::Member, segment);
+                if !attribute_identifier(&member) {
+                    return false;
+                }
+                if property && !arguments.is_empty() {
+                    return false;
+                }
+                if function.asynchronous && !property {
+                    self.out.write("await ");
+                }
+                self.out.write("(");
+                self.authored_arg(receiver, true);
+                self.out.write(")");
+                self.out.write(".");
+                self.out.write(&member);
+                (arguments, property)
+            }
+            Some((_, TypeMember::Static(_)))
+                if lash_kernel_dialect::dispatch::Brand::of_type(&function.signature.result)
+                    .is_none() =>
+            {
+                return false;
+            }
+            Some((_, TypeMember::Static(_))) | None => {
+                if function.asynchronous {
+                    self.out.write("await ");
+                }
+                self.code_path(&import.name);
+                (args, false)
+            }
+        };
+        if property {
+            return true;
+        }
+        self.out.write("(");
+        for (index, arg) in arguments.iter().enumerate() {
+            if index > 0 {
+                self.out.write(", ");
+            }
+            if function.rest && index + 1 == arguments.len() {
+                self.out.write("*");
+            }
+            self.authored_arg(arg, true);
+        }
+        self.out.write(")");
+        true
+    }
+
+    fn code_path(&mut self, name: &lash_kernel_value::QualifiedName) {
+        use lash_kernel_dialect::{SpellKind, Spelling};
+        let spelling = Spelling::Python;
+        let kind = self
+            .namespaces
+            .packages()
+            .get(&name.package)
+            .and_then(|members| members.get(&name.member))
+            .map_or(SpellKind::Member, |member| member.kind.spell_kind());
+        let path = name
+            .package
+            .iter()
+            .map(|part| spelling.spell(SpellKind::PathSegment, part))
+            .chain(std::iter::once(spelling.spell(kind, &name.member)))
+            .chain(
+                name.type_member
+                    .iter()
+                    .map(|part| spelling.spell(SpellKind::Member, part)),
+            )
+            .collect::<Vec<_>>()
+            .join(".");
+        self.operation_path(&path);
     }
 
     /// An operation as its dotted path: Python spells canonical names

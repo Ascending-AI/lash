@@ -59,6 +59,7 @@ async fn df_library_and_workflow_keep_their_defining_links() {
                 .workers
                 .print(
                     draft.document(),
+                    source_environment.namespaces,
                     None,
                     lash::dialect::SourceFormat::TypeScriptV1,
                     Default::default(),

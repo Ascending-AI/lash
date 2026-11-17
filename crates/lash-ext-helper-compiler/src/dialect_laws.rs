@@ -282,11 +282,16 @@ fn authored_modules_print_without_kernel_forms_and_roundtrip() {
                 &document,
                 None,
                 &fixture.library,
+                &Default::default(),
                 Default::default(),
             ),
-            Dialect::Python => {
-                lash_dialect_python::print(&document, None, &fixture.library, Default::default())
-            }
+            Dialect::Python => lash_dialect_python::print(
+                &document,
+                None,
+                &fixture.library,
+                &Default::default(),
+                Default::default(),
+            ),
         }
         .expect("authored print");
         assert!(!printed.source.contains("use kernel"), "{}", printed.source);
@@ -296,6 +301,7 @@ fn authored_modules_print_without_kernel_forms_and_roundtrip() {
                 &printed.source,
                 &document,
                 &fixture.library,
+                &Default::default(),
                 Default::default(),
                 None,
             )
@@ -304,6 +310,7 @@ fn authored_modules_print_without_kernel_forms_and_roundtrip() {
                 &printed.source,
                 &document,
                 &fixture.library,
+                &Default::default(),
                 Default::default(),
                 None,
             )

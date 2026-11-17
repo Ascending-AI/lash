@@ -95,8 +95,8 @@ fn typescript() -> Dialect {
     Dialect {
         name: "typescript".into(),
         front_end: Box::new(lash_dialect_typescript::TypeScript::default()),
-        read: |source, base, library, limits, source_limits| {
-            lash_dialect_typescript::read(source, base, library, limits, source_limits)
+        read: |source, base, library, namespaces, limits, source_limits| {
+            lash_dialect_typescript::read(source, base, library, namespaces, limits, source_limits)
                 .map_err(Into::into)
         },
         printer: Some(Box::new(lash_dialect_typescript::TypeScript::default())),

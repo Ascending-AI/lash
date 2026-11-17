@@ -14,10 +14,20 @@ fn local(
         ..Default::default()
     };
     match format {
-        SourceFormat::TypeScriptV1 => {
-            lash::typescript::print(document.document(), None, library, options)
-        }
-        SourceFormat::PythonV1 => lash::python::print(document.document(), None, library, options),
+        SourceFormat::TypeScriptV1 => lash::typescript::print(
+            document.document(),
+            None,
+            library,
+            &Default::default(),
+            options,
+        ),
+        SourceFormat::PythonV1 => lash::python::print(
+            document.document(),
+            None,
+            library,
+            &Default::default(),
+            options,
+        ),
     }
 }
 
@@ -29,14 +39,28 @@ fn decode(
 ) -> Document {
     match format {
         SourceFormat::TypeScriptV1 => {
-            lash::typescript::read(source, base, library, Default::default(), None)
-                .expect("TypeScript reads against its base")
-                .0
+            lash::typescript::read(
+                source,
+                base,
+                library,
+                &Default::default(),
+                Default::default(),
+                None,
+            )
+            .expect("TypeScript reads against its base")
+            .0
         }
         SourceFormat::PythonV1 => {
-            lash::python::read(source, base, library, Default::default(), None)
-                .expect("Python reads against its base without a library")
-                .0
+            lash::python::read(
+                source,
+                base,
+                library,
+                &Default::default(),
+                Default::default(),
+                None,
+            )
+            .expect("Python reads against its base without a library")
+            .0
         }
     }
 }
@@ -148,6 +172,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                     let remote = service
                         .print(
                             &document,
+                            &Default::default(),
                             None,
                             format,
                             PrintOptions {
@@ -171,6 +196,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                 let remote = service
                     .print(
                         &document,
+                        &Default::default(),
                         None,
                         format,
                         PrintOptions {
@@ -185,7 +211,14 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                     "local and worker agree including final spans"
                 );
                 let decoded = service
-                    .read_exported(&remote.source, &document, format, Default::default(), None)
+                    .read_exported(
+                        &remote.source,
+                        &document,
+                        &Default::default(),
+                        format,
+                        Default::default(),
+                        None,
+                    )
                     .await
                     .expect("worker decode")
                     .0;
@@ -214,6 +247,104 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
             }
         }
     }
+
+    // PRINT-LINKED-DECLARATIONS: source printing and its inverse use the
+    // retained package declaration for methods and asynchronous plain exports.
+    let mut failures = Vec::new();
+    for (name, format, plain, source) in [
+        (
+            "account-typescript",
+            SourceFormat::TypeScriptV1,
+            false,
+            r#"export async function flow(): Promise<JsonValue> {
+  const found = await apps.linear.as("a@x").search("q");
+  const ran = await apps.linear.as("a@x").run("create", {title: "issue"});
+  return [found, ran];
+}"#,
+        ),
+        (
+            "account-python",
+            SourceFormat::PythonV1,
+            false,
+            "async def flow() -> Any:\n    found = await apps.linear.for_account(\"a@x\").search(\"q\")\n    ran = await apps.linear.for_account(\"a@x\").run(\"create\", {\"title\": \"issue\"})\n    return [found, ran]\n",
+        ),
+        (
+            "plain-typescript",
+            SourceFormat::TypeScriptV1,
+            true,
+            r#"export async function flow(): Promise<JsonValue> {
+  const found = await apps.linear.search("q");
+  const ran = await apps.linear.run("create", {title: "issue"});
+  return [found, ran];
+}"#,
+        ),
+    ] {
+        let (core, pin, environment) = super::packages::account_print_fixture(plain).await;
+        let imported = core
+            .host_artifacts()
+            .import_workflow(format.language(), source, &environment, None)
+            .await
+            .unwrap();
+        let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+            panic!("{name} import: {imported:?}");
+        };
+        let start = core
+            .host_artifacts()
+            .publish_workflow(
+                &pin,
+                &document,
+                &lash::package::StartSelector::Export(lash::schema::Name::new("flow")),
+                &environment,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+            code: lash::vm::KernelInlineRequest::Linked { start },
+        })
+        .unwrap();
+        let definition = core
+            .host_artifacts()
+            .publish_definition(&pin, &draft)
+            .await
+            .unwrap();
+        match core
+            .host_artifacts()
+            .print_workflow(&definition.id, None, format, Default::default())
+            .await
+        {
+            Ok(printed) => {
+                eprintln!("PRINT-LINKED-DECLARATIONS {name}: prints");
+                let checked = core
+                    .host_artifacts()
+                    .workflow_environment(&environment)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let decoded = service
+                    .read_exported(
+                        &printed.source,
+                        &document.to_document().unwrap(),
+                        checked.namespaces(),
+                        format,
+                        Default::default(),
+                        None,
+                    )
+                    .await;
+                match decoded {
+                    Ok((after, _)) => exact(&document.to_document().unwrap(), &after),
+                    Err(error) => failures.push(format!("{name} read: {error:?}")),
+                }
+            }
+            Err(error) => {
+                eprintln!("PRINT-LINKED-DECLARATIONS {name}: {error:?}");
+                failures.push(format!("{name}: {error:?}"));
+            }
+        }
+        core.shutdown().await.unwrap();
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Independently read source is checked by the production exact module oracle,
@@ -622,6 +753,7 @@ async fn canvas_expressions_print_and_read_back_in_both_dialects() {
                 let printed = match service
                     .print(
                         draft.document(),
+                        &Default::default(),
                         None,
                         format,
                         PrintOptions {
@@ -641,6 +773,7 @@ async fn canvas_expressions_print_and_read_back_in_both_dialects() {
                     .read_exported(
                         &printed.source,
                         draft.document(),
+                        &Default::default(),
                         format,
                         Default::default(),
                         None,
@@ -710,6 +843,7 @@ async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
     let error = service
         .print(
             &document,
+            &Default::default(),
             Some(&captions),
             SourceFormat::TypeScriptV1,
             PrintOptions {
@@ -752,7 +886,7 @@ async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
 
     // Replay the same insertion against the current helper release, using
     // the captured host operation contracts rather than a simplified toolbox.
-    let namespaces = lash::dialect::regions::namespaces(&document).unwrap();
+    let namespaces = lash::dialect::regions::namespaces(&document, &Default::default()).unwrap();
     let environment = lash::dialect::Environment::new(embedding.library(), &namespaces);
     let lowered = lash::typescript::lower(
         "export async function liveRun(notify: boolean): Promise<void> { await inbox.sendItem({title: 'Live run v2', body: 'Starting.'}); await sleep(20000); await inbox.sendItem({title: 'Live run finished', body: 'The run is done.'}); }",
@@ -803,6 +937,7 @@ async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
     let printed = service
         .print(
             draft.document(),
+            &Default::default(),
             None,
             SourceFormat::TypeScriptV1,
             PrintOptions {
@@ -818,6 +953,7 @@ async fn a_saved_canvas_insertion_explains_its_missing_authored_inverse() {
         .read_exported(
             &printed.source,
             draft.document(),
+            &Default::default(),
             SourceFormat::TypeScriptV1,
             Default::default(),
             None,

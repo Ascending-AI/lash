@@ -592,6 +592,7 @@ fn coarse_spans() {
         document.document(),
         None,
         embedding.library(),
+        &Default::default(),
         lash::dialect::PrintOptions {
             source_map: true,
             ..Default::default()

@@ -1774,7 +1774,13 @@ async fn unpublished_linked_drafts_roundtrip_host_captions() {
         )
         .unwrap();
         let printed = service
-            .print(&document, Some(&captions), format, Default::default())
+            .print(
+                &document,
+                &Default::default(),
+                Some(&captions),
+                format,
+                Default::default(),
+            )
             .await
             .unwrap();
         let (read, _, read_captions) = service
@@ -1846,6 +1852,7 @@ async fn fresh_source_policy_checks_printed_text_again_at_publication() {
     let printed = service
         .print(
             &document.to_document().unwrap(),
+            &Default::default(),
             None,
             SourceFormat::TypeScriptV1,
             Default::default(),
@@ -2015,6 +2022,7 @@ async fn print_environment_selects_fresh_dependencies_and_refuses_conflicts() {
     let error = lash::vm::WorkerService::default()
         .print(
             &document,
+            &Default::default(),
             None,
             SourceFormat::TypeScriptV1,
             Default::default(),

@@ -27,11 +27,12 @@ pub fn print(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn Library,
+    declarations: &lash_kernel_dialect::Namespaces,
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
     check_document_depth(document, options.limits)?;
     crate::constructs::conventions::CONVENTIONS.check_document(document, library)?;
-    let namespaces = regions::namespaces(document).map_err(PrintError::Namespace)?;
+    let namespaces = regions::namespaces(document, declarations).map_err(PrintError::Namespace)?;
     let printing = Printing {
         document,
         captions,
@@ -42,7 +43,7 @@ pub fn print(
     regions::print_verified(document, captions, options, authored, &printing, library)
 }
 
-/// Read ordinary Python using the base document's declared import signatures.
+/// Read ordinary Python using linked package declarations and the base's operation imports.
 ///
 /// # Errors
 /// The front end's diagnostic for invalid or unsupported authored source.
@@ -50,10 +51,11 @@ pub fn read(
     source: &str,
     base: &k::Document,
     library: &dyn Library,
+    declarations: &lash_kernel_dialect::Namespaces,
     limits: GeneratedSourceLimits,
     source_limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
 ) -> Result<(k::Document, k::Captions), Diagnostic> {
-    let namespaces = regions::namespaces(base).map_err(|refused| {
+    let namespaces = regions::namespaces(base, declarations).map_err(|refused| {
         crate::diagnostics::unplaced(
             Code::Syntax,
             format!("the base document's operations compose no namespace: {refused}"),
@@ -74,9 +76,10 @@ impl Printer for crate::Python {
         document: &k::Document,
         captions: Option<&k::Captions>,
         library: &dyn Library,
+        declarations: &lash_kernel_dialect::Namespaces,
         options: PrintOptions,
     ) -> Result<PrintedSource, PrintError> {
-        print(document, captions, library, options)
+        print(document, captions, library, declarations, options)
     }
 }
 
@@ -114,6 +117,7 @@ impl regions::Regions for Printing<'_> {
         let result = print_regions(
             self.document,
             self.environment.library,
+            self.environment.namespaces,
             self.captions,
             options,
             &regions,

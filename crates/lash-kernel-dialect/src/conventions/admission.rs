@@ -105,7 +105,7 @@ pub fn verify_lowering(
     library: &dyn crate::Library,
     lower: impl FnOnce(&crate::Environment<'_>, crate::Mode<'_>) -> Result<k::Document, String>,
 ) -> Result<k::Document, crate::PrintError> {
-    let namespaces = crate::regions::namespaces(document)?;
+    let namespaces = crate::regions::namespaces(document, &crate::Namespaces::default())?;
     let environment = crate::Environment::new(library, &namespaces);
     let mode = if document.exports.is_empty() {
         crate::Mode::Cell(crate::CellEnvironment::first())

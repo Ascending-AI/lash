@@ -194,6 +194,7 @@ impl CaptionDialect<'_> {
             document,
             Some(captions),
             self.environment.library,
+            self.environment.namespaces,
             PrintOptions {
                 source_map,
                 ..Default::default()
@@ -301,6 +302,7 @@ impl CaptionDialect<'_> {
                 &printed.source,
                 document,
                 self.environment.library,
+                self.environment.namespaces,
                 Default::default(),
                 None,
             )

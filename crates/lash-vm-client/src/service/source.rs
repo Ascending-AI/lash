@@ -40,6 +40,7 @@ impl Service {
     pub async fn print(
         &self,
         document: &Document,
+        namespaces: &lash_kernel_dialect::Namespaces,
         captions: Option<&Captions>,
         format: SourceFormat,
         options: PrintOptions,
@@ -51,6 +52,7 @@ impl Service {
         }
         let response = self
             .request_accounted(Request::Print {
+                namespaces: namespaces.clone(),
                 format,
                 document: document.canonical_bytes(),
                 captions: captions.cloned(),
@@ -135,6 +137,7 @@ impl Service {
         &self,
         source: &str,
         base: &Document,
+        namespaces: &lash_kernel_dialect::Namespaces,
         format: SourceFormat,
         limits: GeneratedSourceLimits,
         source_limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
@@ -149,6 +152,7 @@ impl Service {
         }
         let response = self
             .request_accounted(Request::Read {
+                namespaces: namespaces.clone(),
                 format,
                 source: source.to_owned(),
                 base: base.canonical_bytes(),

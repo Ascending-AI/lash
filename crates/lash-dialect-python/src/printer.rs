@@ -29,6 +29,7 @@ pub(crate) struct Regions {
 pub(crate) fn print_regions(
     document: &k::Document,
     library: &dyn lash_kernel_dialect::Library,
+    namespaces: &lash_kernel_dialect::Namespaces,
     captions: Option<&k::Captions>,
     options: PrintOptions,
     regions: &Regions,
@@ -43,6 +44,7 @@ pub(crate) fn print_regions(
         plan: &plan,
         inline: &inline,
         document,
+        namespaces,
         indent: 0,
         scope: Default::default(),
         main: false,
@@ -141,6 +143,7 @@ struct Renderer<'a> {
     authored: bool,
     /// The document owning stored function bodies and import slots.
     document: &'a k::Document,
+    namespaces: &'a lash_kernel_dialect::Namespaces,
     /// The local functions an authored region writes as plain `def`s,
     /// whose calls take no `await`.
     sync: BTreeSet<Name>,

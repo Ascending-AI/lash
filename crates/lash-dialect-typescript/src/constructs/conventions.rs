@@ -8,7 +8,13 @@ fn verify(
     document: &lash_kernel_doc::Document,
     library: &dyn lash_kernel_dialect::Library,
 ) -> Result<lash_kernel_doc::Document, lash_kernel_dialect::PrintError> {
-    let printed = crate::print(document, None, library, Default::default())?;
+    let printed = crate::print(
+        document,
+        None,
+        library,
+        &Default::default(),
+        Default::default(),
+    )?;
     lash_kernel_dialect::conventions::verify_lowering(document, library, |environment, mode| {
         crate::lower(&printed.source, environment, mode)
             .map(|lowered| lowered.document.into_document())

@@ -158,6 +158,10 @@ pub trait FrontEnd {
 /// reidentification and exact import-slot renumbering. Public contracts,
 /// executable structure and resolved binding identity remain exact.
 ///
+/// Package types and callables are described by the immutable linked
+/// `namespaces`; signature-only imports cannot supply their member kinds or
+/// asynchronous/rest flags. Operation imports retain their document-local facts.
+///
 /// Unsupported representations refuse with a typed cause. Printing confers no
 /// publication authority. Captions remain sidecars: spelled targets survive
 /// verification and unspellable targets are listed in PrintedSource::dropped.
@@ -167,6 +171,7 @@ pub trait Printer {
         document: &Document,
         captions: Option<&Captions>,
         library: &dyn crate::Library,
+        namespaces: &crate::Namespaces,
         options: crate::PrintOptions,
     ) -> Result<crate::PrintedSource, crate::PrintError>;
 }
@@ -198,12 +203,14 @@ impl CaptionSupport {
 
 /// A dialect's reader of exported source ([`Dialect::read`]): the source,
 /// the base document it was printed from, the library its printer lowered
-/// against and the limits it is read under, to the document and the
+/// against, its immutable linked namespace declarations and the limits it is
+/// read under, to the document and the
 /// captions the source spells.
 pub type ReadSource = fn(
     &str,
     &Document,
     &dyn crate::Library,
+    &crate::Namespaces,
     crate::GeneratedSourceLimits,
     Option<crate::workflow::WorkflowSourceLimits>,
 ) -> Result<(Document, Captions), Diagnostic>;

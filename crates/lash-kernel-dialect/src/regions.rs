@@ -46,9 +46,12 @@ pub fn reachable(
     listed
 }
 
-/// Reconstruct source-name metadata from signature-only Imports. This never
-/// fulfils a Link or queries providers; source reading keeps the base's slots.
-pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal> {
+/// Compose operation import facts with immutable linked export declarations.
+/// Imports carry no type-member kind, asynchronous or rest metadata.
+pub fn namespaces(
+    document: &k::Document,
+    declarations: &Namespaces,
+) -> Result<Namespaces, NamespaceRefusal> {
     use {lash_kernel_value::ImportKind, lash_kernel_value::package::Visibility};
     let mut packages = BTreeMap::<
         lash_kernel_value::PackagePath,
@@ -81,21 +84,14 @@ pub fn namespaces(document: &k::Document) -> Result<Namespaces, NamespaceRefusal
                     mode: lash_kernel_value::OperationMode::Waited,
                 })
             }
-            ImportKind::Code {
-                signature,
-                convention,
-            } => crate::NamespaceKind::Function(crate::FunctionMember {
-                name: name.clone(),
-                signature: signature.clone(),
-                convention: *convention,
-                asynchronous: false,
-                rest: false,
-            }),
-            ImportKind::Type { .. } => crate::NamespaceKind::Type(crate::ValueType {
-                representation: lash_kernel_value::Type::Any,
-                members: BTreeMap::new(),
-            }),
-            ImportKind::Error { .. } => crate::NamespaceKind::Error,
+            ImportKind::Code { .. } | ImportKind::Type { .. } | ImportKind::Error { .. } => {
+                let member = declarations
+                    .packages()
+                    .get(&name.package)
+                    .and_then(|members| members.get(&name.member))
+                    .ok_or_else(|| NamespaceRefusal::MissingDeclaration { name: name.clone() })?;
+                member.kind.clone()
+            }
         };
         packages.entry(name.package.clone()).or_default().insert(
             name.member.clone(),

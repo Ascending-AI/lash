@@ -100,6 +100,7 @@ pub(crate) fn perform(
         }
 
         Request::Print {
+            namespaces,
             format,
             document,
             captions,
@@ -116,8 +117,13 @@ pub(crate) fn perform(
                     dialect: dialect.into(),
                 },
                 Some(printer) => {
-                    match printer.print(&document, captions.as_ref(), embedding.library(), options)
-                    {
+                    match printer.print(
+                        &document,
+                        captions.as_ref(),
+                        embedding.library(),
+                        &namespaces,
+                        options,
+                    ) {
                         Ok(printed) => Response::Printed(printed),
                         Err(lash_kernel_dialect::PrintError::Namespace(error)) => {
                             Response::PrintNamespaceRefused(error)
@@ -131,6 +137,7 @@ pub(crate) fn perform(
             }
         }
         Request::Read {
+            namespaces,
             format,
             source,
             base,
@@ -144,6 +151,7 @@ pub(crate) fn perform(
                 &source,
                 &decoded_document(base)?,
                 embedding.library(),
+                &namespaces,
                 limits,
                 source_limits,
             ) {
@@ -373,6 +381,7 @@ mod tests {
         export.convention = lash_kernel_doc::StartConvention::Direct;
         let expected = Site::new(Unit::Library(export.function), Vec::new());
         let request = Request::Print {
+            namespaces: Default::default(),
             format: SourceFormat::TypeScriptV1,
             document: document.canonical_bytes(),
             captions: None,
@@ -437,6 +446,7 @@ mod tests {
         _: &str,
         _: &Document,
         _: &dyn lash_kernel_dialect::Library,
+        _: &lash_kernel_dialect::Namespaces,
         _: GeneratedSourceLimits,
         _: Option<WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::Captions), Diagnostic> {
@@ -481,6 +491,7 @@ mod tests {
             let document = lowered.document.document();
             for source_map in [false, true] {
                 let request = Request::Print {
+                    namespaces: Default::default(),
                     format,
                     document: document.canonical_bytes(),
                     captions: None,
@@ -511,6 +522,7 @@ mod tests {
                         &printed.source,
                         document,
                         embedding.library(),
+                        &Default::default(),
                         Default::default(),
                         None,
                     )
@@ -519,6 +531,7 @@ mod tests {
                         &printed.source,
                         document,
                         embedding.library(),
+                        &Default::default(),
                         Default::default(),
                         None,
                     )
@@ -529,6 +542,7 @@ mod tests {
             }
             let encoded = EncodedPayload(
                 rmp_serde::to_vec_named(&Request::Read {
+                    namespaces: Default::default(),
                     format,
                     source: String::new(),
                     base: document.canonical_bytes(),

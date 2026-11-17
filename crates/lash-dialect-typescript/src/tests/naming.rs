@@ -110,6 +110,7 @@ fn enumerated_statements_and_expressions_print_and_relower() {
                 &lowered.document,
                 Some(&lowered.captions),
                 library,
+                &Default::default(),
                 lash_kernel_dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()
@@ -781,6 +782,7 @@ fn enumerated_compositions_print_and_relower() {
                 &lowered.document,
                 Some(&lowered.captions),
                 library,
+                &Default::default(),
                 lash_kernel_dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()

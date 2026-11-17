@@ -47,6 +47,7 @@ pub(super) fn document(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn lash_kernel_dialect::Library,
+    namespaces: &lash_kernel_dialect::Namespaces,
     style: Style,
 ) -> Lifted {
     let functions = document
@@ -67,6 +68,7 @@ pub(super) fn document(
                                 captions,
                                 Unit::Library(export.function),
                                 library,
+                                namespaces,
                                 style,
                             )
                             .item(name, function, export)
@@ -77,13 +79,13 @@ pub(super) fn document(
         })
         .collect::<BTreeMap<_, _>>();
     let main = if document.exports.is_empty() {
-        let mut lifter = Lifter::new(document, captions, Unit::Main, library, style);
+        let mut lifter = Lifter::new(document, captions, Unit::Main, library, namespaces, style);
         let block = document.main.as_deref().unwrap_or_default();
         lifter
             .block(block, &Site::new(Unit::Main, Vec::new()))
             .map(Main::Cell)
     } else {
-        module_main(document, captions, library, style).map(Main::Module)
+        module_main(document, captions, library, namespaces, style).map(Main::Module)
     };
     Lifted { functions, main }
 }
@@ -92,12 +94,13 @@ fn module_main(
     document: &k::Document,
     captions: Option<&k::Captions>,
     library: &dyn lash_kernel_dialect::Library,
+    namespaces: &lash_kernel_dialect::Namespaces,
     style: Style,
 ) -> Lift<Vec<ModulePart>> {
     let parts = lash_kernel_dialect::regions::module_parts(document)
         .ok_or_else(|| "module exports do not match their Main bindings".to_owned())?;
     let main = document.main.as_deref().unwrap_or_default();
-    let mut lifter = Lifter::new(document, captions, Unit::Main, library, style);
+    let mut lifter = Lifter::new(document, captions, Unit::Main, library, namespaces, style);
     parts
         .into_iter()
         .filter_map(|part| {
@@ -131,6 +134,7 @@ struct Pending {
 pub(super) struct Lifter<'a> {
     pub(super) document: &'a k::Document,
     library: &'a dyn lash_kernel_dialect::Library,
+    pub(super) namespaces: &'a lash_kernel_dialect::Namespaces,
     pub(super) imports: &'a BTreeMap<lash_kernel_value::ImportSlot, lash_kernel_value::Import>,
     captions: Option<&'a k::Captions>,
     /// The temporaries lifted and not yet read, in the order they were
@@ -172,6 +176,7 @@ impl<'a> Lifter<'a> {
         captions: Option<&'a k::Captions>,
         unit: Unit,
         library: &'a dyn lash_kernel_dialect::Library,
+        namespaces: &'a lash_kernel_dialect::Namespaces,
         style: Style,
     ) -> Self {
         let imports = match &unit {
@@ -280,6 +285,7 @@ impl<'a> Lifter<'a> {
         let mut lifter = Self {
             document,
             library,
+            namespaces,
             imports,
             captions,
             pending: Vec::new(),
@@ -367,6 +373,7 @@ impl<'a> Lifter<'a> {
             self.captions,
             Unit::Library(function),
             self.library,
+            self.namespaces,
             self.style,
         );
         inner.positional.extend(self.positional.clone());
@@ -459,6 +466,7 @@ impl<'a> Lifter<'a> {
             self.captions,
             Unit::Main,
             self.library,
+            self.namespaces,
             self.style,
         );
         let packed = matches!(&entry.convention, k::StartConvention::TsArgsList { await_fn, same_fn }

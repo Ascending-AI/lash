@@ -267,6 +267,7 @@ fn sleep_prints_its_authored_duration_and_preserves_the_document() {
             &lowered.document,
             Some(&lowered.captions),
             super::library(),
+            &Default::default(),
             Default::default(),
         )
         .expect("sleep has an exact authored inverse");
@@ -274,6 +275,7 @@ fn sleep_prints_its_authored_duration_and_preserves_the_document() {
             &printed.source,
             &lowered.document,
             super::library(),
+            &Default::default(),
             Default::default(),
             None,
         )
@@ -297,7 +299,7 @@ fn an_unprintable_export_refuses_with_its_callable_site() {
     let site = Site::new(Unit::Library(export.function), Vec::new());
     assert!(
         matches!(
-            crate::print(&document, None, super::library(), Default::default()),
+            crate::print(&document, None, super::library(), &Default::default(), Default::default()),
             Err(lash_kernel_dialect::PrintError::Unprintable {
                 site: actual,
                 reason: lash_kernel_dialect::UnprintableReason::Callable { .. },
@@ -685,6 +687,7 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
         &lowered.document,
         Some(&lowered.captions),
         super::library(),
+        &Default::default(),
         Default::default(),
     )
     .unwrap();
@@ -692,6 +695,7 @@ interface Actor { identity_id: string; kind: "human" | "agent" }
         &printed.source,
         &lowered.document,
         super::library(),
+        &Default::default(),
         Default::default(),
         None,
     )
@@ -1093,7 +1097,14 @@ fn print_normal_form_preserves_ordered_calls_and_native_identities() {
         &release.helpers,
     )
     .unwrap();
-    let printed = crate::print(&opened.document, None, library, Default::default()).unwrap();
+    let printed = crate::print(
+        &opened.document,
+        None,
+        library,
+        &Default::default(),
+        Default::default(),
+    )
+    .unwrap();
     crate::lower(
         &printed.source,
         &lash_kernel_dialect::Environment::new(library, &namespaces),
@@ -1133,6 +1144,7 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
             &lowered.document,
             Some(&lowered.captions),
             super::library(),
+            &Default::default(),
             Default::default(),
         )
         .unwrap();
@@ -1403,6 +1415,7 @@ export async function demo(items: string[]): Promise<number[]> {
         &lowered.document,
         Some(&lowered.captions),
         super::library(),
+        &Default::default(),
         Default::default(),
     )
     .unwrap_or_else(|error| {
@@ -1538,6 +1551,7 @@ fn numeric_operators_and_primitive_text_methods_print_as_written() {
             &lowered.document,
             Some(&lowered.captions),
             super::library(),
+            &Default::default(),
             Default::default(),
         )
         .unwrap_or_else(|refused| panic!("`{expression}` must print: {refused}"));
@@ -1682,6 +1696,7 @@ fn block_local_functions_print_with_the_same_private_bindings() {
         &lowered.document,
         Some(&lowered.captions),
         super::library(),
+        &Default::default(),
         lash_kernel_dialect::PrintOptions {
             source_map: true,
             ..Default::default()
@@ -1793,7 +1808,13 @@ fn retained_documents_execute_but_source_requires_current_lowering_identity() {
         assert_ne!(retained.identity(), current.identity());
         assert_eq!(run(&retained), expected);
         assert!(matches!(
-            crate::print(&retained, None, super::library(), PrintOptions::default()),
+            crate::print(
+                &retained,
+                None,
+                super::library(),
+                &Default::default(),
+                PrintOptions::default()
+            ),
             Err(PrintError::Unprintable {
                 reason: UnprintableReason::ReadbackMismatch,
                 ..
@@ -1803,6 +1824,7 @@ fn retained_documents_execute_but_source_requires_current_lowering_identity() {
             source,
             &retained,
             super::library(),
+            &Default::default(),
             Default::default(),
             None,
         )

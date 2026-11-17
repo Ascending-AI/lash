@@ -61,6 +61,8 @@ pub enum Request {
     /// Print `document` (its token body) in the selected generated format,
     /// spelling `captions` of it where the dialect can.
     Print {
+        #[serde(with = "namespaces")]
+        namespaces: lash_kernel_dialect::Namespaces,
         format: lash_kernel_dialect::SourceFormat,
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
@@ -71,6 +73,8 @@ pub enum Request {
     /// Read exported source back against `base` (its token body), the
     /// document it was printed from, without admission or helper resolution.
     Read {
+        #[serde(with = "namespaces")]
+        namespaces: lash_kernel_dialect::Namespaces,
         format: lash_kernel_dialect::SourceFormat,
         source: String,
         #[serde(with = "serde_bytes")]

@@ -1020,7 +1020,14 @@ await control.finish(handle);"#
                 }
                 source = Some(printed.source.clone());
                 let (reread, captions) = lash::vm::WorkerService::default()
-                    .read_exported(&printed.source, &document, format, Default::default(), None)
+                    .read_exported(
+                        &printed.source,
+                        &document,
+                        &Default::default(),
+                        format,
+                        Default::default(),
+                        None,
+                    )
                     .await
                     .expect("read printed source");
                 assert_eq!(reread.library, document.library);

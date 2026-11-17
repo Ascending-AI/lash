@@ -170,7 +170,13 @@ impl SavedWorkflow {
                 };
                 // The worker prints with the library it reads exports back with.
                 let (printed, source_unavailable, cause) = match workers
-                    .print(derived.document(), captions, format, options)
+                    .print(
+                        derived.document(),
+                        &Default::default(),
+                        captions,
+                        format,
+                        options,
+                    )
                     .await
                 {
                     Ok(printed) => (Some(printed), None, None),

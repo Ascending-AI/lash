@@ -460,6 +460,7 @@ fn lowering_glue_belongs_to_the_authored_consumer() {
                 document.document(),
                 None,
                 embedding.library(),
+                &Default::default(),
                 lash::dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()
@@ -469,6 +470,7 @@ fn lowering_glue_belongs_to_the_authored_consumer() {
                 document.document(),
                 None,
                 embedding.library(),
+                &Default::default(),
                 lash::dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()

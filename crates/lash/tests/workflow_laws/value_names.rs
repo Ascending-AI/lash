@@ -133,12 +133,20 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
         );
         let options = Default::default();
         let printed = match format {
-            SourceFormat::TypeScriptV1 => {
-                lash::typescript::print(&document, Some(&captions), embedding.library(), options)
-            }
-            SourceFormat::PythonV1 => {
-                lash::python::print(&document, Some(&captions), embedding.library(), options)
-            }
+            SourceFormat::TypeScriptV1 => lash::typescript::print(
+                &document,
+                Some(&captions),
+                embedding.library(),
+                &Default::default(),
+                options,
+            ),
+            SourceFormat::PythonV1 => lash::python::print(
+                &document,
+                Some(&captions),
+                embedding.library(),
+                &Default::default(),
+                options,
+            ),
         }
         .unwrap_or_else(|error| panic!("{format:?} print with captions: {error:?}"));
         assert!(printed.dropped.is_empty(), "{format:?} drops no caption");
@@ -147,6 +155,7 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
                 &printed.source,
                 &document,
                 embedding.library(),
+                &Default::default(),
                 Default::default(),
                 None,
             )
@@ -155,6 +164,7 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
                 &printed.source,
                 &document,
                 embedding.library(),
+                &Default::default(),
                 Default::default(),
                 None,
             )

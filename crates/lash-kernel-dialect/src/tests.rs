@@ -214,7 +214,7 @@ fn terminal_readback_projects_each_units_exact_import_contract() {
     document
         .functions
         .insert(function.identity(), function.clone());
-    let namespaces = crate::regions::namespaces(&document).unwrap();
+    let namespaces = crate::regions::namespaces(&document, &Default::default()).unwrap();
     assert!(
         namespaces
             .controls(&EffectName::new("corpus.echo").unwrap())
@@ -240,7 +240,7 @@ fn terminal_readback_projects_each_units_exact_import_contract() {
     body.imports.insert(ImportSlot(0), mismatched);
     document.functions.clear();
     document.functions.insert(function.identity(), function);
-    let namespaces = crate::regions::namespaces(&document).unwrap();
+    let namespaces = crate::regions::namespaces(&document, &Default::default()).unwrap();
     assert!(
         namespaces
             .controls(&EffectName::new("corpus.echo").unwrap())

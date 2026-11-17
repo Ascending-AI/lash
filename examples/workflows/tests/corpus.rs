@@ -137,6 +137,7 @@ fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow:
         draft.document(),
         Some(&captions.captions),
         embedding.library(),
+        &Default::default(),
         lash_kernel_dialect::PrintOptions {
             source_map: true,
             ..Default::default()
@@ -146,6 +147,7 @@ fn a_canvas_edited_non_ascii_python_document_reads_back_identically() -> anyhow:
         &printed.source,
         draft.document(),
         embedding.library(),
+        &Default::default(),
         Default::default(),
         None,
     )?;
@@ -195,12 +197,14 @@ fn module_main_roundtrip(
             &lowered.document,
             Some(&lowered.captions),
             embedding.library(),
+            &Default::default(),
             options,
         )?,
         SourceLanguage::Python => lash_dialect_python::print(
             &lowered.document,
             Some(&lowered.captions),
             embedding.library(),
+            &Default::default(),
             options,
         )?,
     };
@@ -209,6 +213,7 @@ fn module_main_roundtrip(
             &printed.source,
             &lowered.document,
             embedding.library(),
+            &Default::default(),
             Default::default(),
             None,
         )?,
@@ -216,6 +221,7 @@ fn module_main_roundtrip(
             &printed.source,
             &lowered.document,
             embedding.library(),
+            &Default::default(),
             Default::default(),
             None,
         )?,
@@ -237,12 +243,20 @@ fn module_main_roundtrip(
             finally: None,
         }));
     let refused = match language {
-        SourceLanguage::TypeScript => {
-            lash_dialect_typescript::print(&unspellable, None, embedding.library(), options)
-        }
-        SourceLanguage::Python => {
-            lash_dialect_python::print(&unspellable, None, embedding.library(), options)
-        }
+        SourceLanguage::TypeScript => lash_dialect_typescript::print(
+            &unspellable,
+            None,
+            embedding.library(),
+            &Default::default(),
+            options,
+        ),
+        SourceLanguage::Python => lash_dialect_python::print(
+            &unspellable,
+            None,
+            embedding.library(),
+            &Default::default(),
+            options,
+        ),
     };
     assert!(
         matches!(refused, Err(lash_kernel_dialect::PrintError::Unprintable { site, .. }) if site.unit == lash_kernel_value::sites::Unit::Main)
@@ -338,12 +352,14 @@ fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> an
                 &lowered.document,
                 Some(&lowered.captions),
                 embedding.library(),
+                &Default::default(),
                 options,
             )?,
             SourceLanguage::Python => lash_dialect_python::print(
                 &lowered.document,
                 Some(&lowered.captions),
                 embedding.library(),
+                &Default::default(),
                 options,
             )?,
         };
@@ -352,6 +368,7 @@ fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> an
                 &printed.source,
                 &lowered.document,
                 embedding.library(),
+                &Default::default(),
                 Default::default(),
                 None,
             )?,
@@ -359,6 +376,7 @@ fn terminal_operation_roundtrip(language: lash_kernel_doc::SourceLanguage) -> an
                 &printed.source,
                 &lowered.document,
                 embedding.library(),
+                &Default::default(),
                 Default::default(),
                 None,
             )?,

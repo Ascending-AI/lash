@@ -41,6 +41,7 @@ fn gathered_local_coroutines_print_without_task_thunks() {
         &lowered.document,
         Some(&lowered.captions),
         machine::library(),
+        &Default::default(),
         lash_kernel_dialect::PrintOptions {
             source_map: true,
             ..Default::default()
@@ -51,6 +52,7 @@ fn gathered_local_coroutines_print_without_task_thunks() {
         &printed.source,
         &lowered.document,
         machine::library(),
+        &Default::default(),
         Default::default(),
         None,
     )
@@ -639,6 +641,7 @@ fn open_record_operation_inputs_print_as_positional_records() {
         &lowered.document,
         None,
         machine::library(),
+        &Default::default(),
         Default::default(),
     )
     .unwrap();
@@ -647,6 +650,7 @@ fn open_record_operation_inputs_print_as_positional_records() {
         &printed.source,
         &lowered.document,
         machine::library(),
+        &Default::default(),
         Default::default(),
         None,
     )
@@ -685,6 +689,7 @@ fn entry_record_modes_survive_source_and_saved_function_promotion() {
             &lowered.document,
             Some(&lowered.captions),
             machine::library(),
+            &Default::default(),
             Default::default(),
         )
         .unwrap();
@@ -846,6 +851,7 @@ fn shared_callable_bodies_and_exception_tokens_keep_caption_readback() {
         &lowered.document,
         Some(&lowered.captions),
         machine::library(),
+        &Default::default(),
         lash_kernel_dialect::PrintOptions {
             source_map: true,
             ..Default::default()
@@ -856,6 +862,7 @@ fn shared_callable_bodies_and_exception_tokens_keep_caption_readback() {
         &printed.source,
         &lowered.document,
         machine::library(),
+        &Default::default(),
         Default::default(),
         None,
     )
@@ -879,6 +886,7 @@ fn assigned_lambdas_keep_their_callable_identity_when_printed() {
         &lowered.document,
         Some(&lowered.captions),
         machine::library(),
+        &Default::default(),
         Default::default(),
     )
     .expect("assigned lambda spelling");
@@ -886,6 +894,7 @@ fn assigned_lambdas_keep_their_callable_identity_when_printed() {
         &printed.source,
         &lowered.document,
         machine::library(),
+        &Default::default(),
         Default::default(),
         None,
     )
@@ -903,6 +912,7 @@ fn for_bindings_keep_the_guest_namespace_when_printed() {
         &lowered.document,
         Some(&lowered.captions),
         machine::library(),
+        &Default::default(),
         lash_kernel_dialect::PrintOptions {
             source_map: true,
             ..Default::default()
@@ -913,6 +923,7 @@ fn for_bindings_keep_the_guest_namespace_when_printed() {
         &printed.source,
         &lowered.document,
         machine::library(),
+        &Default::default(),
         Default::default(),
         None,
     )
@@ -1025,6 +1036,7 @@ fn materialized_saved_callable_tokens_reopen_as_ordinary_python() {
         &opened.document,
         None,
         machine::library(),
+        &Default::default(),
         Default::default(),
     )
     .expect("materialized callable has an exact authored Python readback");
@@ -1058,7 +1070,13 @@ fn declared_local_annotations_print_from_their_evidence() {
         ),
     ];
     let prints = |document: &lash_kernel_doc::Document| {
-        crate::print(document, None, machine::library(), Default::default())
+        crate::print(
+            document,
+            None,
+            machine::library(),
+            &Default::default(),
+            Default::default(),
+        )
     };
     for (source, captures) in cases {
         let lowered = machine::lower(source).unwrap();
@@ -1112,6 +1130,7 @@ fn syntax_lowered_helpers_have_source_spellings() {
             &lowered.document,
             None,
             machine::library(),
+            &Default::default(),
             Default::default(),
         ) {
             Ok(printed) => {
@@ -1141,6 +1160,7 @@ fn syntax_lowered_helpers_have_source_spellings() {
             &lowered.document,
             None,
             machine::library(),
+            &Default::default(),
             Default::default(),
         ) {
             let (_, emitted) =
@@ -1193,6 +1213,7 @@ fn enumerated_statements_and_expressions_print_and_relower() {
                 &lowered.document,
                 Some(&lowered.captions),
                 library,
+                &Default::default(),
                 lash_kernel_dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()
@@ -1695,6 +1716,7 @@ fn enumerated_compositions_print_and_relower() {
                 &lowered.document,
                 Some(&lowered.captions),
                 library,
+                &Default::default(),
                 lash_kernel_dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()

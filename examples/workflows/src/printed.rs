@@ -23,17 +23,30 @@ pub(super) fn laws(
     printing: &Printing<'_>,
 ) -> Result<()> {
     let library = printing.environment.library;
+    let namespaces = printing.environment.namespaces;
     let options = lash_kernel_dialect::PrintOptions::default();
     let again = match lang {
         SourceLanguage::TypeScript => {
-            let (read, captions) =
-                lash_dialect_typescript::read(source, document, library, Default::default(), None)?;
-            lash_dialect_typescript::print(&read, Some(&captions), library, options)?
+            let (read, captions) = lash_dialect_typescript::read(
+                source,
+                document,
+                library,
+                namespaces,
+                Default::default(),
+                None,
+            )?;
+            lash_dialect_typescript::print(&read, Some(&captions), library, namespaces, options)?
         }
         SourceLanguage::Python => {
-            let (read, captions) =
-                lash_dialect_python::read(source, document, library, Default::default(), None)?;
-            lash_dialect_python::print(&read, Some(&captions), library, options)?
+            let (read, captions) = lash_dialect_python::read(
+                source,
+                document,
+                library,
+                namespaces,
+                Default::default(),
+                None,
+            )?;
+            lash_dialect_python::print(&read, Some(&captions), library, namespaces, options)?
         }
     };
     ensure!(

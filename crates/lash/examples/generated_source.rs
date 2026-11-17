@@ -66,9 +66,11 @@ fn print_local(
 ) -> Result<PrintedSource> {
     Ok(match format {
         SourceFormat::TypeScriptV1 => {
-            lash::typescript::print(view.document(), None, library, options)?
+            lash::typescript::print(view.document(), None, library, &Default::default(), options)?
         }
-        SourceFormat::PythonV1 => lash::python::print(view.document(), None, library, options)?,
+        SourceFormat::PythonV1 => {
+            lash::python::print(view.document(), None, library, &Default::default(), options)?
+        }
     })
 }
 
@@ -80,10 +82,26 @@ fn read_local(
 ) -> Result<Document> {
     Ok(match format {
         SourceFormat::TypeScriptV1 => {
-            lash::typescript::read(source, base, library, Default::default(), None)?.0
+            lash::typescript::read(
+                source,
+                base,
+                library,
+                &Default::default(),
+                Default::default(),
+                None,
+            )?
+            .0
         }
         SourceFormat::PythonV1 => {
-            lash::python::read(source, base, library, Default::default(), None)?.0
+            lash::python::read(
+                source,
+                base,
+                library,
+                &Default::default(),
+                Default::default(),
+                None,
+            )?
+            .0
         }
     })
 }
@@ -142,7 +160,9 @@ async fn measure(iterations: u32) -> Result<()> {
                     for _ in 0..iterations {
                         let start = Instant::now();
                         let printed = if worker {
-                            service.print(&document, None, format, options).await?
+                            service
+                                .print(&document, &Default::default(), None, format, options)
+                                .await?
                         } else {
                             print_local(&view, format, options, library)?
                         };
@@ -153,6 +173,7 @@ async fn measure(iterations: u32) -> Result<()> {
                                 .read_exported(
                                     &printed.source,
                                     &document,
+                                    &Default::default(),
                                     format,
                                     options.limits,
                                     None,
@@ -175,7 +196,9 @@ async fn measure(iterations: u32) -> Result<()> {
 
                         let start = Instant::now();
                         let printed = if worker {
-                            service.print(&document, None, format, options).await?
+                            service
+                                .print(&document, &Default::default(), None, format, options)
+                                .await?
                         } else {
                             print_local(&view, format, options, library)?
                         };
@@ -184,6 +207,7 @@ async fn measure(iterations: u32) -> Result<()> {
                                 .read_exported(
                                     &printed.source,
                                     &document,
+                                    &Default::default(),
                                     format,
                                     options.limits,
                                     None,
