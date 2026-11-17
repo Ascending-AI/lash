@@ -17,8 +17,10 @@ import perf_land_gate as gate
 import perf_land_ceilings as policy
 
 
-# Main's real exemptions; each law runs without them unless it is about them.
-EXEMPT_ROWS = dict(policy.MONTY_EXEMPT_ROWS)
+# The exemption the exemption laws describe, supplied by the fixture itself so
+# the laws do not depend on what main's policy exempts today. Every other law
+# runs with no exemption.
+EXEMPT_ROWS = {'python/records': {'ratio': 5.29, 'reason': 'law fixture: the exempt row of the scenario'}}
 
 
 class GateLaws(unittest.TestCase):
