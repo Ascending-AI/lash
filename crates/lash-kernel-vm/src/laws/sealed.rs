@@ -828,6 +828,8 @@ enum Substitute {
     /// holder's inline row, a closure's in the row of the cell it
     /// captures.
     InlineHead(fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool),
+    /// As [`Self::NestedHead`], with the member named by the heap root.
+    RootHead(fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool),
 }
 
 /// The root tuple of a [`Substitute::NestedHead`] case: 513 of the
@@ -1036,8 +1038,10 @@ fn immutable_head_first_read() {
         let store = Counting::default();
         let mut heap = fresh(&store);
         let roots = build(&mut heap);
-        if let Substitute::NestedRoot | Substitute::NestedHead(_) | Substitute::InlineHead(_) =
-            substitute
+        if let Substitute::NestedRoot
+        | Substitute::NestedHead(_)
+        | Substitute::InlineHead(_)
+        | Substitute::RootHead(_) = substitute
         {
             match nested(&store, &mut heap, &roots, *substitute) {
                 Ok(root) => {
@@ -1082,7 +1086,8 @@ fn immutable_head_first_read() {
             | Substitute::Stale
             | Substitute::NestedRoot
             | Substitute::NestedHead(_)
-            | Substitute::InlineHead(_) => other,
+            | Substitute::InlineHead(_)
+            | Substitute::RootHead(_) => other,
             Substitute::Top | Substitute::Second => {
                 let mut row = directory.get(a).expect("a read").expect("a row");
                 match (&mut row.record, &other.record) {
@@ -1212,12 +1217,14 @@ fn first_read(
     Ok(first)
 }
 
-/// Seals the root tuple `roots[0]` (and, for [`Substitute::NestedRoot`],
+/// Seals the holder `roots[0]` (and, for [`Substitute::NestedRoot`],
 /// the other tuple `roots[2]`), then rewrites the store as `substitute`
 /// says: the head of the root tuple's first member keeps the member's key
 /// and names the other tuple's root, the member's row then the other
 /// tuple's; or one field of that head is forged, in the first chunk or
-/// in the inline row, every other row kept.
+/// in the inline row or root. An error in a tuple is tested with the
+/// tuple's commitments rebuilt, so the error's own unchanged row is
+/// reached.
 fn nested(
     store: &Counting,
     heap: &mut SlotHeap,
@@ -1226,7 +1233,8 @@ fn nested(
 ) -> Result<lash_kernel_state::paged::run::root::HeapRoot, String> {
     use lash_kernel_state::kernel_internals::tree::{Access, grant};
     use lash_kernel_state::paged::PageKind;
-    use lash_kernel_state::paged::run::chunked::{ChunkPage, ChunkRef, Placement};
+    use lash_kernel_state::paged::identity;
+    use lash_kernel_state::paged::run::chunked::{CHUNK, ChunkPage, ChunkRef, Members, Placement};
     use lash_kernel_state::paged::run::directory::Directory;
     use lash_kernel_state::paged::run::index::{Index, Part};
     use lash_kernel_state::paged::run::objects::{Captures, Head, Record};
@@ -1256,6 +1264,11 @@ fn nested(
         .seal(sealed)
         .map_err(|error| format!("the seal failed: {error:?}"))?;
     let outer = root.roots[0].id().ok_or("the root is no object")?;
+    if let Substitute::RootHead(forge) = substitute {
+        let (_, head) = root.heads.0.first_mut().ok_or("the root names no head")?;
+        forged(head, forge)?;
+        return Ok(root);
+    }
     let access = Access::new(Box::new(store.clone()));
     let mut directory = Directory::open(root.directory, Box::new(store.clone()));
     let mut row = directory
@@ -1281,6 +1294,12 @@ fn nested(
         };
         let (_, head) = row.heads.0.first_mut().ok_or("the row names no head")?;
         forged(head, forge)?;
+        if let Record::Tuple(members) = &row.record
+            && let Head::Error { .. } = head
+        {
+            let (_, held) = root.heads.0.first_mut().ok_or("the root names no head")?;
+            *held = tuple_of_forged_error(members.len() as u64, head)?;
+        }
         directory
             .put(holder, row)
             .map_err(|error| format!("{error:?}"))?;
@@ -1326,7 +1345,8 @@ fn nested(
         _ => 1,
     };
     let mut member = None;
-    for held in &mut chunks[..forged_chunks] {
+    let mut tuple_head = None;
+    for (position, held) in chunks[..forged_chunks].iter_mut().enumerate() {
         let chunk_page = access
             .read(held.page)
             .map_err(|error| format!("{error:?}"))?;
@@ -1348,6 +1368,17 @@ fn nested(
             (Substitute::NestedHead(forge), None) => forged(head, forge)?,
             _ => return Err("not a nested substitution".into()),
         }
+        if held.leaf.is_some()
+            && let Head::Error { .. } = head
+        {
+            if tuple_head.is_none() {
+                tuple_head = Some(tuple_of_forged_error(tuple.len, head)?);
+            }
+            let Members::List(members) = &chunk.members else {
+                return Err("the tuple chunk holds table entries".into());
+            };
+            held.leaf = identity::chunk_leaf((position * CHUNK) as u64, members, &chunk.heads);
+        }
         held.page = access
             .seal(
                 PageKind::SEQUENCE_LEAF,
@@ -1362,6 +1393,17 @@ fn nested(
     part.page = access
         .seal(PageKind::SEQUENCE_INDEX, encode_body(&chunks), children)
         .map_err(|error| format!("{error:?}"))?;
+    if let Some(head) = tuple_head {
+        let leaves = chunks
+            .iter()
+            .map(|chunk| chunk.leaf)
+            .collect::<Option<Vec<_>>>()
+            .ok_or("a tuple chunk has no leaf")?;
+        part.id = Some(identity::tuple_node(tuple.len, 1, 0, &leaves));
+        let (_, held) = root.heads.0.first_mut().ok_or("the root names no head")?;
+        *held = head.clone();
+        tuple.head = Some(head);
+    }
     if let Some((_, theirs)) = replacement {
         directory
             .put(member, theirs)
@@ -1372,4 +1414,34 @@ fn nested(
         .map_err(|error| format!("{error:?}"))?;
     root.directory = directory.seal().map_err(|error| format!("{error:?}"))?;
     Ok(root)
+}
+
+/// The tuple holders in the head matrix repeat the same error.
+fn tuple_of_forged_error(
+    len: u64,
+    error: &lash_kernel_state::paged::run::objects::Head,
+) -> Result<lash_kernel_state::paged::run::objects::Head, String> {
+    use lash_kernel_state::arena::Summary;
+    use lash_kernel_state::paged::identity::{Member, TupleBuilder};
+    use lash_kernel_state::paged::run::objects::Head;
+
+    let Head::Error { shape, .. } = error else {
+        return Err("the tuple does not hold an error".into());
+    };
+    let member = Member::Immutable(std::borrow::Cow::Borrowed(error));
+    let mut content = TupleBuilder::new(len);
+    for _ in 0..len {
+        content.push(&member);
+    }
+    let content = content.finish().map_err(|error| error.to_string())?;
+    Ok(Head::Tuple {
+        len,
+        shape: Summary {
+            depth: shape.depth.saturating_add(1),
+            task_edges: shape.task_edges.saturating_mul(len),
+            has_edges: shape.has_edges,
+        },
+        normal: content.normal,
+        root: content.root,
+    })
 }

@@ -13,11 +13,10 @@ use super::{Arena, Facts, Head, NO_PAGE, Summary, has_cold, keys, malformed, tab
 
 impl Arena {
     /// The one handle of durable immutable `entity`, which a row names
-    /// with `head`: the one the run already has, whose head (or, a tuple
-    /// not yet vouched for, the head another row named it by) must be
-    /// `head`, else a proxy true to it. A function and a host handle its
-    /// head holds whole open resident; a tuple of any length opens
-    /// opaque, `head` only its claim until its own row vouches for it
+    /// with `head`: the one the run already has, whose head or pending
+    /// claim must equal `head`, else a proxy true to it. A function and
+    /// a host handle its head holds whole open resident. Tuples and
+    /// errors open opaque until their own rows vouch for their claims
     /// ([`Self::vouch`]); any other opens cold, its head's summaries in
     /// its body and facts, and every read of its payload answers
     /// [`lash_kernel_doc::Retry::Cold`].
@@ -78,10 +77,8 @@ impl Arena {
         Ok(self.insert(body, facts))
     }
 
-    /// The tuple `handle`, whose own row a load read and found to be the
-    /// head its referrers named it by ([`Facts::named_by`]): that head is
-    /// its own from now on, and its summary a fact of it. A tuple already
-    /// vouched for, or certified, stays as it is.
+    /// Publish the head and summary of a tuple or error after its own
+    /// row has matched the referrers' claim ([`Facts::named_by`]).
     ///
     /// # Errors
     ///
@@ -94,8 +91,8 @@ impl Arena {
         else {
             return Ok(());
         };
-        if let Head::Tuple { shape, .. } = &claim {
-            facts.summary = *shape;
+        if let Some(shape) = composite_shape(&claim) {
+            facts.summary = shape;
         }
         let projected = facts.try_projection()?;
         let _ = projected.head.set(claim);
@@ -149,8 +146,8 @@ impl Arena {
 
     /// Fixes `head` as the immutable `handle`'s, as a seal that wrote a row
     /// naming it does: every later row names it so.
-    /// A tuple not yet vouched for keeps the claim it was named by, which
-    /// the seal copies: only its own row vouches for it.
+    /// A pending claim stays pending when the seal copies it. Only the
+    /// object's own row vouches for it.
     pub fn certify(&self, handle: ArenaHandle, head: Head) -> Result<(), NativeError> {
         let facts = self.facts(handle)?;
         if let Some(projected) = facts.projected()
@@ -160,7 +157,7 @@ impl Arena {
                 Ok(())
             } else {
                 Err(malformed(
-                    "a seal certifies another head than the tuple's claim",
+                    "a seal certifies another head than the immutable's claim",
                 ))
             };
         }
@@ -243,22 +240,27 @@ impl Arena {
 }
 
 /// Gives the immutable whose projection is `projected` the `head` a row
-/// names it by: a tuple's only as a claim, which its own row must vouch
-/// for before any fact of it is used ([`Arena::vouch`]); any other's as
-/// its head, which its payload is checked against when it is read.
+/// names it by. Tuples and errors keep a claim until their own rows
+/// vouch for it ([`Arena::vouch`]). Other bodies check their heads when
+/// their payloads are read.
 fn named(projected: &mut super::Projected, head: &Head) {
-    if matches!(head, Head::Tuple { .. }) {
+    if composite_shape(head).is_some() {
         projected.claim = Some(head.clone());
     } else {
         let _ = projected.head.set(head.clone());
     }
 }
 
-/// The body an immutable opens with from its `head`, and its summary: a
-/// function and a host handle whole; a tuple of any length opaque, its
-/// head no fact of it until its own row vouches for it; any other cold,
-/// holding what its head says of it. What a load of the object's row
-/// replaces, and what it is admitted against.
+pub(super) fn composite_shape(head: &Head) -> Option<Summary> {
+    match head {
+        Head::Tuple { shape, .. } | Head::Error { shape, .. } => Some(*shape),
+        _ => None,
+    }
+}
+
+/// The body an immutable opens with from its `head`, and its summary.
+/// Tuples and errors open opaque. A row load replaces this body and
+/// admits the growth relative to it.
 #[must_use]
 pub fn opened(head: &Head) -> (Body, Summary) {
     fn cold<T>(len: u64) -> Chunk<T> {
@@ -269,7 +271,7 @@ pub fn opened(head: &Head) -> (Body, Summary) {
     }
     match head {
         Head::Tuple { .. } => (Body::Cold(ColdImmutable::Tuple), Summary::default()),
-        Head::Error { shape, .. } => (Body::Cold(ColdImmutable::Error), *shape),
+        Head::Error { .. } => (Body::Cold(ColdImmutable::Error), Summary::default()),
         Head::BigInt { summary, .. } => (
             Body::Cold(ColdImmutable::BigInt(*summary)),
             Summary::default(),

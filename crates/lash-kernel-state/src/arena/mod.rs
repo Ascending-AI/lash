@@ -279,7 +279,7 @@ impl Facts {
         self.projected()
             .and_then(|projected| projected.head.get().or(projected.claim.as_ref()))
     }
-    /// A tuple a referrer's row names, its own row not yet read.
+    /// A tuple or error whose referrer names a head its own row has yet to verify.
     pub fn unvouched(&self) -> bool {
         self.projected()
             .is_some_and(|projected| projected.claim.is_some())
@@ -802,8 +802,8 @@ impl Arena {
     ///
     /// # Errors
     ///
-    /// [`lash_kernel_doc::Retry::Cold`] for a tuple no row of its own has
-    /// vouched for yet.
+    /// [`lash_kernel_doc::Retry::Cold`] for a tuple or error whose own
+    /// row has yet to verify its head.
     #[inline]
     pub fn summary_of(&self, value: &Value) -> Result<Summary, NativeError> {
         value_summary(&self.facts, value)

@@ -42,71 +42,10 @@ type HeadField = (
     fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool,
 );
 
-/// Every field of every head kind but a tuple's (`paged/run/objects.rs`,
-/// `Head`; a tuple's are [`TUPLE_FIELDS`]).
+/// Fields of scalar heads (`paged/run/objects.rs`, `Head`).
 const HEAD_FIELDS: &[HeadField] = {
     use lash_kernel_state::paged::run::objects::Head;
     &[
-        (
-            "an error, its shape's depth forged",
-            |heap| {
-                heap.error("kind", "message", Value::Null)
-                    .expect("an error")
-            },
-            Read::Item,
-            |head| match head {
-                Head::Error { shape, .. } => {
-                    shape.depth += 1;
-                    true
-                }
-                _ => false,
-            },
-        ),
-        (
-            "an error, its shape's task edges forged",
-            |heap| {
-                heap.error("kind", "message", Value::Null)
-                    .expect("an error")
-            },
-            Read::Item,
-            |head| match head {
-                Head::Error { shape, .. } => {
-                    shape.task_edges += 1;
-                    true
-                }
-                _ => false,
-            },
-        ),
-        (
-            "an error, its shape's edge flag forged",
-            |heap| {
-                heap.error("kind", "message", Value::Null)
-                    .expect("an error")
-            },
-            Read::Item,
-            |head| match head {
-                Head::Error { shape, .. } => {
-                    shape.has_edges = !shape.has_edges;
-                    true
-                }
-                _ => false,
-            },
-        ),
-        (
-            "an error, its content forged",
-            |heap| {
-                heap.error("kind", "message", Value::Null)
-                    .expect("an error")
-            },
-            Read::Item,
-            |head| match head {
-                Head::Error { content, .. } => {
-                    content[0] ^= 1;
-                    true
-                }
-                _ => false,
-            },
-        ),
         (
             "a big integer, its bit count forged",
             |heap| make(heap, NewObject::BigInt(big(20_000))),
@@ -314,8 +253,8 @@ const HEAD_FIELDS: &[HeadField] = {
     ]
 };
 
-/// Review astra-l65d item 2, executed (l65e item 8): every field of every
-/// head kind, forged alone in the member's head that the root tuple holds,
+/// Review astra-l65d item 2, executed (l65e item 8): every scalar head
+/// field, forged alone in the member's head that the root tuple holds,
 /// in its first chunk and in its inline row, the member's key, root and
 /// row and every other page kept, fails the first read that consumes it
 /// with `Store(Corrupt)`.
@@ -479,6 +418,52 @@ const TUPLE_FIELDS: &[TupleField] = {
     ]
 };
 
+/// Every field of an error head, plus the depth-zero encoding refusal.
+const ERROR_FIELDS: &[(&str, bool, Forge)] = {
+    use lash_kernel_state::paged::run::objects::Head;
+    &[
+        (
+            "its shape's depth forged to zero",
+            true,
+            |head| match head {
+                Head::Error { shape, .. } => {
+                    shape.depth = 0;
+                    true
+                }
+                _ => false,
+            },
+        ),
+        ("its shape's depth forged", false, |head| match head {
+            Head::Error { shape, .. } => {
+                shape.depth += 1;
+                true
+            }
+            _ => false,
+        }),
+        ("its shape's task edges forged", false, |head| match head {
+            Head::Error { shape, .. } => {
+                shape.task_edges += 1;
+                true
+            }
+            _ => false,
+        }),
+        ("its shape's edge flag forged", false, |head| match head {
+            Head::Error { shape, .. } => {
+                shape.has_edges = !shape.has_edges;
+                true
+            }
+            _ => false,
+        }),
+        ("its content forged", false, |head| match head {
+            Head::Error { content, .. } => {
+                content[0] ^= 1;
+                true
+            }
+            _ => false,
+        }),
+    ]
+};
+
 /// One use of a tuple a run makes, first after its holder is reached: an
 /// item read, or one of its head's facts alone (its key, its depth, its
 /// length), which a check on item reads alone would not cover.
@@ -530,12 +515,13 @@ fn field(i: i64) -> Value {
     Value::Text(lash_kernel_doc::arena::ShortText::new(&format!("k{i}")).expect("short"))
 }
 
-/// What holds a member's head: the holder of the member, chunked (past
-/// [`LARGE`](lash_kernel_state::paged::run::chunked::LARGE) members) or
-/// inline, and the read that reaches the member in it.
+type Forge = fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool;
+
+/// A holder of a head, the placement of its copy, and the read that
+/// reaches the member in it.
 struct Holder {
     name: &'static str,
-    chunked: bool,
+    substitute: fn(Forge) -> Substitute,
     /// It holds the member as a key, so only a tuple that is a key.
     key: bool,
     build: fn(&mut SlotHeap, Value) -> Value,
@@ -558,35 +544,35 @@ fn first(
 const HOLDERS: &[Holder] = &[
     Holder {
         name: "a tuple's chunk",
-        chunked: true,
+        substitute: Substitute::NestedHead,
         key: false,
         build: |heap, member| make(heap, NewObject::Tuple(vec![member; 513])),
         reach: first,
     },
     Holder {
         name: "a tuple's row",
-        chunked: false,
+        substitute: Substitute::InlineHead,
         key: false,
         build: |heap, member| make(heap, NewObject::Tuple(vec![member; 2])),
         reach: first,
     },
     Holder {
         name: "a list's chunk",
-        chunked: true,
+        substitute: Substitute::NestedHead,
         key: false,
         build: |heap, member| make(heap, NewObject::List(vec![member; 513])),
         reach: first,
     },
     Holder {
         name: "a list's row",
-        chunked: false,
+        substitute: Substitute::InlineHead,
         key: false,
         build: |heap, member| make(heap, NewObject::List(vec![member; 2])),
         reach: first,
     },
     Holder {
         name: "a map's chunk",
-        chunked: true,
+        substitute: Substitute::NestedHead,
         key: false,
         build: |heap, member| {
             make(
@@ -598,14 +584,14 @@ const HOLDERS: &[Holder] = &[
     },
     Holder {
         name: "a map's row",
-        chunked: false,
+        substitute: Substitute::InlineHead,
         key: false,
         build: |heap, member| make(heap, NewObject::Map(vec![(Value::Int(0), member)])),
         reach: |heap, holder| heap.arena().table_get(holder, &Value::Int(0)),
     },
     Holder {
         name: "a record's chunk",
-        chunked: true,
+        substitute: Substitute::NestedHead,
         key: false,
         build: |heap, member| {
             make(
@@ -617,14 +603,14 @@ const HOLDERS: &[Holder] = &[
     },
     Holder {
         name: "a record's row",
-        chunked: false,
+        substitute: Substitute::InlineHead,
         key: false,
         build: |heap, member| make(heap, NewObject::Record(vec![(field(0), member)])),
         reach: |heap, holder| heap.arena().table_get(holder, &field(0)),
     },
     Holder {
         name: "a closure's cell",
-        chunked: false,
+        substitute: Substitute::InlineHead,
         key: false,
         build: |heap, member| {
             use lash_kernel_value::names::{CallableId, FunctionId};
@@ -657,7 +643,7 @@ const HOLDERS: &[Holder] = &[
     },
     Holder {
         name: "a set's chunk, as a key",
-        chunked: true,
+        substitute: Substitute::NestedHead,
         key: true,
         build: |heap, member| {
             let mut keys = vec![member];
@@ -668,12 +654,20 @@ const HOLDERS: &[Holder] = &[
     },
     Holder {
         name: "a set's row, as a key",
-        chunked: false,
+        substitute: Substitute::InlineHead,
         key: true,
         build: |heap, member| make(heap, NewObject::Set(vec![member])),
         reach: first_key,
     },
 ];
+
+const ROOT_HOLDER: Holder = Holder {
+    name: "the heap root",
+    substitute: Substitute::RootHead,
+    key: false,
+    build: |_, member| member,
+    reach: |_, handle| Ok(Some(Value::Error(handle))),
+};
 
 /// The first key of a set.
 fn first_key(
@@ -720,10 +714,13 @@ fn reached(
 /// under every holder ([`HOLDERS`]), the tuple's row and every other page
 /// kept, fails the first use of the tuple ([`ACCESSES`]: an item read, or
 /// its key, depth or length alone) with `Store(Corrupt)`: every holder's
-/// copy of a tuple's head is checked whole against the tuple's row before
+/// copy of a composite's head is checked whole against its row before
 /// a fact of it is used. A forgery the page codec refuses
 /// ([`TUPLE_FIELDS`]) never reaches a store, and must be refused so; a
-/// tuple that is no key is never held as one.
+/// tuple that is no key is never held as one. E1 extends this rule to
+/// an error in each value holder and in the heap root. Errors have no
+/// key or length. The VM must check the row before accepting or refusing
+/// an enclosing tuple by depth.
 #[test]
 fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder() {
     use crate::heap::LoadError;
@@ -741,11 +738,7 @@ fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder()
                 let mut heap = fresh(&store);
                 let member = tuple(&mut heap, len, *unkeyable);
                 let held = (holder.build)(&mut heap, member);
-                let substitute = if holder.chunked {
-                    Substitute::NestedHead(*forge)
-                } else {
-                    Substitute::InlineHead(*forge)
-                };
+                let substitute = (holder.substitute)(*forge);
                 let sealed = nested(&store, &mut heap, &[held, member, member], substitute);
                 let root = match (sealed, refusing.contains(&size)) {
                     (Err(error), true) if error.starts_with(DECODE_REFUSES) => {
@@ -794,5 +787,148 @@ fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder()
     if refused != 2 * HOLDERS.len() + 2 * HOLDERS.len() {
         failed.push(format!("the page codec refused {refused} forgeries"));
     }
+    check_error_heads(&mut failed);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+fn build_error(heap: &mut SlotHeap) -> Value {
+    heap.error("kind", "message", Value::Null)
+        .expect("an error")
+}
+
+const ERROR_DEPTH: Access = ("its depth alone", |heap, member| {
+    heap.arena().summary_of(&member).map(drop)
+});
+
+const ERROR_BODY: Access = ("its body", |heap, member| {
+    let arena = heap.arena();
+    let semantics = arena.semantics();
+    lash_kernel_doc::Args::new(&[], arena.objects(), &semantics)
+        .error(&member)
+        .map(drop)
+});
+
+const REACH_ONLY: Access = ("reach the member", |_, _| Ok(()));
+
+fn enclosing_tuple(
+    heap: SlotHeap,
+    member: Value,
+    depth_limit: usize,
+) -> Result<crate::Step, crate::MachineError> {
+    use crate::laws::embedder::{Setup, Source, World, core_program};
+    use crate::{CoreMachine, Machine};
+
+    let program = core_program(
+        r#"main {
+            try { let tuple = (held,) } catch e { return e.kind }
+            return "built"
+        }"#,
+        None,
+    );
+    let mut setup = Setup::default();
+    setup.start.host.push((
+        lash_kernel_value::Name::new("held"),
+        lash_kernel_doc::Datum::Null,
+    ));
+    let mut machine = CoreMachine::start(
+        program,
+        setup.bounds,
+        setup.start,
+        Box::new(Source::default()),
+    )
+    .expect("the enclosing-tuple program starts");
+    let vm = machine.call_law_vm();
+    vm.heap = heap;
+    vm.globals[0] = member;
+    vm.value_depth = depth_limit;
+    machine.run(&mut World::default(), u64::MAX)
+}
+
+fn check_error_heads(failed: &mut Vec<String>) {
+    use crate::heap::LoadError;
+    use lash_kernel_doc::heap::HeapFault;
+
+    for (field, refuses, forge) in ERROR_FIELDS {
+        for holder in HOLDERS
+            .iter()
+            .filter(|holder| !holder.key)
+            .chain([&ROOT_HOLDER])
+        {
+            let case = format!("an error, {field}, in {}", holder.name);
+            let store = Counting::default();
+            let mut heap = fresh(&store);
+            let member = build_error(&mut heap);
+            let held = (holder.build)(&mut heap, member);
+            let substitute = (holder.substitute)(*forge);
+            let root = match (
+                nested(&store, &mut heap, &[held, member, member], substitute),
+                refuses,
+            ) {
+                (Err(error), true) if error.starts_with(DECODE_REFUSES) => continue,
+                (Ok(_), true) => {
+                    failed.push(format!("{case}: the page codec holds the forgery"));
+                    continue;
+                }
+                (Ok(root), false) => root,
+                (Err(error), _) => {
+                    failed.push(format!("{case}: {error}"));
+                    continue;
+                }
+            };
+
+            let (mut heap, cold) = reopened(&store, &root);
+            let depth = reached(&mut heap, holder, &ERROR_DEPTH, cold);
+            if !matches!(depth, Ok(Err(LoadError::Store(HeapFault::Corrupt { .. })))) {
+                failed.push(format!("{case}, {}: {depth:?}", ERROR_DEPTH.0));
+            }
+
+            let (mut heap, cold) = reopened(&store, &root);
+            let body = reached(&mut heap, holder, &ERROR_BODY, cold);
+            let Ok(Err(LoadError::Store(fault @ HeapFault::Corrupt { .. }))) = body else {
+                failed.push(format!("{case}, {}: {body:?}", ERROR_BODY.0));
+                continue;
+            };
+
+            let (mut heap, cold) = reopened(&store, &root);
+            let member = match reached(&mut heap, holder, &REACH_ONLY, cold) {
+                Ok(Ok(member)) => member,
+                outcome => {
+                    failed.push(format!("{case}, reaching the member: {outcome:?}"));
+                    continue;
+                }
+            };
+            let outcome = enclosing_tuple(heap, member, 2);
+            let expected = crate::MachineError::Host(crate::HostFault::new(fault.to_string()));
+            if outcome != Err(expected) {
+                failed.push(format!(
+                    "{case}, constructing the enclosing tuple: {outcome:?}"
+                ));
+            }
+        }
+    }
+
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let member = build_error(&mut heap);
+    let root = heap.seal(&[member]).expect("the unaltered error seals");
+    let (mut heap, error) = reopened(&store, &root);
+    let (summary, first, _) =
+        store.during(|| warm(&mut heap, &[error], |heap| heap.arena().summary_of(&error)));
+    let (again, repeat, _) = store.during(|| heap.arena().summary_of(&error));
+    eprintln!("error depth: {first} page reads on first use, {repeat} on repeat");
+    assert_eq!(summary.depth, 1);
+    assert_eq!(again.expect("a cached summary"), summary);
+    assert_eq!(repeat, 0);
+    for (depth_limit, expected) in [(2, "built"), (1, "too_deep")] {
+        let (heap, error) = reopened(&store, &root);
+        let outcome = enclosing_tuple(heap, error, depth_limit);
+        assert!(
+            matches!(
+                &outcome,
+                Ok(crate::Step::Ended(crate::End::Finished(finished)))
+                    if finished.result == lash_kernel_doc::Datum::Text(expected.to_owned())
+            ),
+            "{outcome:?}"
+        );
+    }
 }

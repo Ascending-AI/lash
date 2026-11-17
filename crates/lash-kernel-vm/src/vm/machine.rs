@@ -411,7 +411,7 @@ impl CoreMachine {
 
 impl CoreMachine {
     #[cfg(test)]
-    pub(super) fn call_law_vm(&mut self) -> &mut Vm<SlotHeap> {
+    pub(crate) fn call_law_vm(&mut self) -> &mut Vm<SlotHeap> {
         &mut self.vm
     }
 

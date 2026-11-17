@@ -17,12 +17,12 @@ pub struct Summary {
     pub has_edges: bool,
 }
 
-/// `value`'s summary. A tuple no row of its own has vouched for retries
-/// for that row: its summary is a fact of it.
+/// `value`'s summary. A tuple or error with a pending claim retries for
+/// its own row before exposing the summary.
 ///
 /// # Errors
 ///
-/// [`lash_kernel_doc::Retry::Cold`] for an unvouched tuple.
+/// [`lash_kernel_doc::Retry::Cold`] for an unvouched tuple or error.
 #[inline]
 pub(super) fn value_summary(
     facts: &(impl super::FactTable + ?Sized),
@@ -31,32 +31,30 @@ pub(super) fn value_summary(
     match value {
         Value::Tuple(handle) | Value::Error(handle) => match facts.get(handle.index() as usize) {
             None => Ok(Summary::default()),
-            Some(fact) if matches!(value, Value::Tuple(_)) && fact.unvouched() => {
-                Err(lash_kernel_doc::Retry::Cold {
-                    object: *handle,
-                    chunk: 0,
-                }
-                .into())
+            Some(fact) if fact.unvouched() => Err(lash_kernel_doc::Retry::Cold {
+                object: *handle,
+                chunk: 0,
             }
+            .into()),
             Some(fact) => Ok(fact.summary),
         },
         _ => Ok(edges(value)),
     }
 }
 
-/// `value`'s summary as the rows naming it give it: an unvouched tuple's
+/// `value`'s summary as the rows naming it give it: an unvouched tuple or error's
 /// claimed head's. What a load checks a holder's row by, whose own head
 /// binds the heads it names its members by; never a fact of the member.
 fn named_summary(facts: &(impl super::FactTable + ?Sized), value: &Value) -> Summary {
     match value {
         Value::Tuple(handle) | Value::Error(handle) => facts
             .get(handle.index() as usize)
-            .map_or_else(Summary::default, |facts| match facts.projected() {
-                Some(super::Projected {
-                    claim: Some(super::Head::Tuple { shape, .. }),
-                    ..
-                }) => *shape,
-                _ => facts.summary,
+            .map_or_else(Summary::default, |facts| {
+                facts
+                    .projected()
+                    .and_then(|projected| projected.claim.as_ref())
+                    .and_then(super::heads::composite_shape)
+                    .unwrap_or(facts.summary)
             }),
         _ => edges(value),
     }
@@ -88,7 +86,7 @@ fn edges(value: &Value) -> Summary {
 ///
 /// # Errors
 ///
-/// [`lash_kernel_doc::Retry::Cold`] for an unvouched tuple member.
+/// [`lash_kernel_doc::Retry::Cold`] for an unvouched tuple or error member.
 pub(super) fn composite(
     facts: &(impl super::FactTable + ?Sized),
     members: &[Value],
