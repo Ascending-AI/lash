@@ -247,7 +247,15 @@ def policy_values(source):
 
 
 def apply_ratchet(source, lowered):
-    """The ceilings file with exactly the ratchet's ceilings replaced."""
+    """The ceilings file with exactly the ratchet's ceilings replaced, each a
+    finite, positive decrease of the ceiling it replaces."""
+    current = policy_values(source)["ROWS"]
+    for key, ceiling in lowered.items():
+        require(key in current, f"ratchet names an untracked row: {key}")
+        old = current[key]["ceiling"]
+        require(type(ceiling) in (int, float) and math.isfinite(ceiling) and 0 < ceiling
+                and old is not None and ceiling < old,
+                f"{key}: ratchet {ceiling!r} is not a finite, positive decrease of ceiling {old!r}")
     rows = next(node.value for node in ast.parse(source).body
                 if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "ROWS")
     edits = []

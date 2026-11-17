@@ -13,6 +13,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from perf_land_gate import policy_values  # noqa: E402
+
 SCRIPTS = Path(__file__).resolve().parent
 # scripts/land and every module it loads from scripts/ when it starts.
 CODE = ("land", "apply_format_witnesses.py", "check_version_bumps.py", "discover_version_surfaces.py",
@@ -199,6 +202,39 @@ class LandInProcess(unittest.TestCase):
         self.assertEqual(pushes, [], f"an unqualified head reached push; qualified {qualified[0]}")
         self.assertIn("changed after qualification", str(raised))
         self.assertEqual(git(candidate, "log", "-1", "--format=%s"), "unqualified change after the gate")
+
+    def test_the_land_ceiling_commit_only_lowers_ceilings(self):
+        """Job I2: what the land commits is exactly the qualified policy with
+        finite, positive decreases. A receipt that raises, keeps or poisons
+        a ceiling is refused, and so is a commit hook that rewrites the
+        generated commit; nothing reaches push and the head returns to the
+        qualified one."""
+        candidate = self.repos.candidate
+        ceilings = candidate / "scripts/perf_land_ceilings.py"
+        key = "typescript/int_arith"
+        old = policy_values(ceilings.read_text())["ROWS"][key]["ceiling"]
+        hook = ("#!/usr/bin/env python3\nfrom pathlib import Path\nimport subprocess\n"
+                "p = Path('scripts/perf_land_ceilings.py')\n"
+                f"p.write_text(p.read_text().replace({repr(old * .9)!r}, {repr(old * 2)!r}))\n"
+                "subprocess.run(['git', 'add', str(p)], check=True)\n")
+        cases = {"raised by the receipt": ({key: old * 2}, None),
+                 "kept by the receipt": ({key: old}, None),
+                 "not finite": ({key: float("nan")}, None),
+                 "not positive": ({key: 0.0}, None),
+                 "raised by a commit hook": ({key: old * .9}, hook)}
+        for name, (ratchet, hook_source) in cases.items():
+            with self.subTest(name):
+                hooks = candidate / ".git/hooks/pre-commit"
+                hooks.unlink(missing_ok=True)
+                if hook_source:
+                    hooks.write_text(hook_source)
+                    hooks.chmod(0o755)
+                _, qualified, pushes, raised = land_in_process(self.repos, ratchet=ratchet)
+                self.assertEqual(pushes, [], f"a ceiling commit {name} reached push")
+                self.assertIsNotNone(raised)
+                self.assertNotIsInstance(raised, Restart)
+                self.assertEqual(git(candidate, "rev-parse", "HEAD"), qualified[0])
+                self.assertEqual(policy_values(ceilings.read_text())["ROWS"][key]["ceiling"], old)
 
 if __name__ == "__main__":
     unittest.main()
