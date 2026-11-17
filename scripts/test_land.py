@@ -110,52 +110,95 @@ class Restart(Exception):
     pass
 
 
-class ALostPushRestarts(unittest.TestCase):
-    """A push lost to a moving main restarts the land, so the next rebase is
-    again the first of a process and is checked for changed land code."""
+def land_in_process(repos, ratchet=None, inside_lock=None):
+    """Run this tree's scripts/land main() against the fixture repositories,
+    with qualification stubbed: every git operation, commit and hook is
+    real. The perf gate's receipt carries `ratchet`; `inside_lock` runs on
+    entering the land lock. Answers the land, the qualified head, the heads
+    handed to push, and what main() raised."""
+    loader = importlib.machinery.SourceFileLoader("land_under_test", str(SCRIPTS / "land"))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    land = importlib.util.module_from_spec(spec)
+    loader.exec_module(land)
+    real_run = land.run
+    qualified, pushes = [], []
+
+    def run(*args, check=True, quiet=False):
+        if args[0] == "git":
+            return real_run(*args, check=check, quiet=quiet)
+        if "--out" in args:  # the perf gate: a qualified receipt
+            qualified.append(land.git("rev-parse", "HEAD"))
+            out = Path(args[args.index("--out") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "receipt.json").write_text(json.dumps({"ratchet": ratchet or {}}))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    @contextlib.contextmanager
+    def lock():
+        if inside_lock:
+            inside_lock()
+        yield
+
+    def push(main, head):
+        pushes.append(head)
+        return len(pushes) > 1  # the first push loses to a moving main
+
+    def execv(*args):
+        raise Restart(args)
+
+    cwd = os.getcwd()
+    os.chdir(repos.candidate)
+    raised = None
+    try:
+        with patch.object(land, "run", run), \
+                patch.object(land, "apply_format_witnesses", lambda *a: []), \
+                patch.object(land, "land_lock", lock), \
+                patch.object(land, "push", push), \
+                patch.object(land.os, "execv", execv), \
+                patch.object(sys, "argv", ["scripts/land"]), \
+                patch.dict(os.environ, {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                                        "LASH_BUCK2_STORE": str(repos.other.parent / "buck2-store")}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            os.environ.pop("LASH_LAND_RUNS", None)
+            try:
+                land.main()
+            except (Restart, RuntimeError, ValueError) as error:
+                raised = error
+    finally:
+        os.chdir(cwd)
+    return land, qualified, pushes, raised
+
+
+class LandInProcess(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.repos = Repositories(Path(directory.name))
 
     def test_a_push_lost_to_a_moving_main_restarts_instead_of_rebasing_in_process(self):
-        with tempfile.TemporaryDirectory() as directory:
-            repos = Repositories(Path(directory))
-            loader = importlib.machinery.SourceFileLoader("land_under_test", str(SCRIPTS / "land"))
-            spec = importlib.util.spec_from_loader(loader.name, loader)
-            land = importlib.util.module_from_spec(spec)
-            loader.exec_module(land)
-            real_run = land.run
+        """A push lost to a moving main restarts the land, so the next rebase
+        is again the first of a process and is checked for changed land code."""
+        _, _, pushes, raised = land_in_process(self.repos)
+        self.assertIsInstance(raised, Restart)
+        self.assertEqual(len(pushes), 1)
 
-            def run(*args, check=True, quiet=False):
-                if args[0] == "git":
-                    return real_run(*args, check=check, quiet=quiet)
-                if "--out" in args:  # the perf gate: a qualified receipt with no ratchet
-                    out = Path(args[args.index("--out") + 1])
-                    out.mkdir(parents=True, exist_ok=True)
-                    (out / "receipt.json").write_text(json.dumps({"ratchet": {}}))
-                return subprocess.CompletedProcess(args, 0, "", "")
+    def test_a_head_changed_after_qualification_is_never_pushed(self):
+        """Job I1: the land pushes the head it qualified, or its own verified
+        ceiling commit on it; a commit made after qualification is refused,
+        and left in place."""
+        candidate = self.repos.candidate
 
-            def execv(*args):
-                raise Restart(args)
+        def commit_changed_land():
+            (candidate / "scripts/land").write_text("raise SystemExit('unqualified land code')\n")
+            git(candidate, "add", "scripts/land")
+            git(candidate, "commit", "-qm", "unqualified change after the gate")
 
-            cwd = os.getcwd()
-            os.chdir(repos.candidate)
-            pushes = []
-            try:
-                with patch.object(land, "run", run), \
-                        patch.object(land, "apply_format_witnesses", lambda *a: []), \
-                        patch.object(land, "land_lock", contextlib.nullcontext), \
-                        patch.object(land, "push", lambda *a: pushes.append(a) and False), \
-                        patch.object(land.os, "execv", execv), \
-                        patch.object(sys, "argv", ["scripts/land"]), \
-                        patch.dict(os.environ, {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                                                "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-                                                "LASH_BUCK2_STORE": str(Path(directory) / "buck2-store")}), \
-                        contextlib.redirect_stdout(io.StringIO()):
-                    os.environ.pop("LASH_LAND_RUNS", None)
-                    with self.assertRaises(Restart):
-                        land.main()
-            finally:
-                os.chdir(cwd)
-            self.assertEqual(len(pushes), 1)
-
+        _, qualified, pushes, raised = land_in_process(self.repos, inside_lock=commit_changed_land)
+        self.assertEqual(len(qualified), 1)
+        self.assertEqual(pushes, [], f"an unqualified head reached push; qualified {qualified[0]}")
+        self.assertIn("changed after qualification", str(raised))
+        self.assertEqual(git(candidate, "log", "-1", "--format=%s"), "unqualified change after the gate")
 
 if __name__ == "__main__":
     unittest.main()
