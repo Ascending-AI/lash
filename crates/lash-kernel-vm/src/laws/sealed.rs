@@ -815,13 +815,14 @@ enum Substitute {
     /// and the member's row is the other tuple's. Only the root tuple and
     /// the other are roots of the seal.
     NestedRoot,
-    /// In the root tuple's first chunk, one field of its member's head is
-    /// forged; the member's key and root, its row and every other page
-    /// are kept. Only the root tuple is a root of the seal. The function
-    /// forges the field, `false` when the head is of another kind.
+    /// In the root holder's first chunk, one field of its member's head
+    /// is forged; the member's row and every other page are kept. Only
+    /// the holder is a root of the seal. The function forges the field,
+    /// `false` when the head is of another kind.
     NestedHead(fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool),
     /// As [`Self::NestedHead`], the member's head held in the root
-    /// tuple's inline row.
+    /// holder's inline row, a closure's in the row of the cell it
+    /// captures.
     InlineHead(fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool),
 }
 
@@ -1224,8 +1225,23 @@ fn nested(
     use lash_kernel_state::paged::run::chunked::{ChunkPage, ChunkRef, Placement};
     use lash_kernel_state::paged::run::directory::Directory;
     use lash_kernel_state::paged::run::index::{Index, Part};
-    use lash_kernel_state::paged::run::objects::{Head, Record};
+    use lash_kernel_state::paged::run::objects::{Captures, Head, Record};
     use lash_kernel_value::tokens::{decode_body, encode_body};
+
+    // The head forged as `forge` says, refused when a page cannot hold
+    // the forgery (a page writes a tuple's root or its flat key, never
+    // both, so the other is derived and a forgery of it is lost).
+    let forged = |head: &mut Head, forge: fn(&mut Head) -> bool| -> Result<(), String> {
+        let was = head.clone();
+        if !forge(head) {
+            return Err(format!("the member's head is another kind: {head:?}"));
+        }
+        let held: Head = decode_body(&encode_body(&*head)).map_err(|error| error.to_string())?;
+        if held == was {
+            return Err(format!("no page can hold the forgery: {head:?}"));
+        }
+        Ok(())
+    };
 
     let sealed: &[Value] = match substitute {
         Substitute::NestedRoot => &[roots[0], roots[2]],
@@ -1242,15 +1258,26 @@ fn nested(
         .map_err(|error| format!("{error:?}"))?
         .ok_or("the root has no row")?;
     if let Substitute::InlineHead(forge) = substitute {
-        if !matches!(row.record, Record::Tuple(_)) {
-            return Err("the root tuple is not inline".into());
-        }
+        // A closure holds the member in the cell it captures.
+        let (holder, mut row) = match &row.record {
+            Record::Chunked(_) => return Err("the holder is not inline".into()),
+            Record::Closure {
+                captures: Captures::Inline(cells),
+                ..
+            } => {
+                let cell = *cells.first().ok_or("the closure captures no cell")?;
+                let held = directory
+                    .get(cell)
+                    .map_err(|error| format!("{error:?}"))?
+                    .ok_or("the cell has no row")?;
+                (cell, held)
+            }
+            _ => (outer, row),
+        };
         let (_, head) = row.heads.0.first_mut().ok_or("the row names no head")?;
-        if !forge(head) {
-            return Err(format!("the member's head is another kind: {head:?}"));
-        }
+        forged(head, forge)?;
         directory
-            .put(outer, row)
+            .put(holder, row)
             .map_err(|error| format!("{error:?}"))?;
         root.directory = directory.seal().map_err(|error| format!("{error:?}"))?;
         return Ok(root);
@@ -1286,34 +1313,41 @@ fn nested(
     for chunk in &mut chunks {
         grant(&mut chunk.page, &index_page.children).map_err(|error| format!("{error:?}"))?;
     }
-    let chunk_page = access
-        .read(chunks[0].page)
-        .map_err(|error| format!("{error:?}"))?;
-    let mut chunk: ChunkPage =
-        decode_body(&chunk_page.tokens).map_err(|error| error.to_string())?;
-    let (member, head) = chunk.heads.0.first_mut().ok_or("the chunk names no head")?;
-    let member = *member;
-    match (substitute, &replacement) {
-        (Substitute::NestedRoot, Some((replacement, _))) => {
-            let Head::Tuple { root: named, .. } = head else {
-                return Err("the member is no tuple".into());
-            };
-            *named = *replacement;
-        }
-        (Substitute::NestedHead(forge), None) => {
-            if !forge(head) {
-                return Err(format!("the member's head is another kind: {head:?}"));
+    // A forged field is forged in every chunk of the first index page, so
+    // a keyed read finds it whichever chunk its key is placed in; the
+    // other tuple's root is named in the first chunk alone.
+    let forged_chunks = match substitute {
+        Substitute::NestedHead(_) => chunks.len(),
+        _ => 1,
+    };
+    let mut member = None;
+    for held in &mut chunks[..forged_chunks] {
+        let chunk_page = access
+            .read(held.page)
+            .map_err(|error| format!("{error:?}"))?;
+        let mut chunk: ChunkPage =
+            decode_body(&chunk_page.tokens).map_err(|error| error.to_string())?;
+        let (id, head) = chunk.heads.0.first_mut().ok_or("the chunk names no head")?;
+        member = Some(*id);
+        match (substitute, &replacement) {
+            (Substitute::NestedRoot, Some((replacement, _))) => {
+                let Head::Tuple { root: named, .. } = head else {
+                    return Err("the member is no tuple".into());
+                };
+                *named = *replacement;
             }
+            (Substitute::NestedHead(forge), None) => forged(head, forge)?,
+            _ => return Err("not a nested substitution".into()),
         }
-        _ => return Err("not a nested substitution".into()),
+        held.page = access
+            .seal(
+                PageKind::SEQUENCE_LEAF,
+                encode_body(&chunk),
+                chunk_page.children.clone(),
+            )
+            .map_err(|error| format!("{error:?}"))?;
     }
-    chunks[0].page = access
-        .seal(
-            PageKind::SEQUENCE_LEAF,
-            encode_body(&chunk),
-            chunk_page.children.clone(),
-        )
-        .map_err(|error| format!("{error:?}"))?;
+    let member = member.ok_or("the index page names no chunk")?;
     let children = chunks.iter().map(|chunk| chunk.page).collect();
     let part: &mut Part<Option<Placement>> = &mut refs[0];
     part.page = access
