@@ -16,6 +16,11 @@
 //!
 //! A point read through a tree of height `L` reads `L` index pages. A
 //! point edit rewrites the index pages on its leaf's path, and only those.
+//!
+//! In a tree that is not full, every index page an edit or a build writes
+//! names at least [`HALF`] references, but the last of its level: a page
+//! an edit thins below that is joined with its neighbour, so edits cannot
+//! leave a tree of the least height over many narrow pages.
 
 use std::collections::BTreeSet;
 use std::fmt::Debug;
@@ -33,6 +38,10 @@ pub const NODE_REFS: usize = 96;
 /// The references a node names when it is first written, when the tree
 /// is not full: room for a quarter more.
 const FILL: usize = NODE_REFS * 3 / 4;
+
+/// The fewest references a written index page of a tree that is not full
+/// names, but the last of its level.
+const HALF: usize = NODE_REFS / 2;
 
 /// What a tree's references are ordered by: a table chunk's placement,
 /// an edge page's first id, or nothing.
@@ -267,6 +276,24 @@ pub enum Seek<K> {
 enum Level<L: Leaf> {
     Leaves(Vec<L>),
     Parts(Vec<Part<L::Key>>),
+}
+
+/// One reference of a node an edit rewrites, with the first leaf under
+/// it: its page kept, or the references of the pages that replace it, not
+/// yet sealed.
+enum Slot<L: Leaf> {
+    Kept(Part<L::Key>, u64),
+    Redone(Level<L>, u64),
+}
+
+/// `items` cut into runs of `sizes`, in order.
+fn runs<'a, T>(items: &'a [T], sizes: &'a [usize]) -> impl Iterator<Item = &'a [T]> {
+    let mut rest = items;
+    sizes.iter().map(move |&size| {
+        let (run, more) = rest.split_at(size.min(rest.len()));
+        rest = more;
+        run
+    })
 }
 
 impl<L: Leaf> Level<L> {
@@ -700,7 +727,9 @@ impl<L: Leaf> Index<L> {
     /// its bound splits, and the top moves to the height its leaves give
     /// ([`Shape::height`]): it grows a level, or gives way to the nodes
     /// below it while they fit one node. Only when they do not is the
-    /// index built again from its leaves.
+    /// index built again from its leaves. In a tree that is not full, a
+    /// page thinned below [`HALF`] is joined with its neighbour
+    /// ([`Self::occupy`]).
     ///
     /// # Errors
     ///
@@ -726,6 +755,7 @@ impl<L: Leaf> Index<L> {
                     changed,
                     replace,
                     tail,
+                    true,
                 )?,
             ),
             Self::Nodes { refs, .. } if refs.is_empty() => {
@@ -742,6 +772,7 @@ impl<L: Leaf> Index<L> {
                     changed,
                     replace,
                     tail,
+                    true,
                 )?,
             ),
         };
@@ -751,7 +782,7 @@ impl<L: Leaf> Index<L> {
         };
         let target = shape.height(leaves);
         while level.len() > NODE_REFS || height < target {
-            level = Level::Parts(Self::group(access, shape, level, height, 0)?);
+            level = Level::Parts(Self::group(access, shape, level, height, 0, true)?);
             height += 1;
         }
         while height > target {
@@ -801,7 +832,8 @@ impl<L: Leaf> Index<L> {
 
     /// The references of `level`, a node at `height` whose first leaf is
     /// `start`, with its changed leaves replaced and `tail` appended at its
-    /// end: the parts below it rewritten where they change.
+    /// end: the parts below it rewritten where they change. `rightmost`
+    /// when the node ends its level.
     #[expect(clippy::too_many_arguments, reason = "one node of one rebuild")]
     fn redo_level(
         access: &super::super::tree::Access<'_>,
@@ -812,6 +844,7 @@ impl<L: Leaf> Index<L> {
         changed: &BTreeSet<u64>,
         replace: &mut dyn FnMut(u64, L) -> Result<Vec<L>, HeapFault>,
         mut tail: Option<Vec<L>>,
+        rightmost: bool,
     ) -> Result<Level<L>, HeapFault> {
         Ok(match level {
             Level::Leaves(leaves) => {
@@ -829,13 +862,13 @@ impl<L: Leaf> Index<L> {
             }
             Level::Parts(parts) => {
                 let last = parts.len().saturating_sub(1);
-                let mut out = Vec::with_capacity(parts.len());
+                let mut slots = Vec::with_capacity(parts.len());
                 let mut first = start;
                 for (at, part) in parts.into_iter().enumerate() {
                     let ends = if at == last { tail.take() } else { None };
                     let end = first.saturating_add(part.count);
                     if ends.is_none() && changed.range(first..end).next().is_none() {
-                        out.push(part);
+                        slots.push(Slot::Kept(part, first));
                     } else {
                         let below = Self::node(access, shape, &part, height, first)?;
                         let below = Self::redo_level(
@@ -847,32 +880,179 @@ impl<L: Leaf> Index<L> {
                             changed,
                             replace,
                             ends,
+                            rightmost && at == last,
                         )?;
-                        out.extend(Self::group(access, shape, below, height - 1, first)?);
+                        slots.push(Slot::Redone(below, first));
                     }
                     first = end;
                 }
-                Level::Parts(out)
+                Self::occupy(access, shape, &mut slots, height, rightmost)?;
+                Level::Parts(Self::seal_slots(access, shape, slots, height, rightmost)?)
             }
         })
+    }
+
+    /// Joins each redone page of `slots`, pages at `height` of a node
+    /// that ends its level when `rightmost`, that names fewer than
+    /// [`HALF`] references with its next page, or its previous when it is
+    /// the node's last, until it names at least that many: a kept
+    /// neighbour is read. A tree that is full is left as it is, as is the
+    /// level's last page and a node's only one, which its parent joins.
+    fn occupy(
+        access: &super::super::tree::Access<'_>,
+        shape: &Shape,
+        slots: &mut Vec<Slot<L>>,
+        height: u8,
+        rightmost: bool,
+    ) -> Result<(), HeapFault> {
+        slots.retain(|slot| !matches!(slot, Slot::Redone(level, _) if level.len() == 0));
+        if shape.full {
+            return Ok(());
+        }
+        let mut at = 0;
+        while at < slots.len() {
+            let narrow = matches!(&slots[at], Slot::Redone(level, _) if level.len() < HALF);
+            let last = at + 1 == slots.len();
+            if !narrow || slots.len() == 1 || (last && rightmost) {
+                at += 1;
+                continue;
+            }
+            let into = if last { at - 1 } else { at };
+            let ends = rightmost && into + 2 == slots.len();
+            let later = slots.remove(into + 1);
+            let earlier = slots.remove(into);
+            let (earlier, first) = Self::opened(access, shape, earlier, height)?;
+            let (later, _) = Self::opened(access, shape, later, height)?;
+            let joined = Self::join(access, shape, earlier, later, height - 1, ends)?;
+            slots.insert(into, Slot::Redone(joined, first));
+            at = into;
+        }
+        Ok(())
+    }
+
+    /// The references of the page or pages `slot` stands for.
+    fn opened(
+        access: &super::super::tree::Access<'_>,
+        shape: &Shape,
+        slot: Slot<L>,
+        height: u8,
+    ) -> Result<(Level<L>, u64), HeapFault> {
+        match slot {
+            Slot::Kept(part, first) => {
+                Ok((Self::node(access, shape, &part, height, first)?, first))
+            }
+            Slot::Redone(level, first) => Ok((level, first)),
+        }
+    }
+
+    /// The references `earlier` and then `later` name, of `height`, the
+    /// later ending its level when `ends`: where the two pages they meet
+    /// at are below [`HALF`], those are joined too ([`Self::occupy`]). A
+    /// tree that is full never joins, so no first leaf is carried.
+    fn join(
+        access: &super::super::tree::Access<'_>,
+        shape: &Shape,
+        earlier: Level<L>,
+        later: Level<L>,
+        height: u8,
+        ends: bool,
+    ) -> Result<Level<L>, HeapFault> {
+        let (mut earlier, mut later) = match (earlier, later) {
+            (Level::Leaves(mut earlier), Level::Leaves(later)) => {
+                earlier.extend(later);
+                return Ok(Level::Leaves(earlier));
+            }
+            (Level::Parts(earlier), Level::Parts(later)) => (earlier, later),
+            _ => {
+                return Err(HeapFault::Malformed(
+                    "an index joins pages of two levels".into(),
+                ));
+            }
+        };
+        let (Some(left), Some(right)) = (earlier.last().copied(), later.first().copied()) else {
+            earlier.extend(later);
+            return Ok(Level::Parts(earlier));
+        };
+        let left_refs = Self::node(access, shape, &left, height, 0)?;
+        let right_refs = Self::node(access, shape, &right, height, 0)?;
+        if left_refs.len() >= HALF && right_refs.len() >= HALF {
+            earlier.extend(later);
+            return Ok(Level::Parts(earlier));
+        }
+        earlier.pop();
+        let rest = later.split_off(1);
+        let slot = |part: Part<L::Key>, refs: Level<L>| {
+            if refs.len() >= HALF {
+                Slot::Kept(part, 0)
+            } else {
+                Slot::Redone(refs, 0)
+            }
+        };
+        let mut slots = vec![slot(left, left_refs), slot(right, right_refs)];
+        slots.extend(rest.into_iter().map(|part| Slot::Kept(part, 0)));
+        Self::occupy(access, shape, &mut slots, height, ends)?;
+        earlier.extend(Self::seal_slots(access, shape, slots, height, ends)?);
+        Ok(Level::Parts(earlier))
+    }
+
+    /// The references of `slots`, pages at `height` of a node that ends
+    /// its level when `rightmost`: a kept page as it is, a redone one's
+    /// references sealed in pages.
+    fn seal_slots(
+        access: &super::super::tree::Access<'_>,
+        shape: &Shape,
+        slots: Vec<Slot<L>>,
+        height: u8,
+        rightmost: bool,
+    ) -> Result<Vec<Part<L::Key>>, HeapFault> {
+        let last = slots.len().saturating_sub(1);
+        let mut out = Vec::with_capacity(slots.len());
+        for (at, slot) in slots.into_iter().enumerate() {
+            match slot {
+                Slot::Kept(part, _) => out.push(part),
+                Slot::Redone(level, first) => out.extend(Self::group(
+                    access,
+                    shape,
+                    level,
+                    height - 1,
+                    first,
+                    rightmost && at == last,
+                )?),
+            }
+        }
+        Ok(out)
     }
 
     /// The pages of height `height + 1` over `level`, the references of
     /// height `height` whose first leaf is `start`, sealed: a full tree's
     /// [`NODE_REFS`] to a page, another's in one page within the bound,
-    /// else [`FILL`] to a page.
+    /// else [`FILL`] to a page. Past the bound, pages that end their level
+    /// (`rightmost`) are cut at [`Shape::width`], so a build and an append
+    /// lay out alike; others are spread evenly, so each names at least
+    /// [`HALF`].
     fn group(
         access: &super::super::tree::Access<'_>,
         shape: &Shape,
         level: Level<L>,
         height: u8,
         start: u64,
+        rightmost: bool,
     ) -> Result<Vec<Part<L::Key>>, HeapFault> {
         let len = level.len();
         if len == 0 {
             return Ok(Vec::new());
         }
-        let width = usize::try_from(shape.width(len as u64)).unwrap_or(NODE_REFS);
+        let sizes: Vec<usize> = if !rightmost && !shape.full && len > NODE_REFS {
+            let pieces = len.div_ceil(FILL);
+            (0..pieces)
+                .map(|at| len / pieces + usize::from(at < len % pieces))
+                .collect()
+        } else {
+            let width = usize::try_from(shape.width(len as u64)).unwrap_or(NODE_REFS);
+            (0..len.div_ceil(width))
+                .map(|at| width.min(len - at * width))
+                .collect()
+        };
         let above = height + 1;
         let first_node = start / span(above);
         let seal = |tokens: Vec<u8>, children: Vec<PageRef>| {
@@ -896,10 +1076,10 @@ impl<L: Leaf> Index<L> {
                 &ids,
             )))
         };
-        let mut out = Vec::with_capacity(len.div_ceil(width));
+        let mut out = Vec::with_capacity(sizes.len());
         match level {
             Level::Leaves(leaves) => {
-                for (at, run) in leaves.chunks(width).enumerate() {
+                for (at, run) in runs(&leaves, &sizes).enumerate() {
                     let run = run.to_vec();
                     let children = run.iter().map(Leaf::page).collect();
                     let ids = run.iter().map(Leaf::id).collect();
@@ -913,7 +1093,7 @@ impl<L: Leaf> Index<L> {
                 }
             }
             Level::Parts(parts) => {
-                for (at, run) in parts.chunks(width).enumerate() {
+                for (at, run) in runs(&parts, &sizes).enumerate() {
                     let run = run.to_vec();
                     let children = run.iter().map(|part| part.page).collect();
                     let ids = run.iter().map(|part| part.id).collect();

@@ -35,6 +35,8 @@ use super::embedder::Source;
 use crate::heap::Heap;
 use crate::heap::slots::SlotHeap;
 
+mod occupancy;
+
 /// Members of each large object.
 pub(super) const N: i64 = 200_000;
 
@@ -737,11 +739,15 @@ fn opened_all(store: &Counting, root: &HeapRoot) -> Result<(SlotHeap, Vec<Value>
 /// height their leaves give, every index page, read cold, the one its
 /// parent names and naming between one and `NODE_REFS` references, and
 /// no chunk empty. Its chunk layout and the widths of its index pages
-/// may depend on its history, and need not be a direct build's.
+/// may depend on its history, and need not be a direct build's, but each
+/// index keeps the occupancy rule ([`occupancy`], lead ruling, l65f
+/// item 1).
 fn well_formed(store: &Counting, chunked: &Chunked) -> Result<(), String> {
     chunked.check()?;
     chunked.index.check(&chunked.shape())?;
     chunked.edges.check(&EDGES)?;
+    occupancy::occupied(store, &chunked.index).map_err(|error| format!("chunks: {error}"))?;
+    occupancy::occupied(store, &chunked.edges).map_err(|error| format!("edges: {error}"))?;
     let access = Access::new(Box::new(store.clone()));
     let mut empty = 0;
     chunked
@@ -1544,7 +1550,10 @@ fn index_case() -> Result<(), String> {
 /// identified by its object id, so its layout may depend on its history:
 /// its row is [`well_formed`], each index at the height its leaves give,
 /// and need not be a direct build's. Slack it may keep: a chunk with at
-/// least one member, an index page with at least one reference. A tuple
+/// least one member, and an index page with at least half of `NODE_REFS`
+/// references, or fewer when it is the last of its level, also when a map
+/// is thinned to one chunk in each index page, and when an index of
+/// height 2 is thinned to one leaf under an upper page. A tuple
 /// is content-addressed: built in a store with history, sealed again
 /// cold, or copied from its cold members, inline and at index heights 1
 /// and 2, its record is the direct build's and its key
@@ -1581,6 +1590,12 @@ fn an_object_grown_and_shrunk_across_each_boundary_keeps_its_contents_and_a_tupl
     }
     if let Err(error) = list_cleared_case() {
         failed.push(format!("list: {error}"));
+    }
+    if let Err(error) = occupancy::table_thinned_case() {
+        failed.push(format!("map: {error}"));
+    }
+    if let Err(error) = occupancy::index_thinned_case() {
+        failed.push(format!("index thinned: {error}"));
     }
     // Inline; one index level from 257 members; 96 full index pages of
     // 96 chunks of 64 members to one chunk more.
