@@ -180,7 +180,8 @@ enum Outcome {
     /// Unchanged: its reference stands.
     Same,
     /// Rewritten as these pieces (none when it emptied); the first keeps
-    /// the old chunk's first placement when `keep_first`.
+    /// the old range's first placement when `keep_first`, or an earlier
+    /// placement introduced by the split.
     New {
         pieces: Vec<Piece>,
         keep_first: bool,
@@ -744,6 +745,7 @@ fn assemble(
                     seen.insert(chunk, piece.seen.clone());
                     let first = if keep_first && piece_at == 0 && at < old_count {
                         old_first(at)
+                            .map(|first| piece.first.map_or(first, |new| first.min(Some(new))))
                     } else {
                         Some(piece.first)
                     };
@@ -807,7 +809,11 @@ fn assemble(
                     .enumerate()
                     .map(|(piece_at, mut piece)| {
                         if keep_first && piece_at == 0 {
-                            piece.first = held.first;
+                            // A split of the first surviving range may start
+                            // below its old boundary after a shrink.
+                            piece.first = piece
+                                .first
+                                .map_or(held.first, |new| held.first.min(Some(new)));
                         }
                         seal(piece)
                     })

@@ -141,6 +141,123 @@ pub(super) fn table_thinned_case() -> Result<(), String> {
     well_formed(&store, &thinned).map_err(|error| format!("thinned: {error}"))
 }
 
+/// A map or set loses its first four chunks, then grows below its first
+/// surviving boundary. Splitting that range must leave an ordered index
+/// whose members all read back cold.
+pub(super) fn table_regrown_below_first_case(is_set: bool) -> Result<(), String> {
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let value = |i: i64| {
+        if is_set {
+            Value::Absent
+        } else {
+            Value::Int(-i)
+        }
+    };
+    let object = if is_set {
+        NewObject::Set((0..336).map(Value::Int).collect())
+    } else {
+        NewObject::Map((0..336).map(|i| (Value::Int(i), value(i))).collect())
+    };
+    let table = make(&mut heap, object);
+    let root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
+    let built = row(&store, &root)?;
+    let access = Access::new(Box::new(store.clone()));
+    let mut removed = BTreeSet::new();
+    for at in 0..4 {
+        let (_, chunk) = built
+            .index
+            .get(&access, &built.shape(), Seek::At(at))
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or("no chunk to remove")?;
+        let (page, _) = chunk_page(&access, &chunk).map_err(|error| format!("{error:?}"))?;
+        let Members::Table(entries) = page.members else {
+            return Err("a table's chunk holds a list's members".into());
+        };
+        for entry in entries {
+            let RunValue::Int(i) = entry.key else {
+                return Err("an integer table holds another key kind".into());
+            };
+            removed.insert(i);
+        }
+    }
+    assert_eq!(removed.len(), 192);
+    let (mut heap, table) = reopened(&store, &root);
+    let handle = table.handle().ok_or("no table")?;
+    for i in &removed {
+        warm(&mut heap, &[table], |heap| {
+            heap.arena_mut().table_delete(handle, &Value::Int(*i))
+        });
+    }
+    let root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
+    let shrunk = row(&store, &root)?;
+    well_formed(&store, &shrunk)?;
+    let (_, first) = shrunk
+        .index
+        .get(&access, &shrunk.shape(), Seek::At(0))
+        .map_err(|error| format!("{error:?}"))?
+        .ok_or("no surviving chunk")?;
+    let boundary = first.first.ok_or("no surviving placement")?;
+    let (mut heap, table) = reopened(&store, &root);
+    let handle = table.handle().ok_or("no table")?;
+    let mut added = Vec::new();
+    for i in 336..10_000 {
+        let normal = heap
+            .arena()
+            .semantics()
+            .normal_key(&Value::Int(i))
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or("no integer key")?;
+        if placement(&normal) < boundary {
+            warm(&mut heap, &[table], |heap| {
+                heap.arena_mut()
+                    .table_write(handle, Value::Int(i), value(i))
+            });
+            added.push(i);
+            if added.len() == 80 {
+                break;
+            }
+        }
+    }
+    assert_eq!(added.len(), 80);
+    let root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
+    let grown = row(&store, &root)?;
+    well_formed(&store, &grown)?;
+    let mut boundaries = Vec::new();
+    grown
+        .index
+        .each(
+            &Access::new(Box::new(store.clone())),
+            &grown.shape(),
+            &mut |_, chunk| {
+                boundaries.push(chunk.first);
+                Ok(false)
+            },
+        )
+        .map_err(|error| format!("{error:?}"))?;
+    assert!(
+        boundaries.windows(2).all(|pair| pair[0] <= pair[1]),
+        "regrown index is ordered"
+    );
+    let (mut cold, table) = reopened(&store, &root);
+    let handle = table.handle().ok_or("no table")?;
+    assert_eq!(
+        warm(&mut cold, &[table], |heap| heap.arena().len(handle)),
+        224
+    );
+    for i in (0..336).chain(added) {
+        let held = get(&mut cold, &[table], table, Value::Int(i));
+        let right = match held {
+            None => removed.contains(&i),
+            Some(Value::Absent) => is_set && !removed.contains(&i),
+            Some(Value::Int(held)) => !is_set && !removed.contains(&i) && held == -i,
+            _ => false,
+        };
+        assert!(right, "entry {i} reads otherwise: {held:?}");
+    }
+    Ok(())
+}
+
 /// The thinned case at the index itself, at height 2: a filled index of
 /// 20,736 leaves (288 pages of 72 under 4 of 72) loses, in one edit, all
 /// but the first leaf of its first upper page, so that page holds one

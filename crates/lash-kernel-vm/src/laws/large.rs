@@ -1552,7 +1552,8 @@ fn index_case() -> Result<(), String> {
 /// and need not be a direct build's. Slack it may keep: a chunk with at
 /// least one member, and an index page with at least half of `NODE_REFS`
 /// references, or fewer when it is the last of its level, also when a map
-/// is thinned to one chunk in each index page, and when an index of
+/// is thinned to one chunk in each index page, regrows below its first
+/// surviving boundary after its first four chunks are emptied, and when an index of
 /// height 2 is thinned to one leaf under an upper page. A tuple
 /// is content-addressed: built in a store with history, sealed again
 /// cold, or copied from its cold members, inline and at index heights 1
@@ -1586,6 +1587,11 @@ fn an_object_grown_and_shrunk_across_each_boundary_keeps_its_contents_and_a_tupl
     for kind in ["map", "set", "record"] {
         if let Err(error) = table_cleared_case(kind) {
             failed.push(error);
+        }
+    }
+    for (kind, is_set) in [("map", false), ("set", true)] {
+        if let Err(error) = occupancy::table_regrown_below_first_case(is_set) {
+            failed.push(format!("{kind}, regrown below first: {error}"));
         }
     }
     if let Err(error) = list_cleared_case() {
