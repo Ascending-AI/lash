@@ -10,7 +10,9 @@
 
 use std::ops::Range;
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, Chunks, LongText, Sequence, Table};
+use lash_kernel_doc::arena::{
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ColdImmutable, LongText, Sequence, Table,
+};
 use lash_kernel_doc::heap::{NormalKey, PAYLOAD_LEAF_BYTES, PageRef};
 use lash_kernel_doc::{NativeError, Value};
 
@@ -91,24 +93,29 @@ impl Arena {
 
     /// Opens the cold tuple `handle` of `len` members, written chunked, as
     /// its chunks: one cold chunk per [`Sequence::CHUNK`] positions, as a
-    /// large list opens. Its head stays the one its referrers named it by.
+    /// large list opens. The load that calls this has checked the row's
+    /// head against the one its referrers named it by.
     ///
     /// # Errors
     ///
-    /// A malformed fault when `handle` is no cold tuple of `len` members.
+    /// A malformed fault when `handle` is no cold tuple, or one of another
+    /// length.
     pub fn open_tuple(&mut self, handle: ArenaHandle, len: u64) -> Result<(), NativeError> {
         let width = Sequence::CHUNK as u64;
         let (body, facts) = self.parts_mut(handle)?;
-        match body {
-            Body::Tuple(sequence) if facts.cold && sequence.len == len => {
-                sequence.chunks = Chunks::Split(
-                    (0..len.div_ceil(width))
-                        .map(|chunk| cold(width.min(len - chunk * width)))
-                        .collect(),
-                );
-            }
-            _ => return Err(malformed("a chunked tuple's row names another body")),
+        let opaque = matches!(body, Body::Cold(ColdImmutable::Tuple));
+        if !facts.cold || !(opaque || matches!(body, Body::Tuple(sequence) if sequence.len == len))
+        {
+            return Err(malformed("a chunked tuple's row names another body"));
         }
+        *body = Body::Tuple(Sequence {
+            len,
+            chunks: Chunks::Split(
+                (0..len.div_ceil(width))
+                    .map(|chunk| cold(width.min(len - chunk * width)))
+                    .collect(),
+            ),
+        });
         facts.cold = false;
         Ok(())
     }

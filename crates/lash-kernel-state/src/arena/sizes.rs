@@ -17,11 +17,55 @@ pub struct Summary {
     pub has_edges: bool,
 }
 
-pub(super) fn value_summary(facts: &(impl super::FactTable + ?Sized), value: &Value) -> Summary {
+/// `value`'s summary. A tuple no row of its own has vouched for retries
+/// for that row: its summary is a fact of it.
+///
+/// # Errors
+///
+/// [`lash_kernel_doc::Retry::Cold`] for an unvouched tuple.
+#[inline]
+pub(super) fn value_summary(
+    facts: &(impl super::FactTable + ?Sized),
+    value: &Value,
+) -> Result<Summary, NativeError> {
+    match value {
+        Value::Tuple(handle) | Value::Error(handle) => match facts.get(handle.index() as usize) {
+            None => Ok(Summary::default()),
+            Some(fact) if matches!(value, Value::Tuple(_)) && fact.unvouched() => {
+                Err(lash_kernel_doc::Retry::Cold {
+                    object: *handle,
+                    chunk: 0,
+                }
+                .into())
+            }
+            Some(fact) => Ok(fact.summary),
+        },
+        _ => Ok(edges(value)),
+    }
+}
+
+/// `value`'s summary as the rows naming it give it: an unvouched tuple's
+/// claimed head's. What a load checks a holder's row by, whose own head
+/// binds the heads it names its members by; never a fact of the member.
+fn named_summary(facts: &(impl super::FactTable + ?Sized), value: &Value) -> Summary {
     match value {
         Value::Tuple(handle) | Value::Error(handle) => facts
             .get(handle.index() as usize)
-            .map_or_else(Summary::default, |facts| facts.summary),
+            .map_or_else(Summary::default, |facts| match facts.projected() {
+                Some(super::Projected {
+                    claim: Some(super::Head::Tuple { shape, .. }),
+                    ..
+                }) => *shape,
+                _ => facts.summary,
+            }),
+        _ => edges(value),
+    }
+}
+
+/// The summary of a value no immutable composite: the edges it is.
+#[inline]
+fn edges(value: &Value) -> Summary {
+    match value {
         Value::List(_)
         | Value::Map(_)
         | Value::Set(_)
@@ -41,18 +85,44 @@ pub(super) fn value_summary(facts: &(impl super::FactTable + ?Sized), value: &Va
 }
 
 /// The summary of an immutable composite of `members`.
-pub(super) fn composite(facts: &(impl super::FactTable + ?Sized), members: &[Value]) -> Summary {
+///
+/// # Errors
+///
+/// [`lash_kernel_doc::Retry::Cold`] for an unvouched tuple member.
+pub(super) fn composite(
+    facts: &(impl super::FactTable + ?Sized),
+    members: &[Value],
+) -> Result<Summary, NativeError> {
     let mut summary = Summary {
         depth: 1,
         ..Summary::default()
     };
     for member in members {
-        let inner = value_summary(facts, member);
-        summary.depth = summary.depth.max(inner.depth.saturating_add(1));
-        summary.task_edges = summary.task_edges.saturating_add(inner.task_edges);
-        summary.has_edges |= inner.has_edges;
+        joined(&mut summary, value_summary(facts, member)?);
+    }
+    Ok(summary)
+}
+
+/// [`composite`] of a body a load decoded, its members' summaries as its
+/// row names them ([`named_summary`]).
+pub(super) fn named_composite(
+    facts: &(impl super::FactTable + ?Sized),
+    members: &[Value],
+) -> Summary {
+    let mut summary = Summary {
+        depth: 1,
+        ..Summary::default()
+    };
+    for member in members {
+        joined(&mut summary, named_summary(facts, member));
     }
     summary
+}
+
+fn joined(summary: &mut Summary, inner: Summary) {
+    summary.depth = summary.depth.max(inner.depth.saturating_add(1));
+    summary.task_edges = summary.task_edges.saturating_add(inner.task_edges);
+    summary.has_edges |= inner.has_edges;
 }
 
 /// Three u64 words keep exact leaf sizes and eligibility, including while a

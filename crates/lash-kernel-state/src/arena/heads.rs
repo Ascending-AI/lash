@@ -5,21 +5,22 @@
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::NativeError;
-use lash_kernel_doc::arena::{
-    ArenaHandle, Body, Bytes, Chunk, Chunks, ColdImmutable, LongText, Sequence,
-};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, ColdImmutable, LongText};
 use lash_kernel_doc::heap::{EntityId, IntSummary, NormalKey};
 
-use super::sizes::composite;
+use super::sizes::named_composite;
 use super::{Arena, Facts, Head, NO_PAGE, Summary, has_cold, keys, malformed, tables};
 
 impl Arena {
     /// The one handle of durable immutable `entity`, which a row names
-    /// with `head`: the one the run already has, whose head must be
+    /// with `head`: the one the run already has, whose head (or, a tuple
+    /// not yet vouched for, the head another row named it by) must be
     /// `head`, else a proxy true to it. A function and a host handle its
-    /// head holds whole open resident, as does an empty tuple; any other opens cold, its head's
-    /// summaries in its body and facts, and every read of its payload
-    /// answers [`lash_kernel_doc::Retry::Cold`].
+    /// head holds whole open resident; a tuple of any length opens
+    /// opaque, `head` only its claim until its own row vouches for it
+    /// ([`Self::vouch`]); any other opens cold, its head's summaries in
+    /// its body and facts, and every read of its payload answers
+    /// [`lash_kernel_doc::Retry::Cold`].
     ///
     /// # Errors
     ///
@@ -31,7 +32,7 @@ impl Arena {
     ) -> Result<ArenaHandle, NativeError> {
         if let Some(handle) = self.entities.get(&entity).copied() {
             let facts = self.facts(handle)?;
-            if let Some(held) = facts.head() {
+            if let Some(held) = facts.named_by() {
                 return if held == head {
                     Ok(handle)
                 } else {
@@ -50,7 +51,7 @@ impl Arena {
                 let facts = self.facts_mut(handle)?;
                 facts.cold = cold;
                 facts.summary = summary;
-                let _ = facts.projection().head.set(head.clone());
+                named(facts.try_projection_mut()?, head);
                 if !cold {
                     self.colds = self.colds.saturating_sub(1);
                 }
@@ -73,8 +74,32 @@ impl Arena {
         let projected = facts.try_projection_mut()?;
         projected.entity = Some(entity);
         projected.based = true;
-        let _ = projected.head.set(head.clone());
+        named(projected, head);
         Ok(self.insert(body, facts))
+    }
+
+    /// The tuple `handle`, whose own row a load read and found to be the
+    /// head its referrers named it by ([`Facts::named_by`]): that head is
+    /// its own from now on, and its summary a fact of it. A tuple already
+    /// vouched for, or certified, stays as it is.
+    ///
+    /// # Errors
+    ///
+    /// A malformed fault for a stale handle.
+    pub fn vouch(&mut self, handle: ArenaHandle) -> Result<(), NativeError> {
+        let facts = self.facts_mut(handle)?;
+        let Some(claim) = facts
+            .projected_mut()
+            .and_then(|projected| projected.claim.take())
+        else {
+            return Ok(());
+        };
+        if let Head::Tuple { shape, .. } = &claim {
+            facts.summary = *shape;
+        }
+        let projected = facts.try_projection()?;
+        let _ = projected.head.set(claim);
+        Ok(())
     }
 
     /// The head of the immutable `handle`: the one it holds, else the one
@@ -87,7 +112,7 @@ impl Arena {
     /// needs and has no head of; a malformed fault for a mutable object.
     pub fn head(&self, handle: ArenaHandle) -> Result<Head, NativeError> {
         let facts = self.facts(handle)?;
-        if let Some(head) = facts.head() {
+        if let Some(head) = facts.named_by() {
             return Ok(head.clone());
         }
         keys::content_head(
@@ -109,14 +134,14 @@ impl Arena {
     /// A malformed fault for a mutable or partial body.
     pub fn detached_head(&self, body: &Body) -> Result<Head, NativeError> {
         let shape = match body {
-            Body::Tuple(sequence) => composite(
+            Body::Tuple(sequence) => named_composite(
                 &self.facts,
                 sequence
                     .chunks
                     .values()
                     .ok_or_else(|| malformed("a decoded tuple is partial"))?,
             ),
-            Body::Error(error) => composite(&self.facts, std::slice::from_ref(&error.data)),
+            Body::Error(error) => named_composite(&self.facts, std::slice::from_ref(&error.data)),
             _ => Summary::default(),
         };
         keys::content_head(&self.objects, &self.facts, None, body, shape)
@@ -124,9 +149,23 @@ impl Arena {
 
     /// Fixes `head` as the immutable `handle`'s, as a seal that wrote a row
     /// naming it does: every later row names it so.
+    /// A tuple not yet vouched for keeps the claim it was named by, which
+    /// the seal copies: only its own row vouches for it.
     pub fn certify(&self, handle: ArenaHandle, head: Head) -> Result<(), NativeError> {
+        let facts = self.facts(handle)?;
+        if let Some(projected) = facts.projected()
+            && let Some(claim) = &projected.claim
+        {
+            return if *claim == head {
+                Ok(())
+            } else {
+                Err(malformed(
+                    "a seal certifies another head than the tuple's claim",
+                ))
+            };
+        }
         super::freeze(self.body(handle)?);
-        let projected = self.facts(handle)?.try_projection()?;
+        let projected = facts.try_projection()?;
         let _ = projected.head.set(head);
         projected.named_head.take();
         Ok(())
@@ -203,8 +242,21 @@ impl Arena {
     }
 }
 
+/// Gives the immutable whose projection is `projected` the `head` a row
+/// names it by: a tuple's only as a claim, which its own row must vouch
+/// for before any fact of it is used ([`Arena::vouch`]); any other's as
+/// its head, which its payload is checked against when it is read.
+fn named(projected: &mut super::Projected, head: &Head) {
+    if matches!(head, Head::Tuple { .. }) {
+        projected.claim = Some(head.clone());
+    } else {
+        let _ = projected.head.set(head.clone());
+    }
+}
+
 /// The body an immutable opens with from its `head`, and its summary: a
-/// function and a host handle whole, as is an empty tuple; any other cold,
+/// function and a host handle whole; a tuple of any length opaque, its
+/// head no fact of it until its own row vouches for it; any other cold,
 /// holding what its head says of it. What a load of the object's row
 /// replaces, and what it is admitted against.
 #[must_use]
@@ -216,14 +268,7 @@ pub fn opened(head: &Head) -> (Body, Summary) {
         }
     }
     match head {
-        Head::Tuple { len: 0, shape, .. } => (Body::Tuple(Sequence::whole(Vec::new())), *shape),
-        Head::Tuple { len, shape, .. } => (
-            Body::Tuple(Sequence {
-                len: *len,
-                chunks: Chunks::Split(vec![cold(*len)]),
-            }),
-            *shape,
-        ),
+        Head::Tuple { .. } => (Body::Cold(ColdImmutable::Tuple), Summary::default()),
         Head::Error { shape, .. } => (Body::Cold(ColdImmutable::Error), *shape),
         Head::BigInt { summary, .. } => (
             Body::Cold(ColdImmutable::BigInt(*summary)),

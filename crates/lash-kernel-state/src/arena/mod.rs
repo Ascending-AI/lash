@@ -186,6 +186,14 @@ pub struct Projected {
     /// or the one its first seal certified. Fixed once given: the object
     /// never changes, and every row that names it holds this head.
     pub head: std::cell::OnceCell<Head>,
+    /// The head a row named a tuple by, which no row of the tuple's own has
+    /// vouched for yet: its body is opaque ([`ColdImmutable::Tuple`]) and
+    /// no fact of it is published until its row, read, is this head
+    /// whole ([`Arena::vouch`]). Only a comparison with another referrer's
+    /// head, and a seal copying it into a row naming the tuple, read it.
+    ///
+    /// [`ColdImmutable::Tuple`]: lash_kernel_doc::arena::ColdImmutable::Tuple
+    pub(crate) claim: Option<Head>,
     /// The head of an immutable that names an object or task, until the
     /// first seal certifies it: it reads the identity of the objects it
     /// names (a durable id, or a process-local token before there is
@@ -258,8 +266,23 @@ impl Facts {
     pub fn page(&self) -> Option<&PageValue> {
         self.projected().and_then(|projected| projected.page.get())
     }
+    /// The immutable's head, once it is vouched for: certified by a seal,
+    /// or a row's copy checked against the object's own row.
     pub fn head(&self) -> Option<&Head> {
         self.projected().and_then(|projected| projected.head.get())
+    }
+    /// The head every row naming the immutable must name it by: its head,
+    /// else the one a referrer's row claims for it, not yet vouched for.
+    /// What a load compares the object's row with, and a seal copies;
+    /// never a fact of the object.
+    pub fn named_by(&self) -> Option<&Head> {
+        self.projected()
+            .and_then(|projected| projected.head.get().or(projected.claim.as_ref()))
+    }
+    /// A tuple a referrer's row names, its own row not yet read.
+    pub fn unvouched(&self) -> bool {
+        self.projected()
+            .is_some_and(|projected| projected.claim.is_some())
     }
 }
 
@@ -776,7 +799,13 @@ impl Arena {
 
     /// An immutable composite's summary, as its page form certifies it;
     /// the default for everything else.
-    pub fn summary_of(&self, value: &Value) -> Summary {
+    ///
+    /// # Errors
+    ///
+    /// [`lash_kernel_doc::Retry::Cold`] for a tuple no row of its own has
+    /// vouched for yet.
+    #[inline]
+    pub fn summary_of(&self, value: &Value) -> Result<Summary, NativeError> {
         value_summary(&self.facts, value)
     }
 
@@ -845,7 +874,7 @@ impl Arena {
 
     /// A tuple of `members`, or `too_deep` past `depth_limit`.
     pub fn tuple(&mut self, members: Vec<Value>, depth_limit: usize) -> Result<Value, Raise> {
-        let summary = composite(&self.facts, &members);
+        let summary = composite(&self.facts, &members).map_err(Raise::Native)?;
         if summary.depth as usize > depth_limit {
             return Err(Raise::TooDeep);
         }
@@ -881,7 +910,7 @@ impl Arena {
         let data = lash_kernel_doc::error_object::native(args, &mut nursery, kind, message, data)?;
         let data = data.value();
         self.install(&mut nursery.into_new())?;
-        let summary = composite(&self.facts, std::slice::from_ref(&data));
+        let summary = composite(&self.facts, std::slice::from_ref(&data))?;
         Ok(Value::Error(self.insert(
             Body::Error(ErrorBody {
                 kind,
@@ -1022,7 +1051,7 @@ impl Arena {
                 (Body::Record(table), Some(index))
             }
             NewObject::Tuple(members) => {
-                let summary = composite(&self.facts, &members);
+                let summary = composite(&self.facts, &members)?;
                 return Ok((
                     Body::Tuple(Sequence::whole(members)),
                     Facts {
@@ -1059,7 +1088,7 @@ impl Arena {
                 data,
             } => {
                 let data = data.value();
-                let summary = composite(&self.facts, std::slice::from_ref(&data));
+                let summary = composite(&self.facts, std::slice::from_ref(&data))?;
                 return Ok((
                     Body::Error(ErrorBody {
                         kind,
@@ -1654,10 +1683,13 @@ pub(crate) fn first_cold<T>(chunks: &[Chunk<T>]) -> Option<u32> {
 }
 
 /// A guest error the arena's own constructors raise.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum Raise {
     /// A value nests deeper than the run's value depth (`K-VAL-034`).
     TooDeep,
+    /// A member's depth is not known yet: [`lash_kernel_doc::Retry::Cold`]
+    /// for a tuple no row of its own has vouched for.
+    Native(NativeError),
 }
 
 fn resident_text(text: lash_kernel_doc::arena::TextBytes, summary: TextSummary) -> LongText {

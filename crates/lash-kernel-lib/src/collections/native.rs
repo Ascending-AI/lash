@@ -667,7 +667,7 @@ fn key(value: &Value, args: &Args<'_>) -> Result<(), NativeError> {
         return Ok(());
     }
     if matches!(value, Value::Tuple(_))
-        && args.depth(value) as usize > args.limits().value_depth().min(128)
+        && args.depth(value)? as usize > args.limits().value_depth().min(128)
     {
         return Err(raise("too_deep", "key exceeds the configured value depth"));
     }

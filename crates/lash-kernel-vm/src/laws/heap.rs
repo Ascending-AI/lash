@@ -645,7 +645,9 @@ fn every_immutable_payload_read_retries_without_dummy_data() {
 }
 
 /// Astra §3: a cold immutable's length, depth and text counts answer from
-/// its head, without a load.
+/// its head, without a load, except a tuple's: a tuple's head is a claim
+/// until its own row vouches for it, so its length and depth read that row
+/// first (the l65g ruling).
 #[test]
 fn cold_metadata_reads_preserve_len_depth_and_text_counts() {
     let (heap, six, _) = six_cold();
@@ -660,15 +662,13 @@ fn cold_metadata_reads_preserve_len_depth_and_text_counts() {
         args.bytes(&bytes).expect("a read").expect("bytes").len(),
         20
     );
-    assert_eq!(
+    retry_on(
         args.sequence(&tuple)
-            .expect("a read")
-            .expect("a tuple")
-            .len(),
-        2
+            .map(|view| view.map(|view| view.len())),
+        tuple,
     );
-    assert_eq!(args.depth(&tuple), 2);
-    assert_eq!(args.depth(&error), 1);
+    retry_on(args.depth(&tuple), tuple);
+    assert_eq!(args.depth(&error).ok(), Some(1));
     for member in six.members {
         assert!(
             heap.arena()

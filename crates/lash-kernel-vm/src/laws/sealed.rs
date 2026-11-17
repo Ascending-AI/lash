@@ -798,6 +798,10 @@ fn deep_ints(heap: &mut SlotHeap, from: i64) -> Value {
     )
 }
 
+/// How [`nested`] says the page codec refuses a forgery: no page can hold
+/// it, so no store can answer it.
+pub(super) const DECODE_REFUSES: &str = "the page codec refuses the forgery";
+
 /// What of the row a case substitutes.
 #[derive(Clone, Copy)]
 enum Substitute {
@@ -1236,7 +1240,8 @@ fn nested(
         if !forge(head) {
             return Err(format!("the member's head is another kind: {head:?}"));
         }
-        let held: Head = decode_body(&encode_body(&*head)).map_err(|error| error.to_string())?;
+        let held: Head = decode_body(&encode_body(&*head))
+            .map_err(|error| format!("{DECODE_REFUSES}: {error}"))?;
         if held == was {
             return Err(format!("no page can hold the forgery: {head:?}"));
         }
@@ -1327,7 +1332,11 @@ fn nested(
             .map_err(|error| format!("{error:?}"))?;
         let mut chunk: ChunkPage =
             decode_body(&chunk_page.tokens).map_err(|error| error.to_string())?;
-        let (id, head) = chunk.heads.0.first_mut().ok_or("the chunk names no head")?;
+        // A table's keys are placed by hash: a chunk of scalars alone
+        // names no head, and holds no member to forge.
+        let Some((id, head)) = chunk.heads.0.first_mut() else {
+            continue;
+        };
         member = Some(*id);
         match (substitute, &replacement) {
             (Substitute::NestedRoot, Some((replacement, _))) => {

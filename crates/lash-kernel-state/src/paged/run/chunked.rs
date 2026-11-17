@@ -35,7 +35,7 @@ use super::super::tree::Access;
 
 use super::ids::ObjectId;
 use super::index::{self, Index, Key, Leaf, Part, Seek, Shape};
-use super::objects::{Heads, ObjectKind, RunValue};
+use super::objects::{Head, Heads, ObjectKind, RunValue};
 
 /// The most members one chunk page holds: one sequence leaf.
 pub const CHUNK: usize = 64;
@@ -410,6 +410,7 @@ pub fn write_list(access: &Access<'_>, values: &[RunValue]) -> Result<Chunked, H
         next: len,
         index: Index::build(access, &Chunked::shape_of(ObjectKind::List, len), chunks)?,
         edges: rewrite_edges(access, &Index::empty(&EDGES), &delta)?,
+        head: None,
     };
     chunked.check().map_err(HeapFault::Malformed)?;
     Ok(chunked)
@@ -510,10 +511,10 @@ pub fn rewrite_edges(
     )
 }
 
-/// A large list's or table's row record: its kind and length, the next
-/// insertion sequence of a table, the top of its chunk index and of the
-/// index of the edge pages holding the exact multiset of ids its chunks
-/// reference.
+/// A large list's, tuple's or table's row record: its kind and length, the
+/// next insertion sequence of a table, the top of its chunk index and of
+/// the index of the edge pages holding the exact multiset of ids its
+/// chunks reference, and a tuple's whole head.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Chunked {
     pub kind: ObjectKind,
@@ -525,6 +526,10 @@ pub struct Chunked {
     pub index: Index<ChunkRef>,
     /// The edge index, ascending by first id.
     pub edges: Index<EdgePart>,
+    /// A tuple's head, whole, and nothing for any other kind: what every
+    /// referrer's copy of the head is checked against before a fact of the
+    /// tuple is used. Its length and content root are the row's.
+    pub head: Option<Head>,
 }
 
 impl Chunked {
@@ -561,8 +566,9 @@ impl Chunked {
 
     /// Checks what decoding cannot: the kind is a list's or a table's, a
     /// table's index is in placement order and a list's names none, a
-    /// tuple's is positional with its content ids, and the edges ascend
-    /// once each.
+    /// tuple's is positional with its content ids, a tuple's row alone
+    /// holds a head, one of its length and content root, and the edges
+    /// ascend once each.
     ///
     /// # Errors
     ///
@@ -589,6 +595,12 @@ impl Chunked {
         if self.kind == ObjectKind::Tuple && self.chunks() != identity::tuple_leaves(self.len) {
             return Err("a chunked tuple's index is not positional".into());
         }
+        match (&self.head, self.kind) {
+            (Some(Head::Tuple { len, root, .. }), ObjectKind::Tuple)
+                if *len == self.len && self.tuple_root() == Some(*root) => {}
+            (None, kind) if kind != ObjectKind::Tuple => {}
+            _ => return Err("a chunked row's head is not its tuple's".into()),
+        }
         if self.len > self.next {
             return Err("a chunked table holds more entries than it took".into());
         }
@@ -607,21 +619,23 @@ impl Chunked {
 
 impl TokenCodec for Chunked {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
+        out.seq(6);
         self.kind.encode(out);
         out.unsigned(self.len);
         out.unsigned(self.next);
         self.index.encode(out);
         self.edges.encode(out);
+        self.head.encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
+        input.expect_struct(6)?;
         let chunked = Self {
             kind: ObjectKind::decode(input)?,
             len: input.unsigned()?,
             next: input.unsigned()?,
             index: Index::decode(input)?,
             edges: Index::decode(input)?,
+            head: Option::decode(input)?,
         };
         chunked.check().map_err(TokenError::Invalid)?;
         Ok(chunked)

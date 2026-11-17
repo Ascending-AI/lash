@@ -350,29 +350,27 @@ impl SlotHeap {
         let opened = match chunked.kind {
             ObjectKind::List => self.arena.open_list(object, chunked.len),
             ObjectKind::Tuple => {
-                // The row must be the tuple every referrer's head names:
-                // its length and its content root, which the top node the
-                // row embeds makes; each index and chunk page read later
-                // is checked against its parent on the way down
-                // ([`super::large::Large::read`]).
-                let head = self
+                // The row must be the tuple every referrer's head names,
+                // whole: its head, whose length and content root the row
+                // checked against the top node it embeds when it was
+                // decoded ([`Chunked::check`]); each index and chunk page
+                // read later is checked against its parent on the way
+                // down ([`super::large::Large::read`]). Only then is the
+                // head a fact of the tuple.
+                let named = self
                     .arena
                     .facts(object)
                     .map_err(|error| malformed(error.to_string()))?
-                    .head()
+                    .named_by()
                     .cloned();
-                let named = match &head {
-                    Some(Head::Tuple { len, root, .. }) => {
-                        *len == chunked.len && chunked.tuple_root() == Some(*root)
-                    }
-                    _ => false,
-                };
-                if !named {
+                if named.is_none() || named.as_ref() != chunked.head.as_ref() {
                     return Err(self.corrupt_row(format!(
-                        "a chunked tuple's row disagrees with the head its referrers name it by: {head:?}"
+                        "a chunked tuple's row disagrees with the head its referrers name it by: {named:?}"
                     )));
                 }
-                self.arena.open_tuple(object, chunked.len)
+                self.arena
+                    .open_tuple(object, chunked.len)
+                    .and_then(|()| self.arena.vouch(object))
             }
             kind => {
                 let proxy = match kind {
@@ -401,6 +399,34 @@ impl SlotHeap {
         let now = self.holds(object);
         self.held = self.held.saturating_add(now);
         self.place(object, now);
+        Ok(())
+    }
+
+    /// Reads the row of each tuple among `keys` that no row of its own has
+    /// vouched for yet, before a table is keyed by their facts: `held`,
+    /// what the load decoded, held across each read beside `roots`.
+    fn vouch_keys(
+        &mut self,
+        keys: impl Iterator<Item = Value>,
+        held: &[Value],
+        roots: &mut dyn FnMut(&mut Visit<'_>),
+    ) -> Result<(), LoadError> {
+        for key in keys {
+            let Value::Tuple(tuple) = key else {
+                continue;
+            };
+            let unvouched = self
+                .arena
+                .facts(tuple)
+                .map_err(|error| self.corrupt_row(error.to_string()))?
+                .unvouched();
+            if unvouched {
+                self.load(tuple, 0, &mut |visit| {
+                    roots(visit);
+                    held.iter().for_each(&mut *visit);
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -654,24 +680,33 @@ impl SlotHeap {
                     .iter()
                     .map(|member| open::value(&mut self.arena, member, &page.heads))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(malformed)?;
+                    .map_err(|reason| self.corrupt_row(reason))?;
                 self.arena.decoded_list(object, chunk, values)
             }
             Members::Table(entries) => {
-                let mut decoded = Vec::with_capacity(entries.len());
+                // Every key and value opened, held across the reads of
+                // the tuple keys' own rows, which vouch for them before
+                // the chunk is keyed by their facts.
+                let mut held = Vec::with_capacity(entries.len() * 2);
                 for entry in entries {
-                    let key =
-                        open::value(&mut self.arena, &entry.key, &page.heads).map_err(malformed)?;
-                    let value = open::value(&mut self.arena, &entry.value, &page.heads)
-                        .map_err(malformed)?;
+                    for value in [&entry.key, &entry.value] {
+                        held.push(
+                            open::value(&mut self.arena, value, &page.heads)
+                                .map_err(|reason| self.corrupt_row(reason))?,
+                        );
+                    }
+                }
+                self.vouch_keys(held.iter().step_by(2).copied(), &held, roots)?;
+                let mut decoded = Vec::with_capacity(entries.len());
+                for (entry, &[key, value]) in entries.iter().zip(held.as_chunks::<2>().0) {
                     let normal = self
                         .arena
                         .semantics()
                         .normal_key(&key)
-                        .map_err(|error| malformed(error.to_string()))?
-                        .ok_or_else(|| malformed("a table key has no normal form".into()))?;
+                        .map_err(|error| self.corrupt_row(error.to_string()))?
+                        .ok_or_else(|| self.corrupt_row("a table key has no normal form".into()))?;
                     if placement(&normal) != entry.placement {
-                        return Err(malformed(format!(
+                        return Err(self.corrupt_row(format!(
                             "large table {} holds a key out of its placement",
                             id.0
                         )));
@@ -979,7 +1014,7 @@ impl Heap for SlotHeap {
                 .arena
                 .facts(object)
                 .map_err(|error| malformed(error.to_string()))?
-                .head()
+                .named_by()
                 .map(Head::kind);
             let kind = row.record.kind();
             if head.map_or(!kind.mutable(), |head| head != kind) {
@@ -1076,7 +1111,7 @@ impl Heap for SlotHeap {
             .arena
             .facts(object)
             .map_err(|error| malformed(error.to_string()))?
-            .head()
+            .named_by()
             .cloned();
         macro_rules! refuse {
             ($held:expr) => {{
@@ -1102,7 +1137,8 @@ impl Heap for SlotHeap {
                 self.payloads.insert(id, vec![Some(*paged)]);
                 payload_body(paged)
             }
-            record => open::body(&mut self.arena, record, &row.heads).map_err(malformed)?,
+            record => open::body(&mut self.arena, record, &row.heads)
+                .map_err(|reason| self.corrupt_row(reason))?,
         };
         for (id, units) in fresh {
             if let Some(handle) = self.arena.entity_handle(open::entity(id)) {
@@ -1117,8 +1153,18 @@ impl Heap for SlotHeap {
                 return Err(refuse!(held));
             }
         }
+        // A table is indexed by its keys' facts: each tuple key's own row
+        // vouches for it first.
+        if let lash_kernel_doc::arena::Body::Map(table)
+        | lash_kernel_doc::arena::Body::Set(table)
+        | lash_kernel_doc::arena::Body::Record(table) = &body
+        {
+            let held = table.chunks.values().unwrap_or_default();
+            self.vouch_keys(held.iter().step_by(2).copied(), held, roots)?;
+        }
         self.arena
             .materialized(object, body)
+            .and_then(|()| self.arena.vouch(object))
             .map_err(|error| malformed(error.to_string()))?;
         // The body was admitted as the record's schedule less the
         // placeholder; it holds what its body does.

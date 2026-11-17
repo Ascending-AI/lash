@@ -22,7 +22,7 @@ impl Semantics for NoGraph {
     fn normal_key(&self, _: &Value) -> Result<Option<NormalKey>, NativeError> {
         panic!("a scalar relation must not normalize keys")
     }
-    fn depth(&self, _: &Value) -> u32 {
+    fn depth(&self, _: &Value) -> Result<u32, NativeError> {
         panic!("a scalar relation must not traverse a graph")
     }
     fn limits(&self) -> KernelDataLimits {

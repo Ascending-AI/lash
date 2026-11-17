@@ -359,23 +359,29 @@ fn every_head_field_forged_alone_fails_the_first_read_in_a_chunk_and_inline() {
 }
 
 /// One field of a tuple's head: its name, whether the member is a tuple
-/// that is no key (one holding a list), and the forgery of that field
-/// alone.
+/// that is no key (one holding a list), the sizes of member whose head
+/// the page codec cannot hold forged so ([`DECODE_REFUSES`]), and the
+/// forgery of that field alone.
 type TupleField = (
     &'static str,
     bool,
+    &'static [&'static str],
     fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool,
 );
 
 /// Every field of a tuple's head a page can carry. A page writes a
 /// tuple's root or, an inline tuple that is a key, its flat key, and
 /// derives the other, so its identity is forged in the one it writes.
+/// An inline tuple's flat key spells its length, and a head's task edges
+/// must agree with its edge flag and depth, so the codec refuses those
+/// forgeries before any store holds them.
 const TUPLE_FIELDS: &[TupleField] = {
     use lash_kernel_state::paged::run::objects::Head;
     &[
         (
             "its length forged to zero (the nested-length attack, review astra-l65c)",
             false,
+            &["inline"],
             |head| match head {
                 Head::Tuple { len, .. } => {
                     *len = 0;
@@ -384,44 +390,65 @@ const TUPLE_FIELDS: &[TupleField] = {
                 _ => false,
             },
         ),
-        ("its length forged one short", false, |head| match head {
-            Head::Tuple { len, .. } => {
-                *len -= 1;
-                true
-            }
-            _ => false,
-        }),
-        ("its shape's depth forged", false, |head| match head {
+        (
+            "its length forged one short",
+            false,
+            &["inline"],
+            |head| match head {
+                Head::Tuple { len, .. } => {
+                    *len -= 1;
+                    true
+                }
+                _ => false,
+            },
+        ),
+        ("its shape's depth forged", false, &[], |head| match head {
             Head::Tuple { shape, .. } => {
                 shape.depth += 1;
                 true
             }
             _ => false,
         }),
-        ("its shape's task edges forged", false, |head| match head {
-            Head::Tuple { shape, .. } => {
-                shape.task_edges += 1;
-                true
-            }
-            _ => false,
-        }),
-        ("its shape's edge flag forged", false, |head| match head {
-            Head::Tuple { shape, .. } => {
-                shape.has_edges = !shape.has_edges;
-                true
-            }
-            _ => false,
-        }),
-        ("its key's form forged: no key", false, |head| match head {
-            Head::Tuple { normal, .. } if normal.is_some() => {
-                *normal = None;
-                true
-            }
-            _ => false,
-        }),
+        (
+            "its shape's task edges forged",
+            false,
+            &["chunked", "inline"],
+            |head| match head {
+                Head::Tuple { shape, .. } => {
+                    shape.task_edges += 1;
+                    true
+                }
+                _ => false,
+            },
+        ),
+        (
+            "its shape's edge flag forged",
+            false,
+            &[],
+            |head| match head {
+                Head::Tuple { shape, .. } => {
+                    shape.has_edges = !shape.has_edges;
+                    true
+                }
+                _ => false,
+            },
+        ),
+        (
+            "its key's form forged: no key",
+            false,
+            &[],
+            |head| match head {
+                Head::Tuple { normal, .. } if normal.is_some() => {
+                    *normal = None;
+                    true
+                }
+                _ => false,
+            },
+        ),
         (
             "no key, its key's form forged: a key",
             true,
+            &[],
             |head| match head {
                 Head::Tuple { normal, .. } if normal.is_none() => {
                     *normal = Some(lash_kernel_doc::heap::NormalKey::Digest([0; 32]));
@@ -433,6 +460,7 @@ const TUPLE_FIELDS: &[TupleField] = {
         (
             "its identity forged, its row kept",
             false,
+            &[],
             |head| match head {
                 Head::Tuple {
                     normal: Some(normal @ lash_kernel_doc::heap::NormalKey::Inline(_)),
@@ -450,6 +478,43 @@ const TUPLE_FIELDS: &[TupleField] = {
         ),
     ]
 };
+
+/// One use of a tuple a run makes, first after its holder is reached: an
+/// item read, or one of its head's facts alone (its key, its depth, its
+/// length), which a check on item reads alone would not cover.
+type Access = (
+    &'static str,
+    fn(&SlotHeap, Value) -> Result<(), lash_kernel_doc::arena::native::NativeError>,
+);
+
+const ACCESSES: &[Access] = &[
+    ("an item read and its key", |heap, member| {
+        let inner =
+            member
+                .handle()
+                .ok_or(lash_kernel_doc::arena::native::NativeError::Malformed(
+                    "the member is no object",
+                ))?;
+        heap.arena().item(inner, 0)?;
+        heap.arena().semantics().normal_key(&member)?;
+        Ok(())
+    }),
+    ("its key alone", |heap, member| {
+        heap.arena().semantics().normal_key(&member).map(drop)
+    }),
+    ("its depth alone", |heap, member| {
+        heap.arena().summary_of(&member).map(drop)
+    }),
+    ("its length alone", |heap, member| {
+        let inner =
+            member
+                .handle()
+                .ok_or(lash_kernel_doc::arena::native::NativeError::Malformed(
+                    "the member is no object",
+                ))?;
+        heap.arena().len(inner).map(drop)
+    }),
+];
 
 /// A tuple of `len` members: integers, the last a list when it is no key.
 fn tuple(heap: &mut SlotHeap, len: i64, unkeyable: bool) -> Value {
@@ -471,6 +536,8 @@ fn field(i: i64) -> Value {
 struct Holder {
     name: &'static str,
     chunked: bool,
+    /// It holds the member as a key, so only a tuple that is a key.
+    key: bool,
     build: fn(&mut SlotHeap, Value) -> Value,
     reach: fn(
         &SlotHeap,
@@ -492,30 +559,35 @@ const HOLDERS: &[Holder] = &[
     Holder {
         name: "a tuple's chunk",
         chunked: true,
+        key: false,
         build: |heap, member| make(heap, NewObject::Tuple(vec![member; 513])),
         reach: first,
     },
     Holder {
         name: "a tuple's row",
         chunked: false,
+        key: false,
         build: |heap, member| make(heap, NewObject::Tuple(vec![member; 2])),
         reach: first,
     },
     Holder {
         name: "a list's chunk",
         chunked: true,
+        key: false,
         build: |heap, member| make(heap, NewObject::List(vec![member; 513])),
         reach: first,
     },
     Holder {
         name: "a list's row",
         chunked: false,
+        key: false,
         build: |heap, member| make(heap, NewObject::List(vec![member; 2])),
         reach: first,
     },
     Holder {
         name: "a map's chunk",
         chunked: true,
+        key: false,
         build: |heap, member| {
             make(
                 heap,
@@ -527,12 +599,14 @@ const HOLDERS: &[Holder] = &[
     Holder {
         name: "a map's row",
         chunked: false,
+        key: false,
         build: |heap, member| make(heap, NewObject::Map(vec![(Value::Int(0), member)])),
         reach: |heap, holder| heap.arena().table_get(holder, &Value::Int(0)),
     },
     Holder {
         name: "a record's chunk",
         chunked: true,
+        key: false,
         build: |heap, member| {
             make(
                 heap,
@@ -544,12 +618,14 @@ const HOLDERS: &[Holder] = &[
     Holder {
         name: "a record's row",
         chunked: false,
+        key: false,
         build: |heap, member| make(heap, NewObject::Record(vec![(field(0), member)])),
         reach: |heap, holder| heap.arena().table_get(holder, &field(0)),
     },
     Holder {
         name: "a closure's cell",
         chunked: false,
+        key: false,
         build: |heap, member| {
             use lash_kernel_value::names::{CallableId, FunctionId};
             use lash_kernel_value::sites::{Site, Unit};
@@ -579,14 +655,41 @@ const HOLDERS: &[Holder] = &[
             heap.arena().cell(cell).map(Some)
         },
     },
+    Holder {
+        name: "a set's chunk, as a key",
+        chunked: true,
+        key: true,
+        build: |heap, member| {
+            let mut keys = vec![member];
+            keys.extend((1..513).map(Value::Int));
+            make(heap, NewObject::Set(keys))
+        },
+        reach: first_key,
+    },
+    Holder {
+        name: "a set's row, as a key",
+        chunked: false,
+        key: true,
+        build: |heap, member| make(heap, NewObject::Set(vec![member])),
+        reach: first_key,
+    },
 ];
 
-/// The member `holder` holds in the cold `held`, reached, its first member
-/// read and its key taken, each cold page loaded as the reads ask: the
-/// member, or the first load's error.
+/// The first key of a set.
+fn first_key(
+    heap: &SlotHeap,
+    holder: lash_kernel_doc::arena::ArenaHandle,
+) -> Result<Option<Value>, lash_kernel_doc::arena::native::NativeError> {
+    Ok(heap.arena().table_next(holder, None)?.map(|(_, key)| key))
+}
+
+/// The member `holder` holds in the cold `held`, reached and used as
+/// `access` says, each cold page loaded as the reads ask: the member, or
+/// the first load's error.
 fn reached(
     heap: &mut SlotHeap,
     holder: &Holder,
+    access: &Access,
     held: Value,
 ) -> Result<Result<Value, crate::heap::LoadError>, String> {
     use lash_kernel_doc::arena::native::{NativeError, Retry};
@@ -594,11 +697,7 @@ fn reached(
     for _ in 0..64 {
         let asked = (holder.reach)(heap, handle).and_then(|member| {
             let member = member.ok_or(NativeError::Malformed("the holder holds no member"))?;
-            let inner = member
-                .handle()
-                .ok_or(NativeError::Malformed("the member is no object"))?;
-            heap.arena().item(inner, 0)?;
-            heap.arena().semantics().normal_key(&member)?;
+            (access.1)(heap, member)?;
             Ok(member)
         });
         match asked {
@@ -616,20 +715,27 @@ fn reached(
     Err("the reads asked for more than 64 loads".into())
 }
 
-/// Lead ruling, l65f item 2: every field of a tuple's head, forged alone
-/// where its holder holds it, for a chunked tuple and an inline one,
+/// Lead ruling, l65f item 2 (l65g): every field of a tuple's head, forged
+/// alone where its holder holds it, for a chunked tuple and an inline one,
 /// under every holder ([`HOLDERS`]), the tuple's row and every other page
-/// kept, fails the first read that reaches the tuple with
-/// `Store(Corrupt)`: a holder's head is checked against the row it names,
-/// whatever holds it.
+/// kept, fails the first use of the tuple ([`ACCESSES`]: an item read, or
+/// its key, depth or length alone) with `Store(Corrupt)`: every holder's
+/// copy of a tuple's head is checked whole against the tuple's row before
+/// a fact of it is used. A forgery the page codec refuses
+/// ([`TUPLE_FIELDS`]) never reaches a store, and must be refused so; a
+/// tuple that is no key is never held as one.
 #[test]
 fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder() {
     use crate::heap::LoadError;
 
     let mut failed = Vec::new();
-    for (field, unkeyable, forge) in TUPLE_FIELDS {
+    let mut refused = 0;
+    for (field, unkeyable, refusing, forge) in TUPLE_FIELDS {
         for (size, len) in [("chunked", 513), ("inline", 10)] {
             for holder in HOLDERS {
+                if holder.key && *unkeyable {
+                    continue;
+                }
                 let case = format!("{size} tuple, {field}, in {}", holder.name);
                 let store = Counting::default();
                 let mut heap = fresh(&store);
@@ -640,37 +746,53 @@ fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder()
                 } else {
                     Substitute::InlineHead(*forge)
                 };
-                let root = match nested(&store, &mut heap, &[held, member, member], substitute) {
-                    Ok(root) => root,
-                    Err(error) => {
+                let sealed = nested(&store, &mut heap, &[held, member, member], substitute);
+                let root = match (sealed, refusing.contains(&size)) {
+                    (Err(error), true) if error.starts_with(DECODE_REFUSES) => {
+                        refused += 1;
+                        continue;
+                    }
+                    (Ok(_), true) => {
+                        failed.push(format!("{case}: the page codec holds the forgery"));
+                        continue;
+                    }
+                    (Ok(root), false) => root,
+                    (Err(error), _) => {
                         failed.push(format!("{case}: {error}"));
                         continue;
                     }
                 };
-                let (mut heap, cold) = reopened(&store, &root);
-                match reached(&mut heap, holder, cold) {
-                    Ok(Err(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt {
-                        ..
-                    }))) => {}
-                    Ok(Err(other)) => {
-                        failed.push(format!(
-                            "{case}: the first read failed otherwise: {other:?}"
-                        ));
+                for access in ACCESSES {
+                    let case = format!("{case}, {}", access.0);
+                    let (mut heap, cold) = reopened(&store, &root);
+                    match reached(&mut heap, holder, access, cold) {
+                        Ok(Err(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt {
+                            ..
+                        }))) => {}
+                        Ok(Err(other)) => {
+                            failed.push(format!(
+                                "{case}: the first read failed otherwise: {other:?}"
+                            ));
+                        }
+                        Ok(Ok(member)) => {
+                            let head = member
+                                .handle()
+                                .and_then(|handle| heap.arena().facts(handle).ok())
+                                .and_then(|facts| facts.head().cloned());
+                            failed.push(format!(
+                                "{case}: the read answered, the tuple's head {head:?}"
+                            ));
+                        }
+                        Err(error) => failed.push(format!("{case}: {error}")),
                     }
-                    Ok(Ok(member)) => {
-                        let head = member
-                            .handle()
-                            .and_then(|handle| heap.arena().facts(handle).ok())
-                            .and_then(|facts| facts.head().cloned());
-                        let key = heap.arena().semantics().normal_key(&member);
-                        failed.push(format!(
-                            "{case}: the read answered, the tuple's head {head:?}, its key {key:?}"
-                        ));
-                    }
-                    Err(error) => failed.push(format!("{case}: {error}")),
                 }
             }
         }
+    }
+    // Inline length one short and zero, and task edges in both sizes,
+    // under each of the eleven holders.
+    if refused != 2 * HOLDERS.len() + 2 * HOLDERS.len() {
+        failed.push(format!("the page codec refused {refused} forgeries"));
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }

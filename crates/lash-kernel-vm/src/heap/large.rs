@@ -32,7 +32,7 @@ use lash_kernel_state::paged::run::chunked::{
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::ObjectId;
 use lash_kernel_state::paged::run::index::{Index, Seek};
-use lash_kernel_state::paged::run::objects::{Heads, ObjectKind, Record, RunValue};
+use lash_kernel_state::paged::run::objects::{Head, Heads, ObjectKind, Record, RunValue};
 use lash_kernel_value::tokens::{encode_body, logical_digest};
 
 use super::seal::{fault, heads, named_immutable, run_value};
@@ -316,8 +316,15 @@ impl Large {
                 || outcomes.iter().any(
                     |outcome| matches!(outcome, Outcome::New { pieces, .. } if pieces.len() != 1),
                 ));
+        // A tuple's row holds its whole head, which every referrer's copy
+        // is checked against before a fact of it is used.
+        let head = (kind == ObjectKind::Tuple)
+            .then(|| arena.head(handle))
+            .transpose()
+            .map_err(|error| fault(error.to_string()))?;
         let (chunked, seen, firsts) =
-            assemble(access, kind, len, next, old.as_ref(), outcomes).map_err(SealError::Heap)?;
+            assemble(access, kind, len, next, head, old.as_ref(), outcomes)
+                .map_err(SealError::Heap)?;
         let firsts = fresh_firsts.or(firsts);
         self.opened.insert(
             id,
@@ -679,6 +686,7 @@ fn assemble(
     kind: ObjectKind,
     len: u64,
     next: u64,
+    head: Option<Head>,
     old: Option<&Opened>,
     outcomes: Vec<Outcome>,
 ) -> Result<(Chunked, HashMap<u32, Seen>, Option<Vec<Option<Placement>>>), HeapFault> {
@@ -831,6 +839,7 @@ fn assemble(
         next,
         index,
         edges,
+        head,
     };
     chunked.check().map_err(HeapFault::Malformed)?;
     Ok((chunked, seen, firsts))

@@ -295,6 +295,41 @@ impl<H: Heap> Vm<H> {
 }
 
 impl<H: Heap> Vm<H> {
+    /// The tuple and error nesting depth of `value`, where nothing may run
+    /// again: a tuple no row of its own has vouched for has its row read
+    /// here, `value` held across the load.
+    #[inline]
+    pub(crate) fn depth_of(&mut self, value: Value) -> Run<usize> {
+        match self.heap.arena().summary_of(&value) {
+            Ok(summary) => Ok(summary.depth as usize),
+            Err(error) => self.depth_after_load(value, error),
+        }
+    }
+
+    #[cold]
+    fn depth_after_load(&mut self, value: Value, mut error: NativeError) -> Run<usize> {
+        let mut loaded = None;
+        loop {
+            match error {
+                NativeError::Retry(Retry::Cold { object, .. }) if loaded == Some(object) => {
+                    return Err(fault("a tuple's row did not vouch for it"));
+                }
+                NativeError::Retry(Retry::Cold { object, chunk }) => {
+                    loaded = Some(object);
+                    self.held.push(value);
+                    let reloaded = self.reload(object, chunk);
+                    self.held.pop();
+                    reloaded?;
+                }
+                other => return Err(self.native(other)),
+            }
+            match self.heap.arena().summary_of(&value) {
+                Ok(summary) => return Ok(summary.depth as usize),
+                Err(next) => error = next,
+            }
+        }
+    }
+
     /// Call site `site` of `unit`, its arguments on the stack.
     pub(super) fn call(&mut self, program: &Program, unit: &Unit, site: u32) -> Run<()> {
         let site = &unit.calls[site as usize];
@@ -834,9 +869,7 @@ impl<H: Heap> Vm<H> {
             Ok(value) => {
                 // An immediate answer holds no other value.
                 let limit = self.value_depth;
-                if crate::data::immediate_size(&value).is_none()
-                    && self.heap.arena().summary_of(&value).depth as usize > limit
-                {
+                if crate::data::immediate_size(&value).is_none() && self.depth_of(value)? > limit {
                     return Err(self.error(
                         "too_deep",
                         &format!("a value exceeds the configured {limit}-level value depth"),

@@ -299,6 +299,7 @@ fn sequence(
         Body::List(Sequence { chunks, .. }) | Body::Tuple(Sequence { chunks, .. }) => {
             super::ops::values(handle, chunks)
         }
+        Body::Cold(_) => Err(cold(handle)),
         _ => Err(NativeError::Malformed(
             "a sequence handle names another body",
         )),
@@ -395,6 +396,14 @@ pub(crate) fn normal_key(
         return Ok(normal.cloned());
     }
     if let Value::Tuple(handle) = value {
+        // A tuple's key is a fact of it: its own row vouches for the head
+        // a referrer named it by before the key is used.
+        if facts
+            .get(handle.index() as usize)
+            .is_some_and(super::Facts::unvouched)
+        {
+            return Err(cold(*handle));
+        }
         return Ok(object_head(objects, facts, *handle, true)?
             .normal()
             .cloned());
@@ -598,7 +607,10 @@ pub(crate) fn object_head(
     let fact = facts
         .get(handle.index() as usize)
         .ok_or(NativeError::Malformed("a stale handle reached the arena"))?;
-    if let Some(head) = fact.head() {
+    // A member's head as the rows naming it give it, vouched for or not:
+    // a tuple's own key is never read from a claim ([`normal_key`]), and
+    // a tuple is built only of members whose summaries are facts.
+    if let Some(head) = fact.named_by() {
         return Ok(head.clone());
     }
     if let Some(head) = fact
@@ -686,7 +698,7 @@ fn named(
         ) && !matches!(body(objects, member)?, Body::Cell(_));
         if !immutable {
             named.push(member);
-        } else if fact.head().is_none() {
+        } else if fact.named_by().is_none() {
             if fact
                 .projected()
                 .is_none_or(|projected| projected.named_head.borrow().is_none())
@@ -1087,8 +1099,8 @@ impl Semantics for ArenaSemantics<'_> {
         self.normal_key(key)
     }
 
-    fn depth(&self, value: &Value) -> u32 {
-        super::value_summary(self.facts, value).depth
+    fn depth(&self, value: &Value) -> Result<u32, NativeError> {
+        super::value_summary(self.facts, value).map(|summary| summary.depth)
     }
 
     fn limits(&self) -> KernelDataLimits {

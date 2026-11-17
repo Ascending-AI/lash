@@ -166,6 +166,7 @@ impl Arena {
                     continue;
                 }
                 let mut ready = true;
+                let mut unknown = None;
                 let mut summary = Summary {
                     depth: 1,
                     ..Summary::default()
@@ -184,11 +185,20 @@ impl Arena {
                         entries: &entries,
                         indices: &indices,
                     };
-                    let inner = value_summary(&view, value);
+                    let inner = match value_summary(&view, value) {
+                        Ok(inner) => inner,
+                        Err(error) => {
+                            unknown.get_or_insert(error);
+                            return;
+                        }
+                    };
                     summary.depth = summary.depth.max(inner.depth.saturating_add(1));
                     summary.task_edges = summary.task_edges.saturating_add(inner.task_edges);
                     summary.has_edges |= inner.has_edges;
                 });
+                if let Some(error) = unknown {
+                    return Err(error);
+                }
                 if ready {
                     entries[at].facts.summary = summary;
                     entries[at].summarized = true;

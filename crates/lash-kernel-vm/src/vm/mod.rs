@@ -1803,12 +1803,14 @@ impl<H: Heap> Vm<H> {
     /// (`K-VAL-034`).
     fn make_tuple(&mut self, n: usize) -> Run<()> {
         let values = self.top(n).to_vec();
+        // A member's depth counts once its row vouches; the op then reruns.
         let arena = self.heap.arena();
         let depth = values
             .iter()
-            .map(|value| arena.summary_of(value).depth)
-            .max()
-            .unwrap_or(0)
+            .try_fold(0, |depth, value| {
+                Ok(depth.max(arena.summary_of(value)?.depth))
+            })
+            .map_err(|error| self.native(error))?
             .saturating_add(1);
         let limit = self.value_depth;
         if depth as usize > limit {

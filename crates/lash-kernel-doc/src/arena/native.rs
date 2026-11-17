@@ -30,8 +30,8 @@ use std::sync::Arc;
 use std::borrow::Cow;
 
 use super::{
-    ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
-    Table, Value,
+    ArenaHandle, Body, Bytes, Chunk, Chunks, ColdImmutable, ErrorBody, LongText, Objects, Sequence,
+    ShortText, Table, Value,
 };
 use crate::heap::{IMMUTABLE_INLINE_MAX, LogicalBytes, NormalKey};
 
@@ -101,7 +101,12 @@ pub trait Semantics {
     fn normal_key(&self, key: &Value) -> Result<Option<NormalKey>, NativeError>;
     /// The tuple and error nesting depth of `value`, itself included
     /// (`K-VAL-034`): 0 for every other kind.
-    fn depth(&self, value: &Value) -> u32;
+    ///
+    /// # Errors
+    ///
+    /// [`Retry::Cold`] for a tuple whose depth is not known until its row
+    /// is read.
+    fn depth(&self, value: &Value) -> Result<u32, NativeError>;
     /// The run's data limits.
     fn limits(&self) -> KernelDataLimits;
 }
@@ -196,6 +201,8 @@ impl<'call> Args<'call> {
                 proxy(object, sequence)?;
                 Ok(Some(SequenceView { object, sequence }))
             }
+            // A tuple no row has vouched for yet: its row is read first.
+            Body::Cold(ColdImmutable::Tuple) => Err(Retry::Cold { object, chunk: 0 }.into()),
             _ => Err(NativeError::Malformed(
                 "a sequence handle names another body",
             )),
@@ -349,7 +356,12 @@ impl<'call> Args<'call> {
     }
 
     /// The tuple and error nesting depth of `value`, itself included.
-    pub fn depth(&self, value: &Value) -> u32 {
+    ///
+    /// # Errors
+    ///
+    /// [`Retry::Cold`] for a tuple whose depth is not known until its row
+    /// is read.
+    pub fn depth(&self, value: &Value) -> Result<u32, NativeError> {
         self.semantics.depth(value)
     }
 

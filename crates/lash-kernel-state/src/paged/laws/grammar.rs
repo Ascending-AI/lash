@@ -195,6 +195,7 @@ fn chunked() -> Vec<Chunked> {
             next: 300,
             index: Index::Leaves(chunk_refs()),
             edges: Index::Leaves(vec![edge_part()]),
+            head: None,
         },
         Chunked {
             kind: ObjectKind::Map,
@@ -208,6 +209,7 @@ fn chunked() -> Vec<Chunked> {
                 height: 1,
                 refs: edges,
             },
+            head: None,
         },
     ]
 }
