@@ -215,10 +215,6 @@ def shadow(repo, made, ceilings_raised_to=None):
     git(repo, "update-ref", "refs/heads/" + head, made[-1])
 
 
-def preserved(repo, commit):
-    return subprocess.run(["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=repo).returncode == 0
-
-
 class LandInProcess(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -252,6 +248,9 @@ class LandInProcess(unittest.TestCase):
 
         refused = {  # moment -> what is done there; the land must refuse
             "a changed scripts/land committed inside the lock": (None, "lock", changed_land),
+            "foreign work committed after qualification": (.9, "qualified", None),
+            "foreign work committed on the land's ceiling commit": (.9, "committed", None),
+            "foreign work committed as the refused land cleans up": (.9, "cleanup", None),
         }
         for name, (factor, moment, act) in refused.items():
             with self.subTest(name):
@@ -268,7 +267,8 @@ class LandInProcess(unittest.TestCase):
                 self.assertNotIsInstance(raised, Restart)
                 self.assertEqual(git(repos.origin, "rev-parse", "main"), main, "main moved")
                 self.assertEqual(len(made), 1)
-                self.assertTrue(preserved(repos.candidate, made[0]), f"{name}: the refused land dropped {made[0]}")
+                self.assertEqual(git(repos.candidate, "rev-parse", "HEAD"), made[0],
+                                 f"{name}: the refused land moved the branch off the work left on it")
 
         with self.subTest("a branch named after the qualified head at push"):
             repos = self.fresh()
@@ -290,12 +290,18 @@ class LandInProcess(unittest.TestCase):
                 "p = Path('scripts/perf_land_ceilings.py')\n"
                 f"p.write_text(p.read_text().replace({repr(old * .9)!r}, {repr(old * 2)!r}))\n"
                 "subprocess.run(['git', 'add', str(p)], check=True)\n")
-        cases = {"raised by the receipt": ({key: old * 2}, None),
-                 "kept by the receipt": ({key: old}, None),
-                 "not finite": ({key: float("nan")}, None),
-                 "not positive": ({key: 0.0}, None),
-                 "raised by a commit hook": ({key: old * .9}, hook)}
-        for name, (ratchet, hook_source) in cases.items():
+        def rewrite_unchanged(ceilings):  # a stat-only change the index has not seen
+            ceilings.write_bytes(ceilings.read_bytes())
+            os.utime(ceilings, (1, 1))
+
+        cases = {"raised by the receipt": ({key: old * 2}, None, None),
+                 "kept by the receipt": ({key: old}, None, None),
+                 "not finite": ({key: float("nan")}, None, None),
+                 "not positive": ({key: 0.0}, None, None),
+                 "raised by a commit hook": ({key: old * .9}, hook, None),
+                 "raised by a commit hook, the file rewritten unchanged at cleanup":
+                     ({key: old * .9}, hook, rewrite_unchanged)}
+        for name, (ratchet, hook_source, at_cleanup) in cases.items():
             with self.subTest(name):
                 repos = self.fresh()
                 main = git(repos.origin, "rev-parse", "main")
@@ -304,7 +310,8 @@ class LandInProcess(unittest.TestCase):
                     hooks = repos.candidate / ".git/hooks/pre-commit"
                     hooks.write_text(hook_source)
                     hooks.chmod(0o755)
-                qualified, pushes, raised, _ = land_in_process(repos, ratchet=ratchet)
+                qualified, pushes, raised, _ = land_in_process(
+                    repos, ratchet=ratchet, at={"cleanup": lambda: at_cleanup(ceilings)} if at_cleanup else None)
                 self.assertEqual(pushes, [], f"a ceiling commit {name} reached push")
                 self.assertEqual(git(repos.origin, "rev-parse", "main"), main)
                 self.assertIsNotNone(raised)
