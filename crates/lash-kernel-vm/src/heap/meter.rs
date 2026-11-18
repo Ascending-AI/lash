@@ -51,8 +51,9 @@
 //! the facts row; a slimmer row lowers `A`.
 
 use lash_kernel_doc::arena::native::NewObject;
-use lash_kernel_doc::arena::{Body, Chunk, ErrorBody};
+use lash_kernel_doc::arena::{Body, Chunk, Chunks, ErrorBody};
 use lash_kernel_doc::{Datum, Integer};
+use lash_kernel_state::paged::run::chunked::Members;
 use lash_kernel_state::paged::run::objects::Record;
 
 use crate::bytecode::program::Unit;
@@ -120,9 +121,8 @@ pub(crate) fn body(body: &Body) -> u64 {
         Body::BigInt(int) | Body::Timestamp(int) => integer(int),
         Body::LongText(text) => resident(&text.chunks),
         Body::Bytes(bytes) => resident(&bytes.chunks),
-        Body::List(sequence) | Body::Tuple(sequence) => split(&sequence.chunks, 1),
-        Body::Set(table) => split(&table.chunks, 2),
-        Body::Map(table) | Body::Record(table) => split(&table.chunks, 1),
+        Body::List(sequence) | Body::Tuple(sequence) => split(body, &sequence.chunks),
+        Body::Map(table) | Body::Set(table) | Body::Record(table) => split(body, &table.chunks),
         Body::Error(ErrorBody { .. }) => values(3),
         Body::Function(_) => CALLABLE,
         Body::Handle(handle) => (handle.kind.len() + handle.id.len()) as u64,
@@ -170,22 +170,46 @@ pub(crate) fn record(record: &Record) -> u64 {
     OBJECT.saturating_add(length)
 }
 
-/// What a list's, tuple's or table's `chunks` hold: each resident value, `per` of
-/// them to a member (a set's entry holds its key and an absent value), and
-/// each cold chunk.
-fn split(chunks: &lash_kernel_doc::arena::Chunks, per: u64) -> u64 {
+/// A set's second slot per entry is an absent sentinel.
+#[inline]
+fn resident_members(body: &Body, slots: u64) -> u64 {
+    values(if matches!(body, Body::Set(_)) {
+        slots / 2
+    } else {
+        slots
+    })
+}
+
+/// The resident units of `members` and the cold units they replace.
+pub(crate) fn chunk(body: &Body, members: &Members) -> Option<(u64, u64)> {
+    let (chunks, slots) = match (body, members) {
+        (Body::List(sequence) | Body::Tuple(sequence), Members::List(members)) => {
+            (&sequence.chunks, members.len() as u64)
+        }
+        (Body::Map(table) | Body::Set(table) | Body::Record(table), Members::Table(entries)) => {
+            (&table.chunks, (entries.len() as u64).saturating_mul(2))
+        }
+        _ => return None,
+    };
+    let cold = if chunks.count() == 1 { 0 } else { COLD_CHUNK };
+    Some((resident_members(body, slots), cold))
+}
+
+/// What a list's, tuple's or table's `chunks` hold: its resident members
+/// and each cold chunk.
+fn split(body: &Body, chunks: &Chunks) -> u64 {
     let cold = match chunks {
         // One cold chunk standing for every member is a whole object on
         // its page, a proxy: it holds [`OBJECT`] alone. A large object
         // opened by its chunks has one per at most a chunk of members.
-        lash_kernel_doc::arena::Chunks::Split(chunks) if chunks.len() == 1 => 0,
-        lash_kernel_doc::arena::Chunks::Split(chunks) => chunks
+        Chunks::Split(chunks) if chunks.len() == 1 => 0,
+        Chunks::Split(chunks) => chunks
             .iter()
             .filter(|chunk| matches!(chunk, Chunk::Cold { .. }))
             .count() as u64,
         _ => 0,
     };
-    values(chunks.resident_len() / per).saturating_add(COLD_CHUNK.saturating_mul(cold))
+    resident_members(body, chunks.resident_len()).saturating_add(COLD_CHUNK.saturating_mul(cold))
 }
 
 /// What `object` holds once placed. A map or record built from pairs that

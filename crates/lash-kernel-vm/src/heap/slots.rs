@@ -638,64 +638,59 @@ impl SlotHeap {
             .large
             .read(durable.directory.access(), id, chunk)
             .map_err(LoadError::Store)?;
-        let corrupt = |reason: String| {
-            LoadError::Store(self.durable.as_ref().map_or_else(
-                || HeapFault::Malformed(reason.clone()),
-                |durable| durable.corrupt(reason.clone()),
-            ))
+        let body = self
+            .arena
+            .body(object)
+            .map_err(|error| malformed(error.to_string()))?;
+        let (resident, cold) = super::meter::chunk(body, &page.members).ok_or_else(|| {
+            self.corrupt_row(format!("object {} has a chunk of another kind", id.0))
+        })?;
+        let (resident, cold) = if self.code_slots.contains(&object.index()) {
+            (0, 0)
+        } else {
+            (resident, cold)
         };
-        let referents =
-            open::values_referents(page.members.values(), &page.heads).map_err(corrupt)?;
-        let wanted = |heap: &Self| {
-            let mut seen = std::collections::HashSet::new();
-            let fresh: u64 = referents
+        let growth = resident.saturating_sub(cold);
+        let members = page.members.values();
+        let mut referents = open::values_referents(members.iter().copied(), &page.heads)
+            .map_err(|reason| self.corrupt_row(reason))?;
+        let mut seen = std::collections::HashSet::new();
+        referents.retain(|(id, _)| seen.insert(*id));
+        let reserve = |heap: &mut Self| {
+            let fresh: Vec<_> = referents
                 .iter()
-                .filter(|(id, _)| {
-                    seen.insert(*id) && heap.arena.entity_handle(open::entity(*id)).is_none()
-                })
-                .map(|(_, opening)| super::meter::opening(*opening))
-                .sum();
-            let per = match &page.members {
-                Members::List(values) => values.len() as u64,
-                Members::Table(entries) => entries.len() as u64,
-            };
-            super::meter::values(per)
-                .saturating_sub(super::meter::COLD_CHUNK)
-                .saturating_add(fresh)
+                .filter(|(id, _)| heap.arena.entity_handle(open::entity(*id)).is_none())
+                .map(|(id, opening)| (*id, super::meter::opening(*opening)))
+                .collect();
+            let wanted = fresh
+                .iter()
+                .fold(growth, |units, &(_, opening)| units.saturating_add(opening));
+            heap.admit(wanted)?;
+            Ok(fresh)
         };
-        let units = wanted(self);
-        if self.admit(units).is_err() {
-            self.collect(roots);
-            self.admit(wanted(self)).map_err(LoadError::Memory)?;
+        let fresh = match reserve(self) {
+            Ok(fresh) => fresh,
+            Err(_) => {
+                self.collect(roots);
+                reserve(self).map_err(LoadError::Memory)?
+            }
+        };
+        let held = members
+            .into_iter()
+            .map(|member| open::value(&mut self.arena, member, &page.heads))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|reason| self.corrupt_row(reason))?;
+        // Record the admitted placeholders before vouching can load a
+        // tuple's own row and replace its placeholder.
+        for (id, units) in fresh {
+            if let Some(handle) = self.arena.entity_handle(open::entity(id)) {
+                self.place(handle, units);
+            }
         }
-        let fresh: Vec<_> = referents
-            .iter()
-            .filter(|(id, _)| self.arena.entity_handle(open::entity(*id)).is_none())
-            .map(|(id, opening)| (*id, super::meter::opening(*opening)))
-            .collect();
         let mut placements = Vec::new();
         let decoded = match &page.members {
-            Members::List(members) => {
-                let values = members
-                    .iter()
-                    .map(|member| open::value(&mut self.arena, member, &page.heads))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|reason| self.corrupt_row(reason))?;
-                self.arena.decoded_list(object, chunk, values)
-            }
+            Members::List(_) => self.arena.decoded_list(object, chunk, held),
             Members::Table(entries) => {
-                // Every key and value opened, held across the reads of
-                // the tuple keys' own rows, which vouch for them before
-                // the chunk is keyed by their facts.
-                let mut held = Vec::with_capacity(entries.len() * 2);
-                for entry in entries {
-                    for value in [&entry.key, &entry.value] {
-                        held.push(
-                            open::value(&mut self.arena, value, &page.heads)
-                                .map_err(|reason| self.corrupt_row(reason))?,
-                        );
-                    }
-                }
                 self.vouch_keys(held.iter().step_by(2).copied(), &held, roots)?;
                 let mut decoded = Vec::with_capacity(entries.len());
                 for (entry, &[key, value]) in entries.iter().zip(held.as_chunks::<2>().0) {
@@ -718,28 +713,12 @@ impl SlotHeap {
             }
         };
         decoded.map_err(|error| malformed(error.to_string()))?;
-        let mut placed = std::collections::HashSet::new();
-        for (id, units) in fresh {
-            if placed.insert(id)
-                && let Some(handle) = self.arena.entity_handle(open::entity(id))
-            {
-                self.place(handle, units);
-            }
-        }
-        // Admitted as its schedule; it holds what its body does.
+        // Admission already charged the growth. Settle the slot with the
+        // same replacement and return any surplus from the cold chunk.
         let index = object.index() as usize;
         let before = self.units.get(index).copied().unwrap_or(0);
-        let now = self.holds(object);
-        let fresh_units = units.saturating_sub(
-            super::meter::values(page.members.len() as u64)
-                .saturating_sub(super::meter::COLD_CHUNK),
-        );
-        self.held = self
-            .held
-            .saturating_sub(units.saturating_sub(fresh_units))
-            .saturating_sub(before)
-            .saturating_add(now);
-        self.place(object, now);
+        self.held = self.held.saturating_sub(cold.saturating_sub(resident));
+        self.place(object, before.saturating_sub(cold).saturating_add(resident));
         Ok(placements)
     }
 }

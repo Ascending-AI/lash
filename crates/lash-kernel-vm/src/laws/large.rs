@@ -1702,3 +1702,64 @@ fn an_edit_in_one_segment_seals_only_its_index_path() {
     assert_eq!(writes, 2, "an edit at height 2");
     assert_eq!(revised, Index::build(&access, &SEGMENTS, edited).unwrap());
 }
+
+/// Schemasmash K03, `docs/kernel/semantics.md` (admission before
+/// placement): a cold load of a large map's chunk either refuses for
+/// memory or leaves the heap holding no more than its bound. Swept over
+/// every bound from what the open row holds to what the loaded chunk
+/// holds with ample room.
+#[test]
+fn a_cold_map_chunk_load_never_settles_past_the_bound() {
+    const PAIRS: i64 = 2_000;
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let map = make(
+        &mut heap,
+        NewObject::Map(
+            (0..PAIRS)
+                .map(|i| (Value::Int(i), Value::Int(i * i)))
+                .collect(),
+        ),
+    );
+    let root = heap.seal(&[map]).expect("a seal");
+    // Opens `root` under `bound` with the map's row and first chunk read:
+    // the heap, the map, and what loading chunk 1 then answers.
+    let attempt = |bound: u64| {
+        let (mut heap, roots) = SlotHeap::open(
+            bound,
+            &root,
+            Directory::open(root.directory, Box::new(store.clone())),
+        )
+        .ok()?;
+        let map = roots[0];
+        let handle = map.handle().expect("a map");
+        heap.load(handle, 0, &mut |visit| visit(&map)).ok()?;
+        let before = heap.held();
+        let loaded = heap.load(handle, 1, &mut |visit| visit(&map));
+        Some((before, loaded.is_ok(), heap.held()))
+    };
+    let (row_held, loaded, all_held) = attempt(u64::MAX).expect("an ample open");
+    assert!(
+        loaded && all_held > row_held,
+        "chunk 1 is cold after the row"
+    );
+    let mut over = Vec::new();
+    let mut admitted = 0;
+    for bound in row_held..=all_held {
+        if let Some((_, true, held)) = attempt(bound) {
+            admitted += 1;
+            if held > bound {
+                over.push((bound, held));
+            }
+        }
+    }
+    assert!(admitted > 0, "no bound admits the load");
+    assert!(
+        over.is_empty(),
+        "{} of {} bounds in {row_held}..={all_held} admitted a load settling past the bound; first {:?}, last {:?}",
+        over.len(),
+        all_held - row_held + 1,
+        over.first(),
+        over.last()
+    );
+}
