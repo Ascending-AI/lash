@@ -17,7 +17,7 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::arena::native::NewObject;
 use lash_kernel_state::kernel_internals::tree::Access;
 use lash_kernel_state::paged::run::directory::Directory;
-use lash_kernel_state::paged::run::ids::HighWater;
+use lash_kernel_state::paged::run::ids::{HighWater, ObjectId};
 use lash_kernel_state::paged::run::objects::{Record, RunValue};
 use lash_kernel_state::paged::run::session::{self, RunFunction, RunSession};
 use lash_kernel_state::paged::{SealBudget, SessionRoot};
@@ -391,6 +391,174 @@ fn a_relinked_saved_function_is_the_new_callable_through_every_reference() {
         panic!("`c` holds a list first");
     };
     assert_eq!(ring.first().and_then(RunValue::id), Some(cycle));
+}
+
+/// Schemasmash K01 (keys), `K-LIB-009`, RELINK-CLOSURE, `K-KEY-001`: a
+/// relinked saved function is its new callable as a map key and a set
+/// member a later cell kept, as the key of a map only a closure saved
+/// beside it captures, and through a closure's direct capture, once the
+/// session is sealed and opened again: the key and the member keep their
+/// positions, a lookup with the relinked function finds them, and one
+/// function object remains.
+#[test]
+fn a_relinked_saved_function_is_the_new_callable_as_a_key_and_a_member() {
+    let source = Source::default();
+    let callable = |link: u8| lash_kernel_value::CallableId {
+        link: lash_kernel_value::LinkId::from_bytes([link; 32]),
+        function: lash_kernel_value::FunctionId::from_bytes([5; 32]),
+    };
+    // Runs `text` over `session` with the dialect's save, relinks the
+    // saved function `name` to `callable(6)`, seals and opens it again.
+    let relinked = |text: &str, session: Option<SessionRoot>, name: &str, expected: &[&str]| {
+        let program = core_program(text, None);
+        let mut machine = <CoreMachine as Machine>::start(
+            program.clone(),
+            ROOMY,
+            start(session, Vec::new()),
+            Box::new(source.clone()),
+        )
+        .unwrap();
+        machine.set_options(crate::MachineOptions {
+            cell_save: Some(Box::new(DialectSave { program })),
+            ..crate::MachineOptions::default()
+        });
+        let end = drive(&mut machine);
+        assert!(end.not_carried.is_empty(), "{:?}", end.not_carried);
+        assert_eq!(carried(&end, &source), names(expected));
+        let mut editor =
+            crate::SessionEditor::open(end.carry.as_ref(), Box::new(source.clone())).unwrap();
+        assert!(
+            editor
+                .relink_function(&Name::new(name), name.as_bytes(), callable(6))
+                .unwrap()
+        );
+        (end.result, editor.seal().unwrap())
+    };
+    fn bound(carried: &RunSession, name: &str) -> ObjectId {
+        let index = carried
+            .names
+            .iter()
+            .position(|held| held.as_str() == name)
+            .unwrap();
+        carried.binding(index).and_then(RunValue::id).unwrap()
+    }
+    fn record(directory: &Directory, id: ObjectId) -> Record {
+        directory.get(id).unwrap().unwrap().record
+    }
+    /// What the closure bound to `name` holds in its first capture.
+    fn captured(carried: &RunSession, directory: &Directory, name: &str) -> RunValue {
+        let Record::Closure {
+            captures: lash_kernel_state::paged::run::objects::Captures::Inline(cells),
+            ..
+        } = record(directory, bound(carried, name))
+        else {
+            panic!("`{name}` holds a closure");
+        };
+        let Record::Cell(held) = record(directory, cells[0]) else {
+            panic!("`{name}` captures a cell");
+        };
+        held
+    }
+    // Opens `relinked`, checks that `f` is the one function object, the
+    // relinked one, and gives the session, its directory and `f`.
+    let open = |relinked: &SessionRoot| {
+        let (carried, directory) =
+            session::open(Box::new(source.clone()), relinked.page()).unwrap();
+        let saved = bound(&carried, "f");
+        assert_eq!(record(&directory, saved), Record::Function(callable(6)));
+        let functions = directory
+            .reached(carried.heap.roots.iter().filter_map(RunValue::id))
+            .unwrap()
+            .into_iter()
+            .filter(|id| matches!(record(&directory, *id), Record::Function(_)))
+            .count();
+        assert_eq!(functions, 1, "one function object remains");
+        (carried, directory, saved)
+    };
+
+    // `f` was saved in an earlier cell; this one keys a map and a set by
+    // it.
+    let mut heap = SlotHeap::durable(
+        u64::MAX,
+        crate::heap::open::Durable {
+            directory: Directory::new(Box::new(source.clone())),
+            high_water: HighWater(0),
+        },
+    );
+    let object = NewObject::Function(callable(4));
+    heap.admit(crate::heap::slots::schedule(&object))
+        .expect("room");
+    let function = heap.create(object).expect("a function");
+    let root = heap.seal(&[function, function]).expect("a seal");
+    let page = session::write(
+        &Access::new(Box::new(source.clone())),
+        &RunSession {
+            heap: root,
+            names: vec![Name::new("f")],
+            functions: vec![RunFunction {
+                name: Name::new("f"),
+                description: b"f".to_vec(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let (result, keyed) = relinked(
+        "main {\n  let m = map{f: 1, \"z\": 2}\n  let s = set{f, \"z\"}\n  return [m[f], s[f]]\n}",
+        Some(SessionRoot::run(page)),
+        "f",
+        &["f", "m", "s"],
+    );
+    assert_eq!(result, Datum::List(vec![int(1), Datum::Bool(true)]));
+    let mut editor = crate::SessionEditor::open(Some(&keyed), Box::new(source.clone())).unwrap();
+    let new = Datum::Function(callable(6));
+    let mut read = |name: &str| match editor.get(&Name::new(name)).unwrap() {
+        Some(crate::SessionValue::Data(datum)) => datum,
+        other => panic!("`{name}` reads {other:?}"),
+    };
+    assert_eq!(read("f"), new);
+    assert_eq!(
+        read("m"),
+        Datum::Map(vec![
+            (new.clone(), int(1)),
+            (Datum::Text("z".into()), int(2))
+        ])
+    );
+    assert_eq!(
+        read("s"),
+        Datum::Set(vec![new.clone(), Datum::Text("z".into())])
+    );
+    let (carried, directory, saved) = open(&keyed);
+    let Record::Map(entries) = record(&directory, bound(&carried, "m")) else {
+        panic!("`m` holds a map");
+    };
+    assert_eq!(entries[0].0.id(), Some(saved));
+    let Record::Set(members) = record(&directory, bound(&carried, "s")) else {
+        panic!("`s` holds a set");
+    };
+    assert_eq!(members[0].id(), Some(saved));
+    let next = cell(
+        "main {\n  return [m[f], s[f]]\n}",
+        start(Some(keyed), Vec::new()),
+        &source,
+    );
+    assert_eq!(next.result, Datum::List(vec![int(1), Datum::Bool(true)]));
+
+    // One cell saves `f`, `g`, which alone captures a map keyed by it, and
+    // `h`, which captures it.
+    let (_, captures) = relinked(
+        "definition \"function w() -> Any\\nkernel 1\\nmetering statements\\nbody { return 1 }\"\n\nmain {\n  let f = &w\n  let g = null\n  let h = null\n  if true {\n    let n = map{f: 3, \"z\": 4}\n    let k = f\n    set g = fn() { return n }\n    set h = fn() { return k }\n  }\n  return 0\n}",
+        None,
+        "f",
+        &["f", "g", "h"],
+    );
+    let (carried, directory, saved) = open(&captures);
+    let held = captured(&carried, &directory, "g").id().unwrap();
+    let Record::Map(entries) = record(&directory, held) else {
+        panic!("`g` captures a map");
+    };
+    assert_eq!(entries[0].0.id(), Some(saved));
+    assert_eq!(captured(&carried, &directory, "h").id(), Some(saved));
 }
 
 /// A dialect's save on the core: the dialect's rules over the sealed heap,

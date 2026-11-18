@@ -8,6 +8,8 @@
 //! a new function object of the new callable, each mutable holder takes it
 //! in place, each tuple holding it is built anew, and the seal
 //! writes every changed row, head and commitment as it writes any edit.
+//! A function is also a key (`K-KEY-001`) whose token names its callable,
+//! so a map or a set keyed by one is keyed anew through its own writes.
 //! Only the objects whose rows reach a relinked function are loaded.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -179,9 +181,16 @@ impl SessionEditor {
     }
 
     /// Gives every mutable object `value` reaches the image of each member
-    /// it holds, in place. A key stays as it is: the save refuses a saved
-    /// function a key reaches.
+    /// it holds, in place. A map or a set whose key moves is keyed anew
+    /// through [`Self::rekey`]. A ref keeps its identity; the object it
+    /// names is walked.
     fn walk(&mut self, walk: &mut Republish, value: Value) -> Result<(), HeapFault> {
+        if let Value::ObjectRef(handle) = value {
+            if let Some(named) = self.arena_read(|arena| arena.object_value(handle))? {
+                self.walk(walk, named)?;
+            }
+            return Ok(());
+        }
         let Some((handle, _)) = self.reaches(walk, value) else {
             return Ok(());
         };
@@ -202,15 +211,28 @@ impl SessionEditor {
                     }
                 }
             }
-            Value::Map(table) | Value::Record(table) => {
+            Value::Map(table) | Value::Set(table) | Value::Record(table) => {
                 let entries =
                     self.arena_read(|arena| arena.entries(table).map(<[Value]>::to_vec))?;
+                let mut images = Vec::with_capacity(entries.len());
                 for pair in entries.as_chunks::<2>().0 {
                     let [key, member] = *pair;
+                    self.walk(walk, key)?;
                     self.walk(walk, member)?;
-                    let image = self.image(walk, member)?;
-                    if moved(member, image) {
-                        self.arena_write(|arena| arena.table_write(table, key, image))?;
+                    images.push([self.image(walk, key)?, self.image(walk, member)?]);
+                }
+                let pairs = entries.as_chunks::<2>().0;
+                if let Some(first) = pairs
+                    .iter()
+                    .zip(&images)
+                    .position(|(old, new)| moved(old[0], new[0]))
+                {
+                    self.rekey(table, &pairs[first..], &images[first..])?;
+                } else {
+                    for (old, [key, image]) in pairs.iter().zip(images) {
+                        if moved(old[1], image) {
+                            self.arena_write(|arena| arena.table_write(table, key, image))?;
+                        }
                     }
                 }
             }
@@ -247,6 +269,28 @@ impl SessionEditor {
                 self.walk(walk, data)?;
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Keys the table `table` anew from its entry `old[0]` on, whose key
+    /// moved: each of `old` is removed and its image in `new` written
+    /// back in order, through the table's own writes, so every entry keeps
+    /// its position and the table its key placement. Where two keys become
+    /// one, the first key and position stay with the last value
+    /// (`K-KEY-003`, `K-FORM-008`). The editor's heap never releases, so a
+    /// removed key or value stays live until it is written back.
+    fn rekey(
+        &mut self,
+        table: ArenaHandle,
+        old: &[[Value; 2]],
+        new: &[[Value; 2]],
+    ) -> Result<(), HeapFault> {
+        for [key, _] in old {
+            self.arena_write(|arena| arena.table_delete(table, key))?;
+        }
+        for [key, value] in new {
+            self.arena_write(|arena| arena.table_write(table, *key, *value))?;
         }
         Ok(())
     }
