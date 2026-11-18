@@ -4,8 +4,8 @@ use super::*;
 
 impl CodeModeExecutionState {
     /// Relinks every carried saved function by name to `packages`, the
-    /// package surface the cell runs on (K-LIB-009, RELINK-CLOSURE). Each relinked function's object
-    /// takes its new Link in place, under the same identity. One the
+    /// package surface the cell runs on (K-LIB-009, RELINK-CLOSURE). Each relinked function
+    /// takes its new Link for every reference to it. One the
     /// set does not serve is dropped with its binding and listed as not
     /// carried, naming it and the callee. The session then records
     /// `packages` as the set its functions are linked to: a cell of the

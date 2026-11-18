@@ -10,7 +10,8 @@
 //!
 //! A session is a run session ([`run::session`]). Its saved functions
 //! (`K-SES-004`) are roots past its bindings, each described by its
-//! dialect; the editor lists them, relinks one in place, and drops one.
+//! dialect; the editor lists them, relinks one through every reference to
+//! it, and drops one.
 //!
 //! [`run::session`]: lash_kernel_state::paged::run::session
 
@@ -32,6 +33,7 @@ use crate::heap::{Heap, LoadError};
 use crate::vm::{Flow, Run, fault};
 
 mod preview;
+mod relink;
 
 /// A binding a host reads: its value as data, or why it is none.
 #[derive(Clone, Debug, PartialEq)]
@@ -383,8 +385,10 @@ impl SessionEditor {
     }
 
     /// Rewrites the saved function `name` as relinked against its next
-    /// cell's Namespaces (K-LIB-009): `callable` under its new Link, the
-    /// same object, described by `description`. Answers whether the
+    /// cell's Namespaces (K-LIB-009): `callable` under its new Link,
+    /// described by `description`. A closure keeps its object; a function,
+    /// an immutable every holder copies, is one new object at the seal,
+    /// which every reference to it then names. Answers whether the
     /// session held it.
     ///
     /// # Errors
@@ -470,6 +474,7 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn seal(mut self) -> Result<SessionRoot, HeapFault> {
+        self.republish()?;
         let (names, mut values): (Vec<Name>, Vec<Value>) =
             std::mem::take(&mut self.bindings).into_iter().unzip();
         let saved = std::mem::take(&mut self.saved);
@@ -504,10 +509,9 @@ impl SessionEditor {
                         code.callable = callable;
                         code.link = callable.link;
                     }
-                    Record::Function(held) => *held = callable,
                     _ => {
                         return Err(HeapFault::Malformed(format!(
-                            "saved object {} is no function",
+                            "saved object {} is no closure",
                             id.0
                         )));
                     }

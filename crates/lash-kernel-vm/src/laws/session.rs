@@ -281,6 +281,118 @@ fn a_binding_holding_a_saved_function_carries_it_by_identity() {
     }
 }
 
+/// Schemasmash K01, `K-LIB-009`, RELINK-CLOSURE: a relink gives the saved
+/// function its new callable for every reference that survives it: the
+/// saved root, a binding, an alias, a list, map, record and tuple member,
+/// and a tuple in a cycle through a list, once the session is sealed and
+/// opened again; every reference still names one object.
+#[test]
+fn a_relinked_saved_function_is_the_new_callable_through_every_reference() {
+    let source = Source::default();
+    let mut heap = SlotHeap::durable(
+        u64::MAX,
+        crate::heap::open::Durable {
+            directory: Directory::new(Box::new(source.clone())),
+            high_water: HighWater(0),
+        },
+    );
+    let key = heap.arena_mut().text("k");
+    let mut make = |object: NewObject| {
+        heap.admit(crate::heap::slots::schedule(&object))
+            .expect("room");
+        heap.create(object).expect("an object")
+    };
+    let callable = |link: u8| lash_kernel_value::CallableId {
+        link: lash_kernel_value::LinkId::from_bytes([link; 32]),
+        function: lash_kernel_value::FunctionId::from_bytes([5; 32]),
+    };
+    let function = make(NewObject::Function(callable(4)));
+    let tuple = make(NewObject::Tuple(vec![function]));
+    let list = make(NewObject::List(vec![function, tuple]));
+    let map = make(NewObject::Map(vec![(key, function)]));
+    let record = make(NewObject::Record(vec![(key, function)]));
+    // `c` is a tuple of a list holding that tuple, and the function.
+    let ring = make(NewObject::List(Vec::new()));
+    let cycle = make(NewObject::Tuple(vec![ring, function]));
+    let lash_kernel_doc::Value::List(ring_handle) = ring else {
+        panic!("a list")
+    };
+    heap.arena_mut().list_set(ring_handle, 0, cycle).unwrap();
+    let root = heap
+        .seal(&[
+            function, cycle, function, list, map, record, tuple, function,
+        ])
+        .expect("a seal");
+    let page = session::write(
+        &Access::new(Box::new(source.clone())),
+        &RunSession {
+            heap: root,
+            names: ["alias", "c", "f", "fs", "m", "r", "t"]
+                .map(Name::new)
+                .to_vec(),
+            functions: vec![RunFunction {
+                name: Name::new("f"),
+                description: b"f()".to_vec(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let mut editor =
+        crate::SessionEditor::open(Some(&SessionRoot::run(page)), Box::new(source.clone()))
+            .unwrap();
+    assert!(
+        editor
+            .relink_function(&Name::new("f"), b"f()", callable(6))
+            .unwrap()
+    );
+    let relinked = editor.seal().unwrap();
+    let mut editor = crate::SessionEditor::open(Some(&relinked), Box::new(source.clone())).unwrap();
+    let new = Datum::Function(callable(6));
+    let read =
+        |editor: &mut crate::SessionEditor, name: &str| match editor.get(&Name::new(name)).unwrap()
+        {
+            Some(crate::SessionValue::Data(datum)) => datum,
+            other => panic!("`{name}` reads {other:?}"),
+        };
+    assert_eq!(read(&mut editor, "f"), new);
+    assert_eq!(read(&mut editor, "alias"), new);
+    assert_eq!(read(&mut editor, "t"), Datum::Tuple(vec![new.clone()]));
+    assert_eq!(
+        read(&mut editor, "fs"),
+        Datum::List(vec![new.clone(), Datum::Tuple(vec![new.clone()])])
+    );
+    assert_eq!(
+        read(&mut editor, "m"),
+        Datum::Map(vec![(Datum::Text("k".into()), new.clone())])
+    );
+    assert_eq!(
+        read(&mut editor, "r"),
+        Datum::Record(vec![("k".into(), new.clone())])
+    );
+    let (carried, directory) = session::open(Box::new(source.clone()), relinked.page()).unwrap();
+    let saved = carried.function(0).and_then(RunValue::id).unwrap();
+    let record = |id| directory.get(id).unwrap().unwrap().record;
+    assert_eq!(record(saved), Record::Function(callable(6)));
+    // One object still: the saved root, both bindings and the list member.
+    assert_eq!(carried.binding(0).and_then(RunValue::id), Some(saved));
+    assert_eq!(carried.binding(2).and_then(RunValue::id), Some(saved));
+    let Record::List(members) = record(carried.binding(3).and_then(RunValue::id).unwrap()) else {
+        panic!("`fs` holds a list");
+    };
+    assert_eq!(members.first().and_then(RunValue::id), Some(saved));
+    // The cycle's list holds the rebuilt tuple, not the one it replaced.
+    let cycle = carried.binding(1).and_then(RunValue::id).unwrap();
+    let Record::Tuple(members) = record(cycle) else {
+        panic!("`c` holds a tuple");
+    };
+    assert_eq!(members.get(1).and_then(RunValue::id), Some(saved));
+    let Record::List(ring) = record(members[0].id().unwrap()) else {
+        panic!("`c` holds a list first");
+    };
+    assert_eq!(ring.first().and_then(RunValue::id), Some(cycle));
+}
+
 /// A dialect's save on the core: the dialect's rules over the sealed heap,
 /// each saved function described by its name.
 struct DialectSave {

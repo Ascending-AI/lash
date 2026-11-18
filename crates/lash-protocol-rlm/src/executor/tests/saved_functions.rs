@@ -680,48 +680,49 @@ async fn saved_function_declarations_live_until_their_frame_ends() {
     );
 }
 
+/// An echo tool declared under contract `.0`.
+struct EchoContract(&'static str);
+impl EchoContract {
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
+            "tool:echo",
+            "echo.say",
+            "Echo the text back",
+            lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
+            serde_json::json!({"type": "string"}),
+        )
+        .expect("echo schema")
+        .declared_contract(lash_kernel_value::operations::ContractId::new(self.0))
+        .with_execution(std::time::Duration::from_secs(120))
+    }
+}
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for EchoContract {
+    fn tool_manifests(
+        &self,
+        _: &lash_core::OwnerConfigView,
+    ) -> Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        Ok(vec![self.definition().manifest()])
+    }
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
+        (name == "echo.say" || name == "tool:echo").then(|| Arc::new(self.definition().contract()))
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::ok(call.args["text"].clone()).into()
+    }
+}
+
 /// FIG-6926 / RELINK-CLOSURE: a contract-only change rebinds the saved
 /// callable's heap origin too, including aliases and data-held references.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saved_function_and_its_aliases_relink_to_the_next_cells_operation_contract() {
-    struct EchoContract(&'static str);
-    impl EchoContract {
-        fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
-            lash_vocabulary::tool_contract::ToolDefinition::raw(
-                "tool:echo",
-                "echo.say",
-                "Echo the text back",
-                lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
-                serde_json::json!({"type": "string"}),
-            )
-            .expect("echo schema")
-            .declared_contract(lash_kernel_value::operations::ContractId::new(self.0))
-            .with_execution(std::time::Duration::from_secs(120))
-        }
-    }
-    #[async_trait::async_trait]
-    impl lash_core::ToolProvider for EchoContract {
-        fn tool_manifests(
-            &self,
-            _: &lash_core::OwnerConfigView,
-        ) -> Result<
-            Vec<lash_vocabulary::tool_contract::ToolManifest>,
-            lash_execution_contracts::plugin_error::PluginError,
-        > {
-            Ok(vec![self.definition().manifest()])
-        }
-        fn resolve_contract(
-            &self,
-            name: &str,
-            _: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
-            (name == "echo.say" || name == "tool:echo")
-                .then(|| Arc::new(self.definition().contract()))
-        }
-        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-            lash_core::ToolOutcome::ok(call.args["text"].clone()).into()
-        }
-    }
     let host = open_host().await;
     let mut state = typescript_state();
     cell(&mut state, &host, "exec-code:0", Arc::new(EchoContract("first")),
@@ -824,4 +825,55 @@ console.log(local({stringify: (x) => x + 50}, {max: (x) => x + 60}, (x) => x + 7
             response.bindings
         );
     }
+}
+
+/// Schemasmash K01, RELINK-CLOSURE: once a contract change relinks a saved
+/// function, every reference to it calls the relinked function in every
+/// later cell, including a reference a list holds, after a cold restore
+/// in which only the new link's code is held.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relinked_function_held_in_a_list_calls_the_new_link_after_reopen() {
+    let host = open_host().await;
+    let mut state = typescript_state();
+    cell(&mut state, &host, "exec-code:0", Arc::new(EchoContract("first")),
+        "async function shout(text) { return await echo.say({ text }); }\nconst alias = shout; const box = [shout];").await;
+    let old = state
+        .lowering_functions()
+        .values()
+        .next()
+        .expect("the saved function")
+        .clone();
+    let mut state = restored(&host, &mut state).await;
+    cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        Arc::new(EchoContract("second")),
+        "await control.finish(1);",
+    )
+    .await;
+    let relinked = state
+        .lowering_functions()
+        .values()
+        .find(|function| function.name == old.name)
+        .expect("the same saved function")
+        .clone();
+    assert_ne!(relinked.link, old.link, "the contract change relinks");
+    let mut state = restored(&host, &mut state).await;
+    let called = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:2", Arc::new(EchoContract("second"))),
+        &typescript_services(),
+        "await control.finish([await shout('a'), await alias('b'), await box[0]('c'), box[0] === shout, alias === shout]);",
+    )
+    .await;
+    assert!(
+        called.error().is_none(),
+        "the call after reopen failed: {:?}",
+        called.error()
+    );
+    assert_eq!(
+        finish_of(&called),
+        serde_json::json!(["a", "b", "c", true, true])
+    );
 }
