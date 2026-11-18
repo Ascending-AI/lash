@@ -74,3 +74,26 @@ Do not substitute empty platform properties or a uniform budget.
 One lead owns decisions; persistent sidekicks own execution. Exchange concise
 briefs and evidence. Make review independent, and report a gate that could not
 run instead of claiming it passed.
+
+## Rules every lane follows (specs do not repeat these)
+
+- Process safety (2026-11-11: a lane's `kill -TERM <ppid>` hit `systemd --user`
+  and took down every agent, T3 and D-Bus). Never signal a PID you only found
+  as a parent. Before any `kill`, check `ps -o comm= -p PID`. Never kill
+  `systemd`, `dbus-daemon`, `sshd`, `tmux`, `t3`, `orca-ide`, `claude`,
+  `codex` or anything you did not start. Never `pkill -f`/`pgrep -f` with a
+  pattern that matches your own command line. Prefer `buck2 kill` in your own
+  fork or a pidfile you wrote.
+- One build or test command of yours at a time; reads and log checks are
+  free. Block on every command inside the turn; a command over the tool's
+  foreground cap runs in the background and you wait on it. Never end a turn
+  with a command running.
+- No `git stash` (forks share one stash); commit WIP instead.
+- Commits: plain-sentence messages, Samuel as sole author, no AI attribution
+  anywhere (no Co-Authored-By, no mention of Claude, Codex or Devin), never
+  `--no-verify`.
+- Implementation lanes keep going until the change lands. Land each part that
+  qualifies on its own as soon as it does. Evidence is the tests you ran, the
+  land exit code and the landed SHA: no receipts, manifests, hashes, copied
+  reports or ancestry proofs. End with three lines: `landed:`, `summary:`
+  (numbers first), `open:`.
