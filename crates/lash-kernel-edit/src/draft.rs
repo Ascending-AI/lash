@@ -128,25 +128,6 @@ impl Draft {
                 }],
             });
         }
-        let structural = transaction.edits.iter().any(|operation| {
-            matches!(
-                operation,
-                crate::authoring::Operation::InsertBinding { .. }
-                    | crate::authoring::Operation::RemoveBinding { .. }
-                    | crate::authoring::Operation::RemoveStep { .. }
-                    | crate::authoring::Operation::MoveStep { .. }
-                    | crate::authoring::Operation::WrapSteps { .. }
-                    | crate::authoring::Operation::UnwrapSteps { .. }
-            )
-        });
-        let before = if structural {
-            Some(
-                lash_kernel_check::derive(&self.document, environment.functions)
-                    .map_err(|error| refused(None, error))?,
-            )
-        } else {
-            None
-        };
         let mut working = Working::open(&self.document);
         let source = lash_kernel_dialect::conventions::Conventions::of(
             &self.document,
@@ -183,6 +164,14 @@ impl Draft {
                     FaultKind::Unlinked(refusal) => refused(Some(index), refusal),
                 })?;
         }
+        let before = if working.bindings.scopes_changed {
+            Some(
+                lash_kernel_check::derive(&self.document, environment.functions)
+                    .map_err(|error| refused(None, error))?,
+            )
+        } else {
+            None
+        };
         source
             .check_document(&working.document, environment.functions)
             .map_err(|error| {
@@ -291,11 +280,10 @@ impl Draft {
             }
         }
         if let Some(before) = before {
-            crate::canvas::preserve_bindings(
+            published.bindings.preserve(
                 &before,
                 &published.admitted.graph,
                 &published.correspondence,
-                &transaction.edits,
             )?;
         }
         if let Some(since_open) = self.since_open.then(&published.correspondence) {

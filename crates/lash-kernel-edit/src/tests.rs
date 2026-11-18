@@ -1456,3 +1456,105 @@ fn canvas_argument_boundaries_refuse_effectful_factories() {
     ));
     assert_eq!(draft.document(), &before);
 }
+
+/// Schemasmash K08: an edit that leaves a use untouched never changes the
+/// declaration that use resolves to. `Draft::apply` either refuses the
+/// transaction or publishes a document whose surviving use still binds the
+/// outer `x`; it never admits one where the use binds a new declaration.
+fn admits_rebound_use(draft: &mut Draft, edits: Vec<Operation>) -> Option<Document> {
+    let functions = draft.document().functions.clone();
+    let base = draft.identity();
+    draft
+        .apply(
+            &Transaction { base, edits },
+            &Environment::new(&functions),
+            &[],
+        )
+        .map_err(|refusal| eprintln!("refused: {refusal:?}"))
+        .ok()
+        .map(|_| draft.document().clone())
+}
+
+/// K08 (a): a step whose result binds `x`, inserted before an unchanged
+/// nested `print x`, must not capture that use from the outer `x`.
+#[test]
+fn canvas_step_insertion_preserves_a_surviving_use() {
+    let x = Name::new("x");
+    let mut draft = Draft::open(document(vec![
+        Stmt::Let {
+            name: x.clone(),
+            value: Rhs::Expr(text("outer")),
+        },
+        Stmt::If {
+            condition: boolean(true),
+            then_block: vec![Stmt::Print {
+                value: Expr::Variable(x.clone()),
+            }],
+            else_block: vec![],
+        },
+    ]))
+    .unwrap();
+    let base = draft.identity();
+    let edits = vec![Operation::InsertStep {
+        base,
+        at: Position::before(site(&[1, 1, 0])).unwrap(),
+        slot: ImportSlot(0),
+        args: vec![data("new")],
+        result: Type::Text,
+        binding: Some(x),
+    }];
+    if let Some(published) = admits_rebound_use(&mut draft, edits) {
+        panic!("admitted a rebinding of the surviving `print x`: {published:#?}");
+    }
+}
+
+/// K08 (b): rewriting one argument of an action and moving it under an
+/// inner `x` must not rebind its untouched `x` operand.
+#[test]
+fn canvas_set_and_move_preserves_a_surviving_operand() {
+    let x = Name::new("x");
+    let mut doc = document(vec![
+        Stmt::Let {
+            name: x.clone(),
+            value: Rhs::Expr(text("outer")),
+        },
+        Stmt::If {
+            condition: boolean(true),
+            then_block: vec![Stmt::Let {
+                name: x.clone(),
+                value: Rhs::Expr(text("inner")),
+            }],
+            else_block: vec![],
+        },
+        Stmt::Let {
+            name: Name::new("answer"),
+            value: Rhs::Expr(perform(
+                0,
+                vec![Expr::List(vec![text("old")]), Expr::Variable(x.clone())],
+            )),
+        },
+    ]);
+    let pair = parse_definition("function law.pair(value: Any, other: Any) -> Text\nkernel 1\ncharge 1\nimport 0 operation service.pair(value: Any, other: Any) -> Text\nbody { let answer = perform 0(value, other) as Text return answer }").unwrap();
+    doc.imports = pair.body().unwrap().imports.clone();
+    let mut draft = Draft::open(doc).unwrap();
+    let base = draft.identity();
+    let edits = vec![
+        Operation::SetValue {
+            base,
+            target: ValueTarget::ToolArgument {
+                action: site(&[2, 0]),
+                index: 0,
+                path: vec![],
+            },
+            value: data("new"),
+        },
+        Operation::MoveStep {
+            base,
+            action: site(&[2, 0]),
+            to: Position::end(site(&[1, 1])),
+        },
+    ];
+    if let Some(published) = admits_rebound_use(&mut draft, edits) {
+        panic!("admitted a rebinding of the surviving `x` operand: {published:#?}");
+    }
+}

@@ -19,6 +19,7 @@ use lash_kernel_doc::{
 use lash_kernel_value::sites::Site;
 use lash_kernel_value::sites::Unit;
 
+use crate::binding::BindingEdits;
 use crate::edit::{Edit, Position};
 use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused};
 use crate::tree::{NodeClass, Shadow};
@@ -42,11 +43,13 @@ pub(crate) struct Published {
     pub(crate) document: Document,
     pub(crate) admitted: Admitted,
     pub(crate) correspondence: Correspondence,
+    pub(crate) bindings: BindingEdits,
 }
 
 pub(crate) struct Working {
     pub(super) document: Document,
     shadows: BTreeMap<Unit, Shadow>,
+    pub(super) bindings: BindingEdits,
 }
 
 fn body<'a>(document: &'a mut Document, unit: &Unit) -> Option<&'a mut Block> {
@@ -115,6 +118,7 @@ impl Working {
         Self {
             document: document.clone(),
             shadows,
+            bindings: BindingEdits::default(),
         }
     }
 
@@ -249,6 +253,7 @@ impl Working {
     pub(super) fn splice<R>(
         &mut self,
         site: &Site,
+        changes_scope: bool,
         change: impl FnOnce(&mut Block, &mut Vec<Shadow>) -> R,
     ) -> R {
         let Some(NodeMut::Block(block)) = node(&mut self.document, site) else {
@@ -258,6 +263,7 @@ impl Working {
             unreachable!("every node of the document has a shadow");
         };
         let changed = change(block, &mut shadow.children);
+        self.bindings.scopes_changed |= changes_scope;
         if block.is_empty()
             && let Some((_, parent)) = site.path.split_last()
         {
@@ -272,14 +278,15 @@ impl Working {
     }
 
     pub(super) fn insert(&mut self, block: &Site, index: usize, statement: Stmt, shadow: Shadow) {
-        self.splice(block, |statements, shadows| {
+        let declares = matches!(statement, Stmt::Let { .. });
+        self.splice(block, declares, |statements, shadows| {
             statements.insert(index, statement);
             shadows.insert(index, shadow);
         });
     }
 
     pub(super) fn take(&mut self, block: &Site, index: usize) -> (Stmt, Shadow) {
-        self.splice(block, |statements, shadows| {
+        self.splice(block, true, |statements, shadows| {
             (statements.remove(index), shadows.remove(index))
         })
     }
@@ -298,6 +305,9 @@ impl Working {
         let Some(shadow) = shadow(&mut self.shadows, site) else {
             unreachable!("every node of the document has a shadow");
         };
+        if let Some(origin) = &shadow.origin {
+            self.bindings.replaced.insert(origin.clone());
+        }
         shadow.replace(node.as_node());
         Ok(())
     }
@@ -334,26 +344,32 @@ impl Working {
                 action,
                 index,
                 argument,
-            } => self.set_argument(action, *index, argument)?,
+            } => {
+                self.set_argument(action, *index, argument)?;
+                self.bindings
+                    .arguments
+                    .entry(action.clone())
+                    .or_default()
+                    .insert(*index);
+            }
             Edit::SetCondition {
                 statement,
                 condition,
             } => {
                 let site = self.locate_as(statement, NodeClass::Statement)?;
-                let Some(NodeMut::Stmt(
-                    Stmt::If {
-                        condition: slot, ..
-                    }
-                    | Stmt::While {
-                        condition: slot, ..
-                    },
-                )) = node(&mut self.document, &site)
-                else {
+                if !matches!(
+                    node(&mut self.document, &site),
+                    Some(NodeMut::Stmt(Stmt::If { .. } | Stmt::While { .. }))
+                ) {
                     return Err(at(statement, EditDiagnosticKind::NoCondition));
-                };
-                *slot = condition.clone();
-                // The condition is the statement's first child (`K-ID-004`).
-                self.shadow(&site.child(0)).replace(Node::Expr(condition));
+                }
+                // The condition is the statement's first child (K-ID-004).
+                self.write(&site.child(0), |node| {
+                    if let NodeMut::Expr(slot) = node {
+                        **slot = condition.clone();
+                    }
+                    Ok(())
+                })?;
             }
         }
         Ok(())
@@ -439,8 +455,8 @@ impl Working {
         let Some(shadow) = shadow(&mut self.shadows, &site) else {
             unreachable!("every node of the document has a shadow");
         };
-        // The right-hand side survives; its arguments are nodes only while
-        // it is nested, and an atom it had was none.
+        // Argument nodes come and go with the representation. The action
+        // stays in the same scope and its unwritten slots retain their uses.
         shadow.edited = true;
         shadow.children = written.children().into_iter().map(Shadow::fresh).collect();
         Ok(())
@@ -465,7 +481,7 @@ impl Working {
                 index -= 1;
             }
             // One change, so the block is never empty part way through.
-            self.splice(&from, |statements, shadows| {
+            self.splice(&from, true, |statements, shadows| {
                 let taken = statements.remove(at_index);
                 statements.insert(index, taken);
                 let shadow = shadows.remove(at_index);
@@ -533,6 +549,7 @@ impl Working {
             document: self.document,
             admitted,
             correspondence,
+            bindings: self.bindings,
         })
     }
 

@@ -6,9 +6,7 @@ use crate::apply::{Fault, Working, at, node};
 use crate::authoring::{Branch, Operation, ValueTarget, Wrapper};
 use crate::tree::{NodeClass, Shadow};
 use crate::{Edit, EditDiagnosticKind as Cause};
-use lash_kernel_check::{
-    ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, NodeKind, PlaceNode, Reference, StmtNode,
-};
+use lash_kernel_check::binding_references;
 use lash_kernel_doc::{
     ActExpr, ActKind, Action, Callee, Catch, Expr, FunctionCatalog, Literal, Node, NodeMut, Place,
     Rhs, Stmt, TryStmt,
@@ -736,7 +734,7 @@ impl Working {
                 .extend(protocol.functions().into_iter().copied());
         }
         // One change, so the block is never empty part way through.
-        self.splice(&block, |statements, shadows| {
+        self.splice(&block, true, |statements, shadows| {
             let body: Vec<Stmt> = statements.drain(start..=end).collect();
             let statement = wrapped(wrapper, body, via);
             let mut shadow = Shadow::fresh(Node::Stmt(&statement));
@@ -810,7 +808,7 @@ impl Working {
                 graph.node(binding.declared_at).site == site
                     && binding.kind == lash_kernel_check::BindingKind::For
             }) && graph.nodes().iter().any(|node| {
-                references(&node.kind).iter().any(|reference| {
+                binding_references(&node.kind).iter().any(|reference| {
                     **reference == lash_kernel_check::Reference::Binding(binding.id)
                 })
             }) {
@@ -826,7 +824,7 @@ impl Working {
             }
         }
         // One change, so the block is never empty part way through.
-        self.splice(&block, |statements, shadows| {
+        self.splice(&block, true, |statements, shadows| {
             let body = match statements.remove(index) {
                 Stmt::If {
                     then_block,
@@ -895,145 +893,4 @@ fn loses_control(body: &[Stmt]) -> bool {
         }
         _ => false,
     })
-}
-
-/// Structural edits preserve what every surviving, unwritten use names,
-/// including an outer binding hidden by an identically named destination local.
-pub(crate) fn preserve_bindings(
-    before: &lash_kernel_check::Graph,
-    after: &lash_kernel_check::Graph,
-    correspondence: &lash_kernel_doc::Correspondence,
-    operations: &[Operation],
-) -> Result<(), crate::EditRefusal> {
-    for old in before.nodes() {
-        let Some(survivor) = correspondence.survivor(&old.site) else {
-            continue;
-        };
-        let Some(new) = after.node_at(&survivor.to) else {
-            continue;
-        };
-        if survivor.edited {
-            if let NodeKind::Action(ActionNode::Perform { args, .. }) = &old.kind {
-                for (index, atom) in args.iter().enumerate() {
-                    if operations.iter().any(|operation| matches!(operation, Operation::SetValue { target: ValueTarget::ToolArgument { action, index: changed, path }, .. } if action == &old.site && *changed as usize == index && path.is_empty())) { continue; }
-                    let AtomNode::Variable(old_ref) = atom else {
-                        continue;
-                    };
-                    let new_ref = match &new.kind {
-                        NodeKind::Action(ActionNode::Perform { args, .. }) => match args.get(index)
-                        {
-                            Some(AtomNode::Variable(reference)) => Some(reference),
-                            _ => None,
-                        },
-                        NodeKind::Expr(ExprNode::Act { args, .. }) => {
-                            args.get(index)
-                                .and_then(|arg| match &after.node(*arg).kind {
-                                    NodeKind::Expr(ExprNode::Variable(reference)) => {
-                                        Some(reference)
-                                    }
-                                    _ => None,
-                                })
-                        }
-                        _ => None,
-                    };
-                    if new_ref.is_none_or(|new_ref| {
-                        !same_reference(old_ref, new_ref, before, after, correspondence)
-                    }) {
-                        return Err(escaping(&old.site));
-                    }
-                }
-            }
-            continue;
-        }
-        let old_refs = references(&old.kind);
-        let new_refs = references(&new.kind);
-        let same = old_refs.len() == new_refs.len()
-            && old_refs
-                .iter()
-                .zip(new_refs)
-                .all(|(old, new)| same_reference(old, new, before, after, correspondence));
-        if !same {
-            return Err(escaping(&old.site));
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn references(kind: &NodeKind) -> Vec<&Reference> {
-    let mut out = Vec::new();
-    fn callee(value: &CalleeNode) -> Option<&Reference> {
-        match value {
-            CalleeNode::Value(reference) => Some(reference),
-            _ => None,
-        }
-    }
-    match kind {
-        NodeKind::Expr(ExprNode::Variable(reference))
-        | NodeKind::Stmt(StmtNode::Assign {
-            place: PlaceNode::Variable(reference),
-            ..
-        }) => out.push(reference),
-        NodeKind::Expr(ExprNode::Act {
-            kind: ActNode::Call(value) | ActNode::Spawn(value),
-            ..
-        }) => out.extend(callee(value)),
-        NodeKind::Action(action) => {
-            let atoms: Vec<_> = match action {
-                ActionNode::Perform { args, .. } => args.iter().collect(),
-                ActionNode::Call {
-                    callee: value,
-                    args,
-                }
-                | ActionNode::Spawn {
-                    callee: value,
-                    args,
-                } => {
-                    out.extend(callee(value));
-                    args.iter().collect()
-                }
-                ActionNode::Join { task }
-                | ActionNode::Cancel { task }
-                | ActionNode::CancelEffect { task } => vec![task],
-                ActionNode::JoinMany { tasks, .. } => vec![tasks],
-                ActionNode::Await { value, .. } => vec![value],
-                ActionNode::Yield => vec![],
-            };
-            out.extend(atoms.into_iter().filter_map(|atom| {
-                if let AtomNode::Variable(reference) = atom {
-                    Some(reference)
-                } else {
-                    None
-                }
-            }));
-        }
-        _ => {}
-    }
-    out
-}
-
-fn same_reference(
-    old: &Reference,
-    new: &Reference,
-    before: &lash_kernel_check::Graph,
-    after: &lash_kernel_check::Graph,
-    correspondence: &lash_kernel_doc::Correspondence,
-) -> bool {
-    match (old, new) {
-        (Reference::Binding(old), Reference::Binding(new)) => {
-            let old = before.binding(*old);
-            let new = after.binding(*new);
-            correspondence.successor(&before.node(old.declared_at).site)
-                == Some(&after.node(new.declared_at).site)
-        }
-        (old, new) => old == new,
-    }
-}
-fn escaping(site: &Site) -> crate::EditRefusal {
-    crate::EditRefusal {
-        diagnostics: vec![crate::EditDiagnostic {
-            edit: None,
-            location: Some(crate::Location::Base(site.clone())),
-            kind: Cause::EscapingBinding,
-        }],
-    }
 }
