@@ -1244,3 +1244,39 @@ main {
 }"#);
     assert_eq!(result(end), int(1));
 }
+
+/// `K-TASK-017` with a park after the cancel (schemasmash K04): a ready
+/// task cancelled in place of its delivered outcome leaves no claim on
+/// that outcome, so the next ordinary park seals and opens cold, and the
+/// cancelled task still raises `cancelled` at its join.
+#[test]
+fn a_ready_task_cancelled_before_a_park_reopens_cold() {
+    let mut ready = Embedder::new(
+        r#"
+definition "function waits() -> Any\nkernel 1\nmetering statements\nbody { \n  try { do perform 0(\"w\") as Any return \"delivered\" } catch e { return e.kind }\n }"
+
+main {
+  let w = spawn call waits()
+  do perform 0("gate") as Any
+  do cancel w
+  do perform 0("park") as Any
+  let from_ready = join w
+  return from_ready
+}"#,
+    );
+    ready.run();
+    ready.deliver("gate");
+    ready.deliver("w");
+    loop {
+        match ready.run() {
+            Step::Parked(park) if !park.requests.is_empty() => break,
+            Step::Ended(end) => panic!("the run ended before its park: {end:?}"),
+            _ => {}
+        }
+    }
+    assert_eq!(ready.asked().last().map(String::as_str), Some("park"));
+    ready
+        .try_reopen(true)
+        .expect("a normally parked run opens cold");
+    assert_eq!(result(ready.run_to_end(&["park"])), text("cancelled"));
+}

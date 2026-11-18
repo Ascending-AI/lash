@@ -670,18 +670,12 @@ impl<H: Heap> Vm<H> {
             Resume::Raise(value) => Err(Flow::Raise(value)),
             Resume::Joined(joined) => self.joined(joined),
             Resume::Outcome(wait) => {
-                let Some(pending) = self.tasks.waits.remove(&wait) else {
-                    return Err(fault("a resuming outcome has no wait"));
-                };
-                let Phase::Delivered(outcome) = pending.phase else {
-                    return Err(fault("a resuming outcome is not delivered"));
-                };
-                self.heap.release(crate::heap::meter::outcome(&outcome));
+                let (outcome, result) = self.take_delivered_outcome(wait)?;
                 // The raw outcome is decoded here, once: a failure by any
                 // type, a result by the `perform`'s; a result that does not
                 // fit raises its refusal, uncharged.
                 let (raised, raw, ty) = match outcome {
-                    crate::Outcome::Completed(datum) => (false, datum, pending.result),
+                    crate::Outcome::Completed(datum) => (false, datum, result),
                     crate::Outcome::Failed(error) => {
                         (true, Datum::Error(Box::new(error)), Type::Any)
                     }
@@ -713,6 +707,17 @@ impl<H: Heap> Vm<H> {
                 }
             }
         }
+    }
+
+    fn take_delivered_outcome(&mut self, wait: u64) -> Run<(crate::Outcome, Type)> {
+        let Some(pending) = self.tasks.waits.remove(&wait) else {
+            return Err(fault("a resuming outcome has no wait"));
+        };
+        let Phase::Delivered(outcome) = pending.phase else {
+            return Err(fault("a resuming outcome is not delivered"));
+        };
+        self.heap.release(crate::heap::meter::outcome(&outcome));
+        Ok((outcome, pending.result))
     }
 
     /// Builds a decoded outcome and charges its deep size, a boundary
@@ -1296,6 +1301,9 @@ impl<H: Heap> Vm<H> {
         let Some(wait) = wait else {
             // The raise replaces what a ready task resumes with; a
             // delivered one still takes its turn first (`K-TASK-005`).
+            if let State::Ready(Resume::Outcome(wait)) = self.tasks.all[target].state {
+                drop(self.take_delivered_outcome(wait)?);
+            }
             self.tasks.all[target].state = State::Ready(Resume::Raise(cancelled));
             return Ok(());
         };
