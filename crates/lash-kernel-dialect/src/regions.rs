@@ -46,8 +46,9 @@ pub fn reachable(
     listed
 }
 
-/// Compose operation import facts with immutable linked export declarations.
-/// Imports carry no type-member kind, asynchronous or rest metadata.
+/// Compose source names from the document's imports and available linked
+/// declarations. Reconstruct bare names from their import contracts when no
+/// declaration is supplied. Type members need their owning declaration.
 pub fn namespaces(
     document: &k::Document,
     declarations: &Namespaces,
@@ -69,8 +70,12 @@ pub fn namespaces(
             });
         }
         let name = &import.name;
-        let kind = match &import.kind {
-            ImportKind::Operation { signature } => {
+        let declaration = declarations
+            .packages()
+            .get(&name.package)
+            .and_then(|members| members.get(&name.member));
+        let kind = match (&import.kind, declaration) {
+            (ImportKind::Operation { signature }, _) => {
                 crate::NamespaceKind::Operation(crate::OperationSignature {
                     signature: signature.clone(),
                     // Both host control kinds lower to this same terminal
@@ -84,14 +89,28 @@ pub fn namespaces(
                     mode: lash_kernel_value::OperationMode::Waited,
                 })
             }
-            ImportKind::Code { .. } | ImportKind::Type { .. } | ImportKind::Error { .. } => {
-                let member = declarations
-                    .packages()
-                    .get(&name.package)
-                    .and_then(|members| members.get(&name.member))
-                    .ok_or_else(|| NamespaceRefusal::MissingDeclaration { name: name.clone() })?;
-                member.kind.clone()
+            (_, Some(member)) => member.kind.clone(),
+            (_, None) if name.type_member.is_some() => {
+                return Err(NamespaceRefusal::MissingDeclaration { name: name.clone() });
             }
+            (
+                ImportKind::Code {
+                    signature,
+                    convention,
+                },
+                None,
+            ) => crate::NamespaceKind::Function(crate::FunctionMember {
+                name: name.clone(),
+                signature: signature.clone(),
+                convention: *convention,
+                asynchronous: false,
+                rest: false,
+            }),
+            (ImportKind::Type { .. }, None) => crate::NamespaceKind::Type(crate::ValueType {
+                representation: lash_kernel_value::Type::Any,
+                members: BTreeMap::new(),
+            }),
+            (ImportKind::Error { .. }, None) => crate::NamespaceKind::Error,
         };
         packages.entry(name.package.clone()).or_default().insert(
             name.member.clone(),
