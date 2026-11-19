@@ -1,7 +1,7 @@
 use lash_kernel_doc::heap::{LogicalBytes, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{
     CellTargetKind, CheckpointRoot, EndedRecord, FrozenRef, FrozenSummary, KeyedRoot, RootStatus,
-    SavedLimits, SavedMeters, SequenceRoot,
+    SavedCharge, SavedLimits, SequenceRoot,
 };
 
 pub fn page(byte: u8) -> PageRef {
@@ -27,7 +27,7 @@ pub fn root(ended: bool) -> CheckpointRoot {
     CheckpointRoot {
         limits: SavedLimits {
             memory: Some(4096),
-            charge: 1000,
+            charge: SavedCharge::exact(1, 1000).unwrap(),
         },
         kernel: 1,
         document: lash_kernel_value::DocumentId::from_bytes([1; 32]),
@@ -59,11 +59,5 @@ pub fn root(ended: bool) -> CheckpointRoot {
         reads: keyed(15),
         session: keyed(16),
         host: vec![lash_kernel_value::names::Name::new("input")],
-        meters: SavedMeters {
-            charged: Some(1),
-            waits_issued: 1,
-            next_join: 1,
-            live_tasks: 1,
-        },
     }
 }
