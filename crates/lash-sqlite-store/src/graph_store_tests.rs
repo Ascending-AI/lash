@@ -563,6 +563,7 @@ async fn a_large_candidate_installs_within_bounded_buffers() {
 }
 
 law!(file_only a_refused_owner_graph_commit_writes_nothing);
+law!(file_only a_hydration_expecting_another_root_reads_only_its_owner_row);
 law!(file_only prepared_configuration_references_refuse_missing_or_conflicting_nodes);
 law!(file_only a_prepared_configuration_reference_racing_retirement_is_atomic);
 law!(file_only an_owner_refuses_a_second_outcome_for_one_call);

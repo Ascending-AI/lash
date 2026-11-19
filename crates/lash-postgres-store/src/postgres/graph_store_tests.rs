@@ -405,6 +405,7 @@ macro_rules! law {
 }
 
 law!(a_refused_owner_graph_commit_writes_nothing);
+law!(a_hydration_expecting_another_root_reads_only_its_owner_row);
 law!(prepared_configuration_references_refuse_missing_or_conflicting_nodes);
 law!(a_prepared_configuration_reference_racing_retirement_is_atomic);
 law!(an_owner_refuses_a_second_outcome_for_one_call);

@@ -450,6 +450,73 @@ pub async fn prepared_configuration_references_refuse_missing_or_conflicting_nod
     Ok(())
 }
 
+/// PC-READ, expected root (FIG-7725): a hydration that expects another
+/// root than the one its owner names is refused as a revision conflict
+/// before any descendant is read: its read returns the owner's row and
+/// nothing it reaches. Expecting the root the owner names, the same read
+/// returns the root and every node it reaches, so the row count tells the
+/// two apart.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_hydration_expecting_another_root_reads_only_its_owner_row(
+    tier: &dyn GraphTier,
+) -> LawOutcome {
+    use lash_core_ids::operational_metrics::sql;
+
+    let owner = owned(tier, "graph-expected-root").await?;
+    let mut nodes = staging();
+    let held = value(&mut nodes, &[&big("expected-a"), &big("expected-b")], &[]);
+    let root = value(&mut nodes, &["expected root"], &[held]);
+    let other = value(&mut staging(), &["another root"], &[]);
+    owner_commit(
+        tier,
+        &owner,
+        nodes.into_nodes(),
+        vec![pin("expected-root", root)],
+    )
+    .await
+    .map_err(|error| refused("the pin", error))?;
+    let read = |expected: NodeId| {
+        sql::collect(
+            "graph.hydrate-expected",
+            "law",
+            hydrate(
+                tier,
+                pinned("expected-root"),
+                Some(expected),
+                DecodeLimits::within_total(1 << 30),
+            ),
+        )
+    };
+    let (whole, receipt) = read(root).await;
+    let whole = whole.map_err(|refusal| refused("the expected root", refusal))?;
+    ensure!(
+        whole.root == root && whole.nodes.len() > 2,
+        "the expected root hydrated as {} with {} nodes",
+        whole.root,
+        whole.nodes.len()
+    );
+    ensure!(
+        receipt.rows_returned > 2,
+        "the read of the whole root returned {} rows",
+        receipt.rows_returned
+    );
+    let (conflict, receipt) = read(other).await;
+    ensure!(
+        conflict.as_ref().err() == Some(&GraphRefusal::RevisionConflict),
+        "a hydration expecting another root answered {:?}",
+        conflict.map(|graph| graph.root)
+    );
+    ensure!(
+        receipt.rows_returned <= 1,
+        "a hydration expecting another root returned {} rows, past its owner's",
+        receipt.rows_returned
+    );
+    Ok(())
+}
+
 /// PC-ATOMIC: a refused commit leaves no node, edge, fact, admission or
 /// root behind, whatever refused it.
 ///

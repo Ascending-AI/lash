@@ -80,6 +80,35 @@ pub(super) use reclaim::retirement_function_ddl;
 pub(crate) use reclaim::{audit_page, graph_counts, peel};
 pub(super) use reclaim::{reclaim, retirement_mechanics};
 
+/// The one semantic-page leaf rule of every recursive graph walk, as SQL
+/// over the stored `parent` row: true when the walk descends through it.
+/// A walk descends through every blob but a checked graph envelope whose
+/// kind is a persistent-heap page ([`is_semantic`]): magic, then the kind
+/// as a two-byte varint, which every kind of [`SEMANTIC_KINDS`] is. The
+/// literals are tied to the envelope's own constants below.
+macro_rules! descends {
+    () => {
+        "CASE
+                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
+                       WHEN get_byte(parent.content, 4) < 128
+                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
+                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
+                            NOT BETWEEN 1000 AND 1999
+                   END"
+    };
+}
+
+// [`descends`] reads the kind at byte 4 as a two-byte varint and tests it
+// against 1000 to 1999.
+const _: () = {
+    use lash_core_store::checkpoint_graph::MAGIC;
+    use lash_core_store::checkpoint_graph::node::SEMANTIC_KINDS;
+    assert!(MAGIC.len() == 4);
+    assert!(SEMANTIC_KINDS.start == 1000 && SEMANTIC_KINDS.end == 2000);
+    // Every semantic kind takes exactly two varint bytes.
+    assert!(SEMANTIC_KINDS.start >= 1 << 7 && SEMANTIC_KINDS.end <= 1 << 14);
+};
+
 lash_store_sql::statements! {
     lazy
     /// Graph statements only PostgreSQL issues: the artifact bridge's
@@ -129,44 +158,31 @@ lash_store_sql::statements! {
         /// Every blob the roots `?1` reach along stored edges, the roots
         /// included, with its encoding and bytes: one read of a whole graph,
         /// whose child tables a walk still checks. Nothing under a
-        /// persistent-heap page is read (envelope kind 1000 to 1999, a
-        /// two-byte varint after the magic): the page is a leaf.
-        walk_reach = "WITH RECURSIVE reach AS (
+        /// persistent-heap page is read ([`descends`]): the page is a leaf.
+        walk_reach = concat!("WITH RECURSIVE reach AS (
                  SELECT id FROM blobs WHERE hash = ANY(?1::bytea[])
                  UNION
                  SELECT edge.child_id FROM blob_edges AS edge
                  JOIN reach ON edge.parent_id = reach.id
                  JOIN blobs AS parent ON parent.id = reach.id
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END
+                 WHERE ", descends!(), "
              )
              SELECT blobs.hash, blobs.encoding, blobs.content
-             FROM blobs JOIN reach ON blobs.id = reach.id";
+             FROM blobs JOIN reach ON blobs.id = reach.id");
 
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
         /// roots' bytes: what a reader of the graph alone reads.
-        walk_reach_graph = "WITH RECURSIVE reach AS (
+        walk_reach_graph = concat!("WITH RECURSIVE reach AS (
                  SELECT id FROM blobs WHERE hash = ANY(?1::bytea[])
                  UNION
                  SELECT edge.child_id FROM blob_edges AS edge
                  JOIN reach ON edge.parent_id = reach.id
                  JOIN blobs AS parent ON parent.id = reach.id
-                 WHERE CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END
+                 WHERE ", descends!(), "
              )
              SELECT blobs.hash, blobs.encoding,
                     CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::bytea[]) THEN blobs.content END
-             FROM blobs JOIN reach ON blobs.id = reach.id";
+             FROM blobs JOIN reach ON blobs.id = reach.id");
 
         /// One level of a walk: every blob in `?1`. A graph-only walk
         /// (`?3`) omits opaque children's bytes, but includes roots `?2`.
@@ -220,10 +236,12 @@ lash_store_sql::statements! {
         /// column (no row, or a null one, when the owner is gone), then each
         /// node. Owner keys are `?2` to `?4` as text, `?5` and `?6` as
         /// integers and `?7` as bytes, as each kind's source names them. A
-        /// walk stops at what a persistent-heap page reaches (envelope kind
-        /// 1000 to 1999, a two-byte varint after the magic) unless `?8`
-        /// asks for the whole closure: the page is a leaf.
-        hydrate = "WITH RECURSIVE root AS (
+        /// walk stops at what a persistent-heap page reaches ([`descends`])
+        /// unless `?8` asks for the whole closure: the page is a leaf. With
+        /// an expected root `?9` (raw digest), a root column that names
+        /// another root reaches nothing: the owner's row alone answers, and
+        /// no descendant is read.
+        hydrate = concat!("WITH RECURSIVE root AS (
                  SELECT root_ref AS id FROM exec_snapshots WHERE ?1 = 'exec' AND exec_key = ?2
                  UNION ALL SELECT record_ref FROM run_records
                      WHERE ?1 = 'run_fact' AND owner_key = ?2 AND run_seq = ?5 AND ordinal = ?6
@@ -252,18 +270,14 @@ lash_store_sql::statements! {
                      WHERE ?1 = 'admission_base' AND session_id = ?2
                  UNION ALL SELECT graph_ref FROM lash_vm_artifacts
                      WHERE ?1 = 'artifact' AND namespace = ?2 AND artifact_ref = ?3 AND storage_kind = 1),
-             reach AS (SELECT root.id FROM root WHERE root.id IS NOT NULL UNION
+             reach AS (SELECT root.id FROM root WHERE root.id IS NOT NULL
+                     AND (?9::bytea IS NULL OR root.id = (SELECT id FROM blobs WHERE hash = ?9::bytea))
+                 UNION
                  SELECT edge.child_id FROM blob_edges AS edge JOIN reach ON edge.parent_id = reach.id
                  JOIN blobs AS parent ON parent.id = reach.id
-                 WHERE ?8::boolean OR CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
+                 WHERE ?8::boolean OR ", descends!(), ")
              SELECT (SELECT hash FROM blobs WHERE id = root.id) AS id, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.id = reach.id) ON TRUE";
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.id = reach.id) ON TRUE");
     }
 }
 
@@ -581,10 +595,19 @@ type HydrateRow = (
     Option<Vec<u8>>,
 );
 
-/// The one statement that hydrates `owner`'s root on `connection`: its root
-/// column and every blob it reaches. Each kind names its source by its key
-/// columns; a model answer and a run transcript are read as whole closures.
-async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answer<Vec<HydrateRow>> {
+/// The one statement that hydrates `owner`'s root on `connection`, read
+/// row by row: the root it names, then every blob it reaches, each charged
+/// to `limits` as it arrives, before it is kept. The root is checked
+/// against `expected` on the first row, before any descendant is kept; the
+/// statement itself reaches no descendant of a root other than `expected`.
+/// Each kind names its source by its key columns; a model answer and a run
+/// transcript are read as whole closures.
+async fn hydrate_rows(
+    connection: &mut PgConnection,
+    owner: &RootOwner,
+    expected: Option<NodeId>,
+    limits: &DecodeLimits,
+) -> Answer<(NodeId, Found, Budget)> {
     let mut text: [Option<String>; 3] = [None, None, None];
     let mut numbers: [Option<i64>; 2] = [None, None];
     let mut bytes = None;
@@ -692,18 +715,46 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
         }
     };
     let [first, second, third] = text;
-    crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(SQL.postgres.hydrate.sql())
-        .bind(kind)
-        .bind(first)
-        .bind(second)
-        .bind(third)
-        .bind(numbers[0])
-        .bind(numbers[1])
-        .bind(bytes)
-        .bind(whole)
-        .fetch_all(crate::observed_sql::executor(connection))
-        .await
-        .map_err(db)
+    let mut rows =
+        crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(SQL.postgres.hydrate.sql())
+            .bind(kind)
+            .bind(first)
+            .bind(second)
+            .bind(third)
+            .bind(numbers[0])
+            .bind(numbers[1])
+            .bind(bytes)
+            .bind(whole)
+            .bind(expected.map(|expected| crate::keys::key(expected.to_hex())))
+            .fetch(crate::observed_sql::executor(connection));
+    // SQLite's order: a gone owner, then another root, then the limits.
+    let Some((root, hash, encoding, bytes)) = rows.try_next().await.map_err(db)? else {
+        return Err(GraphRefusal::RootRetired);
+    };
+    let Some(root) = root else {
+        return Err(GraphRefusal::RootRetired);
+    };
+    let root = node_of(&root.0)?;
+    if expected.is_some_and(|expected| expected != root) {
+        return Err(GraphRefusal::RevisionConflict);
+    }
+    let mut found = Found::new();
+    let (mut count, mut total) = (0, 0);
+    let mut row = Some((hash, encoding, bytes));
+    while let Some((hash, encoding, bytes)) = row {
+        if let (Some(hash), Some(encoding)) = (hash, encoding) {
+            if let Some(bytes) = &bytes {
+                charge_node(limits, &mut count, &mut total, bytes.len())?;
+            }
+            found.insert(node_of(&hash.0)?, (encoding_of(encoding)?, bytes));
+        }
+        row = rows
+            .try_next()
+            .await
+            .map_err(db)?
+            .map(|(_, hash, encoding, bytes)| (hash, encoding, bytes));
+    }
+    Ok((root, found, Budget { count, total }))
 }
 
 /// The root `owner` names now, read on the caller's connection: none when
@@ -798,25 +849,7 @@ pub(super) async fn hydrate_in(
     expected: Option<NodeId>,
     limits: &DecodeLimits,
 ) -> Answer<HydratedGraph> {
-    let rows = hydrate_rows(connection, &owner).await?;
-    let Some(root) = rows.first().and_then(|(root, ..)| root.as_deref()) else {
-        return Err(GraphRefusal::RootRetired);
-    };
-    let root = node_of(root)?;
-    if expected.is_some_and(|expected| expected != root) {
-        return Err(GraphRefusal::RevisionConflict);
-    }
-    let mut found = Found::new();
-    let (mut count, mut total) = (0, 0);
-    for (_, hash, encoding, bytes) in rows {
-        if let (Some(hash), Some(encoding)) = (hash, encoding) {
-            if let Some(bytes) = &bytes {
-                charge_node(limits, &mut count, &mut total, bytes.len())?;
-            }
-            found.insert(node_of(&hash.0)?, (encoding_of(encoding)?, bytes));
-        }
-    }
-    let spent = Budget { count, total };
+    let (root, found, spent) = hydrate_rows(connection, &owner, expected, limits).await?;
     let nodes = walk_found(None, &[root], found, spent, limits, None).await?;
     Ok(HydratedGraph { owner, root, nodes })
 }
