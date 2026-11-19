@@ -19,12 +19,14 @@ use std::sync::Arc;
 
 use lash_kernel_value::names::FunctionId;
 
+use lash_kernel_doc::arena::Body;
 use lash_kernel_doc::{Datum, JoinMode, Value};
 use lash_kernel_state::paged::run::continuation::{
     self, JoinKind, PointPhase, RunBill, RunFrame, RunHandler, RunJoin, RunJoiner, RunOccurrence,
     RunRecord, RunRequest, RunResume, RunSlot, RunTask, RunTaskState, RunUnit, RunWait, Sites,
     SlotRole as SavedRole, UnitKind as SavedKind, WaitPhase,
 };
+use lash_kernel_state::paged::run::objects::RunValue;
 use lash_kernel_value::content_ids::LinkId;
 use lash_kernel_value::names::OperationUse;
 use lash_kernel_value::sites::Site;
@@ -34,7 +36,7 @@ use crate::bytecode::op::Op;
 use crate::bytecode::program::{Program, Unit, UnitId, UnitKind};
 use crate::bytecode::site_tables::{Entry, Phase, SlotRole};
 use crate::heap::Heap;
-use crate::heap::slots::SlotHeap;
+use crate::heap::slots::{InlineSequences, SlotHeap};
 use crate::interface::EffectRequest;
 use crate::paged::SealError;
 use crate::vm::Vm;
@@ -156,7 +158,14 @@ pub(crate) fn seal(
         .collect();
     let failures = catches::save(vm, &mut values)?;
     let caught = vm.catches.caught.iter().map(|wait| wait.0).collect();
-    let heap = vm.heap.seal(&values.0)?;
+    let (mut heap, inlined) = vm.heap.seal_with_sequences(&values.roots)?;
+    for (at, table, sequence) in values.table_cursors {
+        if let Some(sequences) = inlined.get(&table) {
+            heap.roots[at as usize] =
+                inline_cursor(sequences, sequence).map_or(RunValue::Absent, RunValue::Int);
+        }
+    }
+    remap_live_cursors(vm, &inlined);
     let held_code = code::held(&program, &vm.heap.code).into_iter().collect();
     Ok(RunRecord {
         heap,
@@ -193,12 +202,17 @@ pub(crate) fn seal(
 
 /// The values a sealed run holds, in walk order.
 #[derive(Default)]
-struct Values(Vec<Value>);
+struct Values {
+    roots: Vec<Value>,
+    /// Root index, table slot and sequence for cursors that may need
+    /// renumbering after the heap decides whether the table fits inline.
+    table_cursors: Vec<(u32, u32, u64)>,
+}
 
 impl Values {
     fn put(&mut self, value: Value) -> u32 {
-        self.0.push(value);
-        (self.0.len() - 1) as u32
+        self.roots.push(value);
+        (self.roots.len() - 1) as u32
     }
 }
 
@@ -361,19 +375,21 @@ fn save_frame(
     }
     let mut slots = Vec::with_capacity(locals.len());
     for (at, local) in locals.iter().enumerate() {
-        let mut value = cx.stack[base + at];
-        if let (SlotRole::Loop(CURSOR), Some(walked)) = (&local.role, at.checked_sub(1))
+        let value = cx.stack[base + at];
+        let value = if let (SlotRole::Loop(CURSOR), Some(walked)) = (&local.role, at.checked_sub(1))
             && matches!(locals[walked].role, SlotRole::Loop(WALKED))
         {
-            value = saved_cursor(arena, cx.stack[base + walked], value)?;
-        }
+            saved_cursor(arena, values, cx.stack[base + walked], value)?
+        } else {
+            values.put(value)
+        };
         slots.push(RunSlot {
             site: sites
                 .put(&local.site)
                 .ok_or_else(|| fault("a site past u32 places"))?,
             role: save_role(&local.role),
             copy: local.copy,
-            value: values.put(value),
+            value,
         });
     }
     let operands = cx.stack[base + locals.len()..end]
@@ -420,24 +436,83 @@ const CURSOR: u8 = 1;
 /// keeps no sequences and reopens with its entries numbered by position,
 /// so its cursor saves as the position of the last entry at or before
 /// it. A table saved chunked keeps its sequences, and its cursor with them.
-fn saved_cursor(arena: &Arena, walked: Value, cursor: Value) -> Result<Value, SealError> {
+fn saved_cursor(
+    arena: &Arena,
+    values: &mut Values,
+    walked: Value,
+    cursor: Value,
+) -> Result<u32, SealError> {
     let (Value::Map(table) | Value::Set(table), Value::Int(sequence)) = (walked, cursor) else {
-        return Ok(cursor);
+        return Ok(values.put(cursor));
     };
     let native = |error: lash_kernel_doc::NativeError| fault(error.to_string());
-    if crate::heap::large::is_large(arena, arena.body(table).map_err(native)?) {
-        return Ok(cursor);
+    let body = arena.body(table).map_err(native)?;
+    if matches!(body, Body::Cold(_)) {
+        return Ok(values.put(cursor));
     }
-    let mut position = None;
-    let mut after = None;
-    while let Some((at, _)) = arena.table_next(table, after).map_err(native)? {
-        if at > sequence as u64 {
-            break;
+    if crate::heap::large::is_large(arena, body) {
+        let at = values.put(cursor);
+        values
+            .table_cursors
+            .push((at, table.index(), sequence as u64));
+        return Ok(at);
+    }
+    let passed = arena
+        .table_passed(table, Some(sequence as u64))
+        .map_err(native)?;
+    Ok(values.put(
+        passed
+            .checked_sub(1)
+            .map_or(Value::Absent, |at| Value::Int(at as i64)),
+    ))
+}
+
+/// The last inline position whose original sequence is at or before the cursor.
+fn inline_cursor(sequences: &[u64], sequence: u64) -> Option<i64> {
+    sequences
+        .partition_point(|&held| held <= sequence)
+        .checked_sub(1)
+        .map(|at| at as i64)
+}
+
+/// The in-memory machine can keep running after a seal, using the same
+/// newly inline rows as a cold reopen.
+pub(crate) fn remap_live_cursors(vm: &mut Vm<SlotHeap>, inlined: &InlineSequences) {
+    if inlined.is_empty() {
+        return;
+    }
+    let tasks = &mut vm.tasks;
+    for (number, task) in tasks.all.iter_mut().enumerate() {
+        let cx = if tasks.installed && number == tasks.running {
+            &mut vm.cx
+        } else {
+            &mut task.cx
+        };
+        for frame in &cx.frames {
+            let base = frame.base as usize;
+            let locals = vm.program.unit(frame.unit).sites.locals();
+            for (at, pair) in locals.windows(2).enumerate() {
+                if !matches!(
+                    (&pair[0].role, &pair[1].role),
+                    (SlotRole::Loop(WALKED), SlotRole::Loop(CURSOR))
+                ) {
+                    continue;
+                }
+                let Some(Value::Map(table) | Value::Set(table)) = cx.stack.get(base + at) else {
+                    continue;
+                };
+                let Some(sequences) = inlined.get(&table.index()) else {
+                    continue;
+                };
+                if let Some(cursor) = cx.stack.get_mut(base + at + 1)
+                    && let Value::Int(sequence) = *cursor
+                {
+                    *cursor =
+                        inline_cursor(sequences, sequence as u64).map_or(Value::Absent, Value::Int);
+                }
+            }
         }
-        position = Some(position.map_or(0, |p: i64| p + 1));
-        after = Some(at);
     }
-    Ok(position.map_or(Value::Absent, Value::Int))
 }
 
 /// A handler, by the `try` that installed it.

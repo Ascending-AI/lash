@@ -483,9 +483,12 @@ impl CoreMachine {
     /// the laws' forced-cold runs.
     #[cfg(test)]
     pub(crate) fn force_cold(&mut self) {
-        self.vm.chill = Some(|heap, roots| {
-            heap.page_out(roots)
+        self.vm.chill = Some(|vm, roots| {
+            let inlined = vm
+                .heap
+                .page_out(roots)
                 .expect("a forced-cold run seals its heap");
+            crate::durable::remap_live_cursors(vm, &inlined);
         });
     }
 

@@ -50,6 +50,9 @@ fn build_error<'call>(
     }))
 }
 
+/// The old sequences of newly inlined tables, indexed by live arena slot.
+pub(crate) type InlineSequences = std::collections::HashMap<u32, Vec<u64>>;
+
 /// A slot heap bounded by `bound` schedule units.
 pub(crate) struct SlotHeap {
     arena: Arena,
@@ -174,6 +177,20 @@ impl SlotHeap {
         &mut self,
         roots: &[Value],
     ) -> Result<lash_kernel_state::paged::run::root::HeapRoot, crate::paged::SealError> {
+        self.seal_with_sequences(roots).map(|(root, _)| root)
+    }
+
+    /// Seals the heap and returns the sequences that inline rows renumbered.
+    pub(crate) fn seal_with_sequences(
+        &mut self,
+        roots: &[Value],
+    ) -> Result<
+        (
+            lash_kernel_state::paged::run::root::HeapRoot,
+            InlineSequences,
+        ),
+        crate::paged::SealError,
+    > {
         let durable = self
             .durable
             .as_mut()
@@ -191,7 +208,8 @@ impl SlotHeap {
         self.summaries.clear();
         // A large object whose chunks moved goes back to its row: the
         // arena's chunks are always the row's.
-        for handle in moved {
+        let mut inlined = InlineSequences::default();
+        for (handle, sequences) in moved {
             if self
                 .arena
                 .drop_large(handle)
@@ -201,8 +219,11 @@ impl SlotHeap {
             {
                 self.resettle(handle);
             }
+            if let Some(sequences) = sequences {
+                inlined.insert(handle.index(), sequences);
+            }
         }
-        Ok(root)
+        Ok((root, inlined))
     }
 
     /// Slot `handle`'s body changed in place: it holds what its body does.
@@ -232,9 +253,9 @@ impl SlotHeap {
     pub(crate) fn page_out(
         &mut self,
         roots: &[Value],
-    ) -> Result<lash_kernel_state::paged::run::root::HeapRoot, crate::paged::SealError> {
+    ) -> Result<InlineSequences, crate::paged::SealError> {
         use lash_kernel_doc::arena::Body;
-        let root = self.seal(roots)?;
+        let (_, inlined) = self.seal_with_sequences(roots)?;
         for index in 0..self.units.len() {
             let Some(handle) = self.arena.objects().handle_at(index as u32) else {
                 continue;
@@ -262,7 +283,7 @@ impl SlotHeap {
                 self.resettle(handle);
             }
         }
-        Ok(root)
+        Ok(inlined)
     }
 
     /// The page port the heap seals through, when it has a directory.

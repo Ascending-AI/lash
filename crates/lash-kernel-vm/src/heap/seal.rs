@@ -49,6 +49,9 @@ pub(super) fn fault(problem: impl Into<String>) -> SealError {
     }
 }
 
+/// Moved tables carry their slot and, if inlined, their old sequences.
+type MovedTables = Vec<(ArenaHandle, Option<Vec<u64>>)>;
+
 /// Writes every object `roots` reach that changed since the last seal into
 /// `directory`, minting ids from `high_water`, prunes what they no longer
 /// reach and seals it. A large list, tuple or table is written by its changed
@@ -68,7 +71,7 @@ pub(crate) fn seal(
     high_water: &mut HighWater,
     large: &mut super::large::Large,
     code: &mut BTreeSet<FunctionId>,
-) -> Result<(HeapRoot, Vec<ArenaHandle>), SealError> {
+) -> Result<(HeapRoot, MovedTables), SealError> {
     let mut walk = Walk {
         arena,
         high_water,
@@ -87,19 +90,26 @@ pub(crate) fn seal(
     let Walk { arena, written, .. } = walk;
 
     let mut moved = Vec::new();
+    let mut layouts = Vec::new();
     for &handle in &written {
         let id = id_of(arena, handle)?;
         let body = arena
             .body(handle)
             .map_err(|error| fault(error.to_string()))?;
         let row = if super::large::is_large(arena, body) {
-            let (row, relayout) = large.write(arena, handle, id, directory.access())?;
-            if relayout {
-                moved.push(handle);
+            use super::large::Relayout;
+            let (row, relayout, opened) = large.write(arena, handle, id, directory.access())?;
+            layouts.push((id, opened));
+            match relayout {
+                Relayout::Unchanged => {}
+                Relayout::Chunks => moved.push((handle, None)),
+                Relayout::Inline(sequences) => moved.push((handle, Some(sequences))),
             }
             row
         } else {
-            large.forget(id);
+            if large.row(id).is_some() {
+                layouts.push((id, None));
+            }
             let mut members = Vec::new();
             lash_kernel_state::arena::each_member(body, &mut |value| members.push(*value));
             let record = record(arena, handle, directory.access())?;
@@ -125,6 +135,9 @@ pub(crate) fn seal(
         .prune(roots.iter().filter_map(RunValue::id))
         .map_err(SealError::Heap)?;
     let directory = directory.seal().map_err(SealError::Heap)?;
+    for (id, opened) in layouts {
+        large.written(id, opened);
+    }
 
     for &handle in &written {
         arena

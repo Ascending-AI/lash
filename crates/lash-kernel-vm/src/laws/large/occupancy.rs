@@ -5,6 +5,7 @@
 //! give holds no more pages than about twice a direct build's.
 
 use lash_kernel_state::kernel_internals::tree::grant;
+use lash_kernel_state::paged::run::chunked::LARGE;
 use lash_kernel_state::paged::run::index::{Leaf, NODE_REFS, Part};
 use lash_kernel_value::tokens::decode_body;
 
@@ -66,6 +67,114 @@ pub(super) fn occupied<L: Leaf>(store: &Counting, index: &Index<L>) -> Result<()
         }
     }
     Ok(())
+}
+
+/// Compact a sparse table both above and below the inline threshold.
+pub(super) fn table_compacted_cases(kind: &str) -> Result<(), String> {
+    const START: i64 = 6_400;
+    let key = |i| match kind {
+        "record" => Value::Text(ShortText::new(&format!("k{i}")).expect("short")),
+        _ => Value::Int(i),
+    };
+    let value = |i: i64| match kind {
+        "set" => Value::Absent,
+        _ => Value::Int(-i),
+    };
+    let object = |keys: &[i64]| {
+        let pairs = || keys.iter().map(|&i| (key(i), value(i))).collect();
+        match kind {
+            "map" => NewObject::Map(pairs()),
+            "record" => NewObject::Record(pairs()),
+            _ => NewObject::Set(keys.iter().copied().map(key).collect()),
+        }
+    };
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let keys: Vec<_> = (0..START).collect();
+    let table = make(&mut heap, object(&keys));
+    let built = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
+    let mut failed = Vec::new();
+
+    for (len, stride) in [(100, 64), (400, 16)] {
+        let (mut heap, table) = reopened(&store, &built);
+        let handle = table.handle().ok_or("no table")?;
+        let kept: Vec<_> = keys.iter().copied().filter(|i| i % stride == 0).collect();
+        assert_eq!(kept.len(), len);
+        for i in keys.iter().copied().filter(|i| i % stride != 0) {
+            warm(&mut heap, &[table], |heap| {
+                heap.arena_mut().table_delete(handle, &key(i))
+            });
+        }
+        let root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
+        let (mut cold, table) = reopened(&store, &root);
+        let handle = table.handle().ok_or("no table")?;
+        for i in kept.iter().copied() {
+            let member = get(&mut cold, &[table], table, key(i));
+            let right = match (kind, member) {
+                ("set", Some(Value::Absent)) => true,
+                (_, Some(Value::Int(held))) => held == -i,
+                _ => false,
+            };
+            if !right {
+                return Err(format!("{kind}, {len}: entry {i} reads otherwise"));
+            }
+        }
+        let mut last = None;
+        for i in kept.iter().copied() {
+            let held = warm(&mut cold, &[table], |heap| {
+                heap.arena().table_next(handle, last)
+            });
+            let Some((seq, next)) = held else {
+                return Err(format!("{kind}, {len}: missing entry {i}"));
+            };
+            if number(next) != Some(i) {
+                return Err(format!("{kind}, {len}: entry {i} iterates out of order"));
+            }
+            if len > LARGE && seq != i as u64 {
+                return Err(format!("{kind}, {len}: entry {i} has sequence {seq}"));
+            }
+            last = Some(seq);
+        }
+        if warm(&mut cold, &[table], |heap| {
+            heap.arena().table_next(handle, last)
+        })
+        .is_some()
+        {
+            return Err(format!("{kind}, {len}: extra entry"));
+        }
+        if len <= LARGE {
+            let mut direct = fresh(&store);
+            let table = make(&mut direct, object(&kept));
+            let direct = direct
+                .seal(&[table])
+                .map_err(|error| format!("{error:?}"))?;
+            let expected = record(&store, &direct, 0)?;
+            assert!(matches!(
+                expected,
+                Record::Map(_) | Record::Set(_) | Record::Record(_)
+            ));
+            if record(&store, &root, 0)? != expected {
+                failed.push(format!(
+                    "{kind}, {len}: shrunk row differs from the fresh inline row"
+                ));
+            }
+        } else {
+            let chunked = row(&store, &root)?;
+            well_formed(&store, &chunked)?;
+            let bound = len.div_ceil(CHUNK / 2) as u64;
+            if chunked.chunks() > bound {
+                failed.push(format!(
+                    "{kind}, {len}: {} chunks exceed {bound}",
+                    chunked.chunks()
+                ));
+            }
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(failed.join("; "))
+    }
 }
 
 /// The thinned case: a map of 720 chunks (ten index pages of 72) whose
@@ -145,6 +254,7 @@ pub(super) fn table_thinned_case() -> Result<(), String> {
 /// surviving boundary. Splitting that range must leave an ordered index
 /// whose members all read back cold.
 pub(super) fn table_regrown_below_first_case(is_set: bool) -> Result<(), String> {
+    const START: i64 = 480;
     let store = Counting::default();
     let mut heap = fresh(&store);
     let value = |i: i64| {
@@ -155,9 +265,9 @@ pub(super) fn table_regrown_below_first_case(is_set: bool) -> Result<(), String>
         }
     };
     let object = if is_set {
-        NewObject::Set((0..336).map(Value::Int).collect())
+        NewObject::Set((0..START).map(Value::Int).collect())
     } else {
-        NewObject::Map((0..336).map(|i| (Value::Int(i), value(i))).collect())
+        NewObject::Map((0..START).map(|i| (Value::Int(i), value(i))).collect())
     };
     let table = make(&mut heap, object);
     let root = heap.seal(&[table]).map_err(|error| format!("{error:?}"))?;
@@ -201,7 +311,7 @@ pub(super) fn table_regrown_below_first_case(is_set: bool) -> Result<(), String>
     let (mut heap, table) = reopened(&store, &root);
     let handle = table.handle().ok_or("no table")?;
     let mut added = Vec::new();
-    for i in 336..10_000 {
+    for i in START..10_000 {
         let normal = heap
             .arena()
             .semantics()
@@ -243,9 +353,9 @@ pub(super) fn table_regrown_below_first_case(is_set: bool) -> Result<(), String>
     let handle = table.handle().ok_or("no table")?;
     assert_eq!(
         warm(&mut cold, &[table], |heap| heap.arena().len(handle)),
-        224
+        START as u64 - removed.len() as u64 + added.len() as u64
     );
-    for i in (0..336).chain(added) {
+    for i in (0..START).chain(added) {
         let held = get(&mut cold, &[table], table, Value::Int(i));
         let right = match held {
             None => removed.contains(&i),

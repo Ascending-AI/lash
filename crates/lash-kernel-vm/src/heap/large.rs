@@ -12,9 +12,9 @@
 //! and adjusts the row's edge multiset by the changed chunks' references
 //! alone. A table's new
 //! entries wait in an overflow chunk until the seal places them by key;
-//! a chunk past [`CHUNK`] entries splits by placement, and an object whose
-//! chunks moved goes back to its row as a proxy, so the arena's chunks are
-//! always the row's.
+//! a chunk past [`CHUNK`] entries splits by placement. During shrink,
+//! sparse chunks join their neighbours and a table that fits goes inline.
+//! A table whose chunks moved goes back to its row as a proxy.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -41,19 +41,21 @@ use crate::paged::SealError;
 /// The entries a table's chunk holds when it is first written: room for a
 /// quarter more before it splits.
 const FILL: usize = CHUNK * 3 / 4;
+const MIN_FILL: usize = CHUNK / 2;
 
 /// What the heap knows of a chunk it read or wrote: its encoding's digest
-/// and the ids its members reference, once per reference.
+/// its member count, and the ids its members reference, once per reference.
 #[derive(Clone, Debug)]
 struct Seen {
     digest: [u8; 32],
+    len: usize,
     edges: Vec<ObjectId>,
 }
 
 /// A large object the heap opened or wrote: its row and what it knows of
 /// its chunks.
 #[derive(Debug)]
-struct Opened {
+pub(super) struct Opened {
     row: Chunked,
     seen: HashMap<u32, Seen>,
     /// Each chunk's first placement, when the heap wrote every chunk.
@@ -169,7 +171,11 @@ impl Piece {
             first,
             len,
             tokens,
-            seen: Seen { digest, edges },
+            seen: Seen {
+                digest,
+                len: len as usize,
+                edges,
+            },
             leaf: None,
         }
     }
@@ -186,6 +192,18 @@ enum Outcome {
         pieces: Vec<Piece>,
         keep_first: bool,
     },
+}
+
+/// How a table's on-page layout changed since it entered the arena.
+pub(super) enum Relayout {
+    Unchanged,
+    Chunks,
+    Inline(Vec<u64>),
+}
+
+enum TableLayout {
+    Inline(Box<Row>, Vec<u64>),
+    Chunked(Vec<Outcome>, Option<Vec<Option<Placement>>>),
 }
 
 /// A table entry being written, its key's placement known.
@@ -215,9 +233,13 @@ impl Large {
         );
     }
 
-    /// The object `id` is written whole from now on.
-    pub(crate) fn forget(&mut self, id: ObjectId) {
-        self.opened.remove(&id);
+    /// Installs the new layout after the directory commits it.
+    pub(super) fn written(&mut self, id: ObjectId, opened: Option<Opened>) {
+        if let Some(opened) = opened {
+            self.opened.insert(id, opened);
+        } else {
+            self.opened.remove(&id);
+        }
     }
 
     /// The chunk of the table `id` that holds `normal`'s key, if any
@@ -263,22 +285,28 @@ impl Large {
             })?;
         let (page, digest) = chunk_page(access, &held)?;
         check_tuple_chunk(&opened.row, u64::from(chunk), &held, &page)?;
-        let edges = edges_of(page.members.values());
-        opened.seen.insert(chunk, Seen { digest, edges });
+        opened.seen.insert(
+            chunk,
+            Seen {
+                digest,
+                len: page.members.len(),
+                edges: edges_of(page.members.values()),
+            },
+        );
         Ok(page)
     }
 
     /// The row of the large object `handle` as the seal writes it: its
     /// changed chunks and their index pages written. Gives the row and
-    /// whether the arena's chunks are no longer the row's.
-    pub(crate) fn write(
+    /// how its layout changed.
+    pub(super) fn write(
         &mut self,
         arena: &Arena,
         handle: ArenaHandle,
         id: ObjectId,
         access: &Access<'_>,
-    ) -> Result<(Row, bool), SealError> {
-        let mut old = self.opened.remove(&id);
+    ) -> Result<(Row, Relayout, Option<Opened>), SealError> {
+        let mut old = self.opened.get_mut(&id);
         let body = arena
             .body(handle)
             .map_err(|error| fault(error.to_string()))?;
@@ -289,7 +317,7 @@ impl Large {
                     _ => ObjectKind::Tuple,
                 };
                 let outcomes =
-                    list_outcomes(arena, sequence, old.as_ref(), kind == ObjectKind::Tuple)?;
+                    list_outcomes(arena, sequence, old.as_deref(), kind == ObjectKind::Tuple)?;
                 (kind, outcomes, sequence.len, sequence.len, None)
             }
             Body::Map(table) | Body::Set(table) | Body::Record(table) => {
@@ -301,9 +329,14 @@ impl Large {
                 let next = arena
                     .next_sequence(handle)
                     .map_err(|error| fault(error.to_string()))?;
-                let (outcomes, firsts) =
-                    table_outcomes(arena, handle, table, old.as_mut(), access)?;
-                (kind, outcomes, table.len, next, firsts)
+                match table_layout(arena, handle, kind, table, old.as_deref_mut(), access)? {
+                    TableLayout::Inline(row, sequences) => {
+                        return Ok((*row, Relayout::Inline(sequences), None));
+                    }
+                    TableLayout::Chunked(outcomes, firsts) => {
+                        (kind, outcomes, table.len, next, firsts)
+                    }
+                }
             }
             _ => return Err(fault("a large object of another kind")),
         };
@@ -323,20 +356,21 @@ impl Large {
             .transpose()
             .map_err(|error| fault(error.to_string()))?;
         let (chunked, seen, firsts) =
-            assemble(access, kind, len, next, head, old.as_ref(), outcomes)
+            assemble(access, kind, len, next, head, old.as_deref(), outcomes)
                 .map_err(SealError::Heap)?;
-        let firsts = fresh_firsts.or(firsts);
-        self.opened.insert(
-            id,
-            Opened {
-                row: chunked.clone(),
-                seen,
-                firsts,
-            },
-        );
+        let opened = Opened {
+            row: chunked.clone(),
+            seen,
+            firsts: fresh_firsts.or(firsts),
+        };
         Ok((
             Row::of(Record::Chunked(Box::new(chunked)), Heads(Vec::new())),
-            relayout,
+            if relayout {
+                Relayout::Chunks
+            } else {
+                Relayout::Unchanged
+            },
+            Some(opened),
         ))
     }
 }
@@ -460,13 +494,18 @@ fn entry_heads(arena: &Arena, pairs: &[Value]) -> Result<Heads, SealError> {
 /// A table's chunks written for the first time, or again after its row
 /// named none: by placement, `FILL` to a chunk, with each chunk's first
 /// placement.
-#[allow(clippy::type_complexity)]
 fn first_written(
     arena: &Arena,
     resident: &[Value],
+    kind: ObjectKind,
     mut entries: Vec<Placed>,
-) -> Result<(Vec<Outcome>, Option<Vec<Option<Placement>>>), SealError> {
+) -> Result<TableLayout, SealError> {
     let heads = entry_heads(arena, resident)?;
+    if entries.len() <= LARGE
+        && let Some(inline) = inline_table(kind, entries.iter().collect(), |id| heads.get(id))?
+    {
+        return Ok(inline);
+    }
     entries.sort_unstable_by_key(|entry| entry.placement);
     let mut outcomes = Vec::new();
     let mut firsts = Vec::new();
@@ -480,19 +519,18 @@ fn first_written(
             keep_first: false,
         });
     }
-    Ok((outcomes, Some(firsts)))
+    Ok(TableLayout::Chunked(outcomes, Some(firsts)))
 }
 
-/// What becomes of each chunk of a table, and, for a table written whole
-/// for the first time, every chunk's first placement.
-#[allow(clippy::type_complexity)]
-fn table_outcomes(
+/// A table's replacement row or the edits to its chunk index.
+fn table_layout(
     arena: &Arena,
     handle: ArenaHandle,
+    kind: ObjectKind,
     table: &Table,
     mut old: Option<&mut Opened>,
     access: &Access<'_>,
-) -> Result<(Vec<Outcome>, Option<Vec<Option<Placement>>>), SealError> {
+) -> Result<TableLayout, SealError> {
     let sequences = |chunk: usize| {
         arena
             .chunk_sequences(handle, chunk)
@@ -555,7 +593,7 @@ fn table_outcomes(
                     }
                     groups.extend(by_chunk.into_iter().map(Group::Entries));
                 }
-                _ => return first_written(arena, &resident, entries),
+                _ => return first_written(arena, &resident, kind, entries),
             }
         }
     }
@@ -563,12 +601,12 @@ fn table_outcomes(
     if groups.is_empty() {
         // Its row names no chunk (every entry was deleted): what it holds
         // now is written as a table's first.
-        return first_written(arena, &resident, extra);
+        return first_written(arena, &resident, kind, extra);
     }
 
     // New entries go to the chunks their keys' placements name; a cold
     // chunk read back here names its immutables by its page's heads.
-    let mut read_heads = Vec::new();
+    let mut pool: BTreeMap<ObjectId, Head> = entry_heads(arena, &resident)?.0.into_iter().collect();
     for entry in extra {
         let (chunk, held) = opened
             .row
@@ -585,22 +623,33 @@ fn table_outcomes(
             .filter(|chunk| *chunk < groups.len())
             .ok_or_else(|| fault("a chunked table's index names a chunk past its row"))?;
         if matches!(groups[chunk], Group::Cold) {
-            let (held, digest) = chunk_page(access, &held).map_err(SealError::Heap)?;
-            let edges = edges_of(held.members.values());
-            opened.seen.insert(chunk as u32, Seen { digest, edges });
-            let Members::Table(entries) = held.members else {
-                return Err(fault("a table chunk holds a list's members"));
-            };
-            read_heads.extend(held.heads.0);
-            groups[chunk] = Group::Entries(entries);
+            groups[chunk] =
+                Group::Entries(read_table_chunk(access, opened, chunk, &held, &mut pool)?);
         }
         if let Group::Entries(entries) = &mut groups[chunk] {
             entries.push(entry);
         }
     }
 
-    let mut pool: BTreeMap<ObjectId, _> = entry_heads(arena, &resident)?.0.into_iter().collect();
-    pool.extend(read_heads);
+    if table.len <= LARGE as u64 {
+        let len = table.len as usize;
+        let mut entries = Vec::with_capacity(len);
+        for (at, group) in groups.iter_mut().enumerate() {
+            let chunk = group_entries(access, opened, at, group, &mut pool)?;
+            if chunk.len() > len - entries.len() {
+                return Err(fault("a table's chunks disagree with its length"));
+            }
+            entries.extend(chunk.iter());
+        }
+        if entries.len() != len {
+            return Err(fault("a table's chunks disagree with its length"));
+        }
+        if let Some(inline) = inline_table(kind, entries, |id| pool.get(&id))? {
+            return Ok(inline);
+        }
+    }
+
+    compact_groups(access, opened, table.len, &mut groups, &mut pool)?;
     let heads = Heads(pool.into_iter().collect());
     let mut outcomes = Vec::with_capacity(groups.len());
     for (at, group) in groups.into_iter().enumerate() {
@@ -632,9 +681,13 @@ fn table_outcomes(
         // Past one leaf: split by placement.
         entries.sort_unstable_by_key(|entry| entry.placement);
         let count = entries.len().div_ceil(FILL);
-        let width = entries.len().div_ceil(count);
+        let width = entries.len() / count;
+        let excess = entries.len() % count;
         let mut pieces = Vec::with_capacity(count);
-        for run in entries.chunks(width) {
+        let mut rest = entries.as_slice();
+        for at in 0..count {
+            let (run, tail) = rest.split_at(width + usize::from(at < excess));
+            rest = tail;
             let first = run.first().map(|entry| entry.placement);
             let mut members = run.to_vec();
             members.sort_unstable_by_key(|entry| entry.seq);
@@ -645,7 +698,159 @@ fn table_outcomes(
             keep_first: true,
         });
     }
-    Ok((outcomes, None))
+    Ok(TableLayout::Chunked(outcomes, None))
+}
+
+fn read_table_chunk(
+    access: &Access<'_>,
+    opened: &mut Opened,
+    at: usize,
+    chunk: &ChunkRef,
+    pool: &mut BTreeMap<ObjectId, Head>,
+) -> Result<Vec<Placed>, SealError> {
+    let (page, digest) = chunk_page(access, chunk).map_err(SealError::Heap)?;
+    let edges = edges_of(page.members.values());
+    let Members::Table(entries) = page.members else {
+        return Err(fault("a table chunk holds a list's members"));
+    };
+    opened.seen.insert(
+        at as u32,
+        Seen {
+            digest,
+            len: entries.len(),
+            edges,
+        },
+    );
+    pool.extend(page.heads.0);
+    Ok(entries)
+}
+
+fn group_entries<'a>(
+    access: &Access<'_>,
+    opened: &mut Opened,
+    at: usize,
+    group: &'a mut Group,
+    pool: &mut BTreeMap<ObjectId, Head>,
+) -> Result<&'a mut Vec<Placed>, SealError> {
+    if matches!(group, Group::Cold) {
+        let (_, chunk) = opened
+            .row
+            .index
+            .get(access, &opened.row.shape(), Seek::At(at as u64))
+            .map_err(SealError::Heap)?
+            .ok_or_else(|| fault("a table's index names no chunk"))?;
+        *group = Group::Entries(read_table_chunk(access, opened, at, &chunk, pool)?);
+    }
+    let Group::Entries(entries) = group else {
+        unreachable!("the chunk was read")
+    };
+    Ok(entries)
+}
+
+/// Joins adjacent nonempty ranges when either is below the floor. The
+/// left range keeps its boundary. A combined range past CHUNK is split
+/// into balanced pieces by the ordinary writer.
+fn compact_groups(
+    access: &Access<'_>,
+    opened: &mut Opened,
+    len: u64,
+    groups: &mut [Group],
+    pool: &mut BTreeMap<ObjectId, Head>,
+) -> Result<(), SealError> {
+    let chunk_count: usize = groups
+        .iter()
+        .map(|group| match group {
+            Group::Cold => 1,
+            Group::Entries(entries) if entries.len() > CHUNK => entries.len().div_ceil(FILL),
+            Group::Entries(entries) => usize::from(!entries.is_empty()),
+        })
+        .sum();
+    let sparse = chunk_count as u64 > len.div_ceil(MIN_FILL as u64);
+    let shrunk = len < opened.row.len
+        || groups.iter().enumerate().any(|(at, group)| {
+            matches!(group, Group::Entries(entries) if (1..MIN_FILL).contains(&entries.len())
+            && opened.seen.get(&(at as u32)).is_some_and(|seen| entries.len() < seen.len))
+        });
+    if !sparse && !shrunk {
+        return Ok(());
+    }
+
+    // Normally only a sparse edited chunk needs to pull in its cold
+    // neighbour. A legacy row can already have many sparse cold chunks.
+    let mut widths: Vec<_> = groups
+        .iter()
+        .map(|group| match group {
+            Group::Cold => CHUNK,
+            Group::Entries(entries) => entries.len(),
+        })
+        .collect();
+    if sparse {
+        opened
+            .row
+            .index
+            .each(access, &opened.row.shape(), &mut |at, chunk| {
+                let at = at as usize;
+                if matches!(groups.get(at), Some(Group::Cold)) {
+                    widths[at] = chunk.len as usize;
+                }
+                Ok(false)
+            })
+            .map_err(SealError::Heap)?;
+    }
+
+    let mut prior: Option<usize> = None;
+    for at in 0..groups.len() {
+        if widths[at] == 0 {
+            continue;
+        }
+        if let Some(left) = prior
+            && widths[left].min(widths[at]) < MIN_FILL
+        {
+            let (before, after) = groups.split_at_mut(at);
+            let left_entries = group_entries(access, opened, left, &mut before[left], pool)?;
+            let right_entries = group_entries(access, opened, at, &mut after[0], pool)?;
+            left_entries.append(right_entries);
+            widths[left] = left_entries.len();
+            if widths[left] > CHUNK {
+                prior = None;
+            }
+        } else {
+            prior = Some(at);
+        }
+    }
+    Ok(())
+}
+
+/// The inline row in insertion order, when its encoded size fits.
+fn inline_table<'a>(
+    kind: ObjectKind,
+    mut entries: Vec<&Placed>,
+    head: impl Fn(ObjectId) -> Option<&'a Head>,
+) -> Result<Option<TableLayout>, SealError> {
+    entries.sort_unstable_by_key(|entry| entry.seq);
+    if entries.windows(2).any(|pair| pair[0].seq == pair[1].seq) {
+        return Err(fault("a table's chunks share an insertion sequence"));
+    }
+    let pairs = || {
+        entries
+            .iter()
+            .map(|entry| (entry.key.clone(), entry.value.clone()))
+            .collect()
+    };
+    let record = match kind {
+        ObjectKind::Map => Record::Map(pairs()),
+        ObjectKind::Record => Record::Record(pairs()),
+        ObjectKind::Set => Record::Set(entries.iter().map(|entry| entry.key.clone()).collect()),
+        _ => return Err(fault("an inline table of another kind")),
+    };
+    let heads = member_heads(record.values(), head)?;
+    let row = Row::of(record, heads);
+    Ok((encode_body(&row).len() <= ROW_BYTES).then(|| {
+        TableLayout::Inline(
+            Box::new(row),
+            entries.iter().map(|entry| entry.seq).collect(),
+        )
+    }))
 }
 
 /// One table chunk of `entries`, with the heads of the immutables they
@@ -655,9 +860,23 @@ fn table_piece(
     heads: &Heads,
     first: Option<Placement>,
 ) -> Result<Piece, SealError> {
-    let mut named: Vec<ObjectId> = entries
-        .iter()
-        .flat_map(|entry| [&entry.key, &entry.value])
+    if entries.windows(2).any(|pair| pair[0].seq >= pair[1].seq) {
+        return Err(fault(
+            "a table's entries are out of insertion sequence order",
+        ));
+    }
+    let values = entries.iter().flat_map(|entry| [&entry.key, &entry.value]);
+    let held = member_heads(values, |id| heads.get(id))?;
+    Ok(Piece::new(Members::Table(entries), held, first))
+}
+
+/// The heads of the immutables named by these values, once each by id.
+fn member_heads<'a, 'b>(
+    values: impl IntoIterator<Item = &'a RunValue>,
+    head: impl Fn(ObjectId) -> Option<&'b Head>,
+) -> Result<Heads, SealError> {
+    let mut named: Vec<ObjectId> = values
+        .into_iter()
         .filter_map(|value| match value {
             RunValue::Object(kind, id) if !kind.mutable() => Some(*id),
             _ => None,
@@ -668,13 +887,12 @@ fn table_piece(
     let held = named
         .into_iter()
         .map(|id| {
-            heads
-                .get(id)
+            head(id)
                 .map(|head| (id, head.clone()))
                 .ok_or_else(|| fault(format!("immutable {} has no head", id.0)))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Piece::new(Members::Table(entries), Heads(held), first))
+    Ok(Heads(held))
 }
 
 /// The row of a large object of `kind`, `len` members below `next`, from

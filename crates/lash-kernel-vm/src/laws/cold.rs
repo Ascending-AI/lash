@@ -228,7 +228,8 @@ mod mixed_cycle {
 
 /// `K-ITER-003` across a park sealed and reopened cold: a replaced key
 /// keeps its place, a removed and reinserted key moves to the end and is
-/// visited again, and a record's added field follows its first.
+/// visited again, and a record's added field follows its first. A live
+/// cursor also keeps its place when a shrunk table goes inline.
 #[test]
 fn map_iteration_survives_removal_and_reinsertion_across_a_cold_reopen() {
     let mut embedder = Embedder::new(
@@ -254,6 +255,59 @@ fn map_iteration_survives_removal_and_reinsertion_across_a_cold_reopen() {
             Datum::Record(vec![("z".into(), int(3)), ("a".into(), int(4))]),
         ])
     );
+    let pairs = [1, 0]
+        .into_iter()
+        .chain(2..300)
+        .map(|i| format!("{i}: {i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let removed = (2..100)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let text = format!(
+        "main {{
+            let m = map{{{pairs}}}
+            do perform 0(\"built\") as Any
+            for k in m {{
+                if num.lt(k, 1) {{
+                    do perform 0(\"cursor\") as Any
+                    remove m[0]
+                    for i in [{removed}] {{ remove m[i] }}
+                    do perform 0(\"shrunk\") as Any
+                }}
+                if num.lt(k, 103) {{ print k }}
+            }}
+            return 0
+        }}"
+    );
+    for cold in [false, true] {
+        let mut embedder = Embedder::new(&text);
+        let mut parks = 0;
+        loop {
+            match embedder.run() {
+                Step::Ended(End::Finished(_)) => break,
+                Step::Ended(other) => panic!("the run did not finish: {other:?}"),
+                Step::Slice => {}
+                Step::Parked(_) => {
+                    parks += 1;
+                    if parks < 3 || cold {
+                        embedder.reopen(true);
+                    } else {
+                        embedder.checkpoint();
+                        embedder.checkpoint();
+                    }
+                    embedder.deliver_next();
+                }
+            }
+        }
+        assert_eq!(parks, 3);
+        assert_eq!(
+            embedder.world.printed,
+            [1, 0, 100, 101, 102].map(int),
+            "cold reopen = {cold}",
+        );
+    }
 }
 
 /// Typed body-only helpers over a collection of any members: one that

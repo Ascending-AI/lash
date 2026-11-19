@@ -1549,12 +1549,12 @@ fn index_case() -> Result<(), String> {
 /// A mutable container (a list, map, set, record or edge list) is
 /// identified by its object id, so its layout may depend on its history:
 /// its row is [`well_formed`], each index at the height its leaves give,
-/// and need not be a direct build's. Slack it may keep: a chunk with at
-/// least one member, and an index page with at least half of `NODE_REFS`
-/// references, or fewer when it is the last of its level, also when a map
-/// is thinned to one chunk in each index page, regrows below its first
-/// surviving boundary after its first four chunks are emptied, and when an index of
-/// height 2 is thinned to one leaf under an upper page. A tuple
+/// and need not be a direct build's. A table cut to 100 entries is
+/// inline. Above the inline threshold, a sparse table needs at most
+/// one chunk per half chunk of entries, rounded up. An index page
+/// names at least half of `NODE_REFS` references except at the end of
+/// its level. The law checks sparse indexes and regrowth below a
+/// table's first surviving chunk boundary. A tuple
 /// is content-addressed: built in a store with history, sealed again
 /// cold, or copied from its cold members, inline and at index heights 1
 /// and 2, its record is the direct build's and its key
@@ -1585,6 +1585,9 @@ fn an_object_grown_and_shrunk_across_each_boundary_keeps_its_contents_and_a_tupl
         }
     }
     for kind in ["map", "set", "record"] {
+        if let Err(error) = occupancy::table_compacted_cases(kind) {
+            failed.push(error);
+        }
         if let Err(error) = table_cleared_case(kind) {
             failed.push(error);
         }

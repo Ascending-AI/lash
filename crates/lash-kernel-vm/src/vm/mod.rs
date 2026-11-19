@@ -309,7 +309,7 @@ pub(crate) struct Vm<H: Heap> {
     /// The laws' forced-cold runs: pages every object out at each
     /// statement boundary, the machine's values rooted.
     #[cfg(test)]
-    pub(crate) chill: Option<fn(&mut H, &[Value])>,
+    pub(crate) chill: Option<fn(&mut Self, &[Value])>,
     /// The laws' collected runs: a collection at each statement boundary.
     #[cfg(test)]
     pub(crate) collecting: bool,
@@ -761,7 +761,7 @@ impl<H: Heap> Vm<H> {
         if let Some(restart) = &self.restart {
             restart.roots(&mut visit);
         }
-        chill(&mut self.heap, &roots);
+        chill(self, &roots);
     }
 
     /// Loads chunk `chunk` of `object`, with no view of the heap live and
