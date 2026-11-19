@@ -1239,7 +1239,7 @@ class GuardSet(Harness):
 
 
 class DocumentProjection(Harness):
-    """Only the audited predecessor's document sweep gets corrected."""
+    """The audited document sweep gets corrected from its predecessor onward."""
 
     document_path = "crates/lash-kernel-doc/src/document.rs"
     bytes_path = "crates/lash-kernel-doc/src/document_bytes.rs"
@@ -1288,17 +1288,20 @@ class DocumentProjection(Harness):
         self.write("crates/lash-kernel-doc/src/codec.rs", self.codec)
         self.declarations("shapes")
         self.base = self.commit("predecessor sweeps ephemeral admission types")
+        self.later_base = self.commit("intervening commit after the audited predecessor")
         self.declarations("roots")
         self.write(self.document_path, self.document)
 
-    def corrected_verdict(self) -> tuple[int, str]:
+    def corrected_verdict(self, base: str | None = None) -> tuple[int, str]:
         # Fixture commits cannot have the production predecessor's SHA.
-        with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.base, create=True):
-            return self.verdict(self.commit("correct document projection"))
+        with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.base):
+            return self.verdict(self.commit("correct document projection"), base)
 
     def test_removing_unreachable_admission_types_is_neutral(self) -> None:
-        code, output = self.corrected_verdict()
-        self.assertEqual(code, 0, output)
+        for base in (self.base, self.later_base):
+            with self.subTest(base=base):
+                code, output = self.corrected_verdict(base)
+                self.assertEqual(code, 0, output)
 
     def test_executable_changes_still_require_both_document_bumps(self) -> None:
         mutations = (
@@ -1311,14 +1314,17 @@ class DocumentProjection(Harness):
             with self.subTest(path=path, old=old):
                 original = (self.repo / path).read_text()
                 self.write(path, original.replace(old, new))
-                code, output = self.corrected_verdict()
+                code, output = self.corrected_verdict(self.later_base)
                 self.assertEqual(code, 1, output)
                 for constant in ("DOCUMENT_GRAMMAR_VERSION", "KERNEL_DOCUMENT_SCHEMA_VERSION"):
                     self.assertIn(f"{constant} is 7 on both sides", output)
+                self.assertNotIn("Selection", output)
                 self.write(path, original)
 
     def test_an_unreviewed_predecessor_keeps_the_old_guard(self) -> None:
-        code, output = self.verdict(self.commit("unreviewed base"))
+        # Only the head contains the audited revision in this comparison.
+        with patch.object(gate, "DOCUMENT_PROJECTION_PREDECESSOR", self.later_base):
+            code, output = self.verdict(self.commit("unreviewed base"))
         self.assertEqual(code, 1, output)
         self.assertIn("Selection", output)
 

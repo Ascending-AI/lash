@@ -3073,15 +3073,16 @@ def _declaration(view: TreeView, surface: Surface) -> Declaration | None:
 def audited_document_guards(
     base: TreeView, surface: Surface, guards: tuple[Guard, ...]
 ) -> tuple[Guard, ...]:
-    """Correct the reviewed main predecessor's overbroad document projection.
+    """Correct the overbroad document projection from the reviewed predecessor onward.
 
     FIG-7694 / r57 L56: main's document.rs sweep included ephemeral Selection
     and RestoreSelection, neither serialized by Document. Compare the Document
-    closure on BOTH trees instead. Only these two owners, this predecessor and
-    this exact sweep are corrected; decode and every other guard still bind.
+    closure on both trees when the base contains the reviewed predecessor.
+    Only this exact sweep of these two owners is corrected. Decode and every
+    other guard still bind.
     The normal union of base/head guards, including dropped roots, stays intact.
     """
-    if not isinstance(base, RevisionView) or base.revision != DOCUMENT_PROJECTION_PREDECESSOR:
+    if not isinstance(base, RevisionView):
         return guards
     if surface.key not in {
         "crates/lash-kernel-doc/src/document_bytes.rs:DOCUMENT_GRAMMAR_VERSION",
@@ -3090,6 +3091,11 @@ def audited_document_guards(
         return guards
     paths = ("crates/lash-kernel-doc/src/document.rs",)
     historical = Guard("shapes", paths, must_cover=("Document",))
+    if historical not in guards or git(
+        base.repo, "merge-base", "--is-ancestor", DOCUMENT_PROJECTION_PREDECESSOR,
+        base.revision, check=False,
+    ).returncode != 0:
+        return guards
     corrected = Guard("roots", paths, ("Document",))
     return tuple(corrected if guard == historical else guard for guard in guards)
 

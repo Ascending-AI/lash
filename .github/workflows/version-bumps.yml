@@ -110,7 +110,15 @@ jobs:
         if: steps.select.outputs.versioned_surface == 'true'
         env:
           BASE_SHA: ${{ steps.baseline.outputs.sha }}
-        run: python3 scripts/check_version_bumps.py --base "${BASE_SHA}" --head "${GITHUB_SHA}"
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The guard correction checks ancestry. The two trees are already
+          # present, so fetch history without downloading historical trees.
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" \
+            fetch --no-tags --unshallow --filter=tree:0 origin "${BASE_SHA}"
+          python3 scripts/check_version_bumps.py --base "${BASE_SHA}" --head "${GITHUB_SHA}"
 
       - name: Report an untouched diff
         if: steps.select.outputs.versioned_surface != 'true'
