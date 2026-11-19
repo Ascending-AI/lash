@@ -42,6 +42,12 @@ fetch/base check and push; do not wrap it in an outer `flock`.
 After it prints `landed <sha>`, close your ticket and remove your fork with
 `kiln rm lash <name>`.
 
+Land as soon as the change builds and passes lint. There are no review
+rounds, pin holds or deployment receipts before or after a land: Cenote
+pins whatever main is when it needs to. The instruction-ceiling perf gate
+and the continuation replay run on main's scheduled full run, not in
+`scripts/land`; fix their reds forward. Do not re-run them before landing.
+
 `python3 scripts/dev-test.py --dependents` is an optional local tool for a
 wider affected-tests selection, not a required gate. See [the build
 guide](docs/agents/hermetic-build.md) for partitions, reports, features and
