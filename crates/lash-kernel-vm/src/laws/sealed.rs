@@ -376,6 +376,123 @@ fn a_cold_closure_is_admitted_before_its_code_and_captures_are_read() {
     }
 }
 
+/// Contract §2, admission before materialization, for a session's saved
+/// closure (FIG-7725): a start over a session reads every closure its
+/// bindings reach to find the callables of other Links, and reads a
+/// closure's code and captures only once the heap admits them, as a load
+/// of it would. A closure of 300 captures, each named by a 300-byte name,
+/// so both its code and its captures are paged, saved in a session and
+/// started over under a bound with room for 1 KiB more than the opened
+/// heap holds: the start refuses, and no page of the closure's code or
+/// captures was read. Under a roomy bound the same start reads them, so
+/// the pages watched are the ones a start reads.
+#[test]
+fn a_session_start_admits_a_saved_closure_before_reading_its_code_and_captures() {
+    use std::sync::Arc;
+
+    use lash_kernel_doc::arena::ClosureIdentity;
+    use lash_kernel_doc::linked_site::LinkedSite;
+    use lash_kernel_state::kernel_internals::tree::Access;
+    use lash_kernel_state::paged::SessionRoot;
+    use lash_kernel_state::paged::run::directory::Directory;
+    use lash_kernel_state::paged::run::ids::ObjectId;
+    use lash_kernel_state::paged::run::objects::{Captures, Code, Record};
+    use lash_kernel_state::paged::run::session::{self, RunFunction, RunSession};
+    use lash_kernel_value::Name;
+    use lash_kernel_value::names::{CallableId, FunctionId};
+    use lash_kernel_value::sites::{Site, Unit};
+
+    use crate::{CoreMachine, Machine, StartError};
+
+    const CAPTURES: usize = 300;
+    let text = "main {\n  return 0\n}";
+    let program = super::embedder::core_program(text, None);
+    let store = Counting::default();
+    let mut heap = fresh(&store);
+    let cells: Vec<_> = (0..CAPTURES).map(|_| heap.cell(Value::Int(1))).collect();
+    let link = program.link;
+    let identity = Arc::new(ClosureIdentity {
+        capture_names: (0..CAPTURES)
+            .map(|i| Name::new(format!("{i:0>300}")))
+            .collect(),
+        callable: CallableId {
+            link,
+            function: FunctionId::from_bytes([5; 32]),
+        },
+        site: LinkedSite {
+            link,
+            site: Site::new(Unit::Main, [1]),
+        },
+    });
+    let closure = Value::Closure(heap.closure(identity, cells));
+    let root = heap.seal(&[closure, closure]).expect("a seal");
+    let page = session::write(
+        &Access::new(Box::new(store.clone())),
+        &RunSession {
+            heap: root.clone(),
+            names: vec![Name::new("f")],
+            functions: vec![RunFunction {
+                name: Name::new("f"),
+                description: b"f()".to_vec(),
+            }],
+        },
+        None,
+    )
+    .expect("a session page");
+    // The closure's code and capture pages, as its row names them.
+    let id: ObjectId = root.roots[0].id().expect("the closure's id");
+    let row = Directory::open(root.directory, Box::new(store.clone()))
+        .held(id)
+        .expect("a read")
+        .expect("a row");
+    let Record::Closure {
+        code: Code::Paged { root: code, .. },
+        captures: Captures::Paged(captures),
+    } = &row.record
+    else {
+        panic!(
+            "the closure's code and captures are paged: {:?}",
+            row.record
+        );
+    };
+    let watched: std::collections::BTreeSet<_> = std::iter::once(code.page)
+        .chain(captures.index.pages())
+        .chain(captures.edges.pages())
+        .map(|page| page.id)
+        .collect();
+    let (opened, _) = reopened(&store, &root);
+    let start = |memory: u64| {
+        store.read.borrow_mut().clear();
+        let started = <CoreMachine as Machine>::start(
+            program.clone(),
+            crate::Bounds {
+                memory,
+                ..super::embedder::ROOMY
+            },
+            super::session::start(Some(SessionRoot::run(page)), Vec::new()),
+            Box::new(store.clone()),
+        );
+        let read = store.read.borrow().intersection(&watched).count();
+        (started, read)
+    };
+    let (roomy, read) = start(super::embedder::ROOMY.memory);
+    assert!(roomy.is_ok(), "the roomy start: {:?}", roomy.err());
+    assert!(
+        read > 0,
+        "a roomy start reads the closure's code and captures"
+    );
+    let (refused, read) = start(opened.held() + 1024);
+    assert!(
+        matches!(refused, Err(StartError::Bindings { .. })),
+        "the start answered {:?}",
+        refused.err()
+    );
+    assert_eq!(
+        read, 0,
+        "pages of the closure's code and captures read before its refusal"
+    );
+}
+
 /// What `value` copies out to the host as, every page it reaches loaded
 /// first.
 fn copied(heap: &mut SlotHeap, roots: &[Value], value: Value) -> lash_kernel_doc::Datum {

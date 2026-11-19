@@ -403,8 +403,9 @@ fn stopped(stop: Stop) -> MachineError {
 
 /// The kind of the closure or function object `id`.
 fn directory_kind(directory: &Directory, id: ObjectId) -> Result<ObjectKind, MachineError> {
+    // The row alone: its kind never needs a closure's code or captures.
     match directory
-        .get(id)
+        .held(id)
         .map_err(MachineError::Heap)?
         .map(|row| row.record)
     {
@@ -534,9 +535,11 @@ impl<'a> Reach<'a> {
                 }
                 continue;
             }
+            // The row alone: a closure answers before its code or
+            // captures would be read.
             let row = self
                 .directory
-                .get(id)
+                .held(id)
                 .map_err(MachineError::Heap)?
                 .ok_or_else(|| fault(format!("object {} has no row", id.0)))?;
             let found = match &row.record {

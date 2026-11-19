@@ -744,6 +744,98 @@ impl SlotHeap {
     }
 }
 
+impl SlotHeap {
+    /// What reading `row`'s pages stages before its body is admitted, less
+    /// `placeholder`: none when the row holds everything inline. A scalar
+    /// payload reads whole; so do a closure's paged code and captures. The
+    /// meter counts a closure as its captures, as it did before code paged;
+    /// its code is not counted. What reading them stages is bounded by the
+    /// counts the row records.
+    fn staged(&self, row: &Row, placeholder: u64) -> Option<u64> {
+        let staging = match &row.record {
+            Record::Scalar(scalar) => scalar.summary.utf8_bytes,
+            Record::Closure { code, captures }
+                if matches!(code, Code::Paged { .. }) || matches!(captures, Captures::Paged(_)) =>
+            {
+                0
+            }
+            _ => return None,
+        };
+        Some(
+            self.load_units(row)
+                .saturating_add(staging)
+                .saturating_sub(placeholder),
+        )
+    }
+
+    /// `row` with its paged parts read, `wanted` (its [`Self::staged`])
+    /// already admitted, and released once they are read.
+    fn read_admitted(&mut self, row: Row, wanted: u64) -> Result<Row, LoadError> {
+        let read = match self.durable.as_ref() {
+            Some(durable) => {
+                let access = durable.directory.access();
+                match &row.record {
+                    Record::Scalar(scalar) => scalar.read(access).map(|record| Row {
+                        record,
+                        heads: row.heads.clone(),
+                        edges: row.edges.clone(),
+                    }),
+                    _ => row.read(access),
+                }
+                .map_err(LoadError::Store)
+            }
+            None => Err(LoadError::Store(
+                lash_kernel_doc::heap::HeapFault::Malformed(
+                    "a cold object in a heap with no directory".into(),
+                ),
+            )),
+        };
+        self.held = self.held.saturating_sub(wanted);
+        read
+    }
+
+    /// The row of the saved object `id`, read whole: a closure's paged code
+    /// and captures are read only once what reading them stages is
+    /// admitted, as a load admits them, and released after. Nothing is
+    /// collected first: the caller holds roots this heap cannot trace, so a
+    /// refusal is the caller's. The holding is as it was, whatever the
+    /// answer, and the object stays cold.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadError::Memory`] when the bound does not admit what reading the
+    /// row stages, before a page of it is read; [`LoadError::Store`] when
+    /// the row cannot be read or the directory holds none.
+    pub(crate) fn admitted_row(&mut self, id: ObjectId) -> Result<Row, LoadError> {
+        let Some(durable) = self.durable.as_ref() else {
+            return Err(LoadError::Store(
+                lash_kernel_doc::heap::HeapFault::Malformed(
+                    "a saved object in a heap with no directory".into(),
+                ),
+            ));
+        };
+        let row = durable
+            .directory
+            .held(id)
+            .map_err(LoadError::Store)?
+            .ok_or_else(|| {
+                LoadError::Store(durable.corrupt(format!("object {} has no row", id.0)))
+            })?;
+        let placeholder = self
+            .arena
+            .entity_handle(open::entity(id))
+            .and_then(|handle| self.units.get(handle.index() as usize).copied())
+            .unwrap_or(0);
+        match self.staged(&row, placeholder) {
+            None => Ok(row),
+            Some(wanted) => {
+                self.admit(wanted).map_err(LoadError::Memory)?;
+                self.read_admitted(row, wanted)
+            }
+        }
+    }
+}
+
 impl Heap for SlotHeap {
     #[inline]
     fn objects(&self) -> &Objects {
@@ -1035,52 +1127,20 @@ impl Heap for SlotHeap {
             .unwrap_or(0);
         // A scalar payload reads whole: an integer or a host handle is one
         // value; so do a closure's paged code and captures. Admission comes
-        // before materialization: what the row holds, and a scalar's tokens,
-        // are admitted before a page of them is read, then released for the
-        // admission below of what the row holds. Their pages are checked
-        // against the row's roots as they are read, and a scalar against its
-        // referrers' head below, before the run sees it.
-        let staging = match &row.record {
-            Record::Scalar(scalar) => Some(scalar.summary.utf8_bytes),
-            // The meter counts a closure as its captures, as it did before
-            // code paged; its code is not counted. What reading them stages
-            // is bounded by the counts the row records.
-            Record::Closure { code, captures } => (matches!(code, Code::Paged { .. })
-                || matches!(captures, Captures::Paged(_)))
-            .then_some(0),
-            _ => None,
-        };
-        let row = match staging {
+        // before materialization (`Self::staged`): what the row holds, and a
+        // scalar's tokens, are admitted before a page of them is read, then
+        // released for the admission below of what the row holds. Their
+        // pages are checked against the row's roots as they are read, and a
+        // scalar against its referrers' head below, before the run sees it.
+        let row = match self.staged(&row, placeholder) {
             None => row,
-            Some(staging) => {
-                let staged = |heap: &Self| {
-                    heap.load_units(&row)
-                        .saturating_add(staging)
-                        .saturating_sub(placeholder)
-                };
-                let mut wanted = staged(self);
+            Some(mut wanted) => {
                 if self.admit(wanted).is_err() {
                     self.collect(roots);
-                    wanted = staged(self);
+                    wanted = self.staged(&row, placeholder).unwrap_or(0);
                     self.admit(wanted).map_err(LoadError::Memory)?;
                 }
-                let read = self
-                    .durable
-                    .as_ref()
-                    .map(|durable| {
-                        let access = durable.directory.access();
-                        match &row.record {
-                            Record::Scalar(scalar) => scalar.read(access).map(|record| Row {
-                                record,
-                                heads: row.heads.clone(),
-                                edges: row.edges.clone(),
-                            }),
-                            _ => row.clone().read(access),
-                        }
-                    })
-                    .ok_or_else(|| malformed("a cold object in a heap with no directory".into()));
-                self.held = self.held.saturating_sub(wanted);
-                read?.map_err(LoadError::Store)?
+                self.read_admitted(row, wanted)?
             }
         };
         if let Some(durable) = self.durable.as_ref() {

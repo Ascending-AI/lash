@@ -122,25 +122,37 @@ impl Header {
 }
 
 /// A heap a run opens over, and the values its root holds.
-struct Opened<'a> {
+struct Opened {
     heap: SlotHeap,
-    roots: &'a [Value],
     /// The constants a sealed run placed.
     saved: super::library::Saved,
+    /// The closures of other Links its roots reach ([`foreign_closures`]).
+    foreign: Vec<lash_kernel_doc::arena::ClosureIdentity>,
 }
 
 /// The closures of Links other than `link` that `roots` reach through
 /// closures and the cells they capture, one for each callable: code only
 /// its own Link's document holds, so the build compiles it there. A cold
 /// closure or cell is read from its saved row and stays cold: the open
-/// holds no more than the run it continues (contract §2, R10).
+/// holds no more than the run it continues (contract §2, R10). A saved
+/// closure's paged code and captures are read only once the heap admits
+/// them, as a load of it would ([`SlotHeap::admitted_row`]), and released
+/// after.
+///
+/// # Errors
+///
+/// [`LoadError::Memory`](crate::heap::LoadError::Memory) when the bound
+/// does not admit a closure's code and captures, before a page of them is
+/// read; [`LoadError::Store`](crate::heap::LoadError::Store) for a row the
+/// walk cannot read or that is not what its referrer names.
 fn foreign_closures(
-    heap: &SlotHeap,
+    heap: &mut SlotHeap,
     roots: &[Value],
     link: lash_kernel_value::LinkId,
-) -> Result<Vec<lash_kernel_doc::arena::ClosureIdentity>, StartError> {
-    use crate::heap::open;
+) -> Result<Vec<lash_kernel_doc::arena::ClosureIdentity>, crate::heap::LoadError> {
+    use crate::heap::{LoadError, open};
     use lash_kernel_doc::arena::ArenaHandle;
+    use lash_kernel_doc::heap::HeapFault;
     use lash_kernel_state::paged::run::ids::ObjectId;
     use lash_kernel_state::paged::run::objects::{ObjectKind, Record, RunValue};
     /// A closure or cell of the walk: resident in the arena, or only its
@@ -150,34 +162,29 @@ fn foreign_closures(
         Held(ArenaHandle),
         Saved(ObjectId),
     }
-    let arena = heap.arena();
-    let held = |handle: ArenaHandle| -> Result<At, StartError> {
-        if arena.facts(handle).map_err(linked)?.cold {
-            Ok(At::Saved(open::id_of(arena, handle).map_err(linked)?))
+    let malformed = |problem: String| LoadError::Store(HeapFault::Malformed(problem));
+    let held = |heap: &SlotHeap, handle: ArenaHandle| -> Result<At, LoadError> {
+        let arena = heap.arena();
+        if arena
+            .facts(handle)
+            .map_err(|error| malformed(error.to_string()))?
+            .cold
+        {
+            Ok(At::Saved(open::id_of(arena, handle).map_err(malformed)?))
         } else {
             Ok(At::Held(handle))
         }
     };
-    let saved = |id: ObjectId| -> Result<At, StartError> {
-        match arena.entity_handle(open::entity(id)) {
-            Some(handle) => held(handle),
+    let saved = |heap: &SlotHeap, id: ObjectId| -> Result<At, LoadError> {
+        match heap.arena().entity_handle(open::entity(id)) {
+            Some(handle) => held(heap, handle),
             None => Ok(At::Saved(id)),
         }
-    };
-    let row = |id: ObjectId| -> Result<Record, StartError> {
-        let directory = heap
-            .directory()
-            .ok_or_else(|| linked("a cold closure in a heap with no directory"))?;
-        directory
-            .get(id)
-            .map_err(linked)?
-            .map(|row| row.record)
-            .ok_or_else(|| linked(format!("a held closure's object {} has no row", id.0)))
     };
     let mut work = Vec::new();
     for value in roots {
         if let Value::Closure(handle) = value {
-            work.push(held(*handle)?);
+            work.push(held(heap, *handle)?);
         }
     }
     let mut seen = HashSet::new();
@@ -193,45 +200,55 @@ fn foreign_closures(
         }
         let (identity, cells) = match at {
             At::Held(handle) => {
-                let (identity, captures, _) = arena.closure(handle).map_err(linked)?;
+                let (identity, captures, _) = heap
+                    .arena()
+                    .closure(handle)
+                    .map_err(|error| malformed(error.to_string()))?;
+                let identity = identity.clone();
+                let captures = captures.to_vec();
                 let cells = captures
-                    .iter()
-                    .map(|cell| held(*cell))
+                    .into_iter()
+                    .map(|cell| held(heap, cell))
                     .collect::<Result<Vec<_>, _>>()?;
-                (identity.clone(), cells)
+                (identity, cells)
             }
-            At::Saved(id) => match row(id)? {
-                Record::Closure { code, captures } => (
-                    {
-                        let code = code.inline().map_err(|fault| linked(fault.to_string()))?;
-                        lash_kernel_doc::arena::ClosureIdentity {
-                            capture_names: code.capture_names.clone(),
-                            callable: code.callable,
-                            site: code.linked_site(),
-                        }
-                    },
-                    captures
-                        .inline()
-                        .map_err(|fault| linked(fault.to_string()))?
-                        .iter()
-                        .map(|cell| saved(*cell))
-                        .collect::<Result<Vec<_>, _>>()?,
-                ),
-                _ => return Err(linked(format!("object {} is not a closure", id.0))),
+            At::Saved(id) => match heap.admitted_row(id)?.record {
+                Record::Closure { code, captures } => {
+                    let code = code.into_inline().map_err(LoadError::Store)?;
+                    let identity = lash_kernel_doc::arena::ClosureIdentity {
+                        site: code.linked_site(),
+                        capture_names: code.capture_names,
+                        callable: code.callable,
+                    };
+                    let cells = captures
+                        .into_inline()
+                        .map_err(LoadError::Store)?
+                        .into_iter()
+                        .map(|cell| saved(heap, cell))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    (identity, cells)
+                }
+                _ => return Err(malformed(format!("object {} is not a closure", id.0))),
             },
         };
         for cell in cells {
             let inner = match cell {
-                At::Held(handle) => match arena.cell(handle).map_err(linked)? {
-                    Value::Closure(inner) => Some(held(inner)?),
-                    _ => None,
-                },
-                At::Saved(id) => match row(id)? {
+                At::Held(handle) => {
+                    match heap
+                        .arena()
+                        .cell(handle)
+                        .map_err(|error| malformed(error.to_string()))?
+                    {
+                        Value::Closure(inner) => Some(held(heap, inner)?),
+                        _ => None,
+                    }
+                }
+                At::Saved(id) => match heap.admitted_row(id)?.record {
                     Record::Cell(RunValue::Object(ObjectKind::Closure, inner)) => {
-                        Some(saved(inner)?)
+                        Some(saved(heap, inner)?)
                     }
                     Record::Cell(_) => None,
-                    _ => return Err(linked(format!("object {} is not a cell", id.0))),
+                    _ => return Err(malformed(format!("object {} is not a cell", id.0))),
                 },
             };
             work.extend(inner);
@@ -250,7 +267,7 @@ fn build(
     bounds: Bounds,
     root: Option<&super::callable::Root<'_>>,
     modes: crate::interface::EffectModes,
-    opened: Opened<'_>,
+    opened: Opened,
     used: u64,
     available: Option<&lash_kernel_doc::BuildHelpers>,
 ) -> Result<(Vm<SlotHeap>, Option<lash_kernel_doc::StartConvention>), StartError> {
@@ -283,8 +300,11 @@ fn build(
                 })
         })
         .collect();
-    let Opened { heap, roots, saved } = opened;
-    let mut closures = foreign_closures(&heap, roots, program.link)?;
+    let Opened {
+        heap,
+        saved,
+        foreign: mut closures,
+    } = opened;
     closures.extend(root.iter().flat_map(|root| root.closures.iter().cloned()));
     let loaded = crate::bytecode::compile::Linked {
         others,
@@ -586,13 +606,19 @@ impl CoreMachine {
                 (heap, Some((session, values, page)))
             }
         };
+        let mut heap = heap;
         let roots = session
             .as_ref()
             .map_or(&[][..], |(_, values, _)| values.as_slice());
+        let foreign = foreign_closures(&mut heap, roots, program.link).map_err(|error| {
+            StartError::Bindings {
+                problem: format!("the session's heap does not open: {error:?}"),
+            }
+        })?;
         let opened = Opened {
             heap,
-            roots,
             saved: Default::default(),
+            foreign,
         };
         let (mut vm, convention) = build(
             &program,
@@ -801,7 +827,9 @@ impl Machine for CoreMachine {
         }
         header.host = root.host.clone();
         header.start = record.start.clone();
-        let (heap, values) = SlotHeap::open(heap_bound(&bounds), &record.heap, directory)
+        let (mut heap, values) = SlotHeap::open(heap_bound(&bounds), &record.heap, directory)
+            .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
+        let foreign = foreign_closures(&mut heap, &values, program.link)
             .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
         if record
             .constants
@@ -874,8 +902,8 @@ impl Machine for CoreMachine {
             modes,
             Opened {
                 heap,
-                roots: &values,
                 saved,
+                foreign,
             },
             paid,
             changed.map(|helpers| helpers.as_ref()),

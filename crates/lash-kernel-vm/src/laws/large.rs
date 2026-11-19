@@ -46,6 +46,8 @@ pub(super) const N: i64 = 200_000;
 pub(super) struct Counting {
     pub(super) pages: Source,
     pub(super) reads: Rc<Cell<u64>>,
+    /// Every page read, by id.
+    pub(super) read: Rc<std::cell::RefCell<BTreeSet<lash_kernel_doc::heap::PageId>>>,
     pub(super) writes: Rc<Cell<u64>>,
     pub(super) bytes: Rc<Cell<u64>>,
 }
@@ -53,6 +55,9 @@ pub(super) struct Counting {
 impl PageSource for Counting {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
         self.reads.set(self.reads.get() + pages.len() as u64);
+        self.read
+            .borrow_mut()
+            .extend(pages.iter().map(|page| page.id));
         self.pages.read(pages)
     }
     fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
