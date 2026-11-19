@@ -454,7 +454,7 @@ def guarded_problems(repo: Path, registry: Registry) -> list[str]:
     return problems
 
 
-def guard_marker_problems(repo: Path, registry: Registry) -> list[str]:
+def guard_marker_problems(view: check_version_bumps.WorktreeView, registry: Registry) -> list[str]:
     """Surfaces whose constant declares no guard, or one that cannot be read."""
     try:
         surfaces = [
@@ -464,8 +464,8 @@ def guard_marker_problems(repo: Path, registry: Registry) -> list[str]:
     except check_version_bumps.CheckError as error:
         raise RegistryError(str(error)) from error
     from durable_surfaces import problems
-    return (problems(check_version_bumps.WorktreeView(repo), {s.constant for s in surfaces})
-            + check_version_bumps.worktree_problems(repo, surfaces))
+    return (problems(view, {s.constant for s in surfaces})
+            + check_version_bumps.worktree_problems(view, surfaces))
 
 
 def row_label(row: str) -> str:
@@ -475,14 +475,17 @@ def row_label(row: str) -> str:
     return f"DurableFormat::{row}"
 
 
-def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
+def check(
+    repo: Path, registry: Registry, manifest_text: str, *,
+    view: check_version_bumps.WorktreeView | None = None,
+) -> list[str]:
     problems: list[str] = []
 
+    if view is None:
+        view = check_version_bumps.WorktreeView(repo)
     from discover_version_surfaces import inspect
     try:
-        inventory = inspect(
-            check_version_bumps.WorktreeView(repo), unregistered=registry.unregistered,
-        )
+        inventory = inspect(view, unregistered=registry.unregistered)
     except check_version_bumps.CheckError as error:
         raise RegistryError(str(error)) from error
     discovered, discovery_problems = inventory.surfaces, inventory.problems
@@ -621,7 +624,7 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
                 f"manifest row; every durable format must be in {MANIFEST}"
             )
     problems.extend(guarded_problems(repo, registry))
-    problems.extend(guard_marker_problems(repo, registry))
+    problems.extend(guard_marker_problems(view, registry))
     problems.extend(retired_build_problems(repo, manifest_text))
     return problems
 
@@ -638,7 +641,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         registry = load_registry(args.config)
         manifest_text = (args.repo / MANIFEST).read_text(encoding="utf-8")
-        problems = check(args.repo, registry, manifest_text)
+        view = check_version_bumps.WorktreeView(args.repo)
+        problems = check(args.repo, registry, manifest_text, view=view)
     except (OSError, RegistryError) as error:
         print(f"format-registry check error: {error}", file=sys.stderr)
         return 2
@@ -648,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {problem}", file=sys.stderr)
         return 1
     from discover_version_surfaces import discover
-    discovered, _ = discover(check_version_bumps.WorktreeView(args.repo))
+    discovered, _ = discover(view)
     print(
         f"format-registry check passed: {len(discovered)} surfaces, "
         f"{len(registry.unregistered)} stated exclusions, "

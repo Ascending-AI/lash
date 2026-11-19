@@ -30,9 +30,9 @@ import check_version_bumps as gate
 
 
 class PlannedView(gate.TreeView):
-    def __init__(self, repo: Path, files: dict[str, str]) -> None:
+    def __init__(self, inner: gate.WorktreeView, files: dict[str, str]) -> None:
         super().__init__()
-        self.inner = gate.WorktreeView(repo)
+        self.inner = inner
         self.files = files
         self.label = "automatic format witnesses"
 
@@ -132,8 +132,16 @@ def stamped_artifacts(repo: Path) -> dict[Path, str]:
             # Artifact values need declared writers only. Allocation already
             # scans every source for unregistered versions; avoid repeating
             # that full Rust inspection for this cheap pre-push comparison.
-            return tuple(path for path in super().matching_paths(patterns)
-                         if "version_surface" in (self.content(path) or ""))
+            declared = []
+            for path in super().matching_paths(patterns):
+                try:
+                    data = (self.repo / path).read_bytes()
+                except OSError:
+                    continue
+                if b"version_surface" in data:
+                    self._contents[path] = data.decode("utf-8", errors="surrogateescape")
+                    declared.append(path)
+            return tuple(declared)
 
     tables = (baseline.BLAKE3_DOMAIN_TABLE, baseline.PREDECESSOR_TABLE)
     postgres_schema = repo / "crates/lash-postgres-store/schema.sql"
@@ -351,12 +359,13 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
     strict = gate.STRICT_VERSION_BUMPS if strict is None else strict
     base_view = gate.RevisionView(repo, gate.resolve_revision(repo, base))
     originals = {surface.key: surface for surface in gate.discovered_surfaces(base_view, enforce=False)}
+    worktree = gate.WorktreeView(repo, reuse_content=base_view.reuse_content)
     files: dict[str, str] = {}
     changed: dict[str, tuple[gate.Surface, int | None, int]] = {}
     # A stamp can expose a change to another guarded encoding. Reproject until
     # no obligation remains, without incrementing any stamp twice per landing.
     for _ in range(len(originals) + 1):
-        view = PlannedView(repo, files)
+        view = PlannedView(worktree, files)
         result = gate.check_views(base_view, view, strict=strict)
         if result.errors:
             raise gate.CheckError("; ".join(f.detail for f in result.errors))
@@ -379,13 +388,13 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
             if at == before:
                 path, text = advance(view, surface, 1)
                 files[path] = text
-                view = PlannedView(repo, files)
+                view = PlannedView(worktree, files)
                 changed[surface.key] = (surface, before, before + 1)
     else:
         raise gate.CheckError("automatic format witnesses did not converge")
 
     # Include manually advanced stamps too, so hosts get a complete reset list.
-    final = PlannedView(repo, files)
+    final = PlannedView(worktree, files)
     keys = {s.key for s in result.evaluated}
     for surface in result.registered:
         if surface.upgrade != "coexist":
@@ -401,12 +410,12 @@ def apply(repo: Path, base: str, *, strict: bool | None = None) -> list[str]:
     # artifacts follow these witnesses after materialization below.
     if result.errors or result.failures:
         raise gate.CheckError("automatic format witnesses left unresolved obligations")
-    files.update(retire_replaced_build(base_view, PlannedView(repo, files)))
+    files.update(retire_replaced_build(base_view, final))
     if changed:
         subject = gate.git(repo, "log", "-1", "--format=%s").stdout.strip()
         ticket = re.search(r"FIG-\d+", subject)
         identity = ticket.group() if ticket else f"auto-formats-{base_view.revision[:12]}"
-        path, text = write_note(repo, identity, base_view.revision, changed, PlannedView(repo, files),
+        path, text = write_note(repo, identity, base_view.revision, changed, final,
                                 (*result.evaluated, *result.unshaped, *result.registered))
         files[path] = text
     written = []

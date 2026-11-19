@@ -114,6 +114,7 @@ from discover_version_surfaces import (
     Token, _is_test_source, _rust_group_end, _rust_top_level_items, _test_only_cfg,
     _rust_trivia_end, discover, rust_item_end,
     rust_item_start_with_attributes, rust_outer_attribute_ranges, rust_tokens, rust_lexemes,
+    matching_rust_identifiers, rust_braces,
     strip_rust_trivia, test_only_module_ranges,
 )
 
@@ -261,19 +262,23 @@ class RevisionView(TreeView):
         self.repo = repo
         self.revision = revision
         self.label = revision[:12]
-        self._paths: tuple[str, ...] | None = None
+        self._paths: frozenset[str] | None = None
+        self._matches: dict[str, tuple[str, ...]] = {}
         self._contents: dict[str, str | None] = {}
 
     def matching_paths(self, patterns: Iterable[str]) -> tuple[str, ...]:
         if self._paths is None:
             output = git(self.repo, "ls-tree", "-r", "--name-only", self.revision).stdout
-            self._paths = tuple(line for line in output.splitlines() if line)
-        matches = {
-            path
-            for path in self._paths
-            for pattern in patterns
-            if fnmatch.fnmatchcase(path, pattern)
-        }
+            self._paths = frozenset(line for line in output.splitlines() if line)
+        matches: set[str] = set()
+        for pattern in patterns:
+            if pattern not in self._matches:
+                if re.search(r"[*?\[]", pattern):
+                    match = re.compile(fnmatch.translate(pattern)).match
+                    self._matches[pattern] = tuple(filter(match, self._paths))
+                else:
+                    self._matches[pattern] = (pattern,) if pattern in self._paths else ()
+            matches.update(self._matches[pattern])
         return tuple(sorted(matches))
 
     def content(self, path: str) -> str | None:
@@ -281,6 +286,11 @@ class RevisionView(TreeView):
             result = git(self.repo, "show", f"{self.revision}:{path}", check=False)
             self._contents[path] = result.stdout if result.returncode == 0 else None
         return self._contents[path]
+
+    def reuse_content(self, path: str, text: str) -> str:
+        """Share a loaded blob with the working tree when its bytes agree."""
+        previous = self._contents.get(path)
+        return previous if previous is not None and previous == text else text
 
     def preload(self, paths: Iterable[str]) -> None:
         wanted = [path for path in paths if path not in self._contents]
@@ -313,9 +323,9 @@ class RevisionView(TreeView):
 class WorktreeView(WorktreeSources, TreeView):
     """Filesystem source view with the gate's projection and closure caches."""
 
-    def __init__(self, repo: Path) -> None:
+    def __init__(self, repo: Path, *, reuse_content: Callable[[str, str], str] | None = None) -> None:
         TreeView.__init__(self)
-        WorktreeSources.__init__(self, repo)
+        WorktreeSources.__init__(self, repo, reuse_content=reuse_content)
 
 
 NON_WIRE_DERIVES = {
@@ -470,8 +480,8 @@ def normalize_rust_shape_attributes(text: str) -> str:
 
 RUST_DECLARATION = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
-    r"(?:(?:const[ \t]+)?(?:async[ \t]+)?(?:unsafe[ \t]+)?fn|const|static|struct|enum|type)"
-    r"[ \t]+([A-Za-z_][A-Za-z0-9_]*)\b"
+    r"(?P<kind>(?:const[ \t]+)?(?:async[ \t]+)?(?:unsafe[ \t]+)?fn|const|static|struct|enum|type)"
+    r"[ \t]+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b"
 )
 RUST_SERDE_SHAPE = re.compile(
     r"(?m)^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?"
@@ -495,7 +505,7 @@ def named_rust_items(
     attribute_ranges = rust_outer_attribute_ranges(text)
     excluded_ranges = test_only_module_ranges(text, attribute_ranges)
     for match in RUST_DECLARATION.finditer(text):
-        name = match.group(1)
+        name = match["name"]
         if name not in wanted:
             continue
         if any(start <= match.start() < end for start, end in excluded_ranges):
@@ -1340,14 +1350,16 @@ def _gated_on_test(text: str, start: int) -> bool:
     return False
 
 
-def module_use_offsets(text: str) -> set[int]:
+def module_use_offsets(text: str, imports: Iterable[re.Match[str]]) -> set[int]:
     """Imports at module scope, independent of indentation and formatting."""
     modules = {match.end() - 1 for match in RUST_MODULE_OPENING.finditer(text)}
-    tokens = iter(rust_lexemes(text))
-    token = next(tokens, None)
+    tokens = rust_braces(text)
+    token = None
     stack = []
     offsets = set()
-    for match in RUST_USE.finditer(text):
+    for match in imports:
+        if token is None:
+            token = next(tokens, None)
         while token is not None and token.start < match.start():
             if token.kind == "punct" and token.value == "{":
                 stack.append(token.start in modules)
@@ -1382,12 +1394,12 @@ def index_file(text: str) -> FileIndex:
         # An item indented past its module is inside a function, impl or trait.
         if production(match.start()) and len(match.group(1)) == 4 * len(chain):
             types.append((match.group(3), match.group(2), match.start(), chain))
-    use_offsets = module_use_offsets(text)
+    imports = [match for match in RUST_USE.finditer(text) if production(match.start())]
+    use_offsets = module_use_offsets(text, imports)
     uses = [
         (name, segments, match.group(1) is not None)
-        for match in RUST_USE.finditer(text)
-        if production(match.start())
-        and match.start() in use_offsets
+        for match in imports
+        if match.start() in use_offsets
         for name, segments in _expand_use(match.group(2))
     ]
     return FileIndex(
@@ -2402,6 +2414,11 @@ def without_unencoded_error_types(text: str) -> str:
     return text
 
 
+CODEC_IDENTIFIERS = re.compile(
+    r"(?<![A-Za-z0-9_])(?:impl|TokenCodec|CodecVariant)(?![A-Za-z0-9_])"
+)
+
+
 @lru_cache(maxsize=None)
 def production_codec_source(text: str) -> str | None:
     """Codec implementation, helpers and macro calls, excluding test-only code.
@@ -2427,11 +2444,9 @@ def production_codec_source(text: str) -> str | None:
     for start, end in reversed(merged):
         text = text[:start] + text[end:]
     text = without_unencoded_error_types(text)
-    tokens = rust_tokens(text)
+    names = matching_rust_identifiers(text, CODEC_IDENTIFIERS)
     # Includes generic/qualified impls and macro-generated codecs ($ty).
-    if not (any(kind == "ident" and name == "impl" for kind, name in tokens)
-            and any(kind == "ident" and name in {"TokenCodec", "CodecVariant"}
-                    for kind, name in tokens)) and "traitTokenCodec" not in strip_rust_trivia(text):
+    if not ("impl" in names and names & {"TokenCodec", "CodecVariant"}) and "traitTokenCodec" not in strip_rust_trivia(text):
         return None
     return strip_rust_trivia(normalize_rust_derive_lists(strip_markers(text)))
 
@@ -2490,17 +2505,18 @@ def codec_helpers(view: TreeView, crate: str, entries: Iterable[Entry]) -> tuple
         for path, index in reach._index(crate).items():
             text = view.projected(path) or ""
             for match in RUST_DECLARATION.finditer(text):
-                header = match.group(0)
-                if not re.search(r"\b(?:fn|const|static)\s+" + re.escape(match[1]) + r"$", header):
+                if match["kind"] in {"struct", "enum", "type"}:
                     continue
+                header = match[0]
                 indent = len(header) - len(header.lstrip(" \t"))
                 modules = [name for name, start, end, _ in index.modules
                            if start < match.start() < end]
                 if indent != 4 * len(modules) or _gated_on_test(text, match.start()):
                     continue
                 raw = text[match.start():rust_item_end(text, match.start())]
-                catalog.setdefault(match[1], []).append(
-                    codec_entry(view, path, f"token codec helper: {match[1]}", raw))
+                name = match["name"]
+                catalog.setdefault(name, []).append(
+                    codec_entry(view, path, f"token codec helper: {name}", raw))
         cache[crate] = catalog
     catalog = cache[crate]
     queue = list(entries)
@@ -3422,13 +3438,12 @@ def check_views(
     )
 
 
-def worktree_problems(repo: Path, surfaces: Iterable[Surface]) -> list[str]:
+def worktree_problems(view: WorktreeView, surfaces: Iterable[Surface]) -> list[str]:
     """What stops the working tree's markers from being evaluated.
 
     `check_format_registry.py` reports these, so a surface cannot land without
     a guard, or with one that names something the tree does not have.
     """
-    view = WorktreeView(repo)
     problems: list[str] = []
     for surface in surfaces:
         try:

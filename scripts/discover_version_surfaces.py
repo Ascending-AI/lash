@@ -16,6 +16,7 @@ historical names are immutable and are not current writer versions.
 """
 from __future__ import annotations
 
+from array import array
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import fnmatch
@@ -24,7 +25,7 @@ import os
 from pathlib import Path
 import re
 import tomllib
-from typing import Iterable
+from typing import Callable, Iterable
 
 REGISTRY = "scripts/versioned-surfaces.toml"
 RUST_SOURCE_PATTERNS = ("crates/*.rs", "examples/*.rs")
@@ -39,8 +40,9 @@ class WorktreeSources:
 
     label = "working tree"
 
-    def __init__(self, repo: Path) -> None:
+    def __init__(self, repo: Path, *, reuse_content: Callable[[str, str], str] | None = None) -> None:
         self.repo = repo
+        self._reuse_content = reuse_content
         self._contents: dict[str, str | None] = {}
         self._listings: dict[str, tuple[str, ...]] = {}
 
@@ -72,11 +74,8 @@ class WorktreeSources:
             prefix = pattern[: wildcard.start()].rpartition("/")[0]
             if not (self.repo / prefix).is_dir():
                 continue
-            matches.update(
-                relative
-                for relative in self._listing(prefix)
-                if fnmatch.fnmatchcase(relative, pattern)
-            )
+            match = re.compile(fnmatch.translate(pattern)).match
+            matches.update(filter(match, self._listing(prefix)))
         return tuple(sorted(matches))
 
     def content(self, path: str) -> str | None:
@@ -86,7 +85,8 @@ class WorktreeSources:
             except OSError:
                 self._contents[path] = None
             else:
-                self._contents[path] = data.decode("utf-8", errors="surrogateescape")
+                text = data.decode("utf-8", errors="surrogateescape")
+                self._contents[path] = text if self._reuse_content is None else self._reuse_content(path, text)
         return self._contents[path]
 
     def preload(self, paths: Iterable[str]) -> None:
@@ -127,7 +127,7 @@ def _char_literal_end(text: str, index: int) -> int | None:
 
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Lexeme:
     kind: str
     start: int
@@ -141,61 +141,86 @@ _LEXEME = re.compile(
     r"[0-9][0-9A-Za-z_]*(?:\.[0-9][0-9A-Za-z_]*)?|::|->|=>|.", re.DOTALL,
 )
 
+# An ASCII identifier or number consumes an adjacent b/r prefix.
+_QUOTED_OR_COMMENT = (
+    r"""//[^\n]*|/\*|b(?<![A-Za-z0-9_]b)(?:r\#*"|["'])|r(?<![A-Za-z0-9_]r)\#*"|["']"""
+)
+_TRIVIA = re.compile(_QUOTED_OR_COMMENT + r"|#(?=\[)")
+_STRUCTURE = re.compile(_QUOTED_OR_COMMENT + r"|[{}\[\]();]")
+_BRACES = re.compile(_QUOTED_OR_COMMENT + r"|[{}]")
+_DELIMITER = re.compile(r"[{}\[\]();]")
+_BLOCK_COMMENT_DELIMITER = re.compile(r"/\*|\*/")
+_LIFETIME_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_STRING_BODY = re.compile(r'[^"\\]*(?:\\.[^"\\]*)*"', re.DOTALL)
+_WHITESPACE = re.compile(r"\s*")
+_NON_NEWLINE = re.compile(r"[^\n]+")
 
-@lru_cache(maxsize=8192)
-def rust_lexemes(text: str) -> tuple[Lexeme, ...]:
-    result = []
-    index = 0
-    while match := _LEXEME.match(text, index):
+
+def _lexemes(text: str, pattern: re.Pattern[str], index: int = 0):
+    while match := pattern.search(text, index):
         start, end = match.span()
         value = match[0]
         kind = "punct"
-        if value.isspace():
+        if value in "{}[]();,#":
+            pass
+        elif value.isspace():
             kind = "space"
         elif value.startswith("//"):
             kind = "comment"
         elif value == "/*":
             depth = 1
             while depth and end < len(text):
-                token = re.search(r"/\*|\*/", text[end:])
+                token = _BLOCK_COMMENT_DELIMITER.search(text, end)
                 if token is None:
                     break
-                end += token.end()
+                end = token.end()
                 depth += 1 if token[0] == "/*" else -1
             kind = "comment" if not depth else "malformed"
             if depth:
                 end = len(text)
             value = "unterminated Rust block comment"
-        elif raw := _raw_string_start(text, start):
+        elif value.startswith(("r", "br")) and (raw := _raw_string_start(text, start)):
             content_start, closer = raw
             closing = text.find(closer, content_start)
             kind = "literal" if closing >= 0 else "malformed"
             end = closing + len(closer) if closing >= 0 else len(text)
             value = text[content_start:closing] if closing >= 0 else "unterminated Rust raw string"
         elif value in ('"', 'b"'):
-            content_start = end
-            while end < len(text) and text[end] != '"':
-                end += 2 if text[end] == "\\" else 1
-            kind = "literal" if end < len(text) else "malformed"
-            value = text[content_start:end] if kind == "literal" else "unterminated Rust string"
-            end = min(end + 1, len(text))
-        elif char_end := _char_literal_end(text, start):
+            body = _STRING_BODY.match(text, end)
+            if body is None:
+                kind, end, value = "malformed", len(text), "unterminated Rust string"
+            else:
+                kind, value = "literal", text[end:body.end() - 1]
+                end = body.end()
+        elif value[0] in "'b" and (char_end := _char_literal_end(text, start)):
             kind, end = "char", char_end
             value = text[start:end]
-        elif value == "'" and (name := re.match(r"[A-Za-z_][A-Za-z0-9_]*", text[end:])):
+        elif value == "'" and (name := _LIFETIME_NAME.match(text, end)):
             kind, value = "lifetime", name[0]
             end += len(value)
         elif value[0].isalpha() or value[0] == "_":
             kind = "ident"
         elif value[0].isdigit():
             kind = "number"
-        result.append(Lexeme(kind, start, end, value))
+        yield Lexeme(kind, start, end, value)
         index = end
-    return tuple(result)
 
 
-def lexemes_from(text: str, start: int = 0):
-    lexemes = rust_lexemes(text)
+@lru_cache(maxsize=32)
+def rust_lexemes(text: str) -> tuple[Lexeme, ...]:
+    return tuple(_lexemes(text, _LEXEME))
+
+
+@lru_cache(maxsize=32)
+def _rust_trivia(text: str) -> tuple[Lexeme, ...]:
+    return tuple(_lexemes(text, _TRIVIA))
+
+
+def rust_braces(text: str):
+    return _lexemes(text, _BRACES)
+
+
+def lexemes_from(lexemes: tuple[Lexeme, ...], start: int):
     index = bisect_left(lexemes, start, key=lambda token: token.start)
     return (lexemes[at] for at in range(index, len(lexemes)))
 
@@ -203,29 +228,40 @@ def lexemes_from(text: str, start: int = 0):
 @lru_cache(maxsize=8192)
 def without_comments(text: str) -> str:
     """Mask comments, preserving literal contents, newlines and source offsets."""
-    result = list(text)
-    for token in rust_lexemes(text):
+    result = []
+    cursor = 0
+    for token in _rust_trivia(text):
         if token.kind == "malformed":
             raise SourceError(token.value)
         if token.kind == "comment":
-            result[token.start:token.end] = ["\n" if c == "\n" else " "
-                                              for c in text[token.start:token.end]]
+            result.append(text[cursor:token.start])
+            result.append(_NON_NEWLINE.sub(lambda match: " " * len(match[0]),
+                                          text[token.start:token.end]))
+            cursor = token.end
+    result.append(text[cursor:])
     return "".join(result)
 
 
 @lru_cache(maxsize=8192)
 def strip_rust_trivia(text: str) -> str:
-    tokens = rust_lexemes(text)
-    for token in tokens:
+    result = []
+    cursor = 0
+    for token in _rust_trivia(text):
         if token.kind == "malformed":
             raise SourceError(token.value)
-    return "".join(text[t.start:t.end] for t in tokens if t.kind not in {"space", "comment"})
+        if token.kind in {"comment", "literal", "char"}:
+            result.append(re.sub(r"\s+", "", text[cursor:token.start]))
+            if token.kind != "comment":
+                result.append(text[token.start:token.end])
+            cursor = token.end
+    result.append(re.sub(r"\s+", "", text[cursor:]))
+    return "".join(result)
 
 
 Token = tuple[str, str]
 
 
-@lru_cache(maxsize=8192)
+@lru_cache(maxsize=64)
 def rust_tokens(text: str) -> tuple[Token, ...]:
     tokens = rust_lexemes(text)
     for token in tokens:
@@ -234,17 +270,43 @@ def rust_tokens(text: str) -> tuple[Token, ...]:
     return tuple((t.kind, t.value) for t in tokens if t.kind not in {"space", "comment"})
 
 
+@lru_cache(maxsize=512)
+def _item_delimiters(text: str) -> tuple[array, Lexeme | None]:
+    """Keep offsets for repeated item extraction without holding token objects."""
+    offsets = array("Q")
+    cursor = 0
+    for token in _rust_trivia(text):
+        offsets.extend(match.start() for match in _DELIMITER.finditer(text, cursor, token.start))
+        if token.kind == "malformed":
+            return offsets, token
+        cursor = token.end
+    offsets.extend(match.start() for match in _DELIMITER.finditer(text, cursor))
+    return offsets, None
+
+
+def matching_rust_identifiers(text: str, pattern: re.Pattern[str]) -> set[str]:
+    """Find the requested ASCII identifiers outside comments and literals."""
+    trivia = _rust_trivia(text)
+    if trivia and trivia[-1].kind == "malformed":
+        raise SourceError(trivia[-1].value)
+    found = set()
+    for match in pattern.finditer(text):
+        at = bisect_right(trivia, match.start(), key=lambda token: token.start)
+        if not at or trivia[at - 1].end <= match.start():
+            found.add(match[0])
+    return found
+
+
+@lru_cache(maxsize=8192)
 def rust_item_end(text: str, start: int) -> int:
     """Find an item's terminator outside literals and nested delimiters."""
     depths = {"{": 0, "[": 0, "(": 0}
     pairs = {"}": "{", "]": "[", ")": "("}
     saw_brace = False
-    for token in lexemes_from(text, start):
-        if token.kind == "malformed":
-            raise SourceError(token.value + " while extracting guarded item")
-        if token.kind != "punct":
-            continue
-        char = token.value
+    offsets, malformed = _item_delimiters(text)
+    for at in range(bisect_left(offsets, start), len(offsets)):
+        position = offsets[at]
+        char = text[position]
         if char in depths:
             if char == "{" and not any(depths.values()):
                 saw_brace = True
@@ -252,9 +314,11 @@ def rust_item_end(text: str, start: int) -> int:
         elif char in pairs:
             depths[pairs[char]] -= 1
             if char == "}" and saw_brace and depths["{"] == 0:
-                return token.end
+                return position + 1
         elif char == ";" and not any(depths.values()):
-            return token.end
+            return position + 1
+    if malformed is not None and malformed.start >= start:
+        raise SourceError(malformed.value + " while extracting guarded item")
     raise SourceError("unterminated Rust item while extracting guarded shape")
 
 
@@ -262,7 +326,7 @@ def rust_attribute_end(text: str, start: int) -> int:
     if not text.startswith("#[", start):
         raise SourceError("Rust attribute extraction did not start at #[")
     depth = 1
-    for token in lexemes_from(text, start + 2):
+    for token in _lexemes(text, _STRUCTURE, start + 2):
         if token.kind == "malformed":
             raise SourceError(token.value + " while extracting attribute")
         if token.kind == "punct":
@@ -279,7 +343,7 @@ def rust_attribute_end(text: str, start: int) -> int:
 def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
     ranges = []
     cursor = 0
-    for token in rust_lexemes(text):
+    for token in _rust_trivia(text):
         if token.start < cursor:
             continue
         if token.kind == "malformed":
@@ -302,24 +366,28 @@ def rust_outer_attribute_ranges(text: str) -> tuple[tuple[int, int], ...]:
 
 
 def _rust_trivia_end(text: str, start: int) -> int | None:
-    tokens = rust_lexemes(text)
+    tokens = _rust_trivia(text)
     index = bisect_right(tokens, start, key=lambda token: token.end)
     cursor = start
     for at in range(index, len(tokens)):
         token = tokens[at]
+        if cursor < token.start:
+            cursor = _WHITESPACE.match(text, cursor).end()
+            if cursor < token.start:
+                return cursor
         if token.kind == "malformed":
             return None
-        if token.kind not in {"space", "comment"}:
-            break
+        if token.kind != "comment":
+            return cursor
         cursor = token.end
-    return cursor
+    return _WHITESPACE.match(text, cursor).end()
 
 
 def _rust_group_end(text: str, open_index: int) -> int | None:
     if open_index >= len(text) or text[open_index] != "(":
         return None
     depth = 1
-    for token in lexemes_from(text, open_index + 1):
+    for token in _lexemes(text, _STRUCTURE, open_index + 1):
         if token.kind == "malformed":
             return None
         if token.kind == "punct":
@@ -336,7 +404,7 @@ def _rust_top_level_items(text: str, start: int, end: int) -> tuple[tuple[int, i
     items, delimiters = [], []
     pairs = {"(": ")", "[": "]", "{": "}"}
     item_start = start
-    for token in lexemes_from(text, start):
+    for token in lexemes_from(rust_lexemes(text), start):
         if token.start >= end:
             break
         if token.kind == "malformed" or token.end > end:
@@ -549,9 +617,15 @@ def production_path(path):
 def production_text(text):
     """Mask comments, test modules and attributes, preserving source offsets."""
     attributes = rust_outer_attribute_ranges(text)
-    masked = list(without_comments(text))
-    for start, end in (*attributes, *test_only_module_ranges(text, attributes)):
-        masked[start:end] = ' ' * (end - start)
+    uncommented = without_comments(text)
+    masked = []
+    cursor = 0
+    for start, end in sorted((*attributes, *test_only_module_ranges(text, attributes))):
+        start = max(start, cursor)
+        if start < end:
+            masked.extend((uncommented[cursor:start], ' ' * (end - start)))
+            cursor = end
+    masked.append(uncommented[cursor:])
     return ''.join(masked)
 
 
@@ -599,17 +673,27 @@ def discover(view, *, unregistered=None, enforce=True):
 def _inspect_file(path, text, excluded):
     # Mutant trees used by the guard laws change one file. Reuse the scan of
     # each unchanged file while still scanning every tree for new versions.
+    attributes = rust_outer_attribute_ranges(text)
+    has_metadata = any(marker in text for marker in (
+        "version_surface", "format_manifest", "format_outside_manifest",
+        "version_unguarded", "version_reservations",
+    ))
+    is_test = _is_test_source(path)
+    if is_test and not has_metadata:
+        trivia = _rust_trivia(text)
+        if trivia and trivia[-1].kind == "malformed":
+            raise SourceError(trivia[-1].value)
+        return (), (), frozenset()
     rows, problems = {}, []
     masked = production_text(text)
     declarations = list(CONST.finditer(masked))
     constants = [match for match in declarations if match["value"] is not None]
     version_constants = frozenset(
         f'{path}:{match["name"]}' for match in declarations
-        if not _is_test_source(path)
+        if not is_test
         and (re.fullmatch(r'[A-Z][A-Z0-9_]*(?:_VERSION|_EPOCH|_FORMAT)', match["name"])
              or f'{path}:{match["name"]}' in excluded)
     )
-    attributes = rust_outer_attribute_ranges(text)
 
     def block_for(match):
         start = rust_item_start_with_attributes(text, match.start(), attributes)
@@ -626,7 +710,7 @@ def _inspect_file(path, text, excluded):
         key = f'{path}:{name}'
         if match['value'].strip() == 'env!("CARGO_PKG_VERSION")':
             continue
-        block = block_for(match)
+        block = block_for(match) if has_metadata else ""
         metadata = {}
         invalid = False
         for marker in DECLARATION.finditer(block):
@@ -678,17 +762,20 @@ def _inspect_file(path, text, excluded):
         problems.append(f'{path}:{text.count(chr(10), 0, call.start()) + 1}: '
                         f'unregistered inline family version {call[1]}; use a source-declared constant')
     owned = rows.keys() | excluded
-    for literal in rust_lexemes(text):
-        if literal.kind != "literal" or masked[literal.start:literal.end] != text[literal.start:literal.end]:
+    for literal in _rust_trivia(text):
+        if literal.kind != "literal":
             continue
-        raw, value = text[literal.start:literal.end], literal.value
+        value = literal.value
+        if (not TAG.fullmatch(value) or value.startswith(('http:', 'https:'))
+                or not (re.search(r'[/ :]v[0-9]', value) or value.startswith('lash'))):
+            continue
+        raw = text[literal.start:literal.end]
+        if masked[literal.start:literal.end] != raw:
+            continue
         # A byte string is not a scalar string version that the release
         # resolver can reset; retain the same refusal as the source grammar.
         if raw.startswith(('b"', 'br')):
             raw = raw[1:]
-        if (not TAG.fullmatch(value) or value.startswith(('http:', 'https:'))
-                or not (re.search(r'[/ :]v[0-9]', value) or value.startswith('lash'))):
-            continue
         if any(start <= literal.start < end for start, end in reserved):
             continue
         owner = next((m for m in constants if m.start('value') <= literal.start < m.end('value')), None)

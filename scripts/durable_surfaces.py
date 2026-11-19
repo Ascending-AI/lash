@@ -37,6 +37,10 @@ def records(view: gate.TreeView) -> tuple[Record, ...]:
         if gate._is_test_source(path):
             continue
         text = view.content(path) or ""
+        # A direct implementation or a supported import alias spells the
+        # trait in this file.
+        if "DurableRecord" not in text and "JournalStep" not in text:
+            continue
         aliases = {name: segments[-1] for name, segments, _ in gate.index_file(text).uses
                    if segments and segments[-1] in {"DurableRecord", "JournalStep"}}
         for match in IMPL.finditer(text):
