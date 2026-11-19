@@ -212,6 +212,42 @@ def land_lock():
         yield
 
 
+# Each land holds one of SLOTS while it qualifies and pushes, so turbo runs at
+# most SLOTS lands at once (watchdog, 2026-11-21: ~15 concurrent lands, ~3 GB of
+# Python each plus builds, drove load past 600 on 32 cores). The slot's fd
+# survives the restart's exec, so a restarted land keeps its place.
+SLOTS = 2
+SLOT_FD = "LASH_LAND_SLOT_FD"
+
+
+def take_slot():
+    held = os.environ.get(SLOT_FD)
+    if held:
+        try:
+            os.fstat(int(held))
+            return
+        except OSError:
+            pass
+    waited = False
+    while True:
+        for index in range(SLOTS):
+            fd = os.open(f"/workspace/kiln/lash/land-slot.{index}", os.O_RDWR | os.O_CREAT, 0o644)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(fd)
+                continue
+            os.set_inheritable(fd, True)
+            os.environ[SLOT_FD] = str(fd)
+            if waited:
+                print(f"land: took land slot {index}", flush=True)
+            return
+        if not waited:
+            print(f"land: waiting for one of {SLOTS} land slots", flush=True)
+            waited = True
+        time.sleep(5)
+
+
 def restart(reason):
     runs = int(os.environ.get(RUNS, "1"))
     if runs >= MAX_RUNS:
@@ -225,6 +261,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="rebase, regenerate and check, without pushing")
     args = parser.parse_args()
+    take_slot()
     os.chdir(git("rev-parse", "--show-toplevel"))
     if rebasing():
         raise RuntimeError("rebase already in progress")

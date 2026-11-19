@@ -39,6 +39,9 @@ your fork. It rebases onto main, runs the required workspace checks —
 and pushes. It takes `/workspace/kiln/lash/land.lock` only for the final
 fetch/base check and push; do not wrap it in an outer `flock`.
 `scripts/land --dry-run` does everything except push and never takes the lock.
+At most two lands run on turbo at once: `scripts/land` waits for a free land
+slot by itself. Never start a second land while one of yours is waiting, and
+never run full workspace builds outside it to get around the wait.
 After it prints `landed <sha>`, close your ticket and remove your fork with
 `kiln rm lash <name>`.
 
