@@ -186,23 +186,68 @@ pub enum MemoryMeter {
     Off,
 }
 
-/// The meters a root saves exactly.
+/// The run's charge, as its root alone saves it: the policy, the bound the
+/// run continues with and, under Exact, what it has paid, which never
+/// passes the bound (the meter's own invariant). Built only through
+/// [`Self::exact`] and [`Self::off`], and checked again where a root
+/// decodes, so header inspection and restore read the same checked charge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SavedMeters {
-    /// None is Off; a present meter is Exact, including a meter of zero.
-    pub charged: Option<u64>,
-    pub waits_issued: u64,
-    pub next_join: u64,
-    pub live_tasks: u32,
+pub struct SavedCharge(ChargeState);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChargeState {
+    Exact {
+        paid: u64,
+        limit: u64,
+    },
+    /// Unmetered; the configured bound is kept for the host.
+    Off {
+        limit: u64,
+    },
 }
 
-impl SavedMeters {
-    /// The run's saved charge policy, retained even before its first charge.
-    pub const fn charge(&self) -> Charge {
-        if self.charged.is_some() {
-            Charge::Exact
-        } else {
-            Charge::Off
+/// A paid charge past the bound it was paid under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a run's paid charge {paid} passes its limit {limit}")]
+pub struct OverLimit {
+    pub paid: u64,
+    pub limit: u64,
+}
+
+impl SavedCharge {
+    /// Exact accounting that has paid `paid` of `limit`.
+    ///
+    /// # Errors
+    ///
+    /// [`OverLimit`] when `paid` passes `limit`.
+    pub const fn exact(paid: u64, limit: u64) -> Result<Self, OverLimit> {
+        if paid > limit {
+            return Err(OverLimit { paid, limit });
+        }
+        Ok(Self(ChargeState::Exact { paid, limit }))
+    }
+    /// No charge accounting, its configured bound `limit` kept.
+    pub const fn off(limit: u64) -> Self {
+        Self(ChargeState::Off { limit })
+    }
+    /// The run's charge policy.
+    pub const fn policy(&self) -> Charge {
+        match self.0 {
+            ChargeState::Exact { .. } => Charge::Exact,
+            ChargeState::Off { .. } => Charge::Off,
+        }
+    }
+    /// What the run has paid under Exact; none under Off.
+    pub const fn paid(&self) -> Option<u64> {
+        match self.0 {
+            ChargeState::Exact { paid, .. } => Some(paid),
+            ChargeState::Off { .. } => None,
+        }
+    }
+    /// The charge bound the run continues with.
+    pub const fn limit(&self) -> u64 {
+        match self.0 {
+            ChargeState::Exact { limit, .. } | ChargeState::Off { limit } => limit,
         }
     }
 }
@@ -220,9 +265,8 @@ pub enum CellTargetKind {
 pub struct SavedLimits {
     /// The memory bound in bytes; none when memory is unmetered.
     pub memory: Option<u64>,
-    /// The charge bound in charge units, held whether or not charge is
-    /// metered ([`SavedMeters::charge`]).
-    pub charge: u64,
+    /// The charge policy, bound and paid prefix.
+    pub charge: SavedCharge,
 }
 
 /// Kind 1000: one execution's complete root.
@@ -264,7 +308,6 @@ pub struct CheckpointRoot {
     /// its carry leaves out: the host's, not the session's.
     /// Admitted by `CellStart` within [`Self::HOST_METADATA_LIMIT`].
     pub host: Vec<lash_kernel_value::names::Name>,
-    pub meters: SavedMeters,
 }
 
 impl CheckpointRoot {
@@ -272,8 +315,9 @@ impl CheckpointRoot {
     ///
     /// The 4096-byte root reserves 865 token bytes for its fixed fields:
     /// struct header (2), kernel (6), link (34), document (34), closure/owner (66), helper library (34),
-    /// limits (24), target (3), nine full tree roots (9 * 58), heap (33), largest ended
-    /// status (66), and meters (41). All integers use their maximum widths.
+    /// limits with the charge (38), target (3), nine full tree roots (9 * 58), heap (33),
+    /// largest ended status (66), and 27 reserved bytes that keep the host budget
+    /// unchanged. All integers use their maximum widths.
     /// Another 256 bytes cover the envelope: each of at most 13 distinct
     /// child references adds at most one byte when moved to the child table,
     /// plus the magic, kind, child count and body length.
@@ -282,7 +326,7 @@ impl CheckpointRoot {
     /// Even empty names cost two bytes, so this bounds their count as well
     /// as each name. No guest allocation or park can grow the list.
     pub const HOST_METADATA_LIMIT: usize =
-        4096 - (2 + 6 + 34 + 34 + 66 + 34 + 24 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
+        4096 - (2 + 6 + 34 + 34 + 66 + 34 + 38 + 3 + 9 * 58 + 33 + 66 + 27) - 256;
 
     /// The canonical host-name list's size, without allocating its encoding.
     /// Overflow saturates so admission refuses it.

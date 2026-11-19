@@ -14,7 +14,7 @@ use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_state::paged::run::continuation;
 use lash_kernel_state::paged::{
     CellTargetKind, Checkpoint, CheckpointRoot, KeyedRoot, PageKind, PageSource, RootStatus,
-    SavedLimits, SavedMeters, SealBudget, SequenceRoot,
+    SavedCharge, SavedLimits, SealBudget, SequenceRoot,
 };
 use lash_kernel_value::names::{FunctionName, Name};
 use lash_kernel_value::package::OperationMode;
@@ -88,7 +88,7 @@ impl Output {
 /// The run record a budgeted seal wrote before its budget ran out.
 struct Partial {
     heap: lash_kernel_doc::heap::PageRef,
-    meters: SavedMeters,
+    charge: SavedCharge,
 }
 
 /// What every root the run seals names besides its state: fixed at start.
@@ -727,10 +727,13 @@ impl Machine for CoreMachine {
                 None => crate::MemoryMeter::Off,
             },
             memory: root.limits.memory.unwrap_or(bounds.memory),
-            charge: root.meters.charge(),
-            charge_limit: root.limits.charge,
+            charge: root.limits.charge.policy(),
+            charge_limit: root.limits.charge.limit(),
             ..bounds
         };
+        // What an Exact run has paid, checked against its limit where the
+        // root decoded; an Off run's slice cursor starts afresh.
+        let paid = root.limits.charge.paid().unwrap_or(0);
         let mut header = Header::of(&program, bounds, root.owner);
         if root.document != header.document {
             return Err(OpenError::DocumentMismatch {
@@ -874,7 +877,7 @@ impl Machine for CoreMachine {
                 roots: &values,
                 saved,
             },
-            record.charged,
+            paid,
             changed.map(|helpers| helpers.as_ref()),
         )
         .map_err(|error| malformed(format!("the document does not compile again: {error:?}")))?;
@@ -1003,7 +1006,7 @@ impl Machine for CoreMachine {
         let spent = |now: (u64, u64), before: (u64, u64)| {
             now.0 > before.0 && (now.0 - start.0 >= budget.pages || now.1 - start.1 >= budget.bytes)
         };
-        let Partial { heap, meters } = match self.partial.take() {
+        let Partial { heap, charge } = match self.partial.take() {
             Some(partial) => partial,
             None => {
                 let record = self.seal_heap()?;
@@ -1017,17 +1020,23 @@ impl Machine for CoreMachine {
                 let heap =
                     continuation::write(access, &record, self.run).map_err(SealError::Heap)?;
                 self.run = Some(heap);
-                let meters = SavedMeters {
-                    charged: (self.header.bounds.charge == Charge::Exact).then_some(record.charged),
-                    waits_issued: record.next_wait,
-                    next_join: record.next_join,
-                    live_tasks: record.live,
+                // The limit is the one the run's limiters grew, not the
+                // one it started with: the reopened run resumes under it
+                // (FIG-6768). An Off run's meter has no limit to grow.
+                let charge = if self.vm.off() {
+                    SavedCharge::off(self.header.bounds.charge_limit)
+                } else {
+                    SavedCharge::exact(self.vm.charged(), self.vm.charge_limit()).map_err(
+                        |over| SealError::Fault {
+                            problem: over.to_string(),
+                        },
+                    )?
                 };
                 if spent(written(self), sealed) {
-                    self.partial = Some(Partial { heap, meters });
+                    self.partial = Some(Partial { heap, charge });
                     return Ok(None);
                 }
-                Partial { heap, meters }
+                Partial { heap, charge }
             }
         };
         let access = self.vm.heap.access().ok_or_else(|| SealError::Fault {
@@ -1036,16 +1045,10 @@ impl Machine for CoreMachine {
         let header = &self.header;
         let root = CheckpointRoot {
             limits: SavedLimits {
-                // The limits the run's limiters grew, not the ones it
-                // started with: the reopened run resumes under them
-                // (FIG-6768). An Off run's meter has no limit to grow.
+                // The memory bound the run's limiters grew, as the charge's.
                 memory: (header.bounds.memory_meter == crate::MemoryMeter::On)
                     .then(|| self.vm.heap.bound()),
-                charge: if self.vm.off() {
-                    header.bounds.charge_limit
-                } else {
-                    self.vm.charge_limit()
-                },
+                charge,
             },
             kernel: header.kernel,
             document: header.document,
@@ -1069,7 +1072,6 @@ impl Machine for CoreMachine {
             reads: KeyedRoot::Empty,
             session: KeyedRoot::Empty,
             host: header.host.clone(),
-            meters,
         };
         let tokens = encode_body(&root);
         if tokens.len() > 4096 {

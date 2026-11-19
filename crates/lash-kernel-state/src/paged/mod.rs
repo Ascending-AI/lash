@@ -21,8 +21,8 @@ pub mod source;
 pub use family::{FrozenRef, FrozenSummary, SessionRoot};
 pub use lash_kernel_doc::heap::{FieldName, NormalKey};
 pub use root::{
-    CellTargetKind, Charge, CheckpointRoot, EndedRecord, KeyedRoot, MemoryMeter, RootStatus,
-    SavedLimits, SavedMeters, SequenceRoot,
+    CellTargetKind, Charge, CheckpointRoot, EndedRecord, KeyedRoot, MemoryMeter, OverLimit,
+    RootStatus, SavedCharge, SavedLimits, SequenceRoot,
 };
 pub use source::{PageAnswer, PageBody, PageKind, PagePortLimits, PageSource, SealBudget};
 

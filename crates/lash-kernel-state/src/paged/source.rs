@@ -31,7 +31,7 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/root.rs",
-///         KeyedRoot, SequenceRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind, CheckpointRoot,
+///         KeyedRoot, SequenceRoot, RootStatus, EndedRecord, SavedCharge, CellTargetKind, CheckpointRoot,
 ///     ),
 ///     items(
 ///         path = "crates/lash-kernel-state/src/paged/family.rs",

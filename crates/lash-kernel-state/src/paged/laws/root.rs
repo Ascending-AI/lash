@@ -68,7 +68,7 @@ fn a_checkpoint_root_fits_its_root_bound() {
             link: lash_kernel_value::LinkId::from_bytes([1; 32]),
             limits: SavedLimits {
                 memory: Some(u64::MAX),
-                charge: u64::MAX,
+                charge: SavedCharge::exact(u64::MAX, u64::MAX).unwrap(),
             },
             kernel: u32::MAX,
             document: DocumentId::from_bytes([1; 32]),
@@ -95,12 +95,6 @@ fn a_checkpoint_root_fits_its_root_bound() {
             reads: keyed(13),
             session: keyed(14),
             host,
-            meters: SavedMeters {
-                charged: Some(u64::MAX),
-                waits_issued: u64::MAX,
-                next_join: u64::MAX,
-                live_tasks: u32::MAX,
-            },
         };
         assert_eq!(
             CheckpointRoot::host_metadata_bytes(root.host.iter().map(|name| name.as_str())),
@@ -222,39 +216,12 @@ fn contextual_inline_reads_reuse_their_validated_rows() {
     assert_eq!(work.inline_decodes, 1, "one parse of the contextual leaf");
 }
 
-/// S4: a checkpoint preserves every saved meter, including the next join identity.
-#[test]
-fn saved_meters_preserve_a_nonzero_next_join_on_decode() {
-    let original = SavedMeters {
-        charged: Some(131),
-        waits_issued: 5,
-        next_join: 8,
-        live_tasks: 2,
-    };
-    // seq(4); the unsigned meter itself discriminates Exact.
-    let vector = [9, 4, 3, 131, 1, 3, 5, 3, 8, 3, 2];
-    assert_eq!(encode_body(&original), vector);
-    assert_eq!(decode_body::<SavedMeters>(&vector).unwrap(), original);
-    let off = SavedMeters {
-        charged: None,
-        ..original
-    };
-    let off_vector = [9, 4, 13, 3, 5, 3, 8, 3, 2];
-    assert_eq!(encode_body(&off), off_vector);
-    assert_eq!(decode_body::<SavedMeters>(&off_vector).unwrap(), off);
-    assert_eq!(off.charge(), super::super::Charge::Off);
-    assert_eq!(
-        decode_body::<SavedMeters>(&encode_body(&original)).unwrap(),
-        original
-    );
-}
-
 /// S4: a fixed root grammar retains each field's meaning across codec changes.
 #[test]
 fn a_baseline_checkpoint_root_keeps_every_field() {
-    // seq(21), limits seq(2), memory 31, charge 37, kernel 1.
+    // seq(20), limits seq(2), memory 31, charge Exact paid 29 of 37, kernel 1.
     let vector: &[u8] = &[
-        9, 21, 9, 2, 3, 31, 3, 37, 3, 1, // document: bytes(32), digest 1.
+        9, 20, 9, 2, 3, 31, 12, 0, 2, 3, 29, 3, 37, 3, 1, // document: bytes(32), digest 1.
         8, 32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, // link: bytes(32), digest 2.
         8, 32, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -291,9 +258,8 @@ fn a_baseline_checkpoint_root_keeps_every_field() {
         // session: nonempty, page 15, 10 rows, cost 73.
         12, 1, 3, 11, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
         15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 3, 10, 3, 73,
-        // host: two text names, "host" and "input"; meters seq(4): 79, 83, 89, 97.
-        9, 2, 7, 4, 104, 111, 115, 116, 7, 5, 105, 110, 112, 117, 116, 9, 4, 3, 79, 3, 83, 3, 89, 3,
-        97,
+        // host: two text names, "host" and "input".
+        9, 2, 7, 4, 104, 111, 115, 116, 7, 5, 105, 110, 112, 117, 116,
     ];
     let root: CheckpointRoot = decode_body(vector).expect("baseline root");
     let page = |byte| PageRef {
@@ -311,7 +277,7 @@ fn a_baseline_checkpoint_root_keeps_every_field() {
         cost: LogicalBytes(cost),
     };
     assert_eq!(root.limits.memory, Some(31));
-    assert_eq!(root.limits.charge, 37);
+    assert_eq!(root.limits.charge, SavedCharge::exact(29, 37).unwrap());
     assert_eq!(root.kernel, 1);
     assert_eq!(root.document, DocumentId::from_bytes([1; 32]));
     assert_eq!(root.link, lash_kernel_value::LinkId::from_bytes([2; 32]));
@@ -337,9 +303,69 @@ fn a_baseline_checkpoint_root_keeps_every_field() {
         root.host,
         ["host", "input"].map(lash_kernel_value::names::Name::new)
     );
-    assert_eq!(root.meters.charged, Some(79));
-    assert_eq!(root.meters.waits_issued, 83);
-    assert_eq!(root.meters.next_join, 89);
-    assert_eq!(root.meters.live_tasks, 97);
     assert_eq!(encode_body(&root), vector);
+}
+
+/// FIG-7735 (schemasmash K03): the root owns the run's charge, and what a
+/// run has paid under Exact never passes its limit (the meter's own
+/// invariant). A root claiming more is refused where it decodes, so header
+/// inspection and restore read one checked charge and an open never
+/// reaches `limit - paid` with `paid > limit`.
+#[test]
+fn a_root_whose_paid_charge_passes_its_limit_is_refused() {
+    let page = |byte| PageRef {
+        id: PageId([byte; 32]),
+        grant: PageGrant::NONE,
+    };
+    let root = CheckpointRoot {
+        link: lash_kernel_value::LinkId::from_bytes([1; 32]),
+        limits: SavedLimits {
+            memory: None,
+            charge: SavedCharge::exact(37, 37).unwrap(),
+        },
+        kernel: 1,
+        document: DocumentId::from_bytes([1; 32]),
+        closure: PageId([2; 32]),
+        helper_library: lash_kernel_value::HelperLibraryId::from_bytes([6; 32]),
+        owner: PageId([3; 32]),
+        target: CellTargetKind::Main,
+        functions: KeyedRoot::Empty,
+        status: RootStatus::Parked,
+        heap: page(6),
+        tasks: KeyedRoot::Empty,
+        ready: SequenceRoot::Empty,
+        waits: KeyedRoot::Empty,
+        joins: KeyedRoot::Empty,
+        withdrawn: KeyedRoot::Empty,
+        unreported: SequenceRoot::Empty,
+        reads: KeyedRoot::Empty,
+        session: KeyedRoot::Empty,
+        host: Vec::new(),
+    };
+    let exact = |paid: u64, limit: u64| {
+        let mut out = lash_kernel_value::tokens::TokenWriter::new();
+        out.sum(0, 2);
+        paid.encode(&mut out);
+        limit.encode(&mut out);
+        out.into_bytes()
+    };
+    // The root as a writer that paid one unit past its limit would encode it.
+    let (fits, over) = (exact(37, 37), exact(38, 37));
+    let mut tokens = encode_body(&root);
+    let at = tokens
+        .windows(fits.len())
+        .position(|window| window == fits.as_slice())
+        .expect("the encoded charge");
+    tokens.splice(at..at + fits.len(), over);
+    assert!(SavedCharge::exact(38, 37).is_err());
+    let answer = PageAnswer {
+        page: page(9),
+        kind: PageKind::CHECKPOINT_ROOT,
+        tokens: tokens.into(),
+        children: vec![page(6)],
+    };
+    assert!(matches!(
+        inspect_checkpoint(&answer),
+        Err(HeapFault::Corrupt { .. })
+    ));
 }

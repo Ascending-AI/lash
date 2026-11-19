@@ -107,36 +107,36 @@ impl TokenCodec for SessionRoot {
         }
     }
 }
-// The numeric token denotes Exact; none denotes Off. The token type is
-// already a discriminant, retaining the bounded root's fixed footprint.
-impl TokenCodec for SavedMeters {
+// Exact is tag 0 with what was paid and the bound; Off is tag 1 with the
+// bound. A paid charge past its bound does not decode.
+impl TokenCodec for SavedCharge {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
-        match self.charged {
-            Some(charged) => charged.encode(out),
-            None => out.none(),
+        match self.paid() {
+            Some(paid) => {
+                out.sum(0, 2);
+                paid.encode(out);
+            }
+            None => out.sum(1, 1),
         }
-        self.waits_issued.encode(out);
-        self.next_join.encode(out);
-        self.live_tasks.encode(out);
+        self.limit().encode(out);
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
-        let charged = if input.peek_tag()? == lash_kernel_value::tokens::Tag::None {
-            input.option()?;
-            None
-        } else {
-            Some(u64::decode(input)?)
-        };
-        Ok(Self {
-            charged,
-            waits_issued: u64::decode(input)?,
-            next_join: u64::decode(input)?,
-            live_tasks: u32::decode(input)?,
-        })
+        match input.sum()? {
+            (0, fields) => {
+                TokenReader::expect_fields(fields, 2)?;
+                let paid = u64::decode(input)?;
+                SavedCharge::exact(paid, u64::decode(input)?)
+                    .map_err(|over| TokenError::Invalid(over.to_string()))
+            }
+            (1, fields) => {
+                TokenReader::expect_fields(fields, 1)?;
+                Ok(SavedCharge::off(u64::decode(input)?))
+            }
+            (variant, _) => Err(TokenError::UnsupportedVariant { variant }),
+        }
     }
 }
-// None is an unmetered memory bound, as in [`SavedMeters`].
+// None is an unmetered memory bound.
 impl TokenCodec for SavedLimits {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(2);
@@ -156,7 +156,7 @@ impl TokenCodec for SavedLimits {
         };
         Ok(Self {
             memory,
-            charge: u64::decode(input)?,
+            charge: SavedCharge::decode(input)?,
         })
     }
 }
@@ -180,8 +180,7 @@ record!(CheckpointRoot {
     unreported: SequenceRoot,
     reads: KeyedRoot,
     session: KeyedRoot,
-    host: Vec<lash_kernel_value::names::Name>,
-    meters: SavedMeters
+    host: Vec<lash_kernel_value::names::Name>
 });
 impl TokenCodec for RootStatus {
     fn encode(&self, out: &mut TokenWriter) {

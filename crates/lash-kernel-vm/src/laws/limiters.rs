@@ -131,7 +131,7 @@ fn sealed_and_resumed(
             Step::Parked(_) => {
                 let root = embedder.reopen(true);
                 let limit = match which {
-                    Which::Charge => root.limits.charge,
+                    Which::Charge => root.limits.charge.limit(),
                     Which::Memory => root.limits.memory.expect("memory is metered"),
                 };
                 saved = Some((limit, limiter.map_or(0, |limiter| limiter.asked().len())));
@@ -306,7 +306,7 @@ fn a_crash_before_a_grown_limit_is_saved_asks_again() {
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let root = embedder.checkpoint();
-    assert_eq!(root.limits.charge, total / 2);
+    assert_eq!(root.limits.charge.limit(), total / 2);
     let pending = embedder.pending.clone();
     let mut attempts = Vec::new();
     for _ in 0..2 {

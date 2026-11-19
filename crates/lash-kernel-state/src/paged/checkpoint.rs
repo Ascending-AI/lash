@@ -69,7 +69,8 @@ impl Checkpoint {
 /// Control facts only: no running representation, queues or table roots.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointHeader {
-    /// The limits the run continues with.
+    /// The limits the run continues with, and its checked charge: its
+    /// policy and, under Exact, what it has paid.
     pub limits: super::SavedLimits,
     pub kernel: u32,
     pub document: DocumentId,
@@ -79,8 +80,6 @@ pub struct CheckpointHeader {
     pub helper_library: lash_kernel_value::HelperLibraryId,
     pub owner: PageId,
     pub parked: bool,
-    pub charged: Option<u64>,
-    pub live_tasks: u32,
 }
 
 fn header(root: &CheckpointRoot) -> CheckpointHeader {
@@ -93,8 +92,6 @@ fn header(root: &CheckpointRoot) -> CheckpointHeader {
         helper_library: root.helper_library,
         owner: root.owner,
         parked: matches!(root.status, RootStatus::Parked),
-        charged: root.meters.charged,
-        live_tasks: root.meters.live_tasks,
     }
 }
 

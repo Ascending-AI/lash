@@ -1238,16 +1238,8 @@ fn assert_checkpoint_control(
 ) {
     assert_eq!(before.owner, after.owner, "carry preserves execution owner");
     assert_eq!(
-        before.charged, after.charged,
-        "carry preserves exact semantic charge"
-    );
-    assert_eq!(
         before.limits, after.limits,
-        "carry preserves recorded limits"
-    );
-    assert_eq!(
-        before.live_tasks, after.live_tasks,
-        "carry preserves active identities"
+        "carry preserves recorded limits and exact semantic charge"
     );
 }
 

@@ -465,7 +465,7 @@ Laws:
 
 Declaration: `crates/lash-kernel-state/src/paged/root.rs`, with
 `CheckpointRoot`, `HeapRoot`, `KeyedRoot`, `SequenceRoot`, `RootStatus`,
-`EndedRecord`, `SavedMeters`, `WaitsSummary`, `TaskRecord`,
+`EndedRecord`, `SavedCharge`, `WaitsSummary`, `TaskRecord`,
 `TaskStateRecord`, `JoinerRecord`, `IncomingRecord`, `EndedTask`,
 `FrameRecord`, `BindingRecord`, `BoundRecord`, `LoopRecord`,
 `FinallyRecord`, `EnteredRecord`, `HeldRecord`, `WaitRecord`,

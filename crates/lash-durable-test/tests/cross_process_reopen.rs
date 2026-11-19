@@ -381,7 +381,9 @@ async fn charge(core: &lash::LashCore, process: &ProcessId, path: &Path) -> Opti
         root.to_hex(),
         checkpoint
             .header()
-            .charged
+            .limits
+            .charge
+            .paid()
             .expect("the corpus runs with exact charges"),
     ))
 }

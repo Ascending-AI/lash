@@ -71,10 +71,6 @@ record! {
         pub start: RunStart,
         /// The operation uses the run binds as reads (`K-EFF-012`).
         pub reads: Vec<OperationUse>,
-        /// What the run has paid.
-        pub charged: u64,
-        /// The total a charge refusal reported, once one has.
-        pub refused: Option<u64>,
         /// Each host binding's value, then each session binding's of
         /// [`Self::session`], then each saved function's of
         /// [`Self::functions`].

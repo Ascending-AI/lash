@@ -158,11 +158,9 @@ mod run {
         reader.put(&root.target);
         reader.put(&root.status);
         reader.put(&root.host);
-        reader.put(&root.meters);
+        reader.put(&root.limits.charge.paid());
         reader.put(&record.start);
         reader.put(&record.reads);
-        reader.put(&record.charged);
-        reader.put(&record.refused);
         reader.put(&record.globals);
         reader.put(&record.session);
         reader.put(&record.functions);

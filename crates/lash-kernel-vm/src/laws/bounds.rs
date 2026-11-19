@@ -513,7 +513,7 @@ fn charge_off_survives_a_resume_on_a_fresh_worker() {
     );
     assert!(matches!(run.run(), Step::Parked(_)));
     let root = run.checkpoint();
-    assert_eq!(root.meters.charge(), crate::Charge::Off);
+    assert_eq!(root.limits.charge.policy(), crate::Charge::Off);
     // New preparation and deliberately opposite worker defaults.
     let (program, _) = run.program(false);
     let checkpoint = lash_kernel_state::kernel_internals::checkpoint(root);

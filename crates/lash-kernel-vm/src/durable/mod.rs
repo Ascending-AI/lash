@@ -147,7 +147,10 @@ pub(crate) fn seal(
     );
     let issued = tasks.issued.clone();
     let cancellations = tasks.cancellations.clone();
-    let (charged, refused) = (vm.charged(), vm.refused);
+    // A refused run has ended, and an ended machine never seals.
+    if vm.refused.is_some() {
+        return Err(fault("a run a charge refused cannot seal"));
+    }
     let pins = code::live(vm)
         .map_err(|helper| {
             fault(format!(
@@ -171,8 +174,6 @@ pub(crate) fn seal(
         heap,
         start,
         reads,
-        charged,
-        refused,
         globals,
         session: vm.session.names.clone(),
         functions: vm.session.saved.clone(),
@@ -879,7 +880,6 @@ pub(crate) fn open(
         .collect::<Result<_, String>>()?;
     scheduler.next_join = record.next_join;
     catches::open(vm, record, values)?;
-    vm.refused = record.refused;
     let raw: u64 = vm
         .tasks
         .waits

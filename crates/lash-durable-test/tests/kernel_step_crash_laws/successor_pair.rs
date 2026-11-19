@@ -336,7 +336,6 @@ fn assert_pair(value: &Stored, before: &Stored, old: &Pair, new: &Pair) -> bool 
         );
     }
     assert_eq!(value.page.header().owner, before.page.header().owner);
-    assert_eq!(value.page.header().charged, before.page.header().charged);
     assert_eq!(value.page.header().limits, before.page.header().limits);
     assert_eq!(
         value.calls, before.calls,
