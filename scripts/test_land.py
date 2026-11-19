@@ -131,15 +131,15 @@ def land_in_process(repos, ratchet=None, at=None, lost_push=False):
     real_run = land.run
     qualified, pushes = [], []
 
-    def run(*args, check=True, quiet=False):
+    def run(*args, check=True, quiet=False, stderr=subprocess.STDOUT):
         if args[0] == "git":
             if args[1] == "push":
                 pushes.append(args[-1].split(":")[0])
                 at.get("push", lambda: None)()
             if args[1] in ("reset", "update-ref"):
                 at.get("cleanup", lambda: None)()
-            result = real_run(*args, check=check, quiet=quiet)
-            if args[1] == "commit":
+            result = real_run(*args, check=check, quiet=quiet, stderr=stderr)
+            if args[1] == "commit" or (args[1] == "-c" and "commit" in args[2:]):
                 at.get("committed", lambda: None)()
             return result
         if "--out" in args:  # the perf gate: a qualified receipt
@@ -246,10 +246,18 @@ class LandInProcess(unittest.TestCase):
             git(repos.candidate, "commit", "-qm", "unqualified change after the gate")
             made.append(git(repos.candidate, "rev-parse", "HEAD"))
 
+        def amended_ceiling(repos, made):
+            ceilings = repos.candidate / "scripts/perf_land_ceilings.py"
+            ceilings.write_text(ceilings.read_text() + "\n# Concurrent edit\n")
+            git(repos.candidate, "add", str(ceilings))
+            git(repos.candidate, "commit", "--amend", "--no-edit")
+            made.append(git(repos.candidate, "rev-parse", "HEAD"))
+
         refused = {  # moment -> what is done there; the land must refuse
             "a changed scripts/land committed inside the lock": (None, "lock", changed_land),
             "foreign work committed after qualification": (.9, "qualified", None),
             "foreign work committed on the land's ceiling commit": (.9, "committed", None),
+            "the land's ceiling commit amended in place": (.9, "committed", amended_ceiling),
             "foreign work committed as the refused land cleans up": (.9, "cleanup", None),
         }
         for name, (factor, moment, act) in refused.items():
