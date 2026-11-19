@@ -1361,11 +1361,7 @@ impl DurableSnapshotStore {
         {
             Ok(mut committed) => {
                 for lease in std::mem::take(&mut committed.root_leases) {
-                    if page_owner.lease().is_some() {
-                        page_owner.protect_published(lease);
-                    } else {
-                        page_owner.lease_on(lease);
-                    }
+                    page_owner.protect_published(lease);
                 }
                 page_owner.settle(published.1).map_err(refused)?;
                 members.apply_update(update).map_err(refused)?;

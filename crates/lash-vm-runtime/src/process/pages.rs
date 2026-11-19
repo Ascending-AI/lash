@@ -18,13 +18,13 @@ use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::stage::StageFault;
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
 use lash_durable::DurableError;
-use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseRequest};
+use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseRequest};
 use lash_durable::domain::{ExecKey, RootOwner};
 use lash_execution_contracts::process::{StepManifest, StepPages};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{
-    ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot,
+    ActivationPages, CapabilityKey, OwnedRootLease, PageLimits, SharedPages, SpoolRoot,
 };
 use lash_vm_broker::kernel::state::checkpoint_header;
 use lash_vm_broker::kernel::{KernelFailure, ParkedState, next_stage_lease};
@@ -43,8 +43,7 @@ const SPAN: Duration = Duration::from_secs(3600);
 pub(crate) struct StepActivation {
     pub(crate) pages: SharedPages,
     pub(crate) parked: Option<ParkedState>,
-    store: Arc<dyn PageStore>,
-    lease: Option<RootLeaseId>,
+    lease: Option<OwnedRootLease>,
 }
 
 /// The record a run's parked page is read under, and the lease that pins it.
@@ -90,80 +89,85 @@ impl StepActivation {
     ) -> Result<Self, KernelFailure> {
         let references = [closure.reference(), binding];
         let mut ttl = LEASE_TTL;
-        let (lease, resumed) = match parked {
-            None => (None, None),
-            Some((parked, under)) => {
-                let request = match under {
-                    ParkedUnder::Process(step) => {
-                        let exec = ExecKey::Process(process.clone());
-                        let row = store
-                            .exec_root(&exec)
-                            .await
-                            .map_err(KernelFailure::Lease)?
-                            .ok_or_else(|| {
-                                fault("the process's root does not name its parked run")
-                            })?;
-                        RootLeaseRequest {
-                            owner: RootOwner::Exec(exec),
-                            expected: row.root,
-                            fence: LeaseFence::Actor {
-                                actor: step.actor.clone(),
-                                epoch: step.epoch,
-                            },
-                            ttl_millis: millis(ttl),
+        let mut lease = None;
+        let opened = async {
+            let resumed = match parked {
+                None => None,
+                Some((parked, under)) => {
+                    let request = match under {
+                        ParkedUnder::Process(step) => {
+                            let exec = ExecKey::Process(process.clone());
+                            let row = store
+                                .exec_root(&exec)
+                                .await
+                                .map_err(KernelFailure::Lease)?
+                                .ok_or_else(|| {
+                                    fault("the process's root does not name its parked run")
+                                })?;
+                            RootLeaseRequest {
+                                owner: RootOwner::Exec(exec),
+                                expected: row.root,
+                                fence: LeaseFence::Actor {
+                                    actor: step.actor.clone(),
+                                    epoch: step.epoch,
+                                },
+                                ttl_millis: millis(ttl),
+                            }
                         }
-                    }
-                    ParkedUnder::Record {
-                        owner,
-                        record,
-                        ttl: reader,
-                    } => {
-                        ttl = reader;
-                        RootLeaseRequest {
+                        ParkedUnder::Record {
                             owner,
-                            expected: record,
-                            fence: LeaseFence::Reader,
-                            ttl_millis: millis(ttl),
+                            record,
+                            ttl: reader,
+                        } => {
+                            ttl = reader;
+                            RootLeaseRequest {
+                                owner,
+                                expected: record,
+                                fence: LeaseFence::Reader,
+                                ttl_millis: millis(ttl),
+                            }
                         }
-                    }
-                };
-                let lease = lash_durable::fenced_read::acquire_lease(store.as_ref(), request)
-                    .await
-                    .map_err(KernelFailure::Lease)?;
-                let read = store.read_pages(&lease, &[parked.root]).await;
-                let page = match read {
-                    Ok(mut pages) if pages.len() == 1 => pages.remove(0),
-                    Ok(_) => {
-                        let _ = store.release_root_lease(lease.id).await;
+                    };
+                    let grant = lash_durable::fenced_read::acquire_lease(store.as_ref(), request)
+                        .await
+                        .map_err(KernelFailure::Lease)?;
+                    let owner = lease.insert(OwnedRootLease::new(Arc::clone(&store), grant));
+                    let grant = owner.lease();
+                    let mut pages = store
+                        .read_pages(grant, &[parked.root])
+                        .await
+                        .map_err(KernelFailure::Lease)?;
+                    if pages.len() != 1 {
                         return Err(fault("the leased record does not reach its parked run"));
                     }
-                    Err(error) => {
-                        let _ = store.release_root_lease(lease.id).await;
-                        return Err(KernelFailure::Lease(error));
-                    }
-                };
-                let header = match checkpoint_header(parked.root, &page.bytes) {
-                    Ok(header) => header,
-                    Err(failure) => {
-                        let _ = store.release_root_lease(lease.id).await;
-                        return Err(KernelFailure::State(failure));
-                    }
-                };
-                let resumed = ParkedState {
-                    exec_root: lease.root,
-                    root: parked.root,
-                    header,
-                    admissions,
-                };
-                (Some(lease), Some(resumed))
+                    let page = pages.remove(0);
+                    let header = checkpoint_header(parked.root, &page.bytes)
+                        .map_err(KernelFailure::State)?;
+                    Some(ParkedState {
+                        exec_root: grant.root,
+                        root: parked.root,
+                        header,
+                        admissions,
+                    })
+                }
+            };
+            let stage = next_stage_lease();
+            let spool = spools.spool(stage)?;
+            Ok((resumed, stage, spool))
+        }
+        .await;
+        let (resumed, stage, spool) = match opened {
+            Ok(opened) => opened,
+            Err(failure) => {
+                if let Some(owner) = &mut lease {
+                    owner.close().await;
+                }
+                return Err(failure);
             }
         };
-        let owned = lease.as_ref().map(|lease| lease.id);
-        let stage = next_stage_lease();
-        let spool = spools.spool(stage)?;
         let pages = ActivationPages::new(
-            Arc::clone(&store),
-            lease,
+            store,
+            lease.as_ref().map(|owner| owner.lease().clone()),
             ttl / 3,
             CapabilityKey::fresh(),
             stage.0,
@@ -176,8 +180,7 @@ impl StepActivation {
         Ok(Self {
             pages: Arc::new(tokio::sync::Mutex::new(pages)),
             parked: resumed,
-            store,
-            lease: owned,
+            lease,
         })
     }
 
@@ -196,8 +199,8 @@ impl StepActivation {
     /// Ends the run's reads: the lease it took goes, and its expiry would
     /// end it as well. What the run staged stays with its candidate.
     pub(crate) async fn end_reads(&mut self) {
-        if let Some(lease) = self.lease.take() {
-            let _ = self.store.release_root_lease(lease).await;
+        if let Some(mut lease) = self.lease.take() {
+            lease.close().await;
         }
     }
 }

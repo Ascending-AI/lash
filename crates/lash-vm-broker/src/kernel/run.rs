@@ -46,7 +46,8 @@ use super::graph::{FrozenRequest, Projections};
 use super::ledger::{AdmittedEffect, EffectLedger, Growth};
 use super::ledger::{PendingEffect, Standing};
 use super::pages::{
-    ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot, renew_when_due,
+    ActivationPages, CapabilityKey, OwnedRootLease, PageLimits, SharedPages, SpoolRoot,
+    renew_when_due,
 };
 use super::state::{GraphStateFailure, checkpoint_header};
 use super::store::{
@@ -576,14 +577,8 @@ pub struct PageActivation {
 /// Ends `pages`' activation: the leases on the execution's roots its
 /// broker took go (their expiry would end them as well); the host's own
 /// stays.
-pub async fn end_activation(
-    store: &dyn lash_durable::domain::pages::PageStore,
-    pages: &SharedPages,
-) {
-    let leases = pages.lock().await.end();
-    for lease in leases {
-        let _ = store.release_root_lease(lease.id).await;
-    }
+pub async fn end_activation(pages: &SharedPages) {
+    pages.lock().await.close().await;
 }
 
 impl KernelBroker<'_> {
@@ -727,28 +722,44 @@ impl KernelBroker<'_> {
         machines: &S,
     ) -> Result<PageActivation, KernelFailure> {
         let store = self.store.context().pages().map_err(KernelFailure::Lease)?;
-        let (lease, owned) = match parked {
-            Some(parked) => (Some(self.lease(&store, parked.exec_root).await?), true),
-            None => (self.pages.fresh.clone(), false),
-        };
         let mut references = vec![machines.closure()?.reference(), binding];
         if parked.is_none() {
             references.extend(self.pages.references.iter().copied());
         }
+        let mut owner = match parked {
+            Some(parked) => Some(OwnedRootLease::new(
+                Arc::clone(&store),
+                self.lease(&store, parked.exec_root).await?,
+            )),
+            None => None,
+        };
         let stage = next_stage_lease();
+        let spool = match (self.pages.spool)() {
+            Ok(spool) => spool,
+            Err(fault) => {
+                if let Some(owner) = &mut owner {
+                    owner.close().await;
+                }
+                return Err(fault.into());
+            }
+        };
         let pages = ActivationPages::new(
             store,
-            lease,
+            self.pages.fresh.clone().filter(|_| parked.is_none()),
             self.pages.lease_ttl / 3,
             CapabilityKey::fresh(),
             stage.0,
-            (self.pages.spool)()?,
+            spool,
             Arc::clone(self.store.context().clock()),
             self.pages.span,
             self.pages.limits,
         )
         .with_references(references)
         .with_lease_ttl(self.pages.lease_ttl);
+        let pages = match owner {
+            Some(owner) => pages.with_owned_lease(owner),
+            None => pages,
+        };
         let pages = match &self.pages.cache {
             Some(cache) => pages.caching(cache.clone()),
             None => pages,
@@ -757,7 +768,6 @@ impl KernelBroker<'_> {
             Some(hints) => pages.hinted(hints.clone()),
             None => pages,
         };
-        let pages = if owned { pages.owning() } else { pages };
         Ok(PageActivation {
             pages: Arc::new(tokio::sync::Mutex::new(pages)),
         })
@@ -787,9 +797,7 @@ impl KernelBroker<'_> {
     /// Ends an activation's page service: the lease this broker took goes;
     /// its expiry would end it as well.
     pub async fn end_activation(&self, activation: PageActivation) {
-        if let Ok(store) = self.store.context().pages() {
-            end_activation(store.as_ref(), &activation.pages).await;
-        }
+        end_activation(&activation.pages).await;
     }
 
     /// The root `running` seals at this safe point, its header read from
@@ -1630,9 +1638,7 @@ impl<S: Machines> CellKernelOwner<'_, '_, S> {
                 if let Some(stopped) = self.machine.take() {
                     stopped.release().await?;
                 }
-                if let Ok(store) = self.broker.store.context().pages() {
-                    end_activation(store.as_ref(), &self.activation.pages).await;
-                }
+                end_activation(&self.activation.pages).await;
                 if let Some(response) = held {
                     response.stop();
                 }

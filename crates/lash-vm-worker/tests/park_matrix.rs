@@ -1086,6 +1086,73 @@ async fn diverges(
     Ok(())
 }
 
+/// Commit the fixture's first park and finish the activation that made it.
+async fn first_park(
+    broker: &KernelBroker<'_>,
+    host: &LawHost,
+    machines: &InProcess<NoReads>,
+) -> Result<(ParkedState, EffectLedger), String> {
+    let refused = |error: &dyn std::fmt::Display| error.to_string();
+    let document = machines.document();
+    let closure = machines.closure().map_err(|error| refused(&error))?;
+    let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec())
+        .map_err(|error| refused(&error))?;
+    let first = broker
+        .activation(None, binding, machines)
+        .await
+        .map_err(|error| refused(&error))?;
+    let mut machine = machines
+        .start(binding, first.pages.clone())
+        .await
+        .map_err(|error| refused(&error))?;
+    let MachineStep::Parked(park) = machine
+        .run(u64::MAX, false)
+        .await
+        .map_err(|error| refused(&error))?
+    else {
+        return Err("the run parks first".into());
+    };
+    let state = broker
+        .sealed(
+            &mut machine,
+            &first,
+            binding,
+            &document,
+            closure.reference(),
+        )
+        .await
+        .map_err(|error| refused(&error))?;
+    let committed = broker
+        .store
+        .commit_park(
+            ParkSave {
+                document,
+                state: state.clone(),
+                pages: &first.pages,
+                closure,
+                carried: &[],
+                ledger: EffectLedger::new(),
+                admit: admissions(host, 0, park.requests).await?,
+                with: Vec::new(),
+            },
+            host,
+        )
+        .await
+        .map_err(|error| refused(&error))?;
+    broker.end_activation(first).await;
+    let saved_ledger = committed.ledger;
+    let parked_state = ParkedState {
+        exec_root: committed.root,
+        root: state.root,
+        header: state.header,
+        admissions: broker
+            .store
+            .admitted_waits(&saved_ledger)
+            .map_err(|error| refused(&error))?,
+    };
+    Ok((parked_state, saved_ledger))
+}
+
 /// The delivery and number laws, on the run's first park: commit it, let
 /// its three outcomes commit, then resume the saved state twice and deliver
 /// the outcomes in opposite orders. Both machines must park on the same
@@ -1114,57 +1181,7 @@ async fn two_orders(
     let closure = machines.closure().map_err(|error| refused(&error))?;
     let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec())
         .map_err(|error| refused(&error))?;
-    let first = broker
-        .activation(None, binding, &machines)
-        .await
-        .map_err(|error| refused(&error))?;
-    let mut machine = machines
-        .start(binding, first.pages.clone())
-        .await
-        .map_err(|error| refused(&error))?;
-    let MachineStep::Parked(park) = machine
-        .run(u64::MAX, false)
-        .await
-        .map_err(|error| refused(&error))?
-    else {
-        return Err("the run parks first".into());
-    };
-    let state = broker
-        .sealed(
-            &mut machine,
-            &first,
-            binding,
-            &document,
-            closure.reference(),
-        )
-        .await
-        .map_err(|error| refused(&error))?;
-    let committed = store
-        .commit_park(
-            ParkSave {
-                document,
-                state: state.clone(),
-                pages: &first.pages,
-                closure,
-                carried: &[],
-                ledger: EffectLedger::new(),
-                admit: admissions(host, 0, park.requests).await?,
-                with: Vec::new(),
-            },
-            host,
-        )
-        .await
-        .map_err(|error| refused(&error))?;
-    broker.end_activation(first).await;
-    let saved_ledger = committed.ledger;
-    let parked_state = ParkedState {
-        exec_root: committed.root,
-        root: state.root,
-        header: state.header,
-        admissions: store
-            .admitted_waits(&saved_ledger)
-            .map_err(|error| refused(&error))?,
-    };
+    let (parked_state, saved_ledger) = first_park(broker, host, &machines).await?;
     // Every outcome of the park, as the records hold them.
     let mut waiting = saved_ledger.clone();
     let mut settled: Vec<Settled> = Vec::new();
@@ -1756,6 +1773,140 @@ async fn a_rerun_that_computes_more_between_parks_is_refused_at_the_park_on_its_
         })
         .await
         .assert_held();
+}
+
+/// FIG-7727: a resumed cell that cannot open its spool releases the root
+/// before returning the staging failure.
+#[tokio::test]
+async fn a_resumed_cell_releases_its_root_when_spool_creation_fails() {
+    use lash_core_store::checkpoint_graph::stage::StageFault;
+    use lash_durable::domain::pages::{LeaseFence, RootLeaseRequest};
+    use lash_vm_broker::kernel::KernelFailure;
+
+    let clock = SimClock::new();
+    let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
+        .await
+        .expect("the SQLite store opens");
+    let backend = Backend::for_testing(
+        Arc::new(stores.clone()),
+        lash_durable::OwnerRetentionSettings::default(),
+    );
+    let mut create = MailTx::new();
+    create.create_actor(actor(), FormatSet::new(FORMATS));
+    backend.durable().commit_mail(create, CREATE).await.unwrap();
+    let node = backend
+        .durable()
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("spool-failure-law"),
+            decodes: vec![FormatSet::new(FORMATS)],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    let claim = backend.durable().claim(&node, 1).await.unwrap().remove(0);
+    let cx = ActorContext::new(
+        backend,
+        actor(),
+        claim.epoch,
+        AdmittedScope::runtime_operation("park-law"),
+        CancellationToken::new(),
+        Arc::new(lash_durable::NoProbe),
+    );
+    let shared = Arc::new(Shared {
+        clock: Mutex::new(Some(clock)),
+        ..Shared::default()
+    });
+    let program = program(NumberPolicy::BySpelling);
+    ParkActivation {
+        shared: shared.clone(),
+        drive: Drive::Broker,
+        program: program.clone(),
+    }
+    .register(&cx)
+    .await
+    .unwrap();
+    let store = Arc::new(DurableSnapshotStore::new(&cx, exec()));
+    store
+        .bind_members(
+            Arc::new(LawBodies {
+                shared: shared.clone(),
+                database: Arc::new(stores.durable_store()),
+                clock: Arc::clone(cx.clock()),
+            }),
+            PolicyView::new(["work", "sum"].map(|tool| {
+                (
+                    ToolId::new(format!("tool:{tool}")),
+                    lash_kernel_value::ExecutionPolicy::Once,
+                )
+            })),
+        )
+        .await;
+    let machines = shared.machines(&program).unwrap();
+    let host = LawHost {
+        shared,
+        store: Arc::clone(&store),
+        operations: program
+            .operation_imports()
+            .map(|(use_, import)| (use_, import.name.clone()))
+            .collect(),
+    };
+    let plan = page_plan();
+    let broker = KernelBroker {
+        store: &store,
+        effects: &host,
+        identities: &identities(),
+        ceilings: KernelCeilings {
+            requests_per_park: 16,
+            join_members: 16,
+            effects: u64::MAX,
+            checkpoint_bytes: u64::MAX,
+        },
+        slice: u64::MAX,
+        pages: &plan,
+    };
+    let (parked, _) = first_park(&broker, &host, &machines).await.unwrap();
+    let leases = || lash_sqlite_store::testing::root_leases_for_testing(&stores, &actor()).unwrap();
+    assert!(leases().is_empty(), "the first activation ended");
+
+    let failure = StageFault::Io("injected spool creation failure".into());
+    let broken = PagePlan {
+        spool: Arc::new({
+            let failure = failure.clone();
+            move || Err(failure.clone())
+        }),
+        ..page_plan()
+    };
+    let broken_broker = KernelBroker {
+        pages: &broken,
+        ..broker
+    };
+    let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec()).unwrap();
+    assert!(matches!(
+        broken_broker.activation(Some(&parked), binding, &machines).await,
+        Err(KernelFailure::Staging(ref error)) if *error == failure
+    ));
+
+    let pages = cx.pages().unwrap();
+    let reacquired = pages
+        .acquire_root_lease(RootLeaseRequest {
+            owner: RootOwner::Exec(exec()),
+            expected: parked.exec_root,
+            fence: LeaseFence::Actor {
+                actor: actor(),
+                epoch: claim.epoch,
+            },
+            ttl_millis: 60_000,
+        })
+        .await
+        .expect("the same root leases immediately");
+    assert_eq!(
+        leases(),
+        [(reacquired.id, reacquired.expires_at)],
+        "the failed activation still pins the root"
+    );
+    pages.release_root_lease(reacquired.id).await.unwrap();
 }
 
 // Each tier mounts the same kernel laws; PostgreSQL selection requires a service.

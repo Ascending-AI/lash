@@ -196,20 +196,87 @@ pub enum Resolution {
     NotCommitted,
 }
 
+/// Releases a root lease taken from the store. The cleanup stays armed
+/// until the store acknowledges a release or the transaction that
+/// released it.
+pub struct OwnedRootLease {
+    store: Arc<dyn PageStore>,
+    runtime: tokio::runtime::Handle,
+    lease: RootLease,
+    released: bool,
+}
+
+impl OwnedRootLease {
+    /// Takes ownership of a lease just issued by `store`.
+    pub fn new(store: Arc<dyn PageStore>, lease: RootLease) -> Self {
+        Self {
+            store,
+            runtime: tokio::runtime::Handle::current(),
+            lease,
+            released: false,
+        }
+    }
+
+    /// The grant used for reads and renewal.
+    pub fn lease(&self) -> &RootLease {
+        &self.lease
+    }
+
+    /// Release the lease and await the store's acknowledgement.
+    pub async fn close(&mut self) {
+        if !self.released {
+            self.released = self.store.release_root_lease(self.lease.id).await.is_ok();
+        }
+    }
+}
+
+impl Drop for OwnedRootLease {
+    fn drop(&mut self) {
+        if !self.released {
+            let store = Arc::clone(&self.store);
+            let id = self.lease.id;
+            self.runtime.spawn(async move {
+                let _ = store.release_root_lease(id).await;
+            });
+        }
+    }
+}
+
+enum ActivationLease {
+    Borrowed(RootLease),
+    Owned(OwnedRootLease),
+}
+
+impl ActivationLease {
+    fn lease(&self) -> &RootLease {
+        match self {
+            Self::Borrowed(lease) => lease,
+            Self::Owned(owner) => owner.lease(),
+        }
+    }
+
+    fn renewed(&mut self, renewed: RootLease) {
+        match self {
+            Self::Borrowed(lease) => *lease = renewed,
+            Self::Owned(owner) => owner.lease = renewed,
+        }
+    }
+}
+
 /// One activation's page service: its root lease, capability key, epoch
 /// and spool, within a budget of host work.
 pub struct ActivationPages<R: ?Sized> {
     store: Arc<R>,
     /// The committed root the activation reads under; none for a fresh run
     /// that reads only what it stages.
-    lease: Option<RootLease>,
+    lease: Option<ActivationLease>,
     /// Leases on the roots the activation's parks published beside
     /// `lease`'s, renewed with it and ended with the activation. A settled
     /// candidate's pages stay named by their stage capabilities, and a
     /// worker names one again without sealing it: once a later park
     /// retires the root that published it, only its lease here keeps it
     /// stored (FIG-6629).
-    published: Vec<RootLease>,
+    published: Vec<OwnedRootLease>,
     /// Renew the lease once this long has passed since it was last renewed
     /// (a third of its ttl, `D-LEASE`).
     renew_every: Duration,
@@ -244,9 +311,6 @@ pub struct ActivationPages<R: ?Sized> {
     /// release manifests and owner binding a checkpoint root's header
     /// names, which the publishing commit itself pins or stages.
     references: BTreeSet<NodeId>,
-    /// Whether the activation's lease is one its broker took, which ends
-    /// with the activation; the host's own lease outlives it.
-    owned: bool,
     /// The process's committed pages: a read the cache answers asks the
     /// store for nothing.
     cache: Option<cache::PageCache>,
@@ -257,6 +321,20 @@ pub struct ActivationPages<R: ?Sized> {
     /// last took them: what its next save appends to its checkpoints
     /// (FIG-6788).
     sealed_bytes: u64,
+}
+
+impl ActivationPages<dyn PageStore> {
+    /// Keep a published root leased while the activation's stage
+    /// capabilities still name its pages. The first lease also enables
+    /// store reads for an activation that previously only staged pages.
+    pub(crate) fn protect_published(&mut self, lease: RootLease) {
+        let owner = OwnedRootLease::new(Arc::clone(&self.store), lease);
+        if self.lease.is_some() {
+            self.published.push(owner);
+        } else {
+            self.set_primary(ActivationLease::Owned(owner));
+        }
+    }
 }
 
 impl<R: LeasedReads + ?Sized> ActivationPages<R> {
@@ -282,7 +360,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             renewed: clock.now(),
             root_authority: PageAuthority::Root(lease.as_ref().map_or(0, |lease| lease.id.0)),
             store,
-            lease,
+            lease: lease.map(ActivationLease::Borrowed),
             published: Vec::new(),
             renew_every,
             lease_ttl: renew_every * 3,
@@ -297,7 +375,6 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             pending: None,
             settled: false,
             references: BTreeSet::new(),
-            owned: false,
             cache: None,
             hints: None,
             stats: PageStats::default(),
@@ -433,7 +510,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
 
     #[must_use]
     pub fn lease(&self) -> Option<&RootLease> {
-        self.lease.as_ref()
+        self.lease.as_ref().map(ActivationLease::lease)
     }
 
     /// Keep the broker's exact ttl; dividing a renewal period and then
@@ -452,44 +529,57 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// The leases this activation owns. A capture may transfer their
     /// cleanup to its transaction, retaining this owner until it commits.
     pub fn owned_leases(&self) -> impl Iterator<Item = &RootLease> {
-        self.lease
-            .iter()
-            .filter(|_| self.owned)
+        let primary = match &self.lease {
+            Some(ActivationLease::Owned(owner)) => Some(owner),
+            _ => None,
+        };
+        primary
+            .into_iter()
             .chain(&self.published)
+            .map(OwnedRootLease::lease)
     }
 
-    /// Reads the store under `lease` from now on: an activation that read
-    /// under none takes one on the root its first park published.
-    pub fn lease_on(&mut self, lease: RootLease) {
+    /// Set the root the store reads under, without rekeying capabilities
+    /// already issued for this activation.
+    fn set_primary(&mut self, lease: ActivationLease) {
         self.lease = Some(lease);
         self.renewed = self.clock.now();
-        self.owned = true;
     }
 
-    /// Keeps the root a park of this activation published stored under
-    /// `lease` until the activation ends: what its candidate committed
-    /// stays named by the capabilities the activation issued for it.
-    pub fn protect_published(&mut self, lease: RootLease) {
-        self.published.push(lease);
-    }
-
-    /// This activation, its lease one its broker took.
+    /// Start the activation under a lease this broker took.
     #[must_use]
-    pub fn owning(mut self) -> Self {
-        self.owned = self.lease.is_some();
+    pub fn with_owned_lease(mut self, owner: OwnedRootLease) -> Self {
+        self.root_authority = PageAuthority::Root(owner.lease().id.0);
+        self.set_primary(ActivationLease::Owned(owner));
         self
     }
 
-    /// Ends the activation's reads: the leases its broker took, which the
-    /// caller releases; never the host's own.
-    pub fn end(&mut self) -> Vec<RootLease> {
+    /// End the activation's reads and await release of its owned leases.
+    pub async fn close(&mut self) {
+        if let Some(ActivationLease::Owned(owner)) = &mut self.lease {
+            owner.close().await;
+        }
+        for owner in &mut self.published {
+            owner.close().await;
+        }
+        self.end();
+    }
+
+    /// End the activation's reads after its capture committed the releases.
+    pub fn released(&mut self) {
+        if let Some(ActivationLease::Owned(owner)) = &mut self.lease {
+            owner.released = true;
+        }
+        for owner in &mut self.published {
+            owner.released = true;
+        }
+        self.end();
+    }
+
+    fn end(&mut self) {
         self.key = CapabilityKey::fresh();
-        let owned = std::mem::take(&mut self.owned);
-        let lease = self.lease.take().filter(|_| owned);
-        lease
-            .into_iter()
-            .chain(std::mem::take(&mut self.published))
-            .collect()
+        self.lease = None;
+        self.published.clear();
     }
 
     /// The spool, for pages the parent seals itself (a session's
@@ -559,7 +649,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// remaining span, [`PageRefusal::LeaseLost`] when the store refused
     /// it.
     async fn authority(&mut self) -> Result<(), PageRefusal> {
-        let Some(lease) = self.lease.clone() else {
+        let Some(lease) = self.lease().cloned() else {
             return Ok(());
         };
         if self.clock.now().saturating_duration_since(self.renewed) < self.renew_every {
@@ -578,11 +668,15 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         };
         let renewed = renew(lease).await?;
         let mut published = Vec::with_capacity(self.published.len());
-        for lease in self.published.clone() {
-            published.push(renew(lease).await?);
+        for owner in &self.published {
+            published.push(renew(owner.lease().clone()).await?);
         }
-        self.lease = Some(renewed);
-        self.published = published;
+        if let Some(lease) = &mut self.lease {
+            lease.renewed(renewed);
+        }
+        for (owner, renewed) in self.published.iter_mut().zip(published) {
+            owner.lease = renewed;
+        }
         self.renewed = before;
         Ok(())
     }
@@ -663,7 +757,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// Reads `pages` from the store under the lease the authority guard
     /// keeps live; the cache stays responsible only for immutable bytes.
     async fn fetch(&mut self, pages: &[NodeId]) -> Result<Vec<StoredPage>, PageRefusal> {
-        let Some(lease) = self.lease.clone() else {
+        let Some(lease) = self.lease().cloned() else {
             return Err(PageRefusal::Unauthorized);
         };
         self.stats.store_reads += 1;

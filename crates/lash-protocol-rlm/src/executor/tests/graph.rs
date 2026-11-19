@@ -476,7 +476,7 @@ async fn a_cancelled_capture_keeps_its_readers_and_their_lease_obligations() {
     let run: SharedPages = Arc::new(tokio::sync::Mutex::new(
         ActivationPages::new(
             handle.store.clone(),
-            Some(lease.clone()),
+            None,
             Duration::from_secs(20),
             CapabilityKey::fresh(),
             stage.0,
@@ -485,10 +485,13 @@ async fn a_cancelled_capture_keeps_its_readers_and_their_lease_obligations() {
             Duration::from_secs(60),
             PageLimits::within(lash_vm_protocol::ProtocolBounds::standard().decode),
         )
-        .owning(),
+        .with_owned_lease(lash_vm_broker::kernel::pages::OwnedRootLease::new(
+            handle.store.clone(),
+            lease.clone(),
+        )),
     ));
     let mut access = SessionPageAccess::default();
-    access.hold(HeldRun::new(run.clone(), handle.store.clone()));
+    access.hold(HeldRun::new(run.clone()));
     let held = access.held();
     let cx = host.context();
     let mut tx = cx.begin().await.unwrap();

@@ -59,37 +59,23 @@ pub(crate) struct SessionPageAccess {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct HeldRunId(u64);
 
-/// An ended run's activation the session holds, with the store its lease
-/// is ended in.
+/// An ended run's activation the session holds until it publishes the carry.
 pub(crate) struct HeldRun {
     id: HeldRunId,
     pages: lash_vm_broker::kernel::pages::SharedPages,
-    store: Arc<dyn lash_durable::domain::pages::PageStore>,
 }
 
 impl HeldRun {
-    pub(crate) fn new(
-        pages: lash_vm_broker::kernel::pages::SharedPages,
-        store: Arc<dyn lash_durable::domain::pages::PageStore>,
-    ) -> Self {
+    pub(crate) fn new(pages: lash_vm_broker::kernel::pages::SharedPages) -> Self {
         Self {
             id: HeldRunId(next_stage_lease().0),
             pages,
-            store,
         }
     }
 
     /// Ends the run's activation and its lease.
     async fn end(&mut self) {
-        // The page-owner lock excludes live readers. Keep the leases on
-        // that owner until every release returns, so cancellation leaves
-        // the same cleanup obligation available for the next attempt.
-        let mut pages = self.pages.lock().await;
-        let leases: Vec<_> = pages.owned_leases().cloned().collect();
-        for lease in leases {
-            let _ = self.store.release_root_lease(lease.id).await;
-        }
-        let _ = pages.end();
+        self.pages.lock().await.close().await;
     }
 }
 
@@ -229,7 +215,7 @@ impl SessionPageAccess {
     pub(crate) async fn released_with(&mut self, runs: &BTreeSet<HeldRunId>) {
         for id in runs {
             if let Some(run) = self.take_run(*id) {
-                let _ = run.pages.lock().await.end();
+                run.pages.lock().await.released();
             }
         }
     }

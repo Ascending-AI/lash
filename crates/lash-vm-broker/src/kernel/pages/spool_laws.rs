@@ -1447,7 +1447,7 @@ fn acquiring_the_first_root_lease_preserves_issued_capabilities() {
         PageLimits::within(ProtocolBounds::standard().decode),
     );
     let capability = pages.issue(base.id);
-    pages.lease_on(lease(base.id));
+    pages.set_primary(super::ActivationLease::Borrowed(lease(base.id)));
     assert_eq!(pages.verify(&capability), Ok(base.id));
     let mut forged = capability;
     forged.mac = [0; 32];

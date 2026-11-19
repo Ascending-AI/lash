@@ -3,28 +3,20 @@
 //! traversal; dropping a preparation releases its lease and private pages.
 use super::{KernelProcessEngine, state::KernelEngineState};
 use lash_core_store::checkpoint_graph::{EncodedNode, NodeId};
-use lash_durable::domain::pages::{LeaseFence, PageStore, RootLease, RootLeaseRequest};
+use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseRequest};
 use lash_durable::domain::{ExecKey, RootOwner};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_migrate::{CarryFault, ParkedRefusal, Rewritten};
 use lash_kernel_state::paged::run::rewrite::{LiveCode, RunCorrespondence};
 use lash_kernel_state::paged::{Checkpoint, PageAnswer, PageBody, PageSource};
+use lash_vm_broker::kernel::pages::OwnedRootLease;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 struct Lease {
     store: Arc<dyn PageStore>,
-    lease: RootLease,
+    owner: OwnedRootLease,
     runtime: tokio::runtime::Handle,
-    _release: ReleaseLease,
-}
-struct ReleaseLease(Option<Box<dyn FnOnce() + Send + Sync>>);
-impl Drop for ReleaseLease {
-    fn drop(&mut self) {
-        if let Some(release) = self.0.take() {
-            release();
-        }
-    }
 }
 #[derive(Clone)]
 pub(super) struct Pages {
@@ -56,7 +48,7 @@ impl PageSource for Pages {
                         let read = self
                             .lease
                             .runtime
-                            .block_on(self.lease.store.read_pages(&self.lease.lease, &[id]))
+                            .block_on(self.lease.store.read_pages(self.lease.owner.lease(), &[id]))
                             .map_err(|error| HeapFault::Transport(error.to_string()))?;
                         let stored = read
                             .into_iter()
@@ -585,21 +577,11 @@ pub(super) async fn leased_pages(
     let lease = lash_durable::fenced_read::acquire_lease(store.as_ref(), request)
         .await
         .map_err(|error| HeapFault::Transport(error.to_string()))?;
-    let runtime = tokio::runtime::Handle::current();
-    let release_store = Arc::clone(&store);
-    let release_runtime = runtime.clone();
-    let id = lease.id;
-    let release = ReleaseLease(Some(Box::new(move || {
-        release_runtime.spawn(async move {
-            let _ = release_store.release_root_lease(id).await;
-        });
-    })));
     Ok(Pages {
         lease: Arc::new(Lease {
+            owner: OwnedRootLease::new(Arc::clone(&store), lease),
             store,
-            lease,
-            runtime,
-            _release: release,
+            runtime: tokio::runtime::Handle::current(),
         }),
         nodes: Arc::default(),
     })

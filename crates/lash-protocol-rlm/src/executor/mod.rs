@@ -808,7 +808,6 @@ async fn run_linked_cell(
     // turn's spool under a descriptor of its own. The committed pages it
     // names stay under its run's lease, which the session holds until a
     // committed capture owns the carry.
-    let store = snapshots.context().pages().ok();
     let mut staged = match &run {
         Ok(KernelEnd::Ended {
             end: End::Finished(finished),
@@ -820,10 +819,7 @@ async fn run_linked_cell(
                     .stage_cell(
                         carry,
                         finished.not_carried.clone(),
-                        pages
-                            .clone()
-                            .zip(store.clone())
-                            .map(|(pages, store)| pages::HeldRun::new(pages, store)),
+                        pages.clone().map(pages::HeldRun::new),
                     )
                     .await
                     .map_err(|error| error.to_string()),
@@ -891,15 +887,11 @@ async fn run_linked_cell(
             Ok(KernelEnd::Ended {
                 pages: Some(pages), ..
             }) => {
-                if let Some(store) = store.clone() {
-                    // Recording a failed cell can create and publish the
-                    // first session descriptor too. Retain its activation
-                    // before that publication, until a capture owns it.
-                    state.hold_run(pages::HeldRun::new(Arc::clone(pages), store));
-                    true
-                } else {
-                    false
-                }
+                // Recording a failed cell can create and publish the
+                // first session descriptor too. Retain its activation
+                // before that publication, until a capture owns it.
+                state.hold_run(pages::HeldRun::new(Arc::clone(pages)));
+                true
             }
             _ => false,
         };
@@ -1204,9 +1196,8 @@ async fn run_linked_cell(
     }
     if let Some(pages) = activation
         && !held
-        && let Some(store) = store
     {
-        lash_vm_broker::kernel::end_activation(store.as_ref(), &pages).await;
+        lash_vm_broker::kernel::end_activation(&pages).await;
     }
     // Only the pass that answers the cell publishes its end. A pass that
     // aborts, as one whose worker was lost from outside does, journals no
