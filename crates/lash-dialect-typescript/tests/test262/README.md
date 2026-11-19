@@ -70,16 +70,17 @@ wildcard.
   in-dialect; `harness-shim/unshimmable.tsv` names the capability.
 
 The kernel runner (`//crates/lash-dialect-typescript:test262_kernel__test`,
-`tests/test262_kernel.rs`) lowers each recorded test with this crate and runs
-it on a kernel machine under the same deterministic bounds for every case; a
-bound trip is a failure. The record is partitioned into the laws
-`selection::shard_00` to `selection::shard_39`; run exact selectors in small
-groups to stay inside each action's deadline. `TEST262_KERNEL_FILTER` takes
-comma-separated path prefixes for a focused local rerun. For each case the
-runner prints `outcome\t<path>\t<class>\t<qualifier>`.
+`tests/test262_kernel.rs`) lowers vendored tests and runs them on a kernel
+machine with deterministic bounds. A bound trip is a failure. By default the
+runner checks recorded passes in `selection::shard_00` through
+`selection::shard_159`. `TEST262_KERNEL_FILTER` takes comma-separated path
+prefixes for local reruns. Nightly sets `--test_env=TEST262_KERNEL_CENSUS=1`
+to run every recorded case in those laws. Census mode requires the path
+filter to be unset. For each case the runner prints
+`outcome\t<path>\t<class>\t<qualifier>`.
 
 The ratchet holds the kernel to the record. Collect the last three fields of
-every `outcome` line into a TSV and run:
+each `outcome` line from the raw `test.log` of each Buck2 shard into a TSV:
 
 ```sh
 python3 scripts/check_test262_ratchet.py --base origin/main \
@@ -94,9 +95,9 @@ for each recorded `fail`, `refused` or `harness` row now observed as `pass`,
 printing its path and recorded outcome until that exact row is promoted.
 Filtered libtest runs do not enforce freshness. Changes between nonpass
 classes do not require promotion. Every lost pass is printed.
-The nightly `Test262 nightly` workflow runs the whole partition and this
-check. Without `--kernel-outcomes`, the script holds the record itself to its
-base: a test that passed keeps passing, and a failure is new only where the
+The `Test262 nightly` workflow runs the census and this check. Without
+`--kernel-outcomes`, the script compares the recorded outcomes with their
+base. A test that passed keeps passing, and a failure is new only where the
 base could not run the test.
 
 After reviewing a complete run you executed, promote one named recovered row

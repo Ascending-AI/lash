@@ -2,13 +2,9 @@ name: Test262 nightly
 
 # The whole Test262 selection on the kernel, uncached, once a day: the
 # TypeScript dialect lowers every vendored test and a kernel machine runs it.
-# The merge group runs the same target in the `//:workspace_tests` tail, where
-# an unchanged input set is a cache hit. This run executes it regardless, so a
-# nondeterministic outcome, or one that only a cold run shows, surfaces within
-# a day rather than on the next change to the dialect. The kernel's outcomes
-# are then held to the checked-in record: every recorded pass passes, or the
-# deviation register names it (ADR 0139). The corpus is vendored at the
-# pinned commit; nothing here touches the network beyond the build pool.
+# The merge group runs the recorded-pass partition. The nightly checks
+# every recorded case, including cases that can now be promoted to pass.
+# The corpus is vendored at the pinned commit.
 on:
   schedule:
     - cron: "43 3 * * *"
@@ -68,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           scripts/ci/buck2-test.sh test262-full \
-            --no-test-cache --test_arg=--nocapture \
+            --no-test-cache --test_env=TEST262_KERNEL_CENSUS=1 --test_arg=--nocapture \
             //crates/lash-dialect-typescript:test262_kernel__test
 
       - name: Hold the kernel to the outcome record
@@ -77,13 +73,14 @@ jobs:
         run: |
           set -euo pipefail
           observed="$RUNNER_TEMP/test262-kernel-outcomes.tsv"
-          find "$RUNNER_TEMP/test262-full-test-results" -type f -path '*test262_kernel__test*' -print0 \
-            | xargs -0 --no-run-if-empty cat \
-            | awk -F '\t' '$1 == "outcome" { print $2 "\t" $3 "\t" $4 }' > "$observed"
+          # test.xml also includes stdout. Read only the shard's raw log.
+          find "$RUNNER_TEMP/test262-full-test-results" -type f \
+            -path '*/root/crates/lash-dialect-typescript/test262_kernel__test__shard_*/test.log' \
+            -exec awk -F '\t' '$1 == "outcome" { print $2 "\t" $3 "\t" $4 }' {} + > "$observed"
           python3 scripts/check_test262_ratchet.py --base HEAD --kernel-outcomes "$observed" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # FIG-7589: the same selection, and the Python corpus, run once plain
+      # FIG-7589: the recorded passes, and the Python corpus, run once plain
       # and once parked everywhere or on kernel bodies only; the two runs
       # must agree. A mode action takes up to 25 minutes (2026-11-02:
       # 1697 s wall for both modes against 756 s for the plain selection),

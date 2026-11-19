@@ -1,5 +1,6 @@
 //! Test262 on the kernel: the vendored selection lowered by this crate and
-//! run on a kernel machine. Every recorded pass remains a regression law.
+//! run on a kernel machine. The developer run checks recorded passes.
+//! `TEST262_KERNEL_CENSUS=1` runs every recorded case for nightly Gate 1.
 
 #![expect(
     clippy::expect_used,
@@ -25,6 +26,11 @@ fn selection_filter() -> Vec<String> {
         .ok()
         .map(|value| value.split(',').map(str::to_owned).collect())
         .unwrap_or_default()
+}
+
+#[allow(clippy::disallowed_methods)]
+fn complete_census() -> bool {
+    std::env::var("TEST262_KERNEL_CENSUS").as_deref() == Ok("1")
 }
 
 const REGISTER: &str = include_str!("../deviations.md");
@@ -106,20 +112,27 @@ fn registered_exclusions() -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Every recorded pass has one observation, and the report counts them by
-/// directory. Every recorded pass must run to its expected end or be
-/// excluded by an exact registered dialect deviation.
+/// Report one observation per selected case. Recorded passes must still
+/// pass or have an exact registered dialect deviation.
 fn run_selection(shard: usize) {
-    let recorded = recorded_passes();
+    let census = complete_census();
+    let recorded = if census {
+        runner::recorded_classes()
+    } else {
+        recorded_passes()
+    };
     let filter = selection_filter();
+    assert!(
+        !census || filter.is_empty(),
+        "TEST262_KERNEL_FILTER cannot be used with TEST262_KERNEL_CENSUS=1"
+    );
     for prefix in &filter {
         assert!(
             recorded.keys().any(|path| path.starts_with(prefix)),
             "no recorded case matches {prefix}"
         );
     }
-    // A stable partition of all recorded passes. Concurrent libtest laws keep
-    // expensive families from monopolizing the single test action's deadline.
+    // Partition the selected record before applying any local path filter.
     let paths: Vec<_> = partition_paths(&recorded, shard, SELECTION_PARTITIONS)
         .filter(|path| filter.is_empty() || filter.iter().any(|prefix| path.starts_with(prefix)))
         .cloned()
@@ -176,7 +189,11 @@ fn run_selection(shard: usize) {
     }
     let regressed: Vec<_> = observations
         .iter()
-        .filter(|(path, observed)| *observed != Observed::Pass && !excluded.contains_key(path))
+        .filter(|(path, observed)| {
+            *observed != Observed::Pass
+                && recorded.get(path).is_some_and(|class| class == "pass")
+                && !excluded.contains_key(path)
+        })
         .collect();
     for (path, observed) in &regressed {
         println!("regression\t{path}\t{observed:?}");
