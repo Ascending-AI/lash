@@ -35,6 +35,14 @@ pub(super) const ALL: &[Workload] = &[
         js: include_str!("workloads/array_read.js"),
         py: include_str!("workloads/array_read.py"),
     },
+    // TypeScript twin of the Python row; its Python side is that row's source.
+    Workload {
+        name: "array_read_twin",
+        low: 1000,
+        ops: 10,
+        js: include_str!("workloads/array_read_twin.js"),
+        py: include_str!("workloads/array_read.py"),
+    },
     Workload {
         name: "func_call",
         low: 1000,

@@ -8,32 +8,6 @@
   },
   "cpu": "pinned:0",
   "geometry": {
-    "kernel/typescript/object_sort_200k": {
-      "source_hash": "d92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b",
-      "trips": [
-        20000,
-        200000
-      ],
-      "operations": [
-        20000,
-        200000
-      ],
-      "runs": 1,
-      "warmups": 1
-    },
-    "kernel/python/object_sort_200k": {
-      "source_hash": "11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664",
-      "trips": [
-        20000,
-        200000
-      ],
-      "operations": [
-        20000,
-        200000
-      ],
-      "runs": 1,
-      "warmups": 1
-    },
     "kernel/typescript/empty_loop": {
       "source_hash": "5db9a4e816911a041294fc70bfe29a990b83571e7af5b6f851f5a455cfbbfa8e",
       "trips": [
@@ -126,6 +100,32 @@
       "warmups": 1
     },
     "kernel/python/array_read": {
+      "source_hash": "aefc32a93c8bbee248a88ce26810667d93e6bb2650c50926bed4c8ecc74429f6",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        10000,
+        1000000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/typescript/array_read_twin": {
+      "source_hash": "7e95f7ae4c366a7989ad1d744c48074f848a69cfeed72fd4075a51ca59994698",
+      "trips": [
+        1000,
+        100000
+      ],
+      "operations": [
+        10000,
+        1000000
+      ],
+      "runs": 5,
+      "warmups": 1
+    },
+    "kernel/python/array_read_twin": {
       "source_hash": "aefc32a93c8bbee248a88ce26810667d93e6bb2650c50926bed4c8ecc74429f6",
       "trips": [
         1000,
@@ -476,6 +476,32 @@
       "runs": 5,
       "warmups": 1
     },
+    "kernel/typescript/object_sort_200k": {
+      "source_hash": "d92fc420a4faef7860ee70bc86e1d61d608a206ba2279bfe9d630f6668775f9b",
+      "trips": [
+        20000,
+        200000
+      ],
+      "operations": [
+        20000,
+        200000
+      ],
+      "runs": 1,
+      "warmups": 1
+    },
+    "kernel/python/object_sort_200k": {
+      "source_hash": "11b70d8466f36b7b021c62f810f6f91d5bb71af365ba7869cf035ab93d40a664",
+      "trips": [
+        20000,
+        200000
+      ],
+      "operations": [
+        20000,
+        200000
+      ],
+      "runs": 1,
+      "warmups": 1
+    },
     "replay/chat-short": {
       "script_digest": "ffff3cf74981b3484e0b9d31a966ae6f7861e2788f83c196eecac9c6bb52c8ac",
       "backend": "sqlite-file",
@@ -506,8 +532,6 @@
     }
   },
   "rows": {
-    "kernel/typescript/object_sort_200k": 269115.16414444445,
-    "kernel/python/object_sort_200k": 178992.51409444446,
     "kernel/typescript/empty_loop": 423.9960202020202,
     "kernel/python/empty_loop": 7969.972101010101,
     "kernel/typescript/prop_read": 2164.5016262626264,
@@ -516,6 +540,8 @@
     "kernel/python/prop_write": 4395.999434343435,
     "kernel/typescript/array_read": 2424.801209090909,
     "kernel/python/array_read": 1819.8002676767676,
+    "kernel/typescript/array_read_twin": 3552.3009474747473,
+    "kernel/python/array_read_twin": 1316.508098989899,
     "kernel/typescript/func_call": 1050.4997803030303,
     "kernel/python/func_call": 3290.749573232323,
     "kernel/typescript/func_closure_call": 2499.4993358585857,
@@ -542,6 +568,8 @@
     "kernel/python/object_build": 13150.784433333334,
     "kernel/typescript/object_sort": 137511.09072222223,
     "kernel/python/object_sort": 106105.32126666667,
+    "kernel/typescript/object_sort_200k": 269115.16414444445,
+    "kernel/python/object_sort_200k": 178992.51409444446,
     "replay/chat-short/host": 42188972.0,
     "replay/chat-long-compacting/host": 47982374.0,
     "replay/ts-codemode/host": 132261742.0,
@@ -690,8 +718,6 @@
     }
   },
   "noise": {
-    "kernel/typescript/object_sort_200k": 0,
-    "kernel/python/object_sort_200k": 0,
     "kernel/typescript/empty_loop": 0.0,
     "kernel/python/empty_loop": 0.0,
     "kernel/typescript/prop_read": 0.0,
@@ -700,6 +726,8 @@
     "kernel/python/prop_write": 0.0,
     "kernel/typescript/array_read": 0.0,
     "kernel/python/array_read": 0,
+    "kernel/typescript/array_read_twin": 0,
+    "kernel/python/array_read_twin": 0,
     "kernel/typescript/func_call": 0.0,
     "kernel/python/func_call": 0.0,
     "kernel/typescript/func_closure_call": 0.0,
@@ -726,6 +754,8 @@
     "kernel/python/object_build": 0.0,
     "kernel/typescript/object_sort": 0.0,
     "kernel/python/object_sort": 0.0,
+    "kernel/typescript/object_sort_200k": 0,
+    "kernel/python/object_sort_200k": 0,
     "replay/chat-short/host": 0.0,
     "replay/chat-long-compacting/host": 0.0,
     "replay/ts-codemode/host": 0.0,
@@ -734,8 +764,6 @@
     "replay/py-codemode/worker": 0.0
   },
   "ceilings": {
-    "kernel/typescript/object_sort_200k": 269115.16414444445,
-    "kernel/python/object_sort_200k": 178992.51409444446,
     "kernel/typescript/empty_loop": 423.9960202020202,
     "kernel/python/empty_loop": 7969.972101010101,
     "kernel/typescript/prop_read": 2164.5016262626264,
@@ -744,6 +772,8 @@
     "kernel/python/prop_write": 4395.999434343435,
     "kernel/typescript/array_read": 2424.801209090909,
     "kernel/python/array_read": 1819.8002676767676,
+    "kernel/typescript/array_read_twin": 3552.3009474747473,
+    "kernel/python/array_read_twin": 1316.508098989899,
     "kernel/typescript/func_call": 1050.4997803030303,
     "kernel/python/func_call": 3290.749573232323,
     "kernel/typescript/func_closure_call": 2499.4993358585857,
@@ -770,6 +800,8 @@
     "kernel/python/object_build": 13150.784433333334,
     "kernel/typescript/object_sort": 137511.09072222223,
     "kernel/python/object_sort": 106105.32126666667,
+    "kernel/typescript/object_sort_200k": 269115.16414444445,
+    "kernel/python/object_sort_200k": 178992.51409444446,
     "replay/chat-short/host": 42188972.0,
     "replay/chat-long-compacting/host": 47982374.0,
     "replay/ts-codemode/host": 132261742.0,
@@ -801,6 +833,18 @@
       "recorded_at": "2026-10-27T16:42:16.794309733+00:00",
       "run_id": "compare-2264758",
       "executable_sha256": "818b9b0bae17a059bd7f90e9e0ae631edad98c42eb5745eb314f9db9f01952cd"
+    },
+    "kernel/typescript/array_read_twin": {
+      "commit": "77b93cc28ea31268b13d334561402a17bc197246",
+      "recorded_at": "2026-11-19T22:12:46.481191608+00:00",
+      "run_id": "compare-3773652",
+      "executable_sha256": "213016cb9c6d7a5ac6ca9e2f441d8c628b3f8318e26ceb919d8e9c8fa116f9ad"
+    },
+    "kernel/python/array_read_twin": {
+      "commit": "77b93cc28ea31268b13d334561402a17bc197246",
+      "recorded_at": "2026-11-19T22:12:46.481191608+00:00",
+      "run_id": "compare-3773652",
+      "executable_sha256": "213016cb9c6d7a5ac6ca9e2f441d8c628b3f8318e26ceb919d8e9c8fa116f9ad"
     }
   }
 }
