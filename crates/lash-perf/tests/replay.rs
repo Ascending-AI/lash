@@ -6,7 +6,12 @@
 //! `just perf-replay-bless` re-blesses an intended baseline move.
 #![cfg(not(feature = "dhat-heap"))]
 
+use std::collections::BTreeMap;
 use std::process::Command;
+
+use anyhow::{Context, Result, ensure};
+use lash_core_ids::perf_witness::SqlVerb;
+use lash_core_ids::perf_witness::sql_shapes::work::{Backend, Cut, Key, Receipt};
 
 /// ENV-NAMESPACE-BATCH: ten additional roots of one publisher must not add
 /// transactions to the same preparing environment claim. FIG-7482 found
@@ -335,15 +340,62 @@ fn a_first_cell_turn_stays_within_the_sql_statement_budget() {
     );
 }
 
-/// FIG-6617: one coding turn on SQLite reads each fenced fact once per
-/// scope. A member that captured no wake reads no capture buffer, an owner
-/// commit reads its open turn and that turn's cancel in one statement, and an
-/// advance takes the phase roots its commit's fenced turn read already saw.
-/// The turn (four tool calls, then an answer) issued 54 SELECTs of these
-/// shapes before; the bound is the measured count after.
-#[test]
-fn a_coding_turn_reads_its_fenced_facts_once_per_scope() {
-    let dir = tempfile::tempdir().unwrap();
+/// The SQLite operations these budgets measure. The observer supplies the
+/// store call site and relation set separately from the SQL's spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum CodingRead {
+    FencedTurn,
+    WakeCapture,
+    TurnCancel,
+    PhaseRoots,
+    Window,
+    SessionAdmission,
+}
+
+impl CodingRead {
+    fn of(key: &Key) -> Option<Self> {
+        if SqlVerb::classify(&key.shape) != SqlVerb::Select {
+            return None;
+        }
+        let relations: Vec<_> = key
+            .relations
+            .as_ref()?
+            .iter()
+            .map(|name| name.strip_prefix("main.").unwrap_or(name))
+            .collect();
+        let at = |method: &str| {
+            key.site
+                .split("::{{closure}}")
+                .next()
+                .and_then(|site| site.rsplit("::").next())
+                .and_then(|site| site.split('<').next())
+                == Some(method)
+        };
+        match relations.as_slice() {
+            ["turn_cancel_requests"] => Some(Self::TurnCancel),
+            ["blobs", "turn_phases"] => Some(Self::PhaseRoots),
+            ["session_meta"]
+                if at("admit_pending_turn_inputs") || at("read_session_state_version") =>
+            {
+                Some(Self::SessionAdmission)
+            }
+            names if names.contains(&"temp.lash_woken") => Some(Self::WakeCapture),
+            names if at("turn") && names.contains(&"turn_phases") => Some(Self::FencedTurn),
+            names
+                if names.contains(&"session_head")
+                    && names.contains(&"session_revisions")
+                    && names.contains(&"graph_nodes") =>
+            {
+                Some(Self::Window)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Run one coding turn with four tool calls and a final answer on SQLite.
+fn coding_turn_reads(name: &str) -> Result<BTreeMap<CodingRead, u64>> {
+    let dir = tempfile::tempdir().context("create a coding replay directory")?;
     let script = dir.path().join("coding-turn.json");
     let reads: Vec<_> = (0..4)
         .map(|index| {
@@ -358,146 +410,110 @@ fn a_coding_turn_reads_its_fenced_facts_once_per_scope() {
         &script,
         serde_json::to_vec(&serde_json::json!({
             "format": "lash-perf-replay/1",
-            "name": "coding-turn-reads",
-            "description": "One coding turn's repeated fenced reads (FIG-6617)",
+            "name": name,
+            "description": "One coding turn's SQLite reads",
             "protocol": "standard",
             "sessions": 1,
             "turns": [{"user": "Read four files, then answer", "replies": reads}]
         }))
-        .unwrap(),
+        .context("encode the coding replay fixture")?,
     )
-    .unwrap();
-    let receipt = dir.path().join("receipt.json");
-    let shapes = dir.path().join("shapes.json");
+    .context("write the coding replay fixture")?;
     let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
         .arg("replay")
         .arg(&script)
         .arg("--store-dir")
         .arg(dir.path().join("stores"))
         .arg("--out")
-        .arg(&receipt)
+        .arg(dir.path().join("receipt.json"))
         .arg("--sql-shapes")
-        .arg(&shapes)
+        .arg(dir.path().join("shapes.json"))
         .output()
-        .unwrap();
-    assert!(
+        .context("run the SQLite coding replay")?;
+    ensure!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let shapes: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
-    let fixed = [
-        "from temp.lash_woken",
-        "select request_id, origin, reason, disposition, mode from",
-        "as checkpoint_ref, (select hash from main.blobs where id = answer_ref) as answer_ref from",
-    ];
-    let turn = shapes["rounds"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|round| round["phase"] == "turn" && round["turn"] == 1)
-        .expect("SQL shapes retain the measured turn separately from session start");
-    let rows = turn["rows"].as_array().unwrap();
-    let mut counted = std::collections::BTreeMap::new();
-    for row in rows {
-        let shape = row["shape"].as_str().unwrap();
-        if let Some(fact) = fixed.iter().find(|fact| shape.contains(**fact)) {
-            *counted.entry(*fact).or_insert(0) += row["selects"].as_u64().unwrap();
+
+    #[derive(serde::Deserialize)]
+    struct SqlWork {
+        work: Receipt,
+    }
+    let work_bytes = std::fs::read(dir.path().join("turn-sql-work.json"))
+        .context("read the SQL work receipt")?;
+    let SqlWork { work } =
+        serde_json::from_slice(&work_bytes).context("decode the SQL work receipt")?;
+    let turn = Cut {
+        phase: "turn".into(),
+        turn: Some(1),
+    };
+    let mut counted = BTreeMap::new();
+    for row in work.rows {
+        if row.key.backend == Backend::Sqlite
+            && row.key.started_in == turn
+            && let Some(read) = CodingRead::of(&row.key)
+        {
+            *counted.entry(read).or_default() += row.counts.statements;
         }
     }
-    let selects: u64 = counted.values().sum();
-    eprintln!("FIG-6617 fenced-fact SELECTs: {selects} {counted:?}");
+    Ok(counted)
+}
+
+/// FIG-6617: read the open turn, its cancel and phase roots as fenced facts.
+/// Count the joined read and any standalone fallback or wake-capture reads.
+#[test]
+fn a_coding_turn_reads_its_fenced_facts_once_per_scope() -> Result<()> {
+    let reads = coding_turn_reads("coding-turn-reads")?;
+    assert!(
+        reads.get(&CodingRead::FencedTurn).is_some_and(|&n| n > 0),
+        "the coding turn witnessed no fenced turn read: {reads:?}"
+    );
+    let selects: u64 = reads
+        .iter()
+        .filter(|(read, _)| {
+            matches!(
+                read,
+                CodingRead::FencedTurn
+                    | CodingRead::TurnCancel
+                    | CodingRead::PhaseRoots
+                    | CodingRead::WakeCapture
+            )
+        })
+        .map(|(_, count)| count)
+        .sum();
+    const BOUND: u64 = 2;
+    eprintln!("FIG-6617 fenced-fact reads: {selects} {reads:?}");
     assert!(
         selects <= BOUND,
-        "the coding turn issued {selects} SELECTs of its fenced facts {counted:?}, bound {BOUND}"
+        "the coding turn issued {selects} fenced-fact reads {reads:?}, bound {BOUND}"
     );
+    Ok(())
 }
 
-/// The measured count after FIG-6617.
-const BOUND: u64 = 2;
-
-/// FIG-6634: one coding turn on SQLite loads its committed window from the
-/// store only where nothing it holds is that window. The owner's head and
-/// the runtime's open each read the head; preparation and every environment
-/// sync then take the prelude's base window from the head the turn already
-/// holds instead of reading it again with its state version. The turn (four
-/// tool calls, then an answer) issued the head-meta and state-version
-/// SELECTs counted here before; the bound is the measured count after.
+/// FIG-6634: preparation and environment sync reuse the committed window
+/// they already hold. Count head and window reads and standalone session
+/// metadata reads at admission or state-version checks.
 #[test]
-fn a_coding_turn_loads_its_window_only_where_it_holds_none() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("coding-turn.json");
-    let reads: Vec<_> = (0..4)
-        .map(|index| {
-            serde_json::json!({"tool_calls": [{
-                "tool": "fixture_large",
-                "args": {"key": format!("read-{{turn}}-{index}"), "bytes": 643}
-            }]})
-        })
-        .chain([serde_json::json!({"text": "done"})])
-        .collect();
-    std::fs::write(
-        &script,
-        serde_json::to_vec(&serde_json::json!({
-            "format": "lash-perf-replay/1",
-            "name": "coding-turn-window",
-            "description": "One coding turn's committed-window loads (FIG-6634)",
-            "protocol": "standard",
-            "sessions": 1,
-            "turns": [{"user": "Read four files, then answer", "replies": reads}]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let receipt = dir.path().join("receipt.json");
-    let shapes = dir.path().join("shapes.json");
-    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
-        .arg("replay")
-        .arg(&script)
-        .arg("--store-dir")
-        .arg(dir.path().join("stores"))
-        .arg("--out")
-        .arg(&receipt)
-        .arg("--sql-shapes")
-        .arg(&shapes)
-        .output()
-        .unwrap();
+fn a_coding_turn_loads_its_window_only_where_it_holds_none() -> Result<()> {
+    let reads = coding_turn_reads("coding-turn-window")?;
     assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        reads.get(&CodingRead::Window).is_some_and(|&n| n > 0),
+        "the coding turn witnessed no committed-window read: {reads:?}"
     );
-    let shapes: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
-    let window = [
-        "as config_ref, head.head_revision, revision.leaf_node_id",
-        "select session_state_version from session_meta",
-    ];
-    let turn = shapes["rounds"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|round| round["phase"] == "turn" && round["turn"] == 1)
-        .expect("SQL shapes retain the measured turn separately from session start");
-    let rows = turn["rows"].as_array().unwrap();
-    let mut counted = std::collections::BTreeMap::new();
-    for row in rows {
-        let shape = row["shape"].as_str().unwrap();
-        if let Some(read) = window.iter().find(|read| shape.contains(**read)) {
-            *counted.entry(*read).or_insert(0) += row["selects"].as_u64().unwrap();
-        }
-    }
-    let selects: u64 = counted.values().sum();
-    eprintln!("FIG-6634 window-load SELECTs: {selects} {counted:?}");
+    let selects = reads[&CodingRead::Window]
+        + reads
+            .get(&CodingRead::SessionAdmission)
+            .copied()
+            .unwrap_or(0);
+    const WINDOW_BOUND: u64 = 15;
+    eprintln!("FIG-6634 window and admission reads: {selects} {reads:?}");
     assert!(
         selects <= WINDOW_BOUND,
-        "the coding turn issued {selects} SELECTs of its window loads {counted:?}, bound {WINDOW_BOUND}"
+        "the coding turn issued {selects} window and admission reads {reads:?}, bound {WINDOW_BOUND}"
     );
+    Ok(())
 }
-
-/// The measured count after FIG-6634.
-const WINDOW_BOUND: u64 = 15;
 
 /// REPLAY-RECORD typed capture: a committed TypeScript session records
 /// back as its cells, each turn's cells in order with their source, then its

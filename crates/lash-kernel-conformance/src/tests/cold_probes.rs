@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
 use lash_kernel_vm::{
-    Bounds, CellStart, CoreMachine, End, Host, Machine, PreparedLibrary, Program, Step, Target,
+    Bound, BoundExceeded, Bounds, CellStart, CoreMachine, End, Host, Machine, PreparedLibrary,
+    Program, RunError, Step, Target,
 };
 
 use crate::case::{ExpectedEnd, Shard};
@@ -175,36 +176,47 @@ fn threshold(library: &PreparedLibrary, text: &str, bounds: Bounds) -> u64 {
     passed
 }
 
-/// PRESSURE: the unpaused run under the same bound is the oracle.
+/// PRESSURE: the fixture supplies the result and prints. The unpaused run
+/// under the same bound supplies the charge.
 #[test]
 fn a_row_opened_cold_at_every_slice_finishes_under_the_bound_an_unpaused_run_needs() {
     let library = library();
     let shard: Shard = serde_json::from_str(PRESSURE).expect("r56-pressure.json");
     let mut failures = Vec::new();
     for case in &shard.cases {
-        let (prints, _) = literal(&case.expected);
+        let prints = &case.expected.prints;
+        let ExpectedEnd::Finished(expected) = &case.expected.end else {
+            panic!("{} has no expected result", case.name);
+        };
         let slice = case.environment.slice;
         let bounds: Bounds = case.environment.bounds.into();
         let least = threshold(&library, &case.document, bounds);
         let at = |memory| Bounds { memory, ..bounds };
         let whole = run(&library, &case.document, at(least), u64::MAX, false);
         let cold = run(&library, &case.document, at(least), slice, true);
-        if cold.printed != prints || cold.charged != whole.charged {
+        let finished = |run: &Left| {
+            matches!(&run.end, End::Finished(finished) if &finished.result == expected)
+                && &run.printed == prints
+                && run.charged == whole.charged
+        };
+        if !finished(&cold) {
             failures.push(format!(
                 "{} under {least}: cold printed {:?}, ended {:?}, charged {:?} where unpaused {:?}",
                 case.name, cold.printed, cold.end, cold.charged, whole.charged
             ));
         }
-        let under = run(&library, &case.document, at(least - 1), slice, true);
-        let prefix = prints.starts_with(&under.printed);
-        let cheaper = under.charged <= whole.charged;
-        if !matches!(under.end, End::Finished(_)) && !(prefix && cheaper) {
+        let lower = least - 1;
+        let under = run(&library, &case.document, at(lower), slice, true);
+        let memory_refusal = matches!(
+            under.end,
+            End::Error(RunError::Bound(BoundExceeded { bound: Bound::Memory, limit, .. }))
+                if limit == lower
+        ) && prints.starts_with(&under.printed)
+            && under.charged <= whole.charged;
+        if !finished(&under) && !memory_refusal {
             failures.push(format!(
-                "{} under {}: cold printed {:?}, charged {:?}",
-                case.name,
-                least - 1,
-                under.printed,
-                under.charged
+                "{} under {lower}: cold printed {:?}, ended {:?}, charged {:?}",
+                case.name, under.printed, under.end, under.charged
             ));
         }
     }

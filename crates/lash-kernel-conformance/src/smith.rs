@@ -14,7 +14,7 @@ use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_vm::{Bounds, PreparedLibrary};
 
 mod runner;
-pub use runner::{HostCall, Observation, check_interpreter, compare};
+pub use runner::{HostCall, Observation, SmithMachine, check_interpreter, compare};
 
 /// A program and its environment script. The bytes also choose resource
 /// bounds, delivery order and slices. Every projection is cross-resumed.

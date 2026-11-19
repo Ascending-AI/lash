@@ -6,14 +6,14 @@ use lash_kernel_doc::Datum;
 use lash_kernel_doc::ErrorDatum;
 
 use lash_kernel_vm::{
-    CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
-    StartError, Step, Target,
+    Bound, CellStart, ChargeTape, Delivered, End, Host, KernelMachine, Machine, Meters, Outcome,
+    Program, Request, RunError, StartError, Step, Target, Weight,
 };
 
 use super::{Smith, library};
 use crate::HarnessError;
 
-use crate::projection::Projector;
+use crate::projection::{Projector, Recorded};
 use lash_kernel_state::semantic::Checkpoint;
 
 /// Full observation at one return, including the canonical state at slices
@@ -31,11 +31,37 @@ pub struct Observation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostCall {
-    Print(Datum),
+    Print { charged: u64, value: Datum },
+}
+
+impl HostCall {
+    fn charged(&self) -> u64 {
+        match self {
+            Self::Print { charged, .. } => *charged,
+        }
+    }
+}
+
+/// A Smith plan supplies its charge at each host effect, inside each slice.
+pub trait SmithMachine: Machine {
+    fn record_charges(&mut self, tape: ChargeTape);
+}
+
+impl SmithMachine for KernelMachine {
+    fn record_charges(&mut self, tape: ChargeTape) {
+        self.record_charges(tape);
+    }
+}
+
+impl SmithMachine for Recorded {
+    fn record_charges(&mut self, tape: ChargeTape) {
+        self.record_charges(tape);
+    }
 }
 
 struct World {
     calls: Vec<HostCall>,
+    charges: ChargeTape,
     seed: u64,
 }
 
@@ -73,7 +99,10 @@ impl Host for World {
     }
 
     fn print(&mut self, value: &Datum) {
-        self.calls.push(HostCall::Print(value.clone()));
+        self.calls.push(HostCall::Print {
+            charged: self.charges.steps().into_iter().map(Weight::units).sum(),
+            value: value.clone(),
+        });
     }
 
     fn cancel_requested(&mut self) -> bool {
@@ -104,7 +133,7 @@ enum Execution<O> {
     Ran(Vec<O>),
 }
 
-fn observe<M: Machine>(
+fn observe<M: SmithMachine>(
     smith: &Smith,
     slices: &[u64],
     projection: &mut Projector<'_>,
@@ -112,7 +141,7 @@ fn observe<M: Machine>(
     observe_in::<M>(program(smith), smith, slices, projection)
 }
 
-fn observe_in<M: Machine>(
+fn observe_in<M: SmithMachine>(
     program: Program,
     smith: &Smith,
     slices: &[u64],
@@ -162,11 +191,13 @@ fn observe_in<M: Machine>(
     };
     let mut host = World {
         calls: Vec::new(),
+        charges: ChargeTape::new(),
         seed: smith.schedule.host_seed,
     };
     let mut observations = Vec::new();
     // At least one statement is executed per positive slice. This exceeds
     // the generator's worst-case bounded loops, calls and work charge.
+    machine.record_charges(host.charges.clone());
     for index in 0..25_000 {
         let step = machine
             .run(&mut host, slices[index % slices.len()])
@@ -231,6 +262,9 @@ fn observe_in<M: Machine>(
         if ended {
             return Ok(Execution::Ran(observations));
         }
+        if projection.imports.is_some() {
+            machine.record_charges(host.charges.clone());
+        }
     }
     Err(HarnessError(
         "generated run exhausted its step bound".into(),
@@ -251,45 +285,77 @@ impl PartialEq for Observation {
     }
 }
 
-fn memory(execution: &Execution<Observation>) -> bool {
-    match execution {
-        Execution::Ran(rows) => rows.last().is_some_and(|row| {
-            matches!(
-                row.step,
-                Step::Ended(lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(
-                    lash_kernel_vm::BoundExceeded {
-                        bound: lash_kernel_vm::Bound::Memory,
-                        ..
-                    }
-                )))
-            )
-        }),
-        _ => false,
-    }
+fn memory_refusal(end: &End) -> bool {
+    matches!(end, End::Error(RunError::Bound(error)) if error.bound == Bound::Memory)
 }
 
-/// Memory is a separate verdict. A refusal's precise charge/statement is
-/// plan-dependent; all completed observations before the earlier refusal agree.
 fn agree(a: &Execution<Observation>, b: &Execution<Observation>) -> bool {
-    if !memory(a) && !memory(b) {
+    agree_through_memory_cut(a, b, true, |row| {
+        let end = match &row.step {
+            Step::Ended(end) => Some(end),
+            _ => None,
+        };
+        (end, row.meters.charged, &row.host_calls)
+    })
+}
+
+/// Compare every completed return and host call through the earlier refusal.
+/// A host call has its own charge because a slice can span the other plan's
+/// refusal. At equal refusal charges both complete histories must agree.
+fn agree_through_memory_cut<R: PartialEq>(
+    a: &Execution<R>,
+    b: &Execution<R>,
+    may_finish: bool,
+    observe: impl Fn(&R) -> (Option<&End>, Option<u64>, &[HostCall]),
+) -> bool {
+    let (Execution::Ran(a_rows), Execution::Ran(b_rows)) = (a, b) else {
         return a == b;
-    }
-    match (a, b) {
-        (Execution::Ran(a), Execution::Ran(b)) => {
-            let prefix = a.len().min(b.len()).saturating_sub(1);
-            a[..prefix] == b[..prefix]
-                && a.iter()
-                    .flat_map(|r| &r.host_calls)
-                    .zip(b.iter().flat_map(|r| &r.host_calls))
-                    .all(|(a, b)| a == b)
+    };
+    let (Some(a_last), Some(b_last)) = (a_rows.last(), b_rows.last()) else {
+        return a == b;
+    };
+    let (a_end, Some(a_charge), _) = observe(a_last) else {
+        return a == b;
+    };
+    let (b_end, Some(b_charge), _) = observe(b_last) else {
+        return a == b;
+    };
+    let a_refused = a_end.is_some_and(memory_refusal);
+    let b_refused = b_end.is_some_and(memory_refusal);
+    let same_cut = a_refused && b_refused && a_charge == b_charge;
+    let (earlier, later, cut) = match (a_refused, b_refused) {
+        (true, true) if a_charge <= b_charge => (a_rows, b_rows, a_charge),
+        (true, true) => (b_rows, a_rows, b_charge),
+        (true, false) if may_finish && a_charge <= b_charge => (a_rows, b_rows, a_charge),
+        (false, true) if may_finish && b_charge <= a_charge => (b_rows, a_rows, b_charge),
+        _ => return a == b,
+    };
+    let completed = &earlier[..earlier.len() - 1];
+    let later_completed = if same_cut {
+        &later[..later.len() - 1]
+    } else {
+        let Some((prefix, remainder)) = later.split_at_checked(completed.len()) else {
+            return false;
+        };
+        if remainder
+            .first()
+            .and_then(|row| observe(row).1)
+            .is_some_and(|charged| charged < cut)
+        {
+            return false;
         }
-        _ => true,
-    }
+        prefix
+    };
+    completed == later_completed
+        && earlier.iter().flat_map(|row| observe(row).2).eq(later
+            .iter()
+            .flat_map(|row| observe(row).2)
+            .take_while(|call| same_cut || call.charged() <= cut))
 }
 
 /// A's images opened by B at every slice and park. The public comparison
 /// excludes physical root ids and memory meters.
-pub fn compare<A: Machine, B: Machine>(smith: &Smith) -> Result<(), HarnessError> {
+pub fn compare<A: SmithMachine, B: SmithMachine>(smith: &Smith) -> Result<(), HarnessError> {
     smith.admit().map_err(fault)?;
     let mut reference = Projector::default();
     let a = observe::<A>(smith, &smith.schedule.slices, &mut reference)?;
@@ -308,7 +374,6 @@ pub fn compare<A: Machine, B: Machine>(smith: &Smith) -> Result<(), HarnessError
 
 /// Cross-slice semantic agreement with a projection after every statement.
 pub fn check_interpreter(smith: &Smith) -> Result<(), HarnessError> {
-    use crate::projection::Recorded;
     compare::<Recorded, Recorded>(smith)?;
     let mut statements = smith.clone();
     statements.schedule.slices = vec![0];
@@ -381,30 +446,9 @@ fn without_slices(execution: Execution<Observation>) -> Execution<ScheduleReturn
 }
 
 fn schedule_agree(a: &Execution<ScheduleReturn>, b: &Execution<ScheduleReturn>) -> bool {
-    let refused = |rows: &[ScheduleReturn]| {
-        rows.last().is_some_and(|row| {
-            matches!(
-                &row.end,
-                Some(lash_kernel_vm::End::Error(lash_kernel_vm::RunError::Bound(
-                    lash_kernel_vm::BoundExceeded {
-                        bound: lash_kernel_vm::Bound::Memory,
-                        ..
-                    }
-                )))
-            )
-        })
-    };
-    match (a, b) {
-        (Execution::Ran(a), Execution::Ran(b)) if refused(a) && refused(b) => {
-            let prefix = a.len().min(b.len()).saturating_sub(1);
-            a[..prefix] == b[..prefix]
-                && a.iter()
-                    .flat_map(|r| &r.host_calls)
-                    .zip(b.iter().flat_map(|r| &r.host_calls))
-                    .all(|(a, b)| a == b)
-        }
-        _ => a == b,
-    }
+    agree_through_memory_cut(a, b, false, |row| {
+        (row.end.as_ref(), row.charged, &row.host_calls)
+    })
 }
 
 // Carry storage is compared through the shared graph reader, retaining every
@@ -414,4 +458,52 @@ fn semantic_end(mut end: lash_kernel_vm::End) -> lash_kernel_vm::End {
         finished.carry = None;
     }
     end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_agreement_compares_effects_through_the_earlier_refusal() {
+        let print = |charged, value| HostCall::Print { charged, value };
+        let first = print(1, Datum::Null);
+        let last = print(2, Datum::Bool(true));
+        let extra = print(3, Datum::Bool(false));
+        let run = |charged, host_calls| {
+            Execution::Ran(vec![Observation {
+                step: Step::Ended(End::Error(RunError::Bound(lash_kernel_vm::BoundExceeded {
+                    bound: Bound::Memory,
+                    limit: 1024,
+                    function: None,
+                    site: None,
+                }))),
+                carry: None,
+                meters: Meters {
+                    charged: Some(charged),
+                    ..Meters::default()
+                },
+                after_deliveries: None,
+                parked: None,
+                host_calls,
+                deliveries: vec![],
+            }])
+        };
+        let cases = [
+            (true, 2, vec![first.clone(), last.clone()]),
+            (false, 2, vec![first.clone()]),
+            (true, 3, vec![first.clone(), last.clone(), extra.clone()]),
+            (false, 3, vec![first, extra]),
+        ];
+        for (agrees, charged, calls) in cases {
+            let a = run(2, vec![print(1, Datum::Null), last.clone()]);
+            let b = run(charged, calls);
+            assert_eq!(agree(&a, &b), agrees, "resume: {b:?}");
+            assert_eq!(
+                schedule_agree(&without_slices(a), &without_slices(b)),
+                agrees,
+                "slices at charge {charged}"
+            );
+        }
+    }
 }

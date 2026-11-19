@@ -152,7 +152,6 @@ impl Recorded {
     ) {
         lash_kernel_vm::perf_witness::Profiling::publish_context(&mut self.0, context);
     }
-    #[cfg(test)]
     pub(crate) fn record_charges(&mut self, tape: lash_kernel_vm::ChargeTape) {
         self.0.record_charges(tape);
     }

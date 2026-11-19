@@ -339,6 +339,11 @@ fn streams_and_retry_ids_are_independent_and_shared_blobs_have_two_owners() {
         let right = generator.plan(1, ordinal).unwrap();
         let left_payload = generator.materialize(&left).unwrap();
         let right_payload = generator.materialize(&right).unwrap();
+        assert_eq!(
+            left_payload.attachments.len(),
+            right_payload.attachments.len(),
+            "the two owners materialize the same number of shared attachments"
+        );
         for (a, b) in left_payload
             .attachments
             .iter()
