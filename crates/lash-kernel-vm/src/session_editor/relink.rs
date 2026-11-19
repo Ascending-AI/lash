@@ -222,18 +222,22 @@ impl SessionEditor {
                     images.push([self.image(walk, key)?, self.image(walk, member)?]);
                 }
                 let pairs = entries.as_chunks::<2>().0;
-                if let Some(first) = pairs
+                // Entries before the first moved key keep their keys and
+                // take their new values in place; from that key on the
+                // table is keyed anew. The prefix goes first, so a rekeyed
+                // entry whose key now equals a prefix key overwrites it.
+                let first = pairs
                     .iter()
                     .zip(&images)
                     .position(|(old, new)| moved(old[0], new[0]))
-                {
-                    self.rekey(table, &pairs[first..], &images[first..])?;
-                } else {
-                    for (old, [key, image]) in pairs.iter().zip(images) {
-                        if moved(old[1], image) {
-                            self.arena_write(|arena| arena.table_write(table, key, image))?;
-                        }
+                    .unwrap_or(pairs.len());
+                for (old, [key, image]) in pairs[..first].iter().zip(&images[..first]) {
+                    if moved(old[1], *image) {
+                        self.arena_write(|arena| arena.table_write(table, *key, *image))?;
                     }
+                }
+                if first < pairs.len() {
+                    self.rekey(table, &pairs[first..], &images[first..])?;
                 }
             }
             Value::Closure(closure) => {

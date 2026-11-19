@@ -477,7 +477,7 @@ fn a_relinked_saved_function_is_the_new_callable_as_a_key_and_a_member() {
     };
 
     // `f` was saved in an earlier cell; this one keys a map and a set by
-    // it.
+    // it, and the map also holds it as a value before that key.
     let mut heap = SlotHeap::durable(
         u64::MAX,
         crate::heap::open::Durable {
@@ -504,7 +504,7 @@ fn a_relinked_saved_function_is_the_new_callable_as_a_key_and_a_member() {
     )
     .unwrap();
     let (result, keyed) = relinked(
-        "main {\n  let m = map{f: 1, \"z\": 2}\n  let s = set{f, \"z\"}\n  return [m[f], s[f]]\n}",
+        "main {\n  let m = map{\"a\": f, f: 1, \"z\": 2}\n  let s = set{f, \"z\"}\n  return [m[f], s[f]]\n}",
         Some(SessionRoot::run(page)),
         "f",
         &["f", "m", "s"],
@@ -520,6 +520,7 @@ fn a_relinked_saved_function_is_the_new_callable_as_a_key_and_a_member() {
     assert_eq!(
         read("m"),
         Datum::Map(vec![
+            (Datum::Text("a".into()), new.clone()),
             (new.clone(), int(1)),
             (Datum::Text("z".into()), int(2))
         ])
@@ -532,7 +533,8 @@ fn a_relinked_saved_function_is_the_new_callable_as_a_key_and_a_member() {
     let Record::Map(entries) = record(&directory, bound(&carried, "m")) else {
         panic!("`m` holds a map");
     };
-    assert_eq!(entries[0].0.id(), Some(saved));
+    assert_eq!(entries[0].1.id(), Some(saved));
+    assert_eq!(entries[1].0.id(), Some(saved));
     let Record::Set(members) = record(&directory, bound(&carried, "s")) else {
         panic!("`s` holds a set");
     };
