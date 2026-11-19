@@ -192,9 +192,6 @@ impl ProcessRecord {
     pub fn start_storage(&self) -> impl Serialize + '_ {
         #[derive(Serialize)]
         struct Start<'a> {
-            id: &'a ProcessId,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            start_key: &'a Option<StartKey>,
             lifetime: &'a LifetimeDecision,
             ancestry: &'a Ancestry,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -209,8 +206,8 @@ impl ProcessRecord {
         }
         // Exhaustive so every new record field must choose its storage owner.
         let Self {
-            id,
-            start_key,
+            id: _,
+            start_key: _,
             lifetime,
             ancestry,
             session_capability,
@@ -228,8 +225,6 @@ impl ProcessRecord {
             lifecycle: _,
         } = self;
         Start {
-            id,
-            start_key,
             lifetime,
             ancestry,
             session_capability,

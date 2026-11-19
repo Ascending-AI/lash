@@ -5,7 +5,7 @@
 /// projection and JSON aggregation of `mail_page`.
 #[macro_export]
 macro_rules! mailbox_query {
-    ($budget:literal, $rows:literal, $select:literal) => {
+    ($budget:literal, $rows:literal, $select:expr) => {
         concat!(
             "WITH mail_candidates AS (
                 SELECT seq, kind, appended_at_ms, octet_length(body) AS body_bytes

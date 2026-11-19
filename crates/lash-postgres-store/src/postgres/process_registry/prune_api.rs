@@ -28,8 +28,7 @@ async fn select_prunable<'c>(
     let mut prunable = Vec::new();
     for row in rows {
         let record_json: String = row.get(0);
-        let record: ProcessRecord =
-            serde_json::from_str(&record_json).map_err(process_decode_error)?;
+        let record: ProcessRecord = registry_transitions::decode_record(&record_json)?;
         if filter.is_none_or(|filter| filter.matches_record(&record)) {
             prunable.push(record);
         }

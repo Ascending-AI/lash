@@ -402,8 +402,8 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
     let second_node = format!("generation-node-b:{nonce}");
     sqlx::query(
         "INSERT INTO lash_graph_nodes
-         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, body_bytes)
-         VALUES ($1, $2, NULL, 3, $2, '{}', 2)",
+         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+         VALUES ($1, $2, NULL, 3, $2, '{}')",
     )
     .bind(session_id.as_str())
     .bind(&first_node)
@@ -421,7 +421,6 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
     .bind(vec![Option::<String>::None])
     .bind(vec![3_i64])
     .bind(vec![second_node.clone()])
-    .bind(vec![2_i64])
     .bind(vec!["{}".to_owned()])
     .fetch_all(storage.pool())
     .await

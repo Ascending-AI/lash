@@ -190,6 +190,18 @@ async fn save_locked_process_tx(
     Ok(driver.map(|stored| terminal_driver.or(stored)))
 }
 
+pub(crate) fn read_event_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<lash_execution_contracts::process::ProcessEventRow, PluginError> {
+    Ok(lash_execution_contracts::process::ProcessEventRow {
+        sequence: row.try_get(0).map_err(plugin_sqlx_error)?,
+        event_type: row.try_get(1).map_err(plugin_sqlx_error)?,
+        replay_key: row.try_get(2).map_err(plugin_sqlx_error)?,
+        header: row.try_get(3).map_err(plugin_sqlx_error)?,
+        payload: row.try_get(4).map_err(plugin_sqlx_error)?,
+    })
+}
+
 /// Read the immutable header and match its digest before restoring the
 /// retained payload or the matching append's released fact.
 pub(crate) async fn load_event_by_key_tx(
@@ -207,13 +219,10 @@ pub(crate) async fn load_event_by_key_tx(
     else {
         return Ok(None);
     };
-    let json: String = row.get(0);
-    let payload: Option<String> = row.get(1);
-    let digest: String = row.get(2);
-    let header: lash_execution_contracts::process::ProcessEventHeader =
-        serde_json::from_str(&json).map_err(process_decode_error)?;
-    let event = header.replay(payload.as_deref(), &digest, append, fleet_format)?;
-    Ok(Some(event))
+    let digest: String = row.try_get(5).map_err(plugin_sqlx_error)?;
+    read_event_row(&row)?
+        .replay(process_id, &digest, append, fleet_format)
+        .map(Some)
 }
 
 pub(crate) async fn next_process_event_sequence_tx(
@@ -418,7 +427,7 @@ async fn stage_process_event_append_tx(
                 .bind(event.invocation.effect_replay_key())
                 .bind(serde_json::to_string(&header).map_err(process_decode_error)?)
                 .bind(serde_json::to_string(&event.fact.payload()).map_err(process_decode_error)?)
-                .bind(header.replay_digest(&event.fact))
+                .bind(event.replay_digest())
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(plugin_sqlx_error)?;

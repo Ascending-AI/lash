@@ -2,8 +2,8 @@
 //!
 //! `start_json` is immutable creation metadata; `execution_json` is the current
 //! input/definition pair, replaced only on succession; `lifecycle_json` is the
-//! mutable event fold. Reads concatenate their disjoint object members to
-//! assemble the existing rich `ProcessRecord`, without storing it again. All three
+//! mutable event fold. Reads combine the indexed identity with their disjoint
+//! object members to assemble the rich `ProcessRecord`. All three
 //! codecs emit nonempty JSON objects. Text concatenation preserves payload
 //! strings, including escaped NULs which PostgreSQL JSONB cannot represent.
 //!
@@ -14,6 +14,36 @@
 //! `status` carries domain vocabulary (`lash_execution_contracts::process::ProcessStatus`). A
 //! statement here names a lifecycle partition as a `{{term(column)}}` token
 //! and never spells it.
+
+/// Assemble the registry record from one row. Both dialects' JSON array
+/// constructors quote the two owner fields. Keep the other columns as JSON
+/// text so PostgreSQL can carry escaped NULs in arbitrary process payloads.
+#[macro_export]
+macro_rules! process_record_json {
+    ($prefix:literal) => {
+        concat!(
+            "('{\"id\":' || COALESCE(CAST(json_array(",
+            $prefix,
+            "process_id) -> 0 AS TEXT), 'null')",
+            " || ',\"start_key\":' || COALESCE(CAST(json_array(",
+            $prefix,
+            "start_key) -> 0 AS TEXT), 'null')",
+            " || ',' || substr(",
+            $prefix,
+            "start_json, 2, length(",
+            $prefix,
+            "start_json) - 2)",
+            " || ',' || substr(",
+            $prefix,
+            "execution_json, 2, length(",
+            $prefix,
+            "execution_json) - 2)",
+            " || ',' || substr(",
+            $prefix,
+            "lifecycle_json, 2))"
+        )
+    };
+}
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "processes";
@@ -32,7 +62,11 @@ pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
 /// three result columns: the sequence the caller resumes from, the kind that
 /// says which arm produced the row, and the payload. The literal `'upsert'` is
 /// the arm's name, not a lifecycle label.
-pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS payload";
+pub const CHANGE_FEED_UPSERT_COLUMNS: &str = concat!(
+    "change_seq, 'upsert' AS kind, ",
+    crate::process_record_json!(""),
+    " AS payload"
+);
 
 crate::statements! {
     /// `processes` statements both backends issue verbatim.
@@ -44,11 +78,11 @@ crate::statements! {
         select_driver_json_by_id = "SELECT driver_json FROM processes WHERE process_id = ?1";
 
         /// The stored record for `?1`.
-        select_record_json_by_id = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes WHERE process_id = ?1";
+        select_record_json_by_id = concat!("SELECT ", crate::process_record_json!(""), " AS record_json FROM processes WHERE process_id = ?1");
 
         /// The retained process registered under start key `?1`, if any: the
         /// idempotency half of a registration (ADR 0107).
-        select_record_json_by_start_key = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes WHERE start_key = ?1";
+        select_record_json_by_start_key = concat!("SELECT ", crate::process_record_json!(""), " AS record_json FROM processes WHERE start_key = ?1");
 
         exists_by_id = "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)";
 

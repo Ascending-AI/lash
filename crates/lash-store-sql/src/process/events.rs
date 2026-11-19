@@ -24,14 +24,14 @@ crate::statements! {
         /// The event process `?1` already recorded under replay key `?2`, if
         /// any, with its optional payload and immutable replay digest:
         /// the idempotency half of an append.
-        select_by_replay_key = "SELECT header_json, payload_json, replay_digest
+        select_by_replay_key = "SELECT sequence, event_type, idempotency_key, header_json, payload_json, replay_digest
                  FROM process_event_log
                  WHERE process_id = ?1 AND idempotency_key = ?2";
 
         /// One indexed event under process `?1` and replay key `?2`, bounded
         /// by the snapshot sequence `?3`. The caller checks its sequence
         /// against the release horizon before decoding the payload.
-        read_by_replay_key = "SELECT sequence, (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_event_log
+        read_by_replay_key = "SELECT sequence, event_type, idempotency_key, header_json, payload_json FROM process_event_log
                  WHERE process_id = ?1 AND idempotency_key = ?2 AND sequence <= ?3";
 
         /// The highest sequence process `?1` has recorded, or `NULL` when it
@@ -39,7 +39,7 @@ crate::statements! {
         select_max_sequence = "SELECT MAX(sequence) FROM process_event_log WHERE process_id = ?1";
 
         /// At most `?3` full rows process `?1` recorded after `?2`.
-        page_full = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_event_log
+        page_full = "SELECT sequence, event_type, idempotency_key, header_json, payload_json FROM process_event_log
                  WHERE process_id = ?1 AND sequence > ?2
                  ORDER BY sequence ASC LIMIT ?3";
 
@@ -51,7 +51,7 @@ crate::statements! {
         /// The last `?2` retained events of process `?1`, newest first: a
         /// released row is never part of the tail. The caller reverses them;
         /// the descending order is what lets the primary key serve the limit.
-        list_recent = "SELECT (substr(header_json, 1, length(header_json) - 1) || ',\"payload\":' || COALESCE(payload_json, 'null') || '}') FROM process_event_log
+        list_recent = "SELECT sequence, event_type, idempotency_key, header_json, payload_json FROM process_event_log
                          WHERE process_id = ?1
                            AND sequence > COALESCE(
                                (SELECT released_through FROM process_event_horizons

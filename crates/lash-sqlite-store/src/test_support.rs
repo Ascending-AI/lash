@@ -48,15 +48,6 @@ impl StoreTestSupport for SqliteStore {
                         sql.set_frame_pointer_for_testing.sql(),
                         params![node_id.as_str(), frame.as_str()],
                     )?,
-                    GraphRowCorruption::SetBodyBytes(bytes) => {
-                        let bytes =
-                            i64::try_from(bytes).map_err(|_| rusqlite::Error::InvalidQuery)?;
-                        crate::conn::cached_execute(
-                            tx,
-                            sql.set_body_bytes_for_testing.sql(),
-                            params![node_id.as_str(), bytes],
-                        )?
-                    }
                     GraphRowCorruption::SetGeneration(generation) => {
                         let generation =
                             i64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?;
@@ -86,12 +77,10 @@ impl StoreTestSupport for SqliteStore {
                         let body = node.encode_storage_body(fleet).map_err(|error| {
                             rusqlite::Error::ToSqlConversionFailure(Box::new(error))
                         })?;
-                        let bytes =
-                            i64::try_from(body.len()).map_err(|_| rusqlite::Error::InvalidQuery)?;
                         crate::conn::cached_execute(
                             tx,
                             sql.set_body_for_testing.sql(),
-                            params![node_id.as_str(), body, bytes],
+                            params![node_id.as_str(), body],
                         )?
                     }
                 };

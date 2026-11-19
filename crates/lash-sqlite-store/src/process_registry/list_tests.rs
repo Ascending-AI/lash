@@ -290,3 +290,167 @@ fn process_lifecycle_write_size() {
         "immutable input must not be resubmitted by lifecycle UPDATEs"
     );
 }
+
+async fn registered_process_with_start_key() -> (Arc<SqliteProcessRegistry>, ProcessRecord) {
+    use lash_execution_contracts::process::{
+        EngineLaunch, Lifetime, ProcessInput, ProcessProvenance, ProcessRegistrar,
+    };
+
+    let stores = SqliteStoreSet::memory().await.expect("SQLite");
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = stores.process_registry();
+    let registration = ProcessRegistration::new(
+        ProcessInput::Engine {
+            kind: "sql-authority".into(),
+            payload: serde_json::json!({}),
+            launch: EngineLaunch::new(
+                lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+                None,
+            ),
+        },
+        ProcessProvenance::host(),
+        Lifetime::Detached,
+    )
+    .with_start_key(Some(lash_core_store::process_identity::StartKey::for_host(
+        "sql-authority",
+    )));
+    let record = registry
+        .register_process(registration)
+        .await
+        .expect("register process");
+    (registry, record)
+}
+
+#[tokio::test]
+async fn process_lookup_takes_identity_from_the_indexed_row() {
+    let (registry, record) = registered_process_with_start_key().await;
+    let key = record.start_key.expect("registered start key");
+    let process_id = record.id.clone();
+    let stored = registry
+        .get_process(&record.id)
+        .await
+        .expect("look up process")
+        .expect("retained process");
+    assert_eq!(stored.id, record.id);
+    assert_eq!(stored.start_key.as_ref(), Some(&key));
+    let other = ProcessId::fixture("different-process");
+    let other_key = lash_core_store::process_identity::StartKey::for_host("different-start");
+    registry
+        .conn
+        .call(move |conn| {
+            conn.execute(
+            "UPDATE processes SET start_json = json_set(start_json, '$.id', ?2, '$.start_key', ?3)
+             WHERE process_id = ?1",
+            params![process_id.as_str(), other.as_str(), other_key.as_str()],
+        )
+        })
+        .await
+        .expect("write conflicting identity copies");
+
+    for result in [
+        registry.get_process(&record.id).await,
+        registry.get_process_by_start_key(&key).await,
+    ] {
+        assert!(
+            matches!(
+                result,
+                Err(lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt { .. })
+            ),
+            "{result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn process_history_takes_sequence_from_the_event_row() {
+    use lash_execution_contracts::process::{
+        ProcessEventLog, ProcessEventQueryMode, ProcessEventReadOutcome,
+        ProcessRegistryTestSupport, WaitKind, WaitState,
+    };
+    use std::num::NonZeroUsize;
+
+    let (registry, record) = registered_process_with_start_key().await;
+    let wait = WaitState {
+        kind: WaitKind::Call {
+            resume_at_ms: None,
+            call_id: lash_protocol_types::ToolCallId::fixture("sql-authority"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::from("sql-authority"),
+        },
+        since_ms: 10,
+        site: None,
+    };
+    let key = "sql-authority:wait";
+    let request = ProcessEventAppendRequest::wait_entered(&record.id, &wait).with_replay_key(key);
+    registry
+        .append_event_for_testing(&record.id, request.clone())
+        .await
+        .expect("append");
+    let process_id = record.id.clone();
+    let sequence = registry.conn.call(move |conn| {
+        conn.query_row(
+            "UPDATE process_events SET header_json = json_set(header_json, '$.sequence', sequence + 10)
+             WHERE process_id = ?1 RETURNING sequence",
+            [process_id.as_str()],
+            |row| row.get::<_, u64>(0),
+        )
+    }).await.expect("write conflicting sequence copy");
+
+    let limit = NonZeroUsize::new(1).expect("page size");
+    let ProcessEventReadOutcome::Retained(page) = registry
+        .event_page_after(&record.id, 0, limit, ProcessEventQueryMode::Full)
+        .await
+        .expect("full history")
+    else {
+        panic!("history is retained");
+    };
+    let lash_execution_contracts::process::ProcessEventPageEvents::Full(events) = page.events
+    else {
+        panic!("full events");
+    };
+    let [event] = events.as_slice() else {
+        panic!("one event");
+    };
+    assert_eq!(event.sequence, sequence);
+    assert_eq!(
+        event.invocation,
+        lash_execution_contracts::process_event_invocation(
+            &record.id,
+            sequence,
+            event.fact.event_type(),
+            request.replay.clone(),
+        )
+    );
+    let ProcessEventReadOutcome::Retained(page) = registry
+        .event_page_after(&record.id, 0, limit, ProcessEventQueryMode::Lite)
+        .await
+        .expect("lite history")
+    else {
+        panic!("history is retained");
+    };
+    assert_eq!(
+        page.last_sequence(|event| event.sequence, |event| event.sequence),
+        Some(sequence)
+    );
+    let tail = registry
+        .recent_events(&record.id, 1)
+        .await
+        .expect("recent history");
+    assert_eq!(tail.as_slice(), events.as_slice());
+
+    let ProcessEventReadOutcome::Retained(Some(event)) = registry
+        .event_by_replay_key(&record.id, key, sequence)
+        .await
+        .expect("keyed history")
+    else {
+        panic!("event is retained");
+    };
+    assert_eq!(event.sequence, sequence);
+    let replay = registry
+        .append_event_for_testing(&record.id, request)
+        .await
+        .expect("append replay");
+    assert_eq!(replay.event.sequence, sequence);
+}

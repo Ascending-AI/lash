@@ -13,10 +13,10 @@ lash_store_sql::statements! {
         /// positions and one bounded page, with process `?2`'s
         /// actor row, its registry record (or the tombstone of a pruned
         /// one) and execution root `?3`'s row.
-        open = lash_store_sql::mailbox_query!("?4", "?5", "SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+        open = lash_store_sql::mailbox_query!("?4", "?5", concat!("SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
                     p.state_rev, p.driver_json, p.cancel_requested_at_ms, p.status,
                     p.cascade_cursor, p.written_epoch, p.published_event_sequence,
-                    (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)),
+                    ", lash_store_sql::process_record_json!("p."), ",
                     t.terminal_label, t.pruned_at_ms,
                     s.rev, (SELECT hash FROM blobs WHERE id = s.root_ref) AS root_ref, s.written_epoch, s.commit_id,
                     (SELECT json_group_array(json_array(seq, kind, body, appended_at_ms, body_bytes)) FROM mail_page)
@@ -24,7 +24,7 @@ lash_store_sql::statements! {
              LEFT JOIN processes p ON p.process_id = ?2
              LEFT JOIN process_tombstones t ON t.process_id = ?2
              LEFT JOIN exec_snapshots s ON s.exec_key = ?3
-             WHERE a.actor_key = ?1");
+             WHERE a.actor_key = ?1"));
         control = "SELECT json_extract(lifecycle_json, '$.cancel_request'),
                     json_extract(lifecycle_json, '$.last_event_sequence'),
                     json_extract(lifecycle_json, '$.updated_at_ms'),

@@ -14,12 +14,12 @@ fn frame_retention_follows_forks_and_admissions_after_producer_deletion() {
          INSERT INTO deleted_sessions(session_id, created_at_ms, head_revision, relation_kind)
              VALUES ('producer', 0, 1, 'root');
          INSERT INTO graph_nodes(session_id, node_id, parent_node_id, generation,
-                                 frame_node_id, body_bytes, node_json, tombstoned) VALUES
-             ('producer', 'frame', NULL, 0, 'frame', 0, '{}', 0),
-             ('fork-one', 'leaf-one', 'frame', 1, 'frame', 0, '{}', 0),
-             ('fork-two', 'leaf-two', 'frame', 1, 'frame', 0, '{}', 0),
-             ('barrier', 'barrier', 'frame', 1, 'frame', 0, '{}', 1),
-             ('barrier', 'past-barrier', 'barrier', 2, 'frame', 0, '{}', 0);
+                                 frame_node_id, node_json, tombstoned) VALUES
+             ('producer', 'frame', NULL, 0, 'frame', '{}', 0),
+             ('fork-one', 'leaf-one', 'frame', 1, 'frame', '{}', 0),
+             ('fork-two', 'leaf-two', 'frame', 1, 'frame', '{}', 0),
+             ('barrier', 'barrier', 'frame', 1, 'frame', '{}', 1),
+             ('barrier', 'past-barrier', 'barrier', 2, 'frame', '{}', 0);
          INSERT INTO session_revisions(session_id, head_revision, leaf_node_id, config_ref) VALUES
              ('fork-one', 1, 'leaf-one', (SELECT id FROM blobs WHERE hash = X'01')),
              ('barrier', 1, 'past-barrier', (SELECT id FROM blobs WHERE hash = X'01'));",

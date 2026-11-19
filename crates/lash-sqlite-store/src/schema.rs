@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     parent_node_id TEXT,
     generation     INTEGER NOT NULL CONSTRAINT ck_graph_nodes_generation CHECK (generation >= 0),
     frame_node_id  TEXT NOT NULL,
-    body_bytes     INTEGER NOT NULL CONSTRAINT ck_graph_nodes_body_bytes CHECK (body_bytes >= 0),
+    body_bytes     INTEGER NOT NULL GENERATED ALWAYS AS (length(CAST(node_json AS BLOB))) STORED,
     node_json      TEXT NOT NULL,
     tombstoned     INTEGER NOT NULL DEFAULT 0,
     UNIQUE (session_id, generation)

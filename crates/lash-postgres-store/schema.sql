@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS lash_graph_nodes (
     generation BIGINT NOT NULL CONSTRAINT ck_graph_nodes_generation CHECK (generation >= 0),
     frame_node_id TEXT NOT NULL,
     node_json TEXT NOT NULL,
-    body_bytes BIGINT NOT NULL CONSTRAINT ck_graph_nodes_body_bytes CHECK (body_bytes >= 0),
+    body_bytes BIGINT NOT NULL GENERATED ALWAYS AS (octet_length(node_json)) STORED,
     tombstoned BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (session_id, generation)
 );
@@ -1566,9 +1566,9 @@ DECLARE
     v_environment TEXT[];
     v_sealed BOOLEAN := FALSE;
 BEGIN
-    -- Generated from this build's statements (registry bad6811304bd104e); a call
+    -- Generated from this build's statements (registry 8117492b6213667e); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'bad6811304bd104e'
+    IF p_registry IS DISTINCT FROM '8117492b6213667e'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2327,7 +2327,7 @@ BEGIN
             END LOOP;
         WHEN 'graph_node.insert_batch' THEN
             v_rows := 0;
-            FOR v_row IN INSERT INTO lash_graph_nodes (session_id, node_id, parent_node_id, generation, frame_node_id, body_bytes, node_json) SELECT (v_p->>0), node.node_id, node.parent_node_id, node.generation, node.frame_node_id, node.body_bytes, node.node_json FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element::BIGINT FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::bigint[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element::BIGINT FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::bigint[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->6) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[]) AS node(node_id, parent_node_id, generation, frame_node_id, body_bytes, node_json) ON CONFLICT DO NOTHING RETURNING node_id LOOP
+            FOR v_row IN INSERT INTO lash_graph_nodes (session_id, node_id, parent_node_id, generation, frame_node_id, node_json) SELECT (v_p->>0), node.node_id, node.parent_node_id, node.generation, node.frame_node_id, node.node_json FROM UNNEST((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element::BIGINT FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::bigint[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->5) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[]) AS node(node_id, parent_node_id, generation, frame_node_id, node_json) ON CONFLICT DO NOTHING RETURNING node_id LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -3327,7 +3327,7 @@ DECLARE
     v_when JSONB;
     v_debts TEXT[];
 BEGIN
-    IF p_registry IS DISTINCT FROM 'bad6811304bd104e'
+    IF p_registry IS DISTINCT FROM '8117492b6213667e'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_register_process_execution: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;

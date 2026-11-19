@@ -96,7 +96,7 @@ const WINDOW_ROWS: &str = "WITH readable_sessions AS (
     UNION ALL SELECT ancestor_session_id, fork_generation FROM lash_fork_lineage
       WHERE session_id = $1)
     SELECT node.node_id, node.parent_node_id, node.node_json, node.generation,
-           node.frame_node_id, node.body_bytes
+           node.frame_node_id
     FROM readable_sessions AS readable
     JOIN lash_graph_nodes AS node ON node.session_id = readable.session_id
       AND node.generation BETWEEN $2 AND $3
@@ -329,13 +329,6 @@ impl WindowRows<'_> {
             let node_id: String = row.get("node_id");
             let parent: Option<String> = row.get("parent_node_id");
             let body: String = row.get("node_json");
-            let body_bytes: i64 = row.get("body_bytes");
-            if body_bytes < 0 || usize::try_from(body_bytes).ok() != Some(body.len()) {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("body_bytes differs at `{node_id}`"),
-                ));
-            }
             let generation: i64 = row.get("generation");
             if generation != from + i64::try_from(offset).unwrap_or(i64::MAX) {
                 return Err(corrupt(
@@ -840,12 +833,6 @@ impl SessionHistoryStore for PostgresStore {
                 ));
             }
             let json: String = body.get("node_json");
-            if json.len() as u64 != header.size {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("body_bytes differs at `{id}`"),
-                ));
-            }
             let record = SessionNodeRecord::decode_storage_body_for_fleet(
                 id,
                 header.parent,
@@ -1071,13 +1058,6 @@ impl SessionHistoryStore for PostgresStore {
             let node_id: String = row.get("node_id");
             let parent: Option<String> = row.get("parent_node_id");
             let body: String = row.get("node_json");
-            let bytes = u64_from_sql("SessionGraph", "body_bytes", row.get("body_bytes"))?;
-            if body.len() as u64 != bytes {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("body_bytes differs at `{node_id}`"),
-                ));
-            }
             bodies.insert(node_id, (parent, body));
         }
         crate::observed_sql::control("COMMIT", tx.commit())

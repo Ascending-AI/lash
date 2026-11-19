@@ -89,18 +89,21 @@ pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
 
     let records = sqlite_simple_json_rows(
         &process,
-        "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json, change_seq FROM processes ORDER BY process_id",
+        "SELECT process_id, start_key, start_json, execution_json, lifecycle_json, change_seq FROM processes ORDER BY process_id",
         |row| {
-            let record: String = row.get(0)?;
             Ok(normalized_json(serde_json::json!({
-                "change_seq": row.get::<_, i64>(1)?,
-                "record": serde_json::from_str::<serde_json::Value>(&record).unwrap(),
+                "process_id": row.get::<_, String>(0)?,
+                "start_key": row.get::<_, Option<String>>(1)?,
+                "start": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(2)?).unwrap(),
+                "execution": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(3)?).unwrap(),
+                "lifecycle": serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(4)?).unwrap(),
+                "change_seq": row.get::<_, i64>(5)?,
             })))
         },
     );
     let events = sqlite_simple_json_rows(
         &process,
-        "SELECT process_id, header_json, payload_json, replay_digest FROM process_event_log ORDER BY process_id, sequence",
+        "SELECT process_id, header_json, payload_json, replay_digest, sequence, event_type, idempotency_key FROM process_event_log ORDER BY process_id, sequence",
         |row| {
             let header: String = row.get(1)?;
             let payload: Option<String> = row.get(2)?;
@@ -109,6 +112,9 @@ pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
                 "header": serde_json::from_str::<serde_json::Value>(&header).unwrap(),
                 "payload": payload.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
                 "replay_digest": row.get::<_, String>(3)?,
+                "sequence": row.get::<_, i64>(4)?,
+                "event_type": row.get::<_, String>(5)?,
+                "replay_key": row.get::<_, Option<String>>(6)?,
             })))
         },
     );
@@ -173,23 +179,49 @@ where
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
 pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
-    let record_rows: Vec<(String, i64)> =
-        sqlx::query_as("SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json, change_seq FROM lash_processes ORDER BY process_id")
+    let record_rows: Vec<(String, Option<String>, String, String, String, i64)> =
+        sqlx::query_as("SELECT process_id, start_key, start_json, execution_json, lifecycle_json, change_seq FROM lash_processes ORDER BY process_id")
             .fetch_all(pool)
             .await
             .unwrap();
-    let records = record_rows.into_iter().map(|(record, change_seq)| normalized_json(serde_json::json!({"change_seq": change_seq, "record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))).collect();
-    let event_rows: Vec<(String, String, Option<String>, String)> = sqlx::query_as(
-        "SELECT process_id, header_json, payload_json, replay_digest FROM lash_process_event_log ORDER BY process_id, sequence",
+    let records = record_rows
+        .into_iter()
+        .map(
+            |(process_id, start_key, start, execution, lifecycle, change_seq)| {
+                normalized_json(serde_json::json!({
+                    "process_id": process_id,
+                    "start_key": start_key,
+                    "start": serde_json::from_str::<serde_json::Value>(&start).unwrap(),
+                    "execution": serde_json::from_str::<serde_json::Value>(&execution).unwrap(),
+                    "lifecycle": serde_json::from_str::<serde_json::Value>(&lifecycle).unwrap(),
+                    "change_seq": change_seq,
+                }))
+            },
+        )
+        .collect();
+    type EventRow = (
+        String,
+        String,
+        Option<String>,
+        String,
+        i64,
+        String,
+        Option<String>,
+    );
+    let event_rows: Vec<EventRow> = sqlx::query_as(
+        "SELECT process_id, header_json, payload_json, replay_digest, sequence, event_type, idempotency_key FROM lash_process_event_log ORDER BY process_id, sequence",
     )
     .fetch_all(pool)
     .await
     .unwrap();
-    let events = event_rows.into_iter().map(|(process_id, header, payload, digest)| normalized_json(serde_json::json!({
+    let events = event_rows.into_iter().map(|(process_id, header, payload, digest, sequence, event_type, replay_key)| normalized_json(serde_json::json!({
         "process_id": process_id,
         "header": serde_json::from_str::<serde_json::Value>(&header).unwrap(),
         "payload": payload.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
         "replay_digest": digest,
+        "sequence": sequence,
+        "event_type": event_type,
+        "replay_key": replay_key,
     }))).collect();
     let observers = sqlx::query_as(
         "SELECT session_id, process_id FROM lash_process_observers ORDER BY session_id, process_id",

@@ -329,14 +329,13 @@ fn window_nodes(
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
             ))
         })
         .map_err(sqlite_error)?;
     let mut nodes = Vec::new();
     let mut total = 0;
     for row in rows {
-        let (id, parent, body, generation, pointer, bytes) = row.map_err(sqlite_error)?;
+        let (id, parent, body, generation, pointer) = row.map_err(sqlite_error)?;
         if generation != from + i64::try_from(nodes.len()).unwrap_or(i64::MAX) {
             return Err(corrupt("SessionGraph", format!("generation gap at `{id}`")));
         }
@@ -346,13 +345,6 @@ fn window_nodes(
                 violation: lash_core_store::store::WindowAnchorViolation::ForeignFramePointer,
             });
         }
-        let bytes = nonnegative("SessionGraph", "body_bytes", bytes)?;
-        if bytes != body.len() as u64 {
-            return Err(corrupt(
-                "SessionGraph",
-                format!("body_bytes differs at `{id}`"),
-            ));
-        }
         nodes.push(
             lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                 id, parent, &body, fleet,
@@ -360,7 +352,7 @@ fn window_nodes(
             .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
         );
         decoded.fetch_add(1, Ordering::Relaxed);
-        total += bytes;
+        total += body.len() as u64;
     }
     Ok((nodes, total))
 }
@@ -763,25 +755,15 @@ fn committed_turns(
         )?;
         let mut nodes = Vec::with_capacity(receipt.appended().len());
         for node_id in receipt.appended() {
-            let Some((parent, body, bytes)) = body_stmt
+            let Some((parent, body)) = body_stmt
                 .query_row(params![node_id.as_str(), session.as_str()], |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
+                    Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
                 })
                 .optional()
                 .map_err(sqlite_error)?
             else {
                 continue;
             };
-            if body.len() as u64 != nonnegative("SessionGraph", "body_bytes", bytes)? {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("body_bytes differs at `{node_id}`"),
-                ));
-            }
             nodes.push(
                 lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                     node_id.to_string(),
@@ -977,12 +959,6 @@ fn ancestors(
         let body: String = body_stmt
             .query_row(params![header.id], |row| row.get(0))
             .map_err(sqlite_error)?;
-        if body.len() as u64 != nonnegative("SessionGraph", "body_bytes", header.bytes)? {
-            return Err(corrupt(
-                "SessionGraph",
-                format!("body_bytes differs at `{}`", header.id),
-            ));
-        }
         let record =
             lash_core_store::session_graph::SessionNodeRecord::decode_storage_body_for_fleet(
                 header.id,

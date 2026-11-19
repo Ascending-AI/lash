@@ -1062,7 +1062,7 @@ pub struct ProcessEventRelease {
 
 #[path = "events/header.rs"]
 mod header;
-pub use header::ProcessEventHeader;
+pub use header::{ProcessEventHeader, ProcessEventRow};
 
 /// Result of reading a process-event history without collapsing retention into
 /// an empty page.

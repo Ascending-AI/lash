@@ -16,12 +16,10 @@ pub enum GraphRowCorruption {
     DeleteRow,
     SetParent(Option<NodeId>),
     SetFramePointer(NodeId),
-    SetBodyBytes(u64),
     /// Rewrite the row's stored generation, leaving its parent edge as it is.
     SetGeneration(u64),
     /// Rewrite the row to a valid `Plugin` payload,
-    /// [`GraphRowCorruption::plugin_payload`], and set `body_bytes` to the
-    /// new body's JSON length. The node id, parent, generation and frame
+    /// [`GraphRowCorruption::plugin_payload`]. The node id, parent, generation and frame
     /// pointer are preserved, so a window base becomes a non-`FrameOpen` row.
     SetPayloadKindToPlugin,
 }

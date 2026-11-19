@@ -56,8 +56,8 @@ pub use events::{
     ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHeader,
     ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventRelease, ProcessLifecycleFact, ProcessOutcomeNotRetained, ProcessResumeRefusal,
-    ProcessTerminal, terminal_append_request,
+    ProcessEventRelease, ProcessEventRow, ProcessLifecycleFact, ProcessOutcomeNotRetained,
+    ProcessResumeRefusal, ProcessTerminal, terminal_append_request,
 };
 pub use lash_kernel_value::identity::SessionId;
 pub use lash_vocabulary::identity::ProcessId;

@@ -2326,3 +2326,45 @@ mod configuration;
 
 #[path = "tests/prepared.rs"]
 mod prepared;
+
+#[test]
+fn graph_history_byte_length_is_owned_by_the_utf8_body() {
+    let connection = Connection::open_in_memory().expect("SQLite");
+    connection
+        .execute_batch(crate::schema::SCHEMA)
+        .expect("schema");
+    let body = r#"{"text":"雪☃"}"#;
+    // A writer that still supplies a cached length must be refused.
+    let attempt = connection.execute(
+        "INSERT INTO graph_nodes
+         (session_id, node_id, generation, frame_node_id, node_json, body_bytes)
+         VALUES ('session', 'node', 0, 'node', ?1, 1)",
+        [body],
+    );
+    assert!(
+        matches!(attempt, Err(rusqlite::Error::SqliteFailure(_, _))),
+        "{attempt:?}"
+    );
+    connection
+        .execute(
+            "INSERT INTO graph_nodes (session_id, node_id, generation, frame_node_id, node_json)
+         VALUES ('session', 'node', 0, 'node', ?1)",
+            [body],
+        )
+        .expect("insert owner body");
+    let size = || {
+        connection
+            .query_row(
+                "SELECT body_bytes FROM graph_nodes WHERE node_id = 'node'",
+                [],
+                |row| row.get::<_, usize>(0),
+            )
+            .expect("read size without the body")
+    };
+    assert_eq!(size(), body.len());
+    let changed_body = r#"{"text":"🦀"}"#;
+    connection
+        .execute("UPDATE graph_nodes SET node_json = ?1", [changed_body])
+        .expect("update body");
+    assert_eq!(size(), changed_body.len());
+}

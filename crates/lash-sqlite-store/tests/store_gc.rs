@@ -740,8 +740,8 @@ async fn sqlite_delete_reclaims_tombstones_with_no_live_owner() {
             conn.execute(
                 "INSERT INTO graph_nodes
                      (session_id, node_id, parent_node_id, generation, frame_node_id,
-                      body_bytes, node_json, tombstoned)
-                 VALUES (?1, ?2, NULL, 99, ?2, 2, '{}', 1)",
+                      node_json, tombstoned)
+                 VALUES (?1, ?2, NULL, 99, ?2, '{}', 1)",
                 rusqlite::params![owner, node_id],
             )
             .expect("seed a tombstoned row");

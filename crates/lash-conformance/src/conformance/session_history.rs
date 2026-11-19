@@ -396,7 +396,6 @@ where
         "middle-row",
         "gen0-parent",
         "base-no-parent",
-        "bad-size",
     ] {
         let store = make(case).await;
         let mut state = state(&format!("history-corrupt-{case}"));
@@ -447,11 +446,6 @@ where
                         frame.node_id(),
                         GraphRowCorruption::SetParent(None),
                     )
-                    .await
-            }
-            "bad-size" => {
-                store
-                    .corrupt_graph_row_for_testing(&ids[1], GraphRowCorruption::SetBodyBytes(1))
                     .await
             }
             _ => unreachable!(),

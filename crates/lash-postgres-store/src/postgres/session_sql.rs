@@ -289,7 +289,7 @@ lash_store_sql::statements! {
     pub(crate) struct GraphNodePostgresStatements @ "graph_node" {
         /// The live nodes of session `?1` among the ids in `?2`: each one's
         /// parent, body and stored size.
-        select_live_owned_bodies = "SELECT node_id, parent_node_id, node_json, body_bytes
+        select_live_owned_bodies = "SELECT node_id, parent_node_id, node_json
              FROM graph_nodes
              WHERE session_id = ?1 AND node_id = ANY(?2) AND tombstoned = FALSE";
 
@@ -384,18 +384,14 @@ lash_store_sql::statements! {
              WHERE node_id = ANY(?1)";
 
         /// Insert session `?1`'s nodes `?2[i]` with parent `?3[i]`,
-        /// generation `?4[i]`, frame `?5[i]`, body size `?6[i]` and body
-        /// `?7[i]`, in one statement, and return each id it inserted: a node
+        /// generation `?4[i]`, frame `?5[i]` and body `?6[i]`, in one statement, and return each id it inserted: a node
         /// whose id or generation is taken is left out, never an error.
         insert_batch = "INSERT INTO graph_nodes
-                 (session_id, node_id, parent_node_id, generation, frame_node_id, body_bytes,
-                  node_json)
+                 (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
              SELECT ?1, node.node_id, node.parent_node_id, node.generation, node.frame_node_id,
-                    node.body_bytes, node.node_json
-             FROM UNNEST(?2::text[], ?3::text[], ?4::bigint[], ?5::text[], ?6::bigint[],
-                         ?7::text[])
-                 AS node(node_id, parent_node_id, generation, frame_node_id, body_bytes,
-                         node_json)
+                    node.node_json
+             FROM UNNEST(?2::text[], ?3::text[], ?4::bigint[], ?5::text[], ?6::text[])
+                 AS node(node_id, parent_node_id, generation, frame_node_id, node_json)
              ON CONFLICT DO NOTHING
              RETURNING node_id";
 

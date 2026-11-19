@@ -119,10 +119,9 @@ pub(super) async fn page(
                     for row in rows {
                         #[cfg(test)]
                         decoded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        candidates.push(
-                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                .map_err(process_decode_error)?,
-                        );
+                        candidates.push(registry_transitions::decode_record(
+                            &row.map_err(process_sqlite_error)?,
+                        )?);
                     }
                 }
                 tx.commit().map_err(process_sqlite_error)?;

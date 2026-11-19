@@ -1,5 +1,6 @@
 use super::*;
 use crate::process_registry::sql::process_sql;
+use lash_execution_contracts::process::registry_transitions;
 use lash_vocabulary::identity::ProcessId;
 
 pub(crate) fn max_change_sequence(
@@ -113,7 +114,7 @@ fn processes_changed_since_tx(
         let (change_seq, kind, record_json) = row.map_err(process_sqlite_error)?;
         let change = if kind == "upsert" {
             ProcessChangeKind::Upsert {
-                record: serde_json::from_str(&record_json).map_err(process_decode_error)?,
+                record: Box::new(registry_transitions::decode_record(&record_json)?),
             }
         } else {
             ProcessChangeKind::Deleted {
@@ -276,8 +277,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
     let mut prunable = Vec::new();
     for row in rows {
         let (process_id, record_json) = row.map_err(process_sqlite_error)?;
-        let record: ProcessRecord =
-            serde_json::from_str(&record_json).map_err(process_decode_error)?;
+        let record: ProcessRecord = registry_transitions::decode_record(&record_json)?;
         if filter
             .as_ref()
             .is_none_or(|filter| filter.matches_record(&record))

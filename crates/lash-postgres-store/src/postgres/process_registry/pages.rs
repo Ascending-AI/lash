@@ -118,7 +118,7 @@ pub(super) async fn list_non_terminal_processes_page(
     let mut records: Vec<ProcessRecord> = Vec::new();
     for row in rows {
         let json: String = row.get(0);
-        records.push(serde_json::from_str(&json).map_err(process_decode_error)?);
+        records.push(registry_transitions::decode_record(&json)?);
     }
     let has_more = records.len() > page_size;
     records.truncate(page_size);

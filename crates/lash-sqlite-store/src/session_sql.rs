@@ -263,7 +263,7 @@ lash_store_sql::statements! {
                 (SELECT ?1 AS session_id, NULL AS generation_ceiling UNION ALL
                 SELECT ancestor_session_id, fork_generation FROM fork_lineage WHERE session_id=?1)
                 SELECT node.node_id,node.parent_node_id,node.node_json,node.generation,
-                node.frame_node_id,node.body_bytes FROM readable_sessions AS readable
+                node.frame_node_id FROM readable_sessions AS readable
                 JOIN graph_nodes AS node ON node.session_id=readable.session_id
                 AND node.generation BETWEEN ?2 AND ?3
                 AND (readable.generation_ceiling IS NULL OR node.generation<=readable.generation_ceiling)
@@ -284,7 +284,7 @@ lash_store_sql::statements! {
         select_body = "SELECT node_json FROM graph_nodes WHERE node_id=?1";
 
         /// Live node `?1` of session `?2`: its parent, body and stored size.
-        select_live_owned_body = "SELECT parent_node_id, node_json, body_bytes FROM graph_nodes
+        select_live_owned_body = "SELECT parent_node_id, node_json FROM graph_nodes
                      WHERE node_id = ?1 AND session_id = ?2 AND tombstoned = 0";
 
         exists_live = "SELECT 1 FROM graph_nodes
@@ -406,9 +406,8 @@ lash_store_sql::statements! {
         delete_by_id_for_testing = "DELETE FROM graph_nodes WHERE node_id = ?1";
         set_parent_for_testing = "UPDATE graph_nodes SET parent_node_id = ?2 WHERE node_id = ?1";
         set_frame_pointer_for_testing = "UPDATE graph_nodes SET frame_node_id = ?2 WHERE node_id = ?1";
-        set_body_bytes_for_testing = "UPDATE graph_nodes SET body_bytes = ?2 WHERE node_id = ?1";
         set_generation_for_testing = "UPDATE graph_nodes SET generation = ?2 WHERE node_id = ?1";
-        set_body_for_testing = "UPDATE graph_nodes SET node_json = ?2, body_bytes = ?3 WHERE node_id = ?1";
+        set_body_for_testing = "UPDATE graph_nodes SET node_json = ?2 WHERE node_id = ?1";
 
         /// One statement rather than one per node: the rows are known in full
         /// before any of them is written and they all land or none do, so a
@@ -418,14 +417,13 @@ lash_store_sql::statements! {
         /// single-row insert so the refusal names the offending row, which
         /// SQLite's batch error cannot.
         insert_batch = "INSERT INTO graph_nodes
-             (session_id, node_id, parent_node_id, generation, frame_node_id, body_bytes, node_json)
+             (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
              SELECT json_extract(node.value, '$[0]'),
                     json_extract(node.value, '$[1]'),
                     json_extract(node.value, '$[2]'),
                     json_extract(node.value, '$[3]'),
                     json_extract(node.value, '$[4]'),
-                    json_extract(node.value, '$[5]'),
-                    json_extract(node.value, '$[6]')
+                    json_extract(node.value, '$[5]')
              FROM json_each(?1) AS node";
 
         delete_tombstoned_for_session = "DELETE FROM graph_nodes

@@ -138,7 +138,7 @@ impl lash_execution_contracts::process::ProcessQuery for PostgresProcessRegistry
             let json: String = row.get(2);
             let change = if kind == "upsert" {
                 ProcessChangeKind::Upsert {
-                    record: serde_json::from_str(&json).map_err(process_decode_error)?,
+                    record: Box::new(registry_transitions::decode_record(&json)?),
                 }
             } else {
                 ProcessChangeKind::Deleted {
@@ -450,10 +450,7 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for PostgresProc
             .await
             .map_err(plugin_sqlx_error)?;
         rows.into_iter()
-            .map(|row| {
-                serde_json::from_str::<ProcessRecord>(&row.get::<String, _>(0))
-                    .map_err(process_decode_error)
-            })
+            .map(|row| registry_transitions::decode_record(&row.get::<String, _>(0)))
             .filter(|result| {
                 result
                     .as_ref()
@@ -576,16 +573,16 @@ impl lash_execution_contracts::process::ProcessEventLog for PostgresProcessRegis
         let outcome = match row {
             None => ProcessEventReadOutcome::Retained(None),
             Some(row) => {
-                let sequence = plugin_u64_from_sql("ProcessEvent", "sequence", row.get(0))?;
+                let row = crate::process_helpers::read_event_row(&row)?;
+                let sequence = row.sequence()?;
                 if sequence <= released_through {
                     ProcessEventReadOutcome::NoLongerRetained(
                         ProcessEventHistoryRetention::Released { released_through },
                     )
                 } else {
-                    ProcessEventReadOutcome::Retained(Some(ProcessEvent::decode(
-                        &row.get::<String, _>(1),
-                        self.fence.fleet(),
-                    )?))
+                    ProcessEventReadOutcome::Retained(Some(
+                        row.decode(process_id, self.fence.fleet())?,
+                    ))
                 }
             }
         };
@@ -668,7 +665,10 @@ impl lash_execution_contracts::process::ProcessEventLog for PostgresProcessRegis
                 let fleet_format = self.fence.fleet();
                 let events = rows
                     .into_iter()
-                    .map(|row| ProcessEvent::decode(&row.get::<String, _>(0), fleet_format))
+                    .map(|row| {
+                        crate::process_helpers::read_event_row(&row)?
+                            .decode(process_id, fleet_format)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 lash_execution_contracts::process::ProcessEventPage::from_full_rows(events, limit)
             }
@@ -722,11 +722,12 @@ impl lash_execution_contracts::process::ProcessEventLog for PostgresProcessRegis
             .await
             .map_err(plugin_sqlx_error)?;
         let fleet_format = self.fence.fleet();
-        let mut events = Vec::new();
-        for row in rows {
-            let json: String = row.get(0);
-            events.push(ProcessEvent::decode(&json, fleet_format)?);
-        }
+        let mut events = rows
+            .into_iter()
+            .map(|row| {
+                crate::process_helpers::read_event_row(&row)?.decode(process_id, fleet_format)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         events.reverse();
         Ok(events)
     }
@@ -1014,8 +1015,12 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for PostgresProces
         row.map(|row| {
             let record: Option<String> = row.get(0);
             if let Some(record) = record {
-                let record = serde_json::from_str(&record)
-                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let record = serde_json::from_str(&record).map_err(|error| {
+                    StoreError::StoredDataCorrupt {
+                        record_kind: "process_registry",
+                        message: error.to_string(),
+                    }
+                })?;
                 Ok((record, stored_environment_bytes(&row, 1, 4)?))
             } else {
                 Err(StoreError::ProcessAuthorityPruned {

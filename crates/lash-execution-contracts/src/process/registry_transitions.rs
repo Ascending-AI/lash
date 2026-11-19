@@ -93,7 +93,19 @@ pub fn stored_record(
 ) -> Result<Option<crate::process::ProcessRecord>, PluginError> {
     use lash_durable::domain::ProcessRegistryRow;
     match stored {
-        ProcessRegistryRow::Retained(json) => decode_record(json).map(Some),
+        ProcessRegistryRow::Retained(json) => {
+            let record = decode_record(json)?;
+            if record.id != *process_id {
+                return Err(PluginError::StoredDataCorrupt {
+                    record_kind: "process_registry".into(),
+                    message: format!(
+                        "process `{process_id}` has registry record for `{}`",
+                        record.id
+                    ),
+                });
+            }
+            Ok(Some(record))
+        }
         ProcessRegistryRow::Pruned {
             terminal_label,
             pruned_at_ms,
@@ -195,18 +207,20 @@ pub fn refresh_frontier(
     Ok(())
 }
 
-/// Reassemble exactly the registry's three storage owners, in query order.
+/// Encode an actor's retained view in the same field order as the SQL projection.
 pub fn encode_view_record(record: &crate::process::ProcessRecord) -> Result<String, PluginError> {
     let encode = |error: serde_json::Error| PluginError::StoredDataCorrupt {
         record_kind: "process registry".into(),
         message: error.to_string(),
     };
+    let id = serde_json::to_string(&record.id).map_err(encode)?;
+    let start_key = serde_json::to_string(&record.start_key).map_err(encode)?;
     let start = serde_json::to_string(&record.start_storage()).map_err(encode)?;
     let execution = serde_json::to_string(&record.execution_storage()).map_err(encode)?;
     let lifecycle = serde_json::to_string(&record.lifecycle_storage()).map_err(encode)?;
     Ok(format!(
-        "{},{},{}",
-        &start[..start.len() - 1],
+        r#"{{"id":{id},"start_key":{start_key},{},{},{}"#,
+        &start[1..start.len() - 1],
         &execution[1..execution.len() - 1],
         &lifecycle[1..]
     ))

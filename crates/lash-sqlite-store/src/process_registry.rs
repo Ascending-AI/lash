@@ -255,35 +255,33 @@ impl lash_execution_contracts::process::ProcessObserverRegistry for SqliteProces
         let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
         self.conn
             .call(move |conn| {
-                let registry = &process_sql().registry_sqlite;
-                let sql = if retired_since_ms.is_some() {
-                    registry.list_observed_recent_retired.sql()
-                } else {
-                    registry.list_observed.sql()
-                };
-                let mut stmt = conn.statement(sql)?;
-                let rows = stmt.query_map(
-                    params![session_id.as_str(), status, retired_since_ms],
-                    |row| row.get::<_, String>(0),
-                )?;
-                rows.map(|row| {
-                    serde_json::from_str::<ProcessRecord>(&row?).map_err(|err| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            0,
-                            rusqlite::types::Type::Text,
-                            Box::new(err),
+                Ok((|| {
+                    let registry = &process_sql().registry_sqlite;
+                    let sql = if retired_since_ms.is_some() {
+                        registry.list_observed_recent_retired.sql()
+                    } else {
+                        registry.list_observed.sql()
+                    };
+                    let mut stmt = conn.statement(sql).map_err(process_sqlite_error)?;
+                    let rows = stmt
+                        .query_map(
+                            params![session_id.as_str(), status, retired_since_ms],
+                            |row| row.get::<_, String>(0),
                         )
+                        .map_err(process_sqlite_error)?;
+                    rows.map(|row| {
+                        registry_transitions::decode_record(&row.map_err(process_sqlite_error)?)
                     })
-                })
-                .filter(|result| {
-                    result
-                        .as_ref()
-                        .map_or(true, |record| filter.matches_record(record))
-                })
-                .collect()
+                    .filter(|result| {
+                        result
+                            .as_ref()
+                            .map_or(true, |record| filter.matches_record(record))
+                    })
+                    .collect()
+                })())
             })
             .await
-            .map_err(process_sqlite_error)
+            .map_err(process_sqlite_error)?
     }
 
     async fn is_observer(
@@ -417,25 +415,25 @@ impl lash_execution_contracts::process::ProcessEventLog for SqliteProcessRegistr
                         Err(error) => return Err(error),
                     }
                     let released_through = Self::released_through_conn(conn, &process_id)?;
-                    let row: Option<(i64, String)> = conn
+                    let row = conn
                         .query_row_once(
                             process_sql().event.read_by_replay_key.sql(),
                             params![process_id.as_str(), replay_key, through_sequence],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
+                            support::read_event_row,
                         )
                         .optional()
                         .map_err(process_sqlite_error)?;
-                    let Some((sequence, json)) = row else {
+                    let Some(row) = row else {
                         return Ok(ProcessEventReadOutcome::Retained(None));
                     };
-                    let sequence = plugin_u64_from_sql("ProcessEvent", "sequence", sequence)?;
+                    let sequence = row.sequence()?;
                     if sequence <= released_through {
                         return Ok(ProcessEventReadOutcome::NoLongerRetained(
                             ProcessEventHistoryRetention::Released { released_through },
                         ));
                     }
                     Ok(ProcessEventReadOutcome::Retained(Some(
-                        ProcessEvent::decode(&json, fleet_format)?,
+                        row.decode(&process_id, fleet_format)?,
                     )))
                 })())
             })
@@ -515,16 +513,12 @@ impl lash_execution_contracts::process::ProcessEventLog for SqliteProcessRegistr
                             let rows = stmt
                                 .query_map(
                                     params![process_id.as_str(), after_sequence, fetch_limit,],
-                                    |row| row.get::<_, String>(0),
+                                    support::read_event_row,
                                 )
                                 .map_err(process_sqlite_error)?;
-                            let mut events = Vec::new();
-                            for row in rows {
-                                events.push(ProcessEvent::decode(
-                                    &row.map_err(process_sqlite_error)?,
-                                    fleet_format,
-                                )?);
-                            }
+                            let events = rows
+                                .map(|row| row.map_err(process_sqlite_error)?.decode(&process_id, fleet_format))
+                                .collect::<Result<Vec<_>, _>>()?;
                             lash_execution_contracts::process::ProcessEventPage::from_full_rows(events, limit)
                         }
                         lash_execution_contracts::process::ProcessEventQueryMode::Lite => {
@@ -902,8 +896,12 @@ impl lash_execution_contracts::backend::ProcessAuthorityReads for SqliteProcessR
             .map_err(sqlite_error)?
             .map(|(record, bytes, label, pruned)| {
                 if let Some(record) = record {
-                    let record = serde_json::from_str(&record)
-                        .map_err(|error| StoreError::Backend(error.to_string()))?;
+                    let record = serde_json::from_str(&record).map_err(|error| {
+                        StoreError::StoredDataCorrupt {
+                            record_kind: "process_registry",
+                            message: error.to_string(),
+                        }
+                    })?;
                     Ok((record, bytes.map(StoredEnvironment::bytes).transpose()?))
                 } else {
                     Err(StoreError::ProcessAuthorityPruned {

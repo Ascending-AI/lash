@@ -95,6 +95,18 @@ impl ProcessEventBatch {
     }
 }
 
+pub(super) fn read_event_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<lash_execution_contracts::process::ProcessEventRow> {
+    Ok(lash_execution_contracts::process::ProcessEventRow {
+        sequence: row.get(0)?,
+        event_type: row.get(1)?,
+        replay_key: row.get(2)?,
+        header: row.get(3)?,
+        payload: row.get(4)?,
+    })
+}
+
 pub(super) async fn recent_events(
     registry: &SqliteProcessRegistry,
     process_id: &ProcessId,
@@ -121,13 +133,12 @@ pub(super) async fn recent_events(
                     .statement_once(process_sql().event.list_recent.sql())
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
-                    .query_map(params![process_id.as_str(), limit as i64], |row| {
-                        row.get::<_, String>(0)
-                    })
+                    .query_map(params![process_id.as_str(), limit as i64], read_event_row)
                     .map_err(process_sqlite_error)?;
                 let mut events = rows
                     .map(|row| {
-                        ProcessEvent::decode(&row.map_err(process_sqlite_error)?, fleet_format)
+                        row.map_err(process_sqlite_error)?
+                            .decode(&process_id, fleet_format)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 events.reverse();
@@ -392,21 +403,16 @@ impl SqliteProcessRegistry {
         append: &lash_execution_contracts::process::CanonicalProcessEventAppend,
         fleet_format: lash_core_store::store::FleetFormat,
     ) -> Result<Option<ProcessEvent>, lash_execution_contracts::plugin_error::PluginError> {
-        let row: Option<(String, Option<String>, String)> = conn
+        let row = conn
             .query_row_once(
                 process_sql().event.select_by_replay_key.sql(),
                 params![process_id.as_str(), append.replay_key()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((read_event_row(row)?, row.get::<_, String>(5)?)),
             )
             .optional()
             .map_err(process_sqlite_error)?;
-        let Some((json, payload, digest)) = row else {
-            return Ok(None);
-        };
-        let header: lash_execution_contracts::process::ProcessEventHeader =
-            serde_json::from_str(&json).map_err(process_decode_error)?;
-        let event = header.replay(payload.as_deref(), &digest, append, fleet_format)?;
-        Ok(Some(event))
+        row.map(|(event, digest)| event.replay(process_id, &digest, append, fleet_format))
+            .transpose()
     }
 
     /// One process-event append for the SQLite store: the append sequence
@@ -518,7 +524,7 @@ impl SqliteProcessRegistry {
                         event.invocation.effect_replay_key(),
                         process_encode_json(&header)?,
                         process_encode_json(&event.fact.payload())?,
-                        header.replay_digest(&event.fact),
+                        event.replay_digest(),
                     ],
                 )
                 .map_err(process_sqlite_error)?;

@@ -238,8 +238,8 @@ async fn postgres_delete_reclaims_tombstones_with_no_live_owner_when_configured(
         sqlx::query(
             "INSERT INTO lash_graph_nodes
                  (session_id, node_id, parent_node_id, generation, frame_node_id,
-                  body_bytes, node_json, tombstoned)
-             VALUES ($1, $2, NULL, 99, $2, 2, '{}', TRUE)",
+                  node_json, tombstoned)
+             VALUES ($1, $2, NULL, 99, $2, '{}', TRUE)",
         )
         .bind(owner)
         .bind(node_id)

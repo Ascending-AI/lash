@@ -290,19 +290,17 @@ pub(super) async fn compare_bounded_process_event_pages(
                  VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6)",
             )
             .expect("prepare SQLite page seed");
+        let header = lash_execution_contracts::process::ProcessEventHeader::of(&first);
         for sequence in seeded_from..=EVENT_COUNT {
-            let mut event = first.clone();
-            event.sequence = sequence;
-            let header = lash_execution_contracts::process::ProcessEventHeader::of(&event);
             insert
                 .execute(rusqlite::params![
                     process_id.as_str(),
                     sequence as i64,
                     "process.waiting",
                     serde_json::to_string(&header).expect("encode SQLite event header"),
-                    serde_json::to_string(&event.fact.payload())
+                    serde_json::to_string(&first.fact.payload())
                         .expect("encode SQLite event payload"),
-                    header.replay_digest(&event.fact),
+                    first.replay_digest(),
                 ])
                 .expect("insert SQLite seed event");
         }
@@ -313,7 +311,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         "INSERT INTO lash_process_events
          (process_id, sequence, event_type, idempotency_key, header_json, payload_json, replay_digest)
          SELECT $1, sequence, $2, NULL,
-                jsonb_set($3::jsonb, '{sequence}', to_jsonb(sequence))::text, $6, $7
+                $3, $6, $7
            FROM generate_series($5, $4) AS sequence",
     )
     .bind(process_id.as_str())
@@ -323,7 +321,7 @@ pub(super) async fn compare_bounded_process_event_pages(
     .bind(EVENT_COUNT as i64)
     .bind(seeded_from as i64)
     .bind(serde_json::to_string(&first.fact.payload()).expect("encode PostgreSQL event payload"))
-    .bind(lash_execution_contracts::process::ProcessEventHeader::of(&first).replay_digest(&first.fact))
+    .bind(first.replay_digest())
     .execute(postgres.pool())
     .await
     .expect("seed PostgreSQL process events");

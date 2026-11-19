@@ -262,6 +262,7 @@ impl Continuation {
     ) -> Result<Arc<ProcessRecord>, DurableError> {
         if let (ProcessRegistryRow::Retained(text), Some((held, record))) = (stored, &self.record)
             && text == held
+            && record.id == *process
         {
             return Ok(Arc::clone(record));
         }

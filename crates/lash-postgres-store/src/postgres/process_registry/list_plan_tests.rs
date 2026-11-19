@@ -63,7 +63,7 @@ async fn plan_for(filter: &lash_execution_contracts::process::ProcessListFilter)
         }
         let scope = record.lifetime.scope();
         rows.push(serde_json::json!({
-            "start": record.start_storage(),
+            "id": record.id, "start": record.start_storage(),
             "execution": record.execution_storage(),
             "lifecycle": record.lifecycle_storage(),
             "scope_kind": scope.map(|scope| scope.storage_kind()),
@@ -74,7 +74,7 @@ async fn plan_for(filter: &lash_execution_contracts::process::ProcessListFilter)
         .execute(storage.pool())
         .await
         .expect("remove template");
-    let inserted = sqlx::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, lifetime, lifetime_scope_kind, lifetime_scope_id, start_json, execution_json, lifecycle_json) SELECT r#>>'{start,id}', 'host', r#>>'{execution,identity,kind}', (r#>>'{start,created_at_ms}')::bigint, (r#>>'{lifecycle,updated_at_ms}')::bigint, r#>>'{start,lifetime,lifetime}', r->>'scope_kind', r->>'scope_id', (r->'start')::text, (r->'execution')::text, (r->'lifecycle')::text FROM jsonb_array_elements($1) r")
+    let inserted = sqlx::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, created_at_ms, updated_at_ms, lifetime, lifetime_scope_kind, lifetime_scope_id, start_json, execution_json, lifecycle_json) SELECT r->>'id', 'host', r#>>'{execution,identity,kind}', (r#>>'{start,created_at_ms}')::bigint, (r#>>'{lifecycle,updated_at_ms}')::bigint, r#>>'{start,lifetime,lifetime}', r->>'scope_kind', r->>'scope_id', (r->'start')::text, (r->'execution')::text, (r->'lifecycle')::text FROM jsonb_array_elements($1) r")
         .bind(serde_json::Value::Array(rows)).execute(storage.pool()).await.expect("seed planner fleet");
     assert_eq!(inserted.rows_affected(), 10_000);
     sqlx::query("ANALYZE lash_processes")

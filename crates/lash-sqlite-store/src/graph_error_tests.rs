@@ -28,7 +28,7 @@ fn sqlite_graph_collisions_use_transactional_identity() {
     let insert = crate::session_sql::session_sql().graph.insert.sql();
     tx.execute_once(
         insert,
-        params!["session-a", "node-a", None::<&str>, 3, "frame", 2, "{}"],
+        params!["session-a", "node-a", None::<&str>, 3, "frame", "{}"],
     )
     .expect("seed graph uniqueness fixture");
     tx.execute_once(
@@ -53,7 +53,6 @@ fn sqlite_graph_collisions_use_transactional_identity() {
                         None::<&str>,
                         generation,
                         "frame",
-                        2,
                         "{}"
                     ],
                 )
@@ -88,7 +87,7 @@ fn sqlite_graph_collisions_use_transactional_identity() {
     let raw = tx
         .execute_once(
             insert,
-            params!["session-a", "node-a", None::<&str>, 3, "frame", -1, "{}"],
+            params!["session-a", "node-a", None::<&str>, -1, "frame", "{}"],
         )
         .expect_err("CHECK failure takes precedence over occupied keys");
     let error = sqlite_graph_node_insert_error(

@@ -148,7 +148,6 @@ pub(super) static NODES: Entry = Entry::new(
         Ty::Texts,
         Ty::Ints,
         Ty::Texts,
-        Ty::Ints,
         Ty::Texts,
     ],
     Shape::Returning,
@@ -726,14 +725,10 @@ pub(super) fn program(
             Refusal::Occupied,
         );
         let mut bodies = Vec::with_capacity(nodes.len());
-        let mut sizes = Vec::with_capacity(nodes.len());
         for node in nodes {
             let body = node.encode_storage_body(fleet).map_err(|error| {
                 StoreError::Backend(format!("failed to encode graph node body: {error}"))
             })?;
-            sizes.push(Some(i64::try_from(body.len()).map_err(|_| {
-                StoreError::Backend("graph node body exceeds PostgreSQL BIGINT".to_owned())
-            })?));
             bodies.push(Some(body));
         }
         let planned = plan.planned_node_facts();
@@ -756,7 +751,6 @@ pub(super) fn program(
                             .collect::<Result<_, _>>()?,
                     ),
                     Value::texts(planned.iter().map(|facts| facts.frame_node_id.as_str())),
-                    Value::Ints(sizes),
                     Value::Texts(bodies),
                 ],
                 Some(nodes.len() as u64),

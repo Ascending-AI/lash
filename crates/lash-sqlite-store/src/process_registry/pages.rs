@@ -143,8 +143,7 @@ pub(super) async fn list_non_terminal_processes_page(
                 let mut records = Vec::new();
                 for row in rows {
                     let record: ProcessRecord =
-                        serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                            .map_err(process_decode_error)?;
+                        registry_transitions::decode_record(&row.map_err(process_sqlite_error)?)?;
                     records.push(record);
                 }
                 let has_more = records.len() > page_size;
