@@ -492,10 +492,14 @@ impl Diagnostic {
     pub fn kind(&self) -> DiagnosticKind {
         self.reason.kind()
     }
-    pub(crate) fn entry_signature(refusal: lash_kernel_value::EntrySignatureRefusal) -> Self {
+    pub(crate) fn entry_signature(
+        refusal: lash_kernel_value::EntrySignatureRefusal,
+        params: &[String],
+    ) -> Self {
         let diagnostic = lash_kernel_dialect::Diagnostic::entry_signature(
             refusal,
             lash_kernel_doc::SourceLanguage::TypeScript,
+            params,
         );
         Self {
             reason: diagnostic.reason,
@@ -729,9 +733,10 @@ mod tests {
                         position: SignaturePosition::Result,
                         span: None,
                     })),
+                    &[],
                 ),
-                DiagnosticCode::EntryAnnotationRefused => {
-                    super::Diagnostic::entry_signature(EntrySignatureRefusal::Annotation(Box::new(
+                DiagnosticCode::EntryAnnotationRefused => super::Diagnostic::entry_signature(
+                    EntrySignatureRefusal::Annotation(Box::new(
                         lash_kernel_value::EntryAnnotationRefusal {
                             function: function.clone(),
                             position: SignaturePosition::Result,
@@ -740,8 +745,9 @@ mod tests {
                                 name: "Missing".into(),
                             },
                         },
-                    )))
-                }
+                    )),
+                    &[],
+                ),
                 DiagnosticCode::NamespaceShadowedByLocal => super::Diagnostic::namespace_shadowed(
                     lash_kernel_value::NamespaceShadowing {
                         binding_name: "host".into(),

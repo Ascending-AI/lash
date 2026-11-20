@@ -42,6 +42,10 @@ pub(crate) struct Program {
     pub(crate) statements: Vec<Stmt>,
     pub(crate) imported: BTreeMap<String, Vec<String>>,
     pub(crate) export_aliases: BTreeMap<String, String>,
+    /// The top-level bindings a module exports, by declaration or by alias.
+    /// Only these are a workflow module's entries; every other top-level
+    /// function is an ordinary module-local helper.
+    pub(crate) exported: BTreeSet<String>,
     pub(crate) annotation_limits: (usize, usize),
     /// The captions the source spells.
     pub(crate) captions: Spelled,
@@ -519,6 +523,7 @@ fn parse_from_goal(
         statements: converted?,
         imported: adapter.imported.take(),
         export_aliases: adapter.export_aliases.take(),
+        exported: adapter.exported.take(),
         annotation_limits: limits.entry_annotation_limits(),
         captions: adapter.captions.take(),
         comments: adapter.comments.ranges().to_vec(),
@@ -536,6 +541,7 @@ fn parse_from_goal(
 struct Adapter<'a> {
     imported: RefCell<BTreeMap<String, Vec<String>>>,
     export_aliases: RefCell<BTreeMap<String, String>>,
+    exported: RefCell<BTreeSet<String>>,
     max_nesting: usize,
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,

@@ -406,7 +406,7 @@ fn entry_promotion_requires_written_annotations_at_the_missing_position() {
         let accepted = if missing == "event" {
             "def handle(event: object) -> object:"
         } else {
-            "def handle() -> object:"
+            "def handle(event: Any) -> object:"
         };
         assert!(error.message.as_str().contains(accepted), "{error}");
         let lash_kernel_dialect::DiagnosticReason::SignatureRequired(required) = &error.reason

@@ -73,10 +73,10 @@ pub fn function_values() -> lash_kernel_doc::FunctionRepresentation {
 /// cell environment's bindings name those earlier cells left.
 ///
 /// In [`Mode::Module`] it is a whole workflow a host imports: every
-/// top-level async function, by declaration (exported or not) or bound by
-/// `const`, is an entry of the document under the shared workflow contract
-/// ([`lash_kernel_dialect::workflow`]), and the rest of the top level is
-/// `main`. Exported source printed from a document is read back with
+/// exported top-level function, by declaration or bound by `const`, is an
+/// entry of the document under the shared workflow contract
+/// ([`lash_kernel_dialect::workflow`]), and the rest of the top level,
+/// including non-exported helper functions, is `main`. Exported source printed from a document is read back with
 /// [`read`] against that document instead. A module runs no effect and
 /// lowers to an unchecked document; a host must admit it before use.
 /// Printed source follows the same ordinary authored grammar.

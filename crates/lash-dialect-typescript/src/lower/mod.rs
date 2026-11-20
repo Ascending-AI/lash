@@ -278,6 +278,8 @@ pub(crate) struct Lowerer<'a> {
     /// body may read.
     lifting: Option<HashSet<String>>,
     module_statements: &'a [ast::Stmt],
+    /// The top-level names the module exports: its only entries.
+    exported: &'a BTreeSet<String>,
     /// The functions the session holds, and the ones the source names: the
     /// document declares those.
     /// What the closure just emitted is, as its source wrote it, until the
@@ -432,6 +434,7 @@ fn lower_beside_result(
         declared_notes: BTreeMap::new(),
         lifting: None,
         module_statements: &program.statements,
+        exported: &program.exported,
         written: None,
         spelled: &program.captions,
         declared_captions: Vec::new(),

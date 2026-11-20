@@ -678,11 +678,25 @@ impl Adapter<'_> {
                         }
                         Ok(Stmt::Empty)
                     }
-                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export)) => self
-                        .convert_listed(
+                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export)) => {
+                        let mut exported = self.exported.borrow_mut();
+                        match &export.decl {
+                            swc::Decl::Fn(function) => {
+                                exported.insert(function.ident.sym.to_string());
+                            }
+                            swc::Decl::Var(var) => {
+                                exported.extend(var.decls.iter().filter_map(|declaration| {
+                                    declaration.name.as_ident().map(|id| id.sym.to_string())
+                                }));
+                            }
+                            _ => {}
+                        }
+                        drop(exported);
+                        self.convert_listed(
                             &swc::Stmt::Decl(export.decl.clone()),
                             Some(export.span.lo),
-                        ),
+                        )
+                    }
                     swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportNamed(export))
                         if export.src.is_none()
                             && export.specifiers.iter().all(|specifier| {
@@ -717,6 +731,7 @@ impl Adapter<'_> {
                                     name.value.to_string_lossy().into_owned()
                                 }
                             };
+                            self.exported.borrow_mut().insert(name.sym.to_string());
                             if self
                                 .export_aliases
                                 .borrow_mut()

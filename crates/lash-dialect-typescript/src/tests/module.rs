@@ -92,9 +92,10 @@ fn param(name: &str, ty: Type) -> Param {
     }
 }
 
-/// Top-level function declarations and const functions are Exports, whether
-/// synchronous or async. Block locals and mutable bindings stay ordinary code;
-/// the Export retains the source's async flag for its settled public ABI.
+/// Exported top-level function declarations and const functions are Exports,
+/// whether synchronous or async. Non-exported top-level functions, block
+/// locals and mutable bindings stay ordinary code; the Export retains the
+/// source's async flag for its settled public ABI.
 #[test]
 fn top_level_function_exports_keep_async_flags_and_exclude_block_locals() {
     let source = r#"
@@ -123,14 +124,53 @@ function helper(): any { return 7; }
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
         functions,
-        BTreeMap::from([
-            (Name::new("arrow"), true),
-            (Name::new("declared"), true),
-            (Name::new("expression"), true),
-            (Name::new("helper"), false),
-            (Name::new("unexported"), true),
-        ])
+        BTreeMap::from([(Name::new("arrow"), true), (Name::new("declared"), true)])
     );
+}
+
+/// FIG-7721: only an exported entry carries entry signature rules. A module-local
+/// helper accepts any signature TypeScript's checker accepts, while the same
+/// signature on an exported entry keeps its refusal, and the repair hint keeps
+/// the entry's whole parameter list.
+#[test]
+fn only_exported_entries_carry_entry_signature_rules() {
+    let stage = "export async function screening(case_id: string): Promise<unknown> { return await probe(case_id); }";
+    for (helper, refused, accepted) in [
+        (
+            "async function probe(id: string) { return 1; }",
+            DiagnosticCode::SignatureRequired,
+            "probe(id: string): Promise<unknown>",
+        ),
+        (
+            "async function probe(id: string): Promise<Awaited<ReturnType<typeof host.echo>>[\"ok\"]> { return (await host.echo(id)).ok; }",
+            DiagnosticCode::EntryAnnotationRefused,
+            "probe(id: string): Promise<unknown>",
+        ),
+        (
+            "function probe(v: unknown): v is string { return typeof v === \"string\"; }",
+            DiagnosticCode::EntryAnnotationRefused,
+            "probe(v: unknown): Promise<unknown>",
+        ),
+        (
+            "async function probe(id: ReturnType<typeof host.echo>, n: number): Promise<number> { return n; }",
+            DiagnosticCode::EntryAnnotationRefused,
+            "probe(id: unknown, n: number): Promise<unknown>",
+        ),
+    ] {
+        let source = format!("{helper}\n{stage}");
+        assert_eq!(
+            entries(&source).into_keys().collect::<Vec<_>>(),
+            [Name::new("screening")],
+            "{source}"
+        );
+        let exported = format!("export {helper}");
+        let diagnostic = module(&exported).expect_err("an exported entry keeps its rules");
+        assert_eq!(diagnostic.code(), refused, "{diagnostic}");
+        assert!(
+            diagnostic.message.as_str().contains(accepted),
+            "{diagnostic}"
+        );
+    }
 }
 
 /// `process(...)` is not workflow syntax: an entry is the async function
@@ -817,7 +857,7 @@ fn entry_annotations_distinguish_written_any_from_missing() {
         let accepted = if parameter {
             "handle(event: unknown): Promise<unknown>"
         } else {
-            "handle(): Promise<unknown>"
+            "handle(event: any): Promise<unknown>"
         };
         assert!(
             diagnostic.message.as_str().contains(accepted),

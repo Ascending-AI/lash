@@ -19,6 +19,17 @@ impl Lifter<'_> {
                 if let k::Rhs::Expr(value) = value
                     && let Some(function) = self.closure(value)?
                 {
+                    // A module-local helper may be a declaration, which
+                    // types its calls as calls of its own token, or a const
+                    // arrow, which does not; readback picks the style that
+                    // recreates the module.
+                    if site.unit == lash_kernel_value::sites::Unit::Main
+                        && !self.style.const_functions
+                        && !self.document.exports.is_empty()
+                        && self.module_function(kernel)
+                    {
+                        return Ok(StmtKind::Function(name, function));
+                    }
                     let value = match super::closures::authored_name(value) {
                         Some(authored) if authored != name => {
                             Expr::Function(authored.to_owned(), Box::new(function))

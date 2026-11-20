@@ -52,8 +52,8 @@ pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-/// A top-level async declaration is an entry, using the same literal
-/// lowering as a const-bound async function. Keep its labels and byte spans.
+/// A top-level function declaration lowers as a const-bound function: an
+/// entry when the module exports it, else a module-local helper. Keep its labels and byte spans.
 fn declaration(statement: &mut Stmt) {
     match statement {
         Stmt::Spanned(_, inner) => declaration(inner),

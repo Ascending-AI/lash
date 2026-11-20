@@ -1016,6 +1016,7 @@ review ts-249 empty switch side effect/module
 review ts-250 default only side effect/cell
 review ts-250 default only side effect/module
 review ts-251 named recursive/cell
+review ts-251 named recursive/module
 review ts-252 logical index side effects/cell
 review ts-252 logical index side effects/module
 review ts-253 compound index side effects/cell

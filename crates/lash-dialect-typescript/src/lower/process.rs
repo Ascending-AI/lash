@@ -23,14 +23,24 @@ const AWAIT_EFFECT: &str = "processes.await";
 const HANDLE_FIELD: &str = "__handle__";
 
 impl Lowerer<'_> {
-    /// The function a module's top-level `const` binds, if `init` is
-    /// one: an entry of the module. A declaration inside a block, a
-    /// function or an entry is ordinary code.
-    pub(super) fn module_entry<'e>(&self, init: &'e ast::Expr) -> Option<&'e ast::Function> {
+    /// The function a module's top-level `const` binds as `name`, if
+    /// `init` is one and the module exports `name`: an entry of the module.
+    /// A non-exported top-level function is a module-local helper, and a
+    /// declaration inside a block, a function or an entry is ordinary code;
+    /// neither carries entry signature rules.
+    pub(super) fn module_entry<'e>(
+        &self,
+        name: &str,
+        init: &'e ast::Expr,
+    ) -> Option<&'e ast::Function> {
         let ast::Expr::Function(function) = init else {
             return None;
         };
-        (self.module.is_some() && self.in_cell_code() && self.scopes.len() == 1).then_some(function)
+        (self.module.is_some()
+            && self.in_cell_code()
+            && self.scopes.len() == 1
+            && self.exported.contains(name))
+        .then_some(function)
     }
 
     /// Whether lowering stands in the cell's own code, outside every
@@ -107,6 +117,40 @@ impl Lowerer<'_> {
         )
     }
 
+    /// Every parameter of a refused entry, as an accepted signature spells
+    /// it: a resolved annotation as written, any other as `unknown`.
+    fn accepted_params(
+        &self,
+        function: &ast::Function,
+        signature: &Signature,
+        origin: &SignatureOrigin,
+    ) -> Vec<String> {
+        signature
+            .params
+            .iter()
+            .enumerate()
+            .map(|(index, param)| {
+                let pattern = match function.params.get(index) {
+                    Some(ast::Pattern::Assign { target, .. }) => Some(target.as_ref()),
+                    other => other,
+                };
+                let written = match pattern {
+                    Some(ast::Pattern::Ident(_, Some(annotation)))
+                        if origin
+                            .params
+                            .get(index)
+                            .is_some_and(|origin| origin.refusal.is_none()) =>
+                    {
+                        self.source.get(annotation.span.start..annotation.span.end)
+                    }
+                    _ => None,
+                };
+                let optional = if param.optional { "?" } else { "" };
+                format!("{}{optional}: {}", param.name, written.unwrap_or("unknown"))
+            })
+            .collect()
+    }
+
     fn resolve_entry_annotation(
         &self,
         annotation: Option<&TypeAnnotation>,
@@ -158,7 +202,12 @@ impl Lowerer<'_> {
                     site: None,
                 },
             )
-            .map_err(Diagnostic::entry_signature)?;
+            .map_err(|refusal| {
+                Diagnostic::entry_signature(
+                    refusal,
+                    &self.accepted_params(function, &signature, &origin),
+                )
+            })?;
         let names: Vec<Name> = signature
             .params
             .iter()

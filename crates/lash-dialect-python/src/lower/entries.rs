@@ -15,7 +15,7 @@ use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
 use lash_kernel_doc::{AssignOrder, Expr, Literal, Place, Rhs, Stmt};
 
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
-use ruff_text_size::TextRange;
+use ruff_text_size::{Ranged, TextRange};
 use {lash_kernel_value::Name, lash_kernel_value::Signature};
 
 use super::statements::Body;
@@ -236,25 +236,73 @@ impl Lowerer<'_> {
             ));
         }
         let signature = self.declared_signature(Some(parameters), def.returns.as_deref());
-        self.signature_origin(
+        let origin = self.signature_origin(
             Some(parameters),
             def.returns.as_deref(),
             Some(def.name.id.as_str()),
-        )
-        .require(
-            &signature,
-            lash_kernel_value::FunctionLocation {
-                name: Some(def.name.id.to_string()),
-                site: None,
-            },
-        )
-        .map_err(|refusal| {
-            lash_kernel_dialect::Diagnostic::entry_signature(
-                refusal,
-                lash_kernel_doc::SourceLanguage::Python,
+        );
+        origin
+            .require(
+                &signature,
+                lash_kernel_value::FunctionLocation {
+                    name: Some(def.name.id.to_string()),
+                    site: None,
+                },
             )
-        })?;
+            .map_err(|refusal| {
+                lash_kernel_dialect::Diagnostic::entry_signature(
+                    refusal,
+                    lash_kernel_doc::SourceLanguage::Python,
+                    &self.accepted_params(parameters, &origin),
+                )
+            })?;
         Ok(signature)
+    }
+}
+
+impl Lowerer<'_> {
+    /// Every parameter of a refused entry, as an accepted signature spells
+    /// it: a resolved annotation as written, any other as `object`, with its
+    /// default and the keyword-only marker kept.
+    fn accepted_params(
+        &self,
+        parameters: &ast::Parameters,
+        origin: &lash_kernel_value::SignatureOrigin,
+    ) -> Vec<String> {
+        let positional = parameters.posonlyargs.len() + parameters.args.len();
+        let mut params = Vec::new();
+        for (index, param) in parameters
+            .posonlyargs
+            .iter()
+            .chain(&parameters.args)
+            .chain(&parameters.kwonlyargs)
+            .enumerate()
+        {
+            if index == positional {
+                params.push("*".to_owned());
+            }
+            let annotation = param
+                .parameter
+                .annotation
+                .as_deref()
+                .filter(|_| {
+                    origin
+                        .params
+                        .get(index)
+                        .is_some_and(|origin| origin.refusal.is_none())
+                })
+                .map_or("object", |annotation| self.text(annotation.range()));
+            let mut spelled = format!("{}: {annotation}", param.parameter.name.id);
+            if let Some(default) = &param.default {
+                spelled.push_str(" = ");
+                spelled.push_str(self.text(default.range()));
+            }
+            params.push(spelled);
+            if index + 1 == parameters.posonlyargs.len() {
+                params.push("/".to_owned());
+            }
+        }
+        params
     }
 }
 

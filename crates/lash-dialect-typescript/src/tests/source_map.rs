@@ -64,7 +64,7 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, String> {
 /// their bodies is mapped.
 #[test]
 fn every_entry_body_statement_and_action_is_mapped() {
-    let source = "export async function grüße(name: string): Promise<string> {\n  const said = await host.echo(`héllo ${name}`);\n  if (said === \"ß\") {\n    return \"ok\";\n  }\n  return said;\n}\nconst twice = async (n: number): Promise<number> => {\n  const helper = async (m: number) => m * 2;\n  return await helper(n);\n};\n";
+    let source = "export async function grüße(name: string): Promise<string> {\n  const said = await host.echo(`héllo ${name}`);\n  if (said === \"ß\") {\n    return \"ok\";\n  }\n  return said;\n}\nexport const twice = async (n: number): Promise<number> => {\n  const helper = async (m: number) => m * 2;\n  return await helper(n);\n};\n";
     let effects = super::machine::effects();
     let lowered = crate::lower(
         source,

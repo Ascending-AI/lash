@@ -223,18 +223,22 @@ impl From<lash_kernel_doc::SignatureRequired> for Diagnostic {
 }
 
 impl Diagnostic {
-    /// Explain an entry refusal in the submitted source's language.
+    /// Explain an entry refusal in the submitted source's language. `params`
+    /// is the entry's whole parameter list as the accepted signature spells
+    /// it, in that language: annotations that resolved kept as written, the
+    /// others replaced by the language's unconstrained type.
     pub fn entry_signature(
         refusal: lash_kernel_value::EntrySignatureRefusal,
         language: lash_kernel_doc::SourceLanguage,
+        params: &[String],
     ) -> Self {
-        signature_diagnostic(refusal, Some(language))
+        signature_diagnostic(refusal, Some((language, params)))
     }
 }
 
 fn signature_diagnostic(
     refusal: lash_kernel_value::EntrySignatureRefusal,
-    language: Option<lash_kernel_doc::SourceLanguage>,
+    authored: Option<(lash_kernel_doc::SourceLanguage, &[String])>,
 ) -> Diagnostic {
     use lash_kernel_value::{AnnotationResolutionReason, EntrySignatureRefusal, SignaturePosition};
     let (function, position, problem) = match &refusal {
@@ -270,12 +274,17 @@ fn signature_diagnostic(
         ),
         SignaturePosition::Result => ("result".into(), String::new(), String::new()),
     };
-    let ts = format!("{name}({ts_params}): Promise<unknown>");
-    let py = format!("def {name}({py_params}) -> object:");
-    let accepted = match language {
-        Some(lash_kernel_doc::SourceLanguage::TypeScript) => format!("`{ts}`"),
-        Some(lash_kernel_doc::SourceLanguage::Python) => format!("`{py}`"),
-        None => format!("TypeScript `{ts}` or Python `{py}`"),
+    let accepted = match authored {
+        Some((lash_kernel_doc::SourceLanguage::TypeScript, params)) => {
+            format!("`{name}({}): Promise<unknown>`", params.join(", "))
+        }
+        Some((lash_kernel_doc::SourceLanguage::Python, params)) => {
+            format!("`def {name}({}) -> object:`", params.join(", "))
+        }
+        // A transported refusal has no source; it names only its position.
+        None => format!(
+            "TypeScript `{name}({ts_params}): Promise<unknown>` or Python `def {name}({py_params}) -> object:`"
+        ),
     };
     let message = DiagnosticMessage::authored(format!(
         "Entry `{name}` {position} {problem}; accepted signature, for example: {accepted}"

@@ -64,7 +64,9 @@ impl Lowerer<'_> {
         };
         declarations.iter().find_map(|declaration| {
             match (&declaration.pattern, &declaration.init) {
-                (ast::Pattern::Ident(name, _), Some(init)) if self.module_entry(init).is_some() => {
+                (ast::Pattern::Ident(name, _), Some(init))
+                    if self.module_entry(name, init).is_some() =>
+                {
                     Some(Name::new(name.as_str()))
                 }
                 _ => None,

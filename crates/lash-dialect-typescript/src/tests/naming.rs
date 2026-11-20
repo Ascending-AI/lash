@@ -839,10 +839,10 @@ fn enumerated_compositions_print_and_relower() {
             .collect::<std::collections::BTreeMap<_, _>>(),
         std::collections::BTreeMap::from([
             ("audit".to_owned(), [4, 0]),
-            ("control".to_owned(), [3545, 41]),
+            ("control".to_owned(), [3586, 0]),
             ("flat".to_owned(), [448, 16]),
             ("position".to_owned(), [1860, 44]),
-            ("review".to_owned(), [57, 1])
+            ("review".to_owned(), [58, 0])
         ]),
         "admission counts must not silently shrink"
     );

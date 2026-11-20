@@ -15,6 +15,20 @@ pub(super) use crate::constructs::callables::authored_name;
 use crate::constructs::callables::{self, Token};
 
 impl Lifter<'_> {
+    /// Whether `name` is a function the module declares at its top level:
+    /// an export, or a module-local helper `main` binds to its own function.
+    /// An entry recreates either from its module declaration.
+    pub(super) fn module_function(&self, name: &Name) -> bool {
+        self.document.exports.contains_key(name)
+            || self.document.main.as_deref().is_some_and(|main| {
+                main.iter().any(|statement| {
+                    matches!(statement, k::Stmt::Let { name: bound, value: k::Rhs::Expr(value) }
+                        if bound == name
+                            && authored_name(value) == Some(name.as_str()))
+                })
+            })
+    }
+
     pub(super) fn declaration(
         &mut self,
         block: &[k::Stmt],

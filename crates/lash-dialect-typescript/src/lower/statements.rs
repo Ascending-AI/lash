@@ -408,12 +408,13 @@ impl Lowerer<'_> {
             // one of its entries.
             Some(init)
                 if kind == VarKind::Const
-                    && matches!(declaration.pattern, ast::Pattern::Ident(..))
-                    && self.module_entry(init).is_some() =>
+                    && matches!(&declaration.pattern, ast::Pattern::Ident(name, _)
+                        if self.module_entry(name, init).is_some()) =>
             {
-                let (ast::Pattern::Ident(name, _), Some(function)) =
-                    (&declaration.pattern, self.module_entry(init))
-                else {
+                let ast::Pattern::Ident(name, _) = &declaration.pattern else {
+                    unreachable!("the guard matched a module entry");
+                };
+                let Some(function) = self.module_entry(name, init) else {
                     unreachable!("the guard matched a module entry");
                 };
                 self.lower_module_entry(name, function)?

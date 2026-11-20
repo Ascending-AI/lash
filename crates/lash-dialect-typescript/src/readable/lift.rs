@@ -539,7 +539,7 @@ impl<'a> Lifter<'a> {
             .count();
         for statement in &statements[..skip] {
             if let k::Stmt::Let { name, .. } = statement
-                && self.document.exports.contains_key(name)
+                && self.module_function(name)
             {
                 self.module_helpers.insert(name.clone());
             }
@@ -616,7 +616,7 @@ impl<'a> Lifter<'a> {
         else {
             return false;
         };
-        if self.document.exports.contains_key(name) {
+        if self.module_function(name) {
             super::closures::authored_name(value) == Some(name.as_str())
         } else {
             self.document
