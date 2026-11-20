@@ -1,7 +1,7 @@
 use super::Selection;
 use lash_kernel_doc::{
-    Formula, Integer, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
-    TextView, Value, arena::SharedText,
+    CountedText, Formula, Integer, NativeCall, NativeError, NewObject, Nursery, Operand,
+    PreparedNative, TextView, Value, arena::SharedText,
 };
 
 use num_traits::ToPrimitive;
@@ -699,26 +699,21 @@ fn utf16_compare(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
 /// takes a new one of twice its length; otherwise one of exactly its
 /// length. Each text is admitted for its own length only, as a copy is.
 fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-    let (text, other) = (text_view(&call.args, 0)?, text_view(&call.args, 1)?);
-    let (a, b) = (text.summary(), other.summary());
-    let tip = text.shared().filter(|shared| shared.at_tip());
-    let (text, other) = (text.whole()?, other.whole()?);
+    let parts = [text_view(&call.args, 0)?, text_view(&call.args, 1)?];
+    let tip = parts[0].shared().filter(|shared| shared.at_tip());
+    let (text, other) = (parts[0].whole()?, parts[1].whole()?);
     let len = text
         .len()
         .checked_add(other.len())
         .ok_or_else(crate::exhausted)?;
     call.new.hold(0, super::room(len))?;
-    let summary = lash_kernel_doc::heap::TextSummary {
-        utf8_bytes: len as u64,
-        chars: a.chars + b.chars,
-        utf16_units: a.utf16_units + b.utf16_units,
-    };
     if len <= lash_kernel_doc::arena::ShortText::MAX {
         let mut out = String::with_capacity(len);
         out.push_str(&text);
         out.push_str(&other);
-        return Ok(call.new.text_of(out, summary));
+        return Ok(call.new.counted(CountedText::joined(out, parts)?));
     }
+    let views = parts;
     let parts = [text.as_ref(), other.as_ref()];
     // A host that refuses the doubled buffer still gets the exact one, so
     // the call refuses only where a copy would.
@@ -733,10 +728,11 @@ fn concat(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
     #[cfg(test)]
     let _buffer = crate::native_contract_laws::scratch(out.len() as u64);
     // Longer than a short text, so it is built.
-    Ok(call.new.allocate(lash_kernel_doc::NewObject::LongText {
-        text: out.into(),
-        summary,
-    }))
+    Ok(call
+        .new
+        .allocate(lash_kernel_doc::NewObject::LongText(CountedText::joined(
+            out, views,
+        )?)))
 }
 /// [`concat`] of two short texts whose concatenation is short: the same
 /// text, which is inline, so the call builds and holds nothing of the

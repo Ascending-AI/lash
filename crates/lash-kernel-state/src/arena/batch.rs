@@ -366,7 +366,10 @@ pub(super) fn raw_body(object: NewObject) -> Result<Body, NativeError> {
             values.extend(members.into_iter().flat_map(|value| [value, Value::Absent]));
             Body::Set(lash_kernel_doc::arena::Table::whole(values))
         }
-        NewObject::LongText { text, summary } => Body::LongText(resident_text(text, summary)),
+        NewObject::LongText(text) => {
+            let (text, summary) = text.into_parts();
+            Body::LongText(resident_text(text, summary))
+        }
         NewObject::Bytes(bytes) => Body::Bytes(Bytes {
             len: bytes.len() as u64,
             chunks: Box::new([Chunk::Resident(bytes.as_ref().into())]),

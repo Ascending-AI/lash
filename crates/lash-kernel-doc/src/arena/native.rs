@@ -721,11 +721,8 @@ pub enum NewObject {
     Map(Vec<(Value, Value)>),
     Set(Vec<Value>),
     Record(Vec<(Value, Value)>),
-    /// A long text and its lengths.
-    LongText {
-        text: super::TextBytes,
-        summary: crate::heap::TextSummary,
-    },
+    /// A long text, its lengths counted with it.
+    LongText(CountedText),
     /// A function reference by a name past [`ShortText::MAX`] bytes.
     Function(lash_kernel_value::names::CallableId),
     Bytes(Arc<[u8]>),
@@ -739,14 +736,68 @@ pub enum NewObject {
     },
 }
 
+/// A text and its lengths, which only counting its bytes or joining two
+/// texts whose lengths the arena holds can give: no caller states the
+/// lengths of a text it builds, so a long text's head and row never
+/// disagree about them.
+#[derive(Clone, Debug)]
+pub struct CountedText {
+    text: super::TextBytes,
+    summary: crate::heap::TextSummary,
+}
+
+impl CountedText {
+    /// `text`, its lengths counted.
+    pub fn new(text: impl Into<super::TextBytes>) -> Self {
+        let text = text.into();
+        let summary = crate::heap_values::text_summary(text.as_str());
+        Self { text, summary }
+    }
+
+    /// `text`, the two texts `parts` joined, its lengths the sums of
+    /// theirs: built without counting its bytes again.
+    ///
+    /// # Errors
+    ///
+    /// A malformed fault when `text` is not as long as `parts` together.
+    pub fn joined(
+        text: impl Into<super::TextBytes>,
+        parts: [TextView<'_>; 2],
+    ) -> Result<Self, NativeError> {
+        let text = text.into();
+        let [a, b] = parts.map(|part| part.summary());
+        let summary = crate::heap::TextSummary {
+            utf8_bytes: a.utf8_bytes.saturating_add(b.utf8_bytes),
+            chars: a.chars.saturating_add(b.chars),
+            utf16_units: a.utf16_units.saturating_add(b.utf16_units),
+        };
+        if text.as_str().len() as u64 != summary.utf8_bytes {
+            return Err(NativeError::Malformed(
+                "a joined text is not as long as its parts",
+            ));
+        }
+        debug_assert_eq!(summary, crate::heap_values::text_summary(text.as_str()));
+        Ok(Self { text, summary })
+    }
+
+    pub fn text(&self) -> &super::TextBytes {
+        &self.text
+    }
+
+    pub fn summary(&self) -> crate::heap::TextSummary {
+        self.summary
+    }
+
+    /// The text and its lengths.
+    pub fn into_parts(self) -> (super::TextBytes, crate::heap::TextSummary) {
+        (self.text, self.summary)
+    }
+}
+
 impl NewObject {
     /// The long text `text`, its lengths counted.
     pub fn long_text(text: String) -> Self {
-        let summary = crate::heap_values::text_summary(&text);
-        Self::LongText {
-            text: text.into(),
-            summary,
-        }
+        Self::LongText(CountedText::new(text))
     }
 
     /// The value that names the object, by the slot it takes.
@@ -757,7 +808,7 @@ impl NewObject {
             Self::Map(_) => Value::Map,
             Self::Set(_) => Value::Set,
             Self::Record(_) => Value::Record,
-            Self::LongText { .. } => Value::LongText,
+            Self::LongText(_) => Value::LongText,
             Self::Function(_) => Value::Function,
             Self::Bytes(_) => Value::Bytes,
             Self::BigInt(_) => Value::BigInt,
@@ -931,18 +982,12 @@ impl<'call> Nursery<'call> {
         }
     }
 
-    /// A text whose lengths `summary` gives, as [`Self::text`] makes it:
-    /// what a native that joins texts of known lengths builds without
-    /// counting its bytes again.
-    pub fn text_of(
-        &mut self,
-        text: impl Into<super::TextBytes>,
-        summary: crate::heap::TextSummary,
-    ) -> Value {
-        let text = text.into();
-        match ShortText::new(&text) {
+    /// A counted text, as [`Self::text`] makes it: what a native that
+    /// joins texts builds without counting its bytes again.
+    pub fn counted(&mut self, text: CountedText) -> Value {
+        match ShortText::new(text.text().as_str()) {
             Some(short) => Value::Text(short),
-            None => self.allocate(NewObject::LongText { text, summary }),
+            None => self.allocate(NewObject::LongText(text)),
         }
     }
 

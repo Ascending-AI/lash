@@ -1316,10 +1316,9 @@ fn a_sealed_shared_text_keeps_its_identity_and_its_buffer_takes_no_append() {
     let shared = SharedText::new(&[LONG, "!"], 2 * (LONG.len() + 1)).expect("a buffer");
     let mut arena = Arena::new();
     let text = arena
-        .create(NewObject::LongText {
-            text: shared.clone().into(),
-            summary: counts(&format!("{LONG}!")),
-        })
+        .create(NewObject::LongText(lash_kernel_doc::CountedText::new(
+            shared.clone(),
+        )))
         .expect("a text");
     let copy = arena
         .create(NewObject::long_text(format!("{LONG}!")))

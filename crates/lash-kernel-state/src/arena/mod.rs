@@ -1060,7 +1060,8 @@ impl Arena {
                     },
                 ));
             }
-            NewObject::LongText { text, summary } => {
+            NewObject::LongText(text) => {
+                let (text, summary) = text.into_parts();
                 return Ok((
                     Body::LongText(resident_text(text, summary)),
                     Facts::default(),
@@ -1724,7 +1725,7 @@ pub(crate) fn freeze(body: &Body) {
 fn leaf(object: &NewObject) -> bool {
     matches!(
         object,
-        NewObject::LongText { .. }
+        NewObject::LongText(_)
             | NewObject::Bytes(_)
             | NewObject::BigInt(_)
             | NewObject::Timestamp(_)

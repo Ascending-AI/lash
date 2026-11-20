@@ -70,8 +70,8 @@ impl Library {
 /// none: it is its value.
 pub(crate) fn key(object: &NewObject) -> ConstantKey {
     match object {
-        NewObject::LongText { text, .. } => {
-            ConstantKey::of(ConstantContent::Text(&identity::text_key(text)))
+        NewObject::LongText(text) => {
+            ConstantKey::of(ConstantContent::Text(&identity::text_key(text.text())))
         }
         NewObject::BigInt(int) => {
             let mut out = lash_kernel_value::tokens::TokenWriter::default();
