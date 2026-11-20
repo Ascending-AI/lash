@@ -388,6 +388,50 @@ fn a_large_map_keeps_insertion_order_across_relayout() {
     );
 }
 
+/// A long text key whose 256 bytes fit inline in its directory row.
+fn long_key(i: i64) -> String {
+    format!("{i:0>256}")
+}
+
+/// The map row is already open. Packing 200,000 entries at 48 per
+/// chunk gives 4,167 chunks, within the 72 × 96 references of one index
+/// level below the row. A lookup reads one index page and one chunk.
+/// The directory packs the 280-byte text rows into about 7,000 leaves
+/// with three index levels above them. Only the matching key needs that
+/// four-page path. Its text is inline and the integer value is immediate.
+#[test]
+fn a_point_read_with_long_keys_reads_only_the_matching_key_row() {
+    let store = Counting::default();
+    let (mut heap, map) = opened_large(&store, |heap| {
+        let pairs = (0..N)
+            .map(|i| {
+                let key = make(heap, NewObject::long_text(long_key(i)));
+                (key, Value::Int(i))
+            })
+            .collect();
+        make(heap, NewObject::Map(pairs))
+    });
+    for i in [0, N / 2 + 3, N - 1] {
+        let key = make(&mut heap, NewObject::long_text(long_key(i)));
+        heap.forget_pages();
+        let (value, reads, _) = store.during(|| get(&mut heap, &[map, key], map, key));
+        assert_eq!(int(value), Some(i), "key {i}");
+        assert_eq!(reads, 2 + 4, "key {i}");
+    }
+
+    // An edit and reseal must retain the placements of the untouched
+    // entries in a decoded chunk, whose keys still wait on their rows.
+    let key = make(&mut heap, NewObject::long_text(long_key(0)));
+    let handle = map.handle().expect("a map");
+    warm(&mut heap, &[map, key], |heap| {
+        heap.arena_mut().table_write(handle, key, Value::Int(-1))
+    });
+    let root = heap.seal(&[map]).expect("a reseal");
+    let (mut heap, map) = reopened(&store, &root);
+    let key = make(&mut heap, NewObject::long_text(long_key(0)));
+    assert_eq!(int(get(&mut heap, &[map, key], map, key)), Some(-1));
+}
+
 /// Contract §6: a point access through a large list of immutables reads
 /// the list's index page and chunk, then the one member's row: the
 /// members it does not touch stay unread.

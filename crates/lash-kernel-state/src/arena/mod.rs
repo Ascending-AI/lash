@@ -95,7 +95,7 @@ pub use versions::{ContentVersion, Registration};
 /// covers.
 pub const CARD: u64 = 64;
 pub use bench::{Bench, Called, Usage};
-pub use chunks::{ColdChunk, LOOKUP, PayloadPart};
+pub use chunks::{ColdChunk, DecodedKey, LOOKUP, PayloadPart};
 pub use heads::opened;
 pub use keys::{ArenaSemantics, Key, text_key};
 pub use ops::invalid_key;

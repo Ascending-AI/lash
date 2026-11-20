@@ -460,7 +460,12 @@ fn list_outcomes(
 
 /// The entries of a table's resident chunk `values`, whose sequences are
 /// `seqs`, with their keys' placements.
-fn placed_entries(arena: &Arena, pairs: &[Value], seqs: &[u64]) -> Result<Vec<Placed>, SealError> {
+fn placed_entries(
+    arena: &Arena,
+    pairs: &[Value],
+    seqs: &[u64],
+    pending: &BTreeMap<u64, Placement>,
+) -> Result<Vec<Placed>, SealError> {
     if pairs.len() != seqs.len() * 2 {
         return Err(fault("a table chunk and its sequences disagree"));
     }
@@ -471,13 +476,18 @@ fn placed_entries(arena: &Arena, pairs: &[Value], seqs: &[u64]) -> Result<Vec<Pl
         .iter()
         .zip(seqs)
         .map(|([key, value], seq)| {
-            let normal = semantics
-                .normal_key(key)
-                .map_err(|error| fault(error.to_string()))?
-                .ok_or_else(|| fault("a table key has no normal form"))?;
+            let at = if let Some(at) = pending.get(seq) {
+                *at
+            } else {
+                let normal = semantics
+                    .normal_key(key)
+                    .map_err(|error| fault(error.to_string()))?
+                    .ok_or_else(|| fault("a table key has no normal form"))?;
+                placement(&normal)
+            };
             Ok(Entry {
                 seq: *seq,
-                placement: placement(&normal),
+                placement: at,
                 key: run_value(arena, key)?,
                 value: run_value(arena, value)?,
             })
@@ -536,6 +546,10 @@ fn table_layout(
             .chunk_sequences(handle, chunk)
             .map_err(|error| fault(error.to_string()))
     };
+    let pending = arena
+        .pending_table_placements(handle)
+        .map_err(|error| fault(error.to_string()))?
+        .collect();
     // The resident pairs every entry's heads come from.
     let mut resident: Vec<Value> = Vec::new();
     let mut groups: Vec<Group> = Vec::new();
@@ -548,7 +562,7 @@ fn table_layout(
                     Chunk::Cold { .. } => None,
                     Chunk::Resident(pairs) => {
                         resident.extend_from_slice(pairs);
-                        Some(placed_entries(arena, pairs, &sequences(at)?)?)
+                        Some(placed_entries(arena, pairs, &sequences(at)?, &pending)?)
                     }
                 };
                 match (at < count, entries) {
@@ -565,7 +579,7 @@ fn table_layout(
                 .resident(0)
                 .ok_or_else(|| fault("a whole table holds no chunk"))?;
             resident.extend_from_slice(pairs);
-            let entries = placed_entries(arena, pairs, &sequences(0)?)?;
+            let entries = placed_entries(arena, pairs, &sequences(0)?, &pending)?;
             let firsts = match opened {
                 Some(opened) => Some(match &opened.firsts {
                     Some(firsts) => firsts.clone(),

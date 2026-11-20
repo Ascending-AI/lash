@@ -29,6 +29,7 @@
 //! [`LOOKUP`].
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
@@ -39,6 +40,7 @@ use lash_kernel_doc::{NativeError, Retry, Value};
 use super::keys::{Key, key_of};
 use super::layouts::{Layout, Layouts, Step};
 use super::{CARD, Facts};
+use crate::paged::run::chunked::Placement;
 
 /// A table's key index and its entries' insertion sequences: a shared
 /// layout's, or its own.
@@ -58,6 +60,8 @@ struct Own {
     /// Each known key, to its entry's sequence. Never iterated: only
     /// looked up.
     keys: HashMap<Key, u64>,
+    /// Cold keys routed by their entry placements until their own rows are read.
+    pending: BTreeMap<(Placement, u64), Value>,
     /// Keys the heap's key index holds no entry for, while a chunk is
     /// cold.
     absent: HashSet<Key>,
@@ -177,7 +181,7 @@ enum Known {
     Seq(u64),
     /// No entry holds it.
     Absent,
-    /// A cold chunk may hold it.
+    /// A cold chunk or a pending entry may hold it.
     Unknown,
 }
 
@@ -221,6 +225,7 @@ impl Own {
     fn dense(keys: HashMap<Key, u64>, len: u64) -> Self {
         Self {
             keys,
+            pending: BTreeMap::new(),
             absent: HashSet::new(),
             width: 0,
             seqs: Vec::new(),
@@ -266,7 +271,9 @@ impl Own {
     fn known(&self, key: &Key, cold: bool) -> Known {
         match self.keys.get(key) {
             Some(seq) => Known::Seq(*seq),
-            None if !cold || self.absent.contains(key) => Known::Absent,
+            None if (!cold && self.pending.is_empty()) || self.absent.contains(key) => {
+                Known::Absent
+            }
             None => Known::Unknown,
         }
     }
@@ -353,6 +360,7 @@ impl Index {
     pub(super) fn chunked(width: u64, chunks: usize, next: u64) -> Self {
         Self(Repr::Own(Box::new(Own {
             keys: HashMap::new(),
+            pending: BTreeMap::new(),
             absent: HashSet::new(),
             width,
             seqs: vec![Vec::new(); chunks],
@@ -368,6 +376,7 @@ impl Index {
     pub(super) fn keyed(chunks: usize, next: u64) -> Self {
         Self(Repr::Own(Box::new(Own {
             keys: HashMap::new(),
+            pending: BTreeMap::new(),
             absent: HashSet::new(),
             width: 0,
             seqs: vec![Vec::new(); chunks],
@@ -468,6 +477,11 @@ impl Index {
             Repr::Shared(_) => false,
             Repr::Own(own) => cold && matches!(own.known(key, true), Known::Unknown),
         }
+    }
+
+    /// Records a decoded entry which still needs its key's own row checked.
+    pub(super) fn defer(&mut self, at: Placement, seq: u64, key: Value) {
+        self.own_mut().pending.insert((at, seq), key);
     }
 
     /// Records what the heap's key index holds for `key`.
@@ -634,6 +648,7 @@ pub(super) fn rekeyed(
         Repr::Shared(_) => return index_of(objects, facts, layouts, object, table),
         Repr::Own(own) => own,
     };
+    let pending: HashSet<_> = own.pending.keys().map(|(_, seq)| *seq).collect();
     let mut resident = HashSet::new();
     let mut fresh = Vec::new();
     for chunk in 0..table.chunks.count() {
@@ -645,6 +660,9 @@ pub(super) fn rekeyed(
             let seq = seqs
                 .get(at)
                 .ok_or(NativeError::Malformed("a table entry has no sequence"))?;
+            if pending.contains(&seq) {
+                continue;
+            }
             resident.insert(seq);
             fresh.push((key_of(objects, facts, key)?.ok_or_else(invalid_key)?, seq));
         }
@@ -732,7 +750,7 @@ pub(crate) fn find(
     }
     let cold = table.chunks.first_cold();
     match own.known(key, cold.is_some()) {
-        Known::Unknown if own.placed.is_some() => {
+        Known::Unknown if own.placed.is_some() || !own.pending.is_empty() => {
             *own.lookup.borrow_mut() = Some(key.clone());
             Err(Retry::Cold {
                 object,
@@ -819,6 +837,66 @@ impl super::Arena {
     pub(super) fn table_view(&self, handle: ArenaHandle) -> Result<(&Table, &Index), NativeError> {
         let (table, index, _) = self.table_facts(handle)?;
         Ok((table, index))
+    }
+
+    /// The resident candidates at `at` whose keys are still outside the
+    /// exact key index. The VM checks each candidate's own row.
+    pub fn pending_table_keys(
+        &self,
+        handle: ArenaHandle,
+        at: Placement,
+    ) -> Result<Vec<(u64, Value)>, NativeError> {
+        let (_, index) = self.table_view(handle)?;
+        let Repr::Own(own) = &index.0 else {
+            return Ok(Vec::new());
+        };
+        Ok(own
+            .pending
+            .range((at, 0)..=(at, u64::MAX))
+            .map(|(&(_, seq), &key)| (seq, key))
+            .collect())
+    }
+
+    /// The saved placements of entries still outside the exact key index.
+    /// A seal carries those placements forward with the entries.
+    pub fn pending_table_placements(
+        &self,
+        handle: ArenaHandle,
+    ) -> Result<impl Iterator<Item = (u64, Placement)> + '_, NativeError> {
+        let (_, index) = self.table_view(handle)?;
+        let pending = match &index.0 {
+            Repr::Own(own) => Some(&own.pending),
+            Repr::Shared(_) => None,
+        };
+        Ok(pending
+            .into_iter()
+            .flat_map(BTreeMap::keys)
+            .map(|&(at, seq)| (seq, at)))
+    }
+
+    /// Publishes the candidates at `at` after the VM checks their rows.
+    /// Records a miss if the exact key index has no entry for `probe`.
+    pub fn resolve_table_lookup(
+        &mut self,
+        handle: ArenaHandle,
+        at: Placement,
+        verified: Vec<(u64, Key)>,
+        probe: Key,
+    ) -> Result<(), NativeError> {
+        let own = self
+            .facts_mut(handle)?
+            .index
+            .as_mut()
+            .ok_or(NativeError::Malformed("a resident table has no index"))?
+            .own_mut();
+        for (seq, key) in verified {
+            own.pending.remove(&(at, seq));
+            own.resolved(key, Some(seq));
+        }
+        if !own.keys.contains_key(&probe) {
+            own.resolved(probe, None);
+        }
+        Ok(())
     }
 
     /// Writes `value` over the entry under `key`, if the table holds one:

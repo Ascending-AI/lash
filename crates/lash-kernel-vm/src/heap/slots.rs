@@ -13,7 +13,7 @@ use lash_kernel_doc::arena::Objects;
 use lash_kernel_doc::arena::native::{Args, NativeError, NewObject, Nursery};
 use lash_kernel_state::arena::{Arena, ArenaSemantics, Visit};
 
-use lash_kernel_state::arena::{LOOKUP, ProxyKind};
+use lash_kernel_state::arena::{DecodedKey, Key, LOOKUP, ProxyKind};
 use lash_kernel_state::paged::run::chunked::{Chunked, Members, Placement, placement};
 use lash_kernel_state::paged::run::directory::Row;
 use lash_kernel_state::paged::run::ids::ObjectId;
@@ -459,9 +459,25 @@ impl SlotHeap {
         Ok(())
     }
 
-    /// Reads the row of each immutable among `keys` that no row of its own
-    /// has vouched for yet, before a table is keyed by their facts:
-    /// `held`, what the load decoded, held across each read beside `roots`.
+    /// The pending immutable whose own row must vouch for a table key.
+    fn unvouched_key(&self, key: Value) -> Result<Option<ArenaHandle>, LoadError> {
+        let (Value::Tuple(object)
+        | Value::LongText(object)
+        | Value::Bytes(object)
+        | Value::BigInt(object)
+        | Value::BigTimestamp(object)) = key
+        else {
+            return Ok(None);
+        };
+        let facts = self
+            .arena
+            .facts(object)
+            .map_err(|error| self.corrupt_row(error.to_string()))?;
+        Ok(facts.unvouched().then_some(object))
+    }
+
+    /// Reads the row of each pending immutable among `keys`. The decoded
+    /// entries in `held` survive collection before they join the table.
     fn vouch_keys(
         &mut self,
         keys: impl Iterator<Item = Value>,
@@ -469,20 +485,7 @@ impl SlotHeap {
         roots: &mut dyn FnMut(&mut Visit<'_>),
     ) -> Result<(), LoadError> {
         for key in keys {
-            let (Value::Tuple(object)
-            | Value::LongText(object)
-            | Value::Bytes(object)
-            | Value::BigInt(object)
-            | Value::BigTimestamp(object)) = key
-            else {
-                continue;
-            };
-            let unvouched = self
-                .arena
-                .facts(object)
-                .map_err(|error| self.corrupt_row(error.to_string()))?
-                .unvouched();
-            if unvouched {
+            if let Some(object) = self.unvouched_key(key)? {
                 self.load(object, 0, &mut |visit| {
                     roots(visit);
                     held.iter().for_each(&mut *visit);
@@ -490,6 +493,28 @@ impl SlotHeap {
             }
         }
         Ok(())
+    }
+
+    /// Checks a vouched key against the placement its table entry held.
+    fn checked_key(
+        &self,
+        id: ObjectId,
+        key: &Value,
+        at: Placement,
+    ) -> Result<lash_kernel_doc::heap::NormalKey, LoadError> {
+        let normal = self
+            .arena
+            .semantics()
+            .normal_key(key)
+            .map_err(|error| self.corrupt_row(error.to_string()))?
+            .ok_or_else(|| self.corrupt_row("a table key has no normal form".into()))?;
+        if placement(&normal) != at {
+            return Err(self.corrupt_row(format!(
+                "large table {} holds a key out of its placement",
+                id.0
+            )));
+        }
+        Ok(normal)
     }
 
     /// The store's corruption fault for `reason`.
@@ -534,22 +559,43 @@ impl SlotHeap {
                 .map_err(|error| malformed(error.to_string()))?
                 .ok_or_else(|| malformed("a lookup with no key".into()))?;
             let at = placement(&normal);
-            let durable = self
-                .durable
-                .as_ref()
-                .ok_or_else(|| malformed("a large object in a heap with no directory".into()))?;
-            let target = self
-                .large
-                .chunk_of_key(durable.directory.access(), id, &at)
-                .map_err(LoadError::Store)?;
-            let found =
-                cold(self, target)? && self.read_chunk(object, id, target, roots)?.contains(&at);
-            if !found {
-                self.arena
-                    .resolved(object, key, None)
-                    .map_err(|error| malformed(error.to_string()))?;
+            let candidates = |heap: &Self| {
+                heap.arena
+                    .pending_table_keys(object, at)
+                    .map_err(|error| malformed(error.to_string()))
+            };
+            let mut pending = candidates(self)?;
+            if pending.is_empty()
+                && !self
+                    .arena
+                    .cold_chunks(object, 0, 1)
+                    .map_err(|error| malformed(error.to_string()))?
+                    .is_empty()
+            {
+                let durable = self.durable.as_ref().ok_or_else(|| {
+                    malformed("a large object in a heap with no directory".into())
+                })?;
+                let target = self
+                    .large
+                    .chunk_of_key(durable.directory.access(), id, &at)
+                    .map_err(LoadError::Store)?;
+                if cold(self, target)? {
+                    self.read_chunk(object, id, target, roots)?;
+                    pending = candidates(self)?;
+                }
             }
-            return Ok(());
+            self.vouch_keys(pending.iter().map(|(_, key)| *key), &[], roots)?;
+            let verified = pending
+                .into_iter()
+                .map(|(seq, key)| {
+                    let normal = self.checked_key(id, &key, at)?;
+                    Ok((seq, Key::normalized(&key, normal)))
+                })
+                .collect::<Result<Vec<_>, LoadError>>()?;
+            return self
+                .arena
+                .resolve_table_lookup(object, at, verified, key)
+                .map_err(|error| malformed(error.to_string()));
         }
         if cold(self, chunk)? {
             self.read_chunk(object, id, chunk, roots)?;
@@ -681,15 +727,15 @@ impl SlotHeap {
     }
 
     /// Reads chunk `chunk` of the large object `id` into `object`: its
-    /// members decoded, each referent opened. Gives the placements of a
-    /// table chunk's keys.
+    /// members decoded, each referent opened. Pending table keys stay
+    /// indexed by entry placement until a lookup needs their own rows.
     fn read_chunk(
         &mut self,
         object: ArenaHandle,
         id: ObjectId,
         chunk: u32,
         roots: &mut dyn FnMut(&mut Visit<'_>),
-    ) -> Result<Vec<Placement>, LoadError> {
+    ) -> Result<(), LoadError> {
         use lash_kernel_doc::heap::HeapFault;
         let malformed = |reason: String| LoadError::Store(HeapFault::Malformed(reason));
         let durable = self
@@ -742,34 +788,24 @@ impl SlotHeap {
             .map(|member| open::value(&mut self.arena, member, &page.heads))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|reason| self.corrupt_row(reason))?;
-        // Record the admitted placeholders before vouching can load a
-        // tuple's own row and replace its placeholder.
+        // Record the admitted placeholders before their own rows can
+        // replace them.
         for (id, units) in fresh {
             if let Some(handle) = self.arena.entity_handle(open::entity(id)) {
                 self.place(handle, units);
             }
         }
-        let mut placements = Vec::new();
         let decoded = match &page.members {
             Members::List(_) => self.arena.decoded_list(object, chunk, held),
             Members::Table(entries) => {
-                self.vouch_keys(held.iter().step_by(2).copied(), &held, roots)?;
                 let mut decoded = Vec::with_capacity(entries.len());
                 for (entry, &[key, value]) in entries.iter().zip(held.as_chunks::<2>().0) {
-                    let normal = self
-                        .arena
-                        .semantics()
-                        .normal_key(&key)
-                        .map_err(|error| self.corrupt_row(error.to_string()))?
-                        .ok_or_else(|| self.corrupt_row("a table key has no normal form".into()))?;
-                    if placement(&normal) != entry.placement {
-                        return Err(self.corrupt_row(format!(
-                            "large table {} holds a key out of its placement",
-                            id.0
-                        )));
-                    }
-                    placements.push(entry.placement);
-                    decoded.push((entry.seq, key, value, normal));
+                    let indexed = if self.unvouched_key(key)?.is_some() {
+                        DecodedKey::Pending(entry.placement)
+                    } else {
+                        DecodedKey::Verified(self.checked_key(id, &key, entry.placement)?)
+                    };
+                    decoded.push((entry.seq, key, value, indexed));
                 }
                 self.arena.decoded_table(object, chunk, decoded)
             }
@@ -781,7 +817,7 @@ impl SlotHeap {
         let before = self.units.get(index).copied().unwrap_or(0);
         self.held = self.held.saturating_sub(cold.saturating_sub(resident));
         self.place(object, before.saturating_sub(cold).saturating_add(resident));
-        Ok(placements)
+        Ok(())
     }
 }
 

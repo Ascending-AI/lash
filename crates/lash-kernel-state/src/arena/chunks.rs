@@ -19,6 +19,7 @@ use lash_kernel_doc::{NativeError, Value};
 pub use super::tables::LOOKUP;
 use super::tables::{self, Index};
 use super::{Arena, Key, NO_PAGE, ProxyKind, body_values, first_cold, malformed};
+use crate::paged::run::chunked::Placement;
 
 /// What a cold chunk holds, for the machine to read from the heap.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +28,13 @@ pub enum ColdChunk {
     List { start: u64, count: u64 },
     /// The entries of a table whose insertion sequences are in `span`.
     Table { span: Range<u64> },
+}
+
+/// How a decoded table entry is routed until lookup can use its key.
+#[derive(Debug)]
+pub enum DecodedKey {
+    Verified(NormalKey),
+    Pending(Placement),
 }
 
 /// A node of a long text's or bytes' payload tree, decoded.
@@ -362,12 +370,12 @@ impl Arena {
     }
 
     /// Chunk `chunk` of the table `handle`, decoded: its entries in
-    /// sequence order, each with its sequence and its key's normal form.
+    /// sequence order, with verified keys or saved candidate placements.
     pub fn decoded_table(
         &mut self,
         handle: ArenaHandle,
         chunk: u32,
-        entries: Vec<(u64, Value, Value, NormalKey)>,
+        entries: Vec<(u64, Value, Value, DecodedKey)>,
     ) -> Result<(), NativeError> {
         let before = self.needs_decode(handle)?;
         let added = entries.len() as u64 * 2;
@@ -383,15 +391,21 @@ impl Arena {
         let Some(held @ Chunk::Cold { .. }) = chunks.get_mut(chunk as usize) else {
             return Err(malformed("a decoded table chunk is not cold"));
         };
+        index.decoded(
+            chunk as usize,
+            entries.iter().map(|entry| entry.0).collect(),
+        )?;
         let mut pairs = Vec::with_capacity(entries.len() * 2);
-        let mut seqs = Vec::with_capacity(entries.len());
-        for (seq, key, value, normal) in entries {
-            index.resolved(Key::normalized(&key, normal), Some(seq));
-            seqs.push(seq);
+        for (seq, key, value, decoded) in entries {
+            match decoded {
+                DecodedKey::Verified(normal) => {
+                    index.resolved(Key::normalized(&key, normal), Some(seq));
+                }
+                DecodedKey::Pending(at) => index.defer(at, seq, key),
+            }
             pairs.push(key);
             pairs.push(value);
         }
-        index.decoded(chunk as usize, seqs)?;
         let members: Vec<ArenaHandle> = pairs.iter().filter_map(Value::handle).collect();
         *held = Chunk::Resident(pairs);
         for member in members {
