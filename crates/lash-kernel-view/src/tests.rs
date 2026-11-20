@@ -202,3 +202,133 @@ fn helper_view_reads_walk_admission_edges_once_per_link() {
         "view reads rewalked the helper closure: {edges} edges, bound 11"
     );
 }
+
+/// A view of `source`'s root function, its local closures included.
+fn root_view(source: &str) -> (crate::WorkflowView, lash_kernel_check::WorkflowDocument) {
+    use lash_kernel_doc::{Document, NumberPolicy, parse_definition_with_locals};
+    use lash_kernel_package::{LinkedStart, StartSelector};
+    use lash_kernel_value::sites::Unit;
+    let (root, locals) = parse_definition_with_locals(source).unwrap();
+    let root_id = root.identity();
+    let mut document = Document::new(NumberPolicy::Float, vec![]);
+    document.functions.insert(root_id, root);
+    document
+        .functions
+        .extend(locals.into_iter().map(|f| (f.identity(), f)));
+    let link = lash_kernel_value::Link {
+        helper_fills: Default::default(),
+        document: document.identity(),
+        fills: Default::default(),
+    };
+    let mut content = lash_kernel_package::LinkedContent::default();
+    content
+        .documents
+        .insert(document.identity(), document.clone().into());
+    content.links.insert(link.identity(), link.clone());
+    let reference = LinkedStart {
+        link: link.identity(),
+        selector: StartSelector::Main,
+    };
+    let context = crate::ViewContext::new(
+        reference.clone().into(),
+        content,
+        Default::default(),
+        lash_kernel_doc::BuildHelpers::empty(),
+    )
+    .unwrap();
+    let checked = lash_kernel_check::WorkflowDocument::entered(
+        document.clone(),
+        reference,
+        &document.functions,
+    )
+    .unwrap();
+    let view = crate::derive_callable(&checked, &Unit::Library(root_id), &context).unwrap();
+    (view, checked)
+}
+
+/// The closure expressions of `checked`, in graph order.
+fn closures(checked: &lash_kernel_check::WorkflowDocument) -> Vec<lash_kernel_value::sites::Site> {
+    checked
+        .graph()
+        .nodes()
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.kind,
+                lash_kernel_check::NodeKind::Expr(lash_kernel_check::ExprNode::Closure { .. })
+            )
+        })
+        .map(|node| node.site.clone())
+        .collect()
+}
+
+/// FIG-7723: a value that holds itself (`x = {inner: x}`) still carries the
+/// closure it held before, at every depth. The stack-cut analysis answered
+/// `x` while `x` was being read and dropped `x.inner.inner`, missing a call.
+#[test]
+fn a_closure_reached_through_a_value_that_holds_itself_is_applied() {
+    let (view, checked) = root_view(
+        "function law.nest() -> Any\nkernel 1\nmetering statements\nbody { let g = fn() { return null } let x = { inner: g } set x = { inner: x } let a = x.inner let b = a.inner do apply b() return null }",
+    );
+    let [g] = closures(&checked).try_into().unwrap();
+    let applied: Vec<_> = view
+        .dataflow
+        .actions
+        .iter()
+        .filter(|action| action.callee.is_none())
+        .map(|action| action.applies.clone())
+        .collect();
+    assert_eq!(applied, [vec![g]]);
+}
+
+/// FIG-7723: helpers that call each other in a cycle and pass one
+/// parameter along are solved in work linear in the graph. Each helper
+/// `h_i(p)` applies `p`, `h_{i+1}` and `h_{i+2}` (indices mod N), and the
+/// root applies `h_0(g)`. The stack-cut analysis followed every simple path
+/// back through the callers, a Fibonacci number of them in N.
+///
+/// Bound, by hand: one result per graph node and binding, at most. Results
+/// outside the cycle (the helper variables, `g`) are final before it is
+/// solved and evaluated once. In the cycle, every value holds one closure at
+/// its root (`g` for each `p`, the returns and the `do apply p()` results), so it
+/// grows at most once, and a result is revisited at most once for each of
+/// the at most two growing results or new callers it reads. So evaluations
+/// are at most three per result, and nodes plus bindings bound results.
+#[test]
+fn helpers_feeding_each_others_parameters_derive_in_linear_work() {
+    for helpers in [16, 64] {
+        let mut body = String::new();
+        for index in 0..helpers {
+            body.push_str(&format!("let h{index} = null "));
+        }
+        for index in 0..helpers {
+            let (next, after) = ((index + 1) % helpers, (index + 2) % helpers);
+            body.push_str(&format!(
+                "set h{index} = fn(p) {{ do apply p() do apply h{next}(p) do apply h{after}(p) return p }} "
+            ));
+        }
+        body.push_str("let g = fn() { return null } do apply h0(g) return null");
+        crate::applies::take_computed();
+        let (view, checked) = root_view(&format!(
+            "function law.ring() -> Any\nkernel 1\nmetering statements\nbody {{ {body} }}"
+        ));
+        let computed = crate::applies::take_computed();
+        let graph = checked.graph();
+        let bound = 3 * (graph.nodes().len() + graph.bindings().len()) as u64;
+        println!("FIG-7723 helpers={helpers} computed={computed} bound={bound}");
+        assert!(
+            computed <= bound,
+            "{helpers} helpers took {computed} evaluations, bound {bound}"
+        );
+        // Every `apply p()` runs `g`, which reaches each helper only around
+        // the cycle.
+        let g = closures(&checked).pop().unwrap();
+        let through_p = view
+            .dataflow
+            .actions
+            .iter()
+            .filter(|action| action.applies == [g.clone()])
+            .count();
+        assert_eq!(through_p, helpers, "each helper applies its parameter");
+    }
+}

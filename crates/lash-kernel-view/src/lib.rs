@@ -559,10 +559,10 @@ pub fn derive_callable(
             .map(|f| f.signature.result.clone()),
         _ => None,
     };
-    let ordinals = document.ordinals();
+    let ordinals = context.ordinals(document);
     let mut walk = Walk {
-        ordinals: ordinals.sites,
-        action_ordinals: ordinals.actions,
+        ordinals: &ordinals.sites,
+        action_ordinals: &ordinals.actions,
         document,
         graph,
         context,
@@ -592,7 +592,6 @@ pub fn derive_callable(
             execution_sites: graph.execution_sites().iter().map(execution_site).collect(),
         },
         uses: BTreeMap::new(),
-        links: applies::Links::new(),
     };
     let at = Context {
         block: walk.entry.site.clone(),
@@ -706,14 +705,13 @@ struct Context {
 
 struct Walk<'a> {
     context: &'a ViewContext,
-    ordinals: BTreeMap<Site, u32>,
-    action_ordinals: BTreeMap<Site, u32>,
+    ordinals: &'a BTreeMap<Site, u32>,
+    action_ordinals: &'a BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
     entry: Callable,
     view: WorkflowView,
     uses: BTreeMap<BindingId, Vec<Use>>,
-    links: applies::Links,
 }
 
 /// Fold an entry in lexical order, following a closure into its library body.
@@ -1212,7 +1210,7 @@ impl<'a> Walk<'a> {
                 ActionRole::Task
             }
         };
-        let applies = self.links.applies(self.graph, derived, self.context);
+        let applies = applies::applies(self.graph, derived, self.context);
         let mut performs = match &callee {
             Some(CalleeView::Effect(effect)) => std::collections::BTreeSet::from([*effect]),
             Some(CalleeView::Library { id, link, .. }) => {
@@ -1229,12 +1227,7 @@ impl<'a> Walk<'a> {
             Some(CalleeView::Timer { use_ }) => std::collections::BTreeSet::from([*use_]),
             None => std::collections::BTreeSet::new(),
         };
-        performs.extend(applied_performs(
-            self.graph,
-            &mut self.links,
-            &applies,
-            self.context,
-        ));
+        performs.extend(applied_performs(self.graph, &applies, self.context));
         self.view.dataflow.actions.push(ActionView {
             ordinal: self.action_ordinals[&node.site],
             site: node.site.clone(),
@@ -1260,7 +1253,6 @@ impl<'a> Walk<'a> {
 /// derivation; the view only follows the callable sites `applies` has resolved.
 fn applied_performs(
     graph: &Graph,
-    links: &mut applies::Links,
     callables: &[Site],
     context: &ViewContext,
 ) -> std::collections::BTreeSet<lash_kernel_value::OperationUse> {
@@ -1338,7 +1330,7 @@ fn applied_performs(
                 _ => {}
             }
             if let Some(action) = action {
-                callables.extend(links.applies(graph, action, context));
+                callables.extend(applies::applies(graph, action, context));
             }
             match &node.kind {
                 NodeKind::Expr(ExprNode::Call { function, .. })

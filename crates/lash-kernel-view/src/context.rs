@@ -22,6 +22,11 @@ pub struct ViewContext {
     /// The operations each callable reaches, inspected once per context: a
     /// reach is a pure function of the immutable linked content and helpers.
     reaches: std::sync::Arc<std::sync::Mutex<BTreeMap<CallableId, Operations>>>,
+    /// Library summaries and the solved document graph behind `applies`,
+    /// shared by clones: both are pure functions of the linked content.
+    pub(crate) links: std::sync::Arc<std::sync::Mutex<crate::applies::Links>>,
+    /// The document's run-count ordinals, walked once per context.
+    ordinals: std::sync::Arc<std::sync::OnceLock<lash_kernel_doc::Ordinals>>,
 }
 
 type Operations = BTreeSet<lash_kernel_value::OperationUse>;
@@ -49,6 +54,8 @@ impl ViewContext {
             labels,
             timers: Default::default(),
             reaches: Default::default(),
+            links: Default::default(),
+            ordinals: Default::default(),
         })
     }
     /// Install build-owned display facts for exact helpers in each Link's
@@ -185,6 +192,15 @@ impl ViewContext {
                 })
                 .flatten()
         })
+    }
+
+    /// `document`'s ordinals. Every derivation from this context reads the
+    /// same document; `derive_callable` refuses any other.
+    pub(crate) fn ordinals(
+        &self,
+        document: &lash_kernel_doc::Document,
+    ) -> &lash_kernel_doc::Ordinals {
+        self.ordinals.get_or_init(|| document.ordinals())
     }
 
     pub(crate) fn function_graph(&self, callable: &CallableId) -> Option<lash_kernel_check::Graph> {

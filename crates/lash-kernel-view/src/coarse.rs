@@ -339,10 +339,15 @@ pub(crate) fn project(
     let comparisons = crate::comparison::Comparisons::new(graph, &view.dataflow.bindings, context);
     let mut projection = Projection {
         view,
+        callables: view
+            .callables
+            .iter()
+            .map(|callable| (&callable.block, &callable.site))
+            .collect(),
         nodes: Vec::new(),
         bearing: BTreeSet::new(),
-        action_ordinals: document.action_ordinals(),
-        condition_ordinals: document.condition_ordinals(),
+        action_ordinals: &context.ordinals(document).actions,
+        condition_ordinals: &context.ordinals(document).conditions,
         headers: graph
             .nodes()
             .iter()
@@ -449,11 +454,14 @@ pub(crate) fn project(
 
 struct Projection<'a> {
     view: &'a WorkflowView,
+    /// Each callable's site by its body block; the last callable listed
+    /// for a block wins.
+    callables: BTreeMap<&'a Site, &'a Site>,
     nodes: Vec<WorkflowNode>,
     bearing: BTreeSet<Site>,
     writes: BTreeMap<Site, usize>,
-    action_ordinals: BTreeMap<Site, u32>,
-    condition_ordinals: BTreeMap<Site, u32>,
+    action_ordinals: &'a BTreeMap<Site, u32>,
+    condition_ordinals: &'a BTreeMap<Site, u32>,
     headers: BTreeMap<Site, (HeaderRole, Site, Option<ComparisonView>)>,
 }
 
@@ -536,9 +544,9 @@ impl Projection<'_> {
                     .expressions
                     .iter()
                     .filter_map(|expression| {
-                        if self.callable(&expression.block) != Some(callable)
-                            || !matches!(expression.expression, Expr::If { .. })
+                        if !matches!(expression.expression, Expr::If { .. })
                             || !under(action, &expression.site)
+                            || self.callable(&expression.block) != Some(callable)
                         {
                             return None;
                         }
@@ -597,13 +605,13 @@ impl Projection<'_> {
         self.nodes.push(node);
     }
 
+    /// The innermost callable whose body holds `block`.
     fn callable(&self, block: &Site) -> Option<&Site> {
-        self.view
-            .callables
-            .iter()
-            .filter(|callable| under(block, &callable.block))
-            .max_by_key(|callable| callable.block.path.len())
-            .map(|callable| &callable.site)
+        (0..=block.path.len()).rev().find_map(|len| {
+            self.callables
+                .get(&Site::new(block.unit.clone(), &block.path[..len]))
+                .copied()
+        })
     }
 
     fn node(
