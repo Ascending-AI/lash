@@ -459,9 +459,9 @@ impl SlotHeap {
         Ok(())
     }
 
-    /// Reads the row of each tuple among `keys` that no row of its own has
-    /// vouched for yet, before a table is keyed by their facts: `held`,
-    /// what the load decoded, held across each read beside `roots`.
+    /// Reads the row of each immutable among `keys` that no row of its own
+    /// has vouched for yet, before a table is keyed by their facts:
+    /// `held`, what the load decoded, held across each read beside `roots`.
     fn vouch_keys(
         &mut self,
         keys: impl Iterator<Item = Value>,
@@ -469,16 +469,21 @@ impl SlotHeap {
         roots: &mut dyn FnMut(&mut Visit<'_>),
     ) -> Result<(), LoadError> {
         for key in keys {
-            let Value::Tuple(tuple) = key else {
+            let (Value::Tuple(object)
+            | Value::LongText(object)
+            | Value::Bytes(object)
+            | Value::BigInt(object)
+            | Value::BigTimestamp(object)) = key
+            else {
                 continue;
             };
             let unvouched = self
                 .arena
-                .facts(tuple)
+                .facts(object)
                 .map_err(|error| self.corrupt_row(error.to_string()))?
                 .unvouched();
             if unvouched {
-                self.load(tuple, 0, &mut |visit| {
+                self.load(object, 0, &mut |visit| {
                     roots(visit);
                     held.iter().for_each(&mut *visit);
                 })?;
@@ -1236,8 +1241,8 @@ impl Heap for SlotHeap {
                 return Err(refuse!(held));
             }
         }
-        // A table is indexed by its keys' facts: each tuple key's own row
-        // vouches for it first.
+        // A table is indexed by its keys' facts: each immutable key's own
+        // row vouches for it first.
         if let lash_kernel_doc::arena::Body::Map(table)
         | lash_kernel_doc::arena::Body::Set(table)
         | lash_kernel_doc::arena::Body::Record(table) = &body

@@ -84,17 +84,27 @@ fn take(remaining: &mut u64, bytes: u64) -> bool {
 }
 
 /// The UTF-8 length of a text, or the length of bytes, from its summary:
-/// a cold text or bytes object opens with its head's lengths, so sizing it
-/// reads no payload.
+/// once its own row is read, a cold text's or bytes' chunks are not, so
+/// sizing it reads no payload.
 fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
     match value {
         Value::Text(short) => Ok(short.as_str().len() as u64),
         Value::LongText(handle) => match arena.body(*handle)? {
             Body::LongText(text) => Ok(text.summary.utf8_bytes),
+            Body::Cold(_) => Err(Retry::Cold {
+                object: *handle,
+                chunk: 0,
+            }
+            .into()),
             _ => Err(NativeError::Malformed("a text names another body")),
         },
         Value::Bytes(handle) => match arena.body(*handle)? {
             Body::Bytes(bytes) => Ok(bytes.len),
+            Body::Cold(_) => Err(Retry::Cold {
+                object: *handle,
+                chunk: 0,
+            }
+            .into()),
             _ => Err(NativeError::Malformed("bytes name another body")),
         },
         _ => Err(NativeError::Malformed("a size of no text or bytes")),
@@ -102,14 +112,24 @@ fn size(arena: &Arena, value: &Value) -> Result<u64, NativeError> {
 }
 
 /// The magnitude bits of a big integer or timestamp object, from its
-/// summary when it is cold.
-fn bits(arena: &Arena, handle: lash_kernel_doc::arena::ArenaHandle) -> Result<u64, NativeError> {
-    use lash_kernel_doc::arena::ColdImmutable;
+/// head once its row has vouched for it.
+pub(crate) fn bits(
+    arena: &Arena,
+    handle: lash_kernel_doc::arena::ArenaHandle,
+) -> Result<u64, NativeError> {
+    use lash_kernel_state::paged::run::objects::Head;
     match arena.body(handle)? {
         Body::BigInt(int) | Body::Timestamp(int) => Ok(int.bits()),
-        Body::Cold(ColdImmutable::BigInt(summary) | ColdImmutable::Timestamp(summary)) => {
-            Ok(summary.bits)
-        }
+        Body::Cold(_) => match arena.facts(handle)?.head() {
+            Some(Head::BigInt { summary, .. } | Head::Timestamp { summary, .. }) => {
+                Ok(summary.bits)
+            }
+            _ => Err(Retry::Cold {
+                object: handle,
+                chunk: 0,
+            }
+            .into()),
+        },
         _ => Err(NativeError::Malformed("an integer names another body")),
     }
 }

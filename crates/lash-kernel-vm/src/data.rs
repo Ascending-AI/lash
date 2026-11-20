@@ -84,6 +84,12 @@ fn view_integer_of(
     arena.integer(value)
 }
 
+/// The retry a size of the opaque `object` answers: its counts are its
+/// own row's, read first.
+fn unread(object: ArenaHandle) -> NativeError {
+    lash_kernel_doc::Retry::Cold { object, chunk: 0 }.into()
+}
+
 /// A value's size (`K-CHG-004`), from what the arena knows of it.
 pub(crate) fn view_size(arena: &impl ChargeArena, value: &Value) -> Result<u64, NativeError> {
     if let Some(size) = immediate_size(value) {
@@ -96,10 +102,12 @@ pub(crate) fn view_size(arena: &impl ChargeArena, value: &Value) -> Result<u64, 
         Value::Text(short) => short.as_bytes().len() as u64,
         Value::LongText(handle) => match arena.body(*handle)? {
             Body::LongText(text) => text.summary.utf8_bytes,
+            Body::Cold(_) => return Err(unread(*handle)),
             _ => 0,
         },
         Value::Bytes(handle) => match arena.body(*handle)? {
             Body::Bytes(bytes) => bytes.len,
+            Body::Cold(_) => return Err(unread(*handle)),
             _ => 0,
         },
         Value::Tuple(handle) | Value::List(handle) | Value::Set(handle) | Value::Record(handle) => {
@@ -199,6 +207,7 @@ fn text_len(arena: &impl ChargeArena, text: &Value) -> Result<u64, NativeError> 
         Value::Text(short) => short.as_bytes().len() as u64,
         Value::LongText(handle) => match arena.body(*handle)? {
             Body::LongText(text) => text.summary.utf8_bytes,
+            Body::Cold(_) => return Err(unread(*handle)),
             _ => 0,
         },
         _ => 0,

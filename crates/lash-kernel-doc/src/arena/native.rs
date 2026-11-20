@@ -253,6 +253,9 @@ impl<'call> Args<'call> {
     pub fn long_text(&self, object: ArenaHandle) -> Result<TextView<'call>, NativeError> {
         match self.body(object)? {
             Body::LongText(text) => Ok(TextView::Long { object, text }),
+            // A text no row of its own has vouched for yet: its row is
+            // read first.
+            Body::Cold(_) => Err(Retry::Cold { object, chunk: 0 }.into()),
             _ => Err(NativeError::Malformed("a text handle names another body")),
         }
     }
@@ -321,6 +324,7 @@ impl<'call> Args<'call> {
         };
         match self.body(object)? {
             Body::Bytes(bytes) => Ok(Some(BytesView { object, bytes })),
+            Body::Cold(_) => Err(Retry::Cold { object, chunk: 0 }.into()),
             _ => Err(NativeError::Malformed("a bytes handle names another body")),
         }
     }

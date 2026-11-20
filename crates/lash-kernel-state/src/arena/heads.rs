@@ -5,21 +5,20 @@
 use lash_kernel_doc::Integer;
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::NativeError;
-use lash_kernel_doc::arena::{ArenaHandle, Body, Bytes, Chunk, ColdImmutable, LongText};
+use lash_kernel_doc::arena::{ArenaHandle, Body, ColdImmutable};
 use lash_kernel_doc::heap::{EntityId, IntSummary, NormalKey};
 
 use super::sizes::named_composite;
-use super::{Arena, Facts, Head, NO_PAGE, Summary, has_cold, keys, malformed, tables};
+use super::{Arena, Facts, Head, Summary, has_cold, keys, malformed, tables};
 
 impl Arena {
     /// The one handle of durable immutable `entity`, which a row names
     /// with `head`: the one the run already has, whose head or pending
     /// claim must equal `head`, else a proxy true to it. A function and
-    /// a host handle its head holds whole open resident. Tuples and
-    /// errors open opaque until their own rows vouch for their claims
-    /// ([`Self::vouch`]); any other opens cold, its head's summaries in
-    /// its body and facts, and every read of its payload answers
-    /// [`lash_kernel_doc::Retry::Cold`].
+    /// a host handle its head holds whole open resident. Any other opens
+    /// opaque until its own row vouches for the claim ([`Self::vouch`]):
+    /// no fact of the head is published before, and every read of it
+    /// answers [`lash_kernel_doc::Retry::Cold`].
     ///
     /// # Errors
     ///
@@ -77,8 +76,9 @@ impl Arena {
         Ok(self.insert(body, facts))
     }
 
-    /// Publish the head and summary of a tuple or error after its own
-    /// row has matched the referrers' claim ([`Facts::named_by`]).
+    /// Publish the head (and a tuple's or error's summary) of an immutable
+    /// after its own row has matched the referrers' claim
+    /// ([`Facts::named_by`]).
     ///
     /// # Errors
     ///
@@ -243,11 +243,14 @@ impl Arena {
 /// names it by. Tuples and errors keep a claim until their own rows
 /// vouch for it ([`Arena::vouch`]). Other bodies check their heads when
 /// their payloads are read.
+/// A row's head for an object it opens: a claim until the object's own
+/// row vouches for it ([`Arena::vouch`]), but a function's or a host
+/// handle's, whose head is its whole value.
 fn named(projected: &mut super::Projected, head: &Head) {
-    if composite_shape(head).is_some() {
-        projected.claim = Some(head.clone());
-    } else {
+    if matches!(head, Head::Function(_) | Head::Handle { .. }) {
         let _ = projected.head.set(head.clone());
+    } else {
+        projected.claim = Some(head.clone());
     }
 }
 
@@ -259,55 +262,30 @@ pub(super) fn composite_shape(head: &Head) -> Option<Summary> {
 }
 
 /// The body an immutable opens with from its `head`, and its summary.
-/// Tuples and errors open opaque. A row load replaces this body and
+/// Every immutable but a function and a host handle opens opaque: no
+/// fact of its head is in its body. A row load replaces this body and
 /// admits the growth relative to it.
 #[must_use]
 pub fn opened(head: &Head) -> (Body, Summary) {
-    fn cold<T>(len: u64) -> Chunk<T> {
-        Chunk::Cold {
-            page: NO_PAGE,
-            len: u32::try_from(len).unwrap_or(u32::MAX),
-        }
-    }
-    match head {
-        Head::Tuple { .. } => (Body::Cold(ColdImmutable::Tuple), Summary::default()),
-        Head::Error { .. } => (Body::Cold(ColdImmutable::Error), Summary::default()),
-        Head::BigInt { summary, .. } => (
-            Body::Cold(ColdImmutable::BigInt(*summary)),
-            Summary::default(),
-        ),
-        Head::Timestamp { summary, .. } => (
-            Body::Cold(ColdImmutable::Timestamp(*summary)),
-            Summary::default(),
-        ),
-        Head::LongText { summary, .. } => (
-            Body::LongText(LongText {
-                summary: *summary,
-                chunks: Box::new([cold(summary.utf8_bytes)]),
-            }),
-            Summary::default(),
-        ),
-        Head::Bytes { len, .. } => (
-            Body::Bytes(Bytes {
-                len: *len,
-                chunks: Box::new([cold(*len)]),
-            }),
-            Summary::default(),
-        ),
-        Head::Function(callable) => (Body::Function(Box::new(*callable)), Summary::default()),
+    let body = match head {
+        Head::Tuple { .. } => Body::Cold(ColdImmutable::Tuple),
+        Head::Error { .. } => Body::Cold(ColdImmutable::Error),
+        Head::BigInt { .. } => Body::Cold(ColdImmutable::BigInt),
+        Head::Timestamp { .. } => Body::Cold(ColdImmutable::Timestamp),
+        Head::LongText { .. } => Body::Cold(ColdImmutable::LongText),
+        Head::Bytes { .. } => Body::Cold(ColdImmutable::Bytes),
+        Head::Function(callable) => Body::Function(Box::new(*callable)),
         Head::Handle {
             kind_len, id_len, ..
-        } => (
-            match head.resident_handle() {
-                Some(host) => Body::Handle(host),
-                None => Body::Cold(ColdImmutable::Handle {
-                    kind_len: *kind_len,
-                    id_len: *id_len,
-                }),
-            },
-            Summary::default(),
-        ),
-    }
+        } => match head.resident_handle() {
+            Some(host) => Body::Handle(host),
+            None => Body::Cold(ColdImmutable::Handle {
+                kind_len: *kind_len,
+                id_len: *id_len,
+            }),
+        },
+    };
+    (body, Summary::default())
 }
 
 /// The head of the immutable scalar `body`, whose normal form `normal`

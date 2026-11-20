@@ -644,22 +644,23 @@ fn every_immutable_payload_read_retries_without_dummy_data() {
     retry_on(args.equal(&float, &big), big);
 }
 
-/// Astra §3: a cold immutable's length, depth and text counts answer from
-/// its head without a load for text and bytes. A tuple's length and
-/// depth and an error's depth first require their own rows (l65g and E1).
+/// Astra §3, FIG-7735 K01: a cold immutable's length, depth and text
+/// counts are facts of its own row: a text's counts, bytes' length, a
+/// tuple's length and depth and an error's depth all first require it.
 #[test]
-fn cold_metadata_reads_preserve_len_depth_and_text_counts() {
+fn cold_metadata_reads_wait_for_their_own_rows() {
     let (heap, six, _) = six_cold();
     let [text, _, _, bytes, tuple, error] = six.members;
     let objects = heap.arena().objects();
     let semantics = heap.arena().semantics();
     let args = Args::new(&[], objects, &semantics);
-    let view = args.text(&text).expect("a read").expect("a text");
-    assert_eq!(view.summary(), counts(UNICODE));
-    assert_eq!(view.len(), UNICODE.len() as u64);
-    assert_eq!(
-        args.bytes(&bytes).expect("a read").expect("bytes").len(),
-        20
+    retry_on(
+        args.text(&text).map(|view| view.map(|view| view.summary())),
+        text,
+    );
+    retry_on(
+        args.bytes(&bytes).map(|view| view.map(|view| view.len())),
+        bytes,
     );
     retry_on(
         args.sequence(&tuple)

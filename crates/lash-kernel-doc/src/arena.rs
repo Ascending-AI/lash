@@ -693,20 +693,27 @@ pub enum Body {
     /// A variable a closure shares (`K-CLO-001`), or a `for` iteration's
     /// fresh one (`K-CLO-002`): not a value kind, only a holder of one.
     Cell(Value),
-    /// A big integer, a big timestamp, an error or a long host handle
-    /// whose payload the machine has not read: only its head's summaries. Every read of its payload
-    /// answers [`Retry::Cold`](native::Retry::Cold); no reader that matches
-    /// the resident kind finds it. A tuple's, a long text's and bytes'
-    /// unread payloads are cold chunks of their own bodies instead.
+    /// An immutable whose payload the machine has not read. Every read of
+    /// its payload answers [`Retry::Cold`](native::Retry::Cold); no reader
+    /// that matches the resident kind finds it. A fact of it (a count, a
+    /// key) is its arena head's once its own row has vouched for it, and
+    /// is read nowhere else. A long text's and bytes' unread chunks, once
+    /// their row is read, are cold chunks of their own bodies instead.
     Cold(ColdImmutable),
 }
 
-/// What a cold [`Body::Cold`] immutable is, and the summaries its head
-/// certifies.
+/// What a cold [`Body::Cold`] immutable is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColdImmutable {
-    BigInt(crate::heap::IntSummary),
-    Timestamp(crate::heap::IntSummary),
+    BigInt,
+    Timestamp,
+    /// A long text no row of its own has vouched for yet: not even its
+    /// counts are known until its row is read and checked against the
+    /// head its referrers name it by.
+    LongText,
+    /// Bytes no row of their own has vouched for yet, as
+    /// [`Self::LongText`].
+    Bytes,
     /// Its depth and edge summaries are the arena's, as for a resident one.
     Error,
     /// A tuple no row of its own has vouched for yet: nothing of it is

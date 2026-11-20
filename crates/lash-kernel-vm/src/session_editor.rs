@@ -32,7 +32,7 @@ use crate::heap::slots::SlotHeap;
 use crate::heap::{Heap, LoadError};
 use crate::vm::{Flow, Run, fault};
 
-mod preview;
+pub(crate) mod preview;
 mod relink;
 
 /// A binding a host reads: its value as data, or why it is none.

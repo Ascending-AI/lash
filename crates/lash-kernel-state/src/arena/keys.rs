@@ -329,6 +329,7 @@ pub(crate) fn text<'a>(
             Body::LongText(long) => {
                 Ok(whole(objects, *handle, &long.chunks)?.map_or("", |text| text))
             }
+            Body::Cold(_) => Err(cold(*handle)),
             _ => Err(NativeError::Malformed("a text handle names another body")),
         },
         _ => Err(NativeError::Malformed("a text was expected")),
@@ -342,6 +343,7 @@ pub(crate) fn bytes(
 ) -> Result<&[u8], NativeError> {
     match body(objects, handle)? {
         Body::Bytes(bytes) => Ok(whole(objects, handle, &bytes.chunks)?.map_or(&[], |bytes| bytes)),
+        Body::Cold(_) => Err(cold(handle)),
         _ => Err(NativeError::Malformed("a bytes handle names another body")),
     }
 }
@@ -395,15 +397,20 @@ pub(crate) fn normal_key(
     if let Some(normal) = certified(facts, value) {
         return Ok(normal.cloned());
     }
-    if let Value::Tuple(handle) = value {
-        // A tuple's key is a fact of it: its own row vouches for the head
-        // a referrer named it by before the key is used.
-        if facts
+    // A key is a fact of its object: its own row vouches for the head a
+    // referrer named it by before the key is used.
+    if let Value::Tuple(handle)
+    | Value::LongText(handle)
+    | Value::Bytes(handle)
+    | Value::BigInt(handle)
+    | Value::BigTimestamp(handle) = value
+        && facts
             .get(handle.index() as usize)
             .is_some_and(super::Facts::unvouched)
-        {
-            return Err(cold(*handle));
-        }
+    {
+        return Err(cold(*handle));
+    }
+    if let Value::Tuple(handle) = value {
         return Ok(object_head(objects, facts, *handle, true)?
             .normal()
             .cloned());

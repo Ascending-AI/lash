@@ -388,35 +388,6 @@ fn a_large_map_keeps_insertion_order_across_relayout() {
     );
 }
 
-/// A key whose normal form is 256 bytes: a long text of that length.
-fn long_key(i: i64) -> String {
-    format!("{i:0>256}")
-}
-
-/// Contract §6, measured with 256-byte normals: a point read of a large
-/// map keyed by long texts still loads one index page and one chunk; the
-/// keys open from the heads the chunk holds, without their rows.
-#[test]
-fn a_point_read_with_long_keys_reads_one_index_page_and_one_chunk() {
-    let store = Counting::default();
-    let (mut heap, map) = opened_large(&store, |heap| {
-        let pairs = (0..N)
-            .map(|i| {
-                let key = make(heap, NewObject::long_text(long_key(i)));
-                (key, Value::Int(i))
-            })
-            .collect();
-        make(heap, NewObject::Map(pairs))
-    });
-    for i in [0, N / 2 + 3, N - 1] {
-        let key = make(&mut heap, NewObject::long_text(long_key(i)));
-        heap.forget_pages();
-        let (value, reads, _) = store.during(|| get(&mut heap, &[map, key], map, key));
-        assert_eq!(int(value), Some(i), "key {i}");
-        assert_eq!(reads, 2, "key {i}");
-    }
-}
-
 /// Contract §6: a point access through a large list of immutables reads
 /// the list's index page and chunk, then the one member's row: the
 /// members it does not touch stay unread.

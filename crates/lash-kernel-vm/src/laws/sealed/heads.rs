@@ -791,6 +791,153 @@ fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder()
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A use of a scalar that a head alone could answer, and its answer.
+type ScalarUse = (
+    &'static str,
+    fn(&SlotHeap, Value) -> Result<String, lash_kernel_doc::arena::native::NativeError>,
+);
+
+/// What a scalar's head alone could answer: its key, the size a charge
+/// reads (a text's or bytes' length, an integer's magnitude), and the
+/// counts a native reads of a text or bytes.
+const SCALAR_USES: &[ScalarUse] = &[
+    ("its key", |heap, member| {
+        Ok(format!(
+            "{:?}",
+            heap.arena().semantics().normal_key(&member)?
+        ))
+    }),
+    ("its size", |heap, member| {
+        Ok(crate::data::size(heap.arena(), &member)?.to_string())
+    }),
+    ("its counts", |heap, member| {
+        let semantics = heap.arena().semantics();
+        let args =
+            lash_kernel_doc::arena::native::Args::new(&[], heap.arena().objects(), &semantics);
+        Ok(match member {
+            Value::LongText(_) => format!("{:?}", args.text(&member)?.map(|view| view.summary())),
+            Value::Bytes(_) => format!("{:?}", args.bytes(&member)?.map(|view| view.len())),
+            _ => String::new(),
+        })
+    }),
+    ("its magnitude", |heap, member| {
+        Ok(match member {
+            Value::BigInt(handle) | Value::BigTimestamp(handle) => {
+                crate::session_editor::preview::bits(heap.arena(), handle)?.to_string()
+            }
+            _ => String::new(),
+        })
+    }),
+];
+
+/// FIG-7735 K01: every field of a big integer's, timestamp's, text's or
+/// bytes' head, forged alone where its holder holds it (every holder in
+/// [`HOLDERS`], and the heap root), the scalar's own row and every other
+/// page kept, never answers a use of the scalar (its key, size, counts
+/// or magnitude): the use fails with `Store(Corrupt)` or gives the
+/// owner's answer, the same use of the scalar as built. The owner's row is the oracle, read and
+/// checked whole before any fact of the head is used. A function's and
+/// a host handle's heads are whole values, not claims, and stay with
+/// [`every_head_field_forged_alone_fails_the_first_read_in_a_chunk_and_inline`].
+#[test]
+fn every_scalar_head_field_forged_alone_never_answers_a_use_under_every_holder() {
+    use crate::heap::LoadError;
+    use lash_kernel_state::paged::run::objects::Head;
+
+    let mut failed = Vec::new();
+    for (field, member, _, forge) in HEAD_FIELDS {
+        let store = Counting::default();
+        let mut heap = fresh(&store);
+        let built = member(&mut heap);
+        let handle = built.handle().expect("an object");
+        if !matches!(
+            heap.arena().head(handle),
+            Ok(Head::BigInt { .. }
+                | Head::Timestamp { .. }
+                | Head::LongText { .. }
+                | Head::Bytes { .. })
+        ) {
+            continue;
+        }
+        let owner: Vec<_> = SCALAR_USES
+            .iter()
+            .map(|(name, used)| used(&heap, built).map_err(|error| format!("{name}: {error:?}")))
+            .collect();
+        for holder in HOLDERS.iter().chain([&ROOT_HOLDER]) {
+            let case = format!("{field}, in {}", holder.name);
+            let store = Counting::default();
+            let mut heap = fresh(&store);
+            let built = member(&mut heap);
+            let held = (holder.build)(&mut heap, built);
+            let root = match nested(
+                &store,
+                &mut heap,
+                &[held, built, built],
+                (holder.substitute)(*forge),
+            ) {
+                Ok(root) => root,
+                Err(error) => {
+                    failed.push(format!("{case}: {error}"));
+                    continue;
+                }
+            };
+            for (scalar_use, owner) in SCALAR_USES.iter().zip(&owner) {
+                let case = format!("{case}, {}", scalar_use.0);
+                let (mut heap, cold) = reopened(&store, &root);
+                let reach = (holder.name != ROOT_HOLDER.name).then_some(holder);
+                match used(&mut heap, reach, scalar_use, cold) {
+                    Ok(Err(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt {
+                        ..
+                    }))) => {}
+                    Ok(Err(other)) => {
+                        failed.push(format!("{case}: the use failed otherwise: {other:?}"));
+                    }
+                    Ok(Ok(answer)) if Ok(&answer) == owner.as_ref() => {}
+                    Ok(Ok(answer)) => failed.push(format!(
+                        "{case}: the forged head answered {answer}, the owner {owner:?}"
+                    )),
+                    Err(error) => failed.push(format!("{case}: {error}")),
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// `scalar_use` of the member `holder` holds in the cold `held`, or of
+/// `held` itself with no holder, each cold page loaded as the reads ask:
+/// the answer, or the first load's error.
+fn used(
+    heap: &mut SlotHeap,
+    holder: Option<&Holder>,
+    scalar_use: &ScalarUse,
+    held: Value,
+) -> Result<Result<String, crate::heap::LoadError>, String> {
+    use lash_kernel_doc::arena::native::{NativeError, Retry};
+    for _ in 0..64 {
+        let asked = match holder {
+            Some(holder) => (holder.reach)(heap, held.handle().ok_or("the holder is no object")?)
+                .and_then(|member| {
+                    member.ok_or(NativeError::Malformed("the holder holds no member"))
+                }),
+            None => Ok(held),
+        }
+        .and_then(|member| (scalar_use.1)(heap, member));
+        match asked {
+            Ok(answer) => return Ok(Ok(answer)),
+            Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
+                if let Err(error) = heap.load(object, chunk, &mut |visit| {
+                    [held].iter().for_each(&mut *visit)
+                }) {
+                    return Ok(Err(error));
+                }
+            }
+            Err(other) => return Err(format!("a use failed: {other:?}")),
+        }
+    }
+    Err("the use asked for more than 64 loads".into())
+}
+
 fn build_error(heap: &mut SlotHeap) -> Value {
     heap.error("kind", "message", Value::Null)
         .expect("an error")

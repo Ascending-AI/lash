@@ -186,13 +186,11 @@ pub struct Projected {
     /// or the one its first seal certified. Fixed once given: the object
     /// never changes, and every row that names it holds this head.
     pub head: std::cell::OnceCell<Head>,
-    /// The head a row named a tuple by, which no row of the tuple's own has
-    /// vouched for yet: its body is opaque ([`ColdImmutable::Tuple`]) and
-    /// no fact of it is published until its row, read, is this head
-    /// whole ([`Arena::vouch`]). Only a comparison with another referrer's
-    /// head, and a seal copying it into a row naming the tuple, read it.
-    ///
-    /// [`ColdImmutable::Tuple`]: lash_kernel_doc::arena::ColdImmutable::Tuple
+    /// The head a row named an immutable by, which no row of the object's
+    /// own has vouched for yet: its body is opaque ([`Body::Cold`]) and no
+    /// fact of it is published until its row, read, is this head whole
+    /// ([`Arena::vouch`]). Only a comparison with another referrer's head,
+    /// and a seal copying it into a row naming the object, read it.
     pub(crate) claim: Option<Head>,
     /// The head of an immutable that names an object or task, until the
     /// first seal certifies it: it reads the identity of the objects it
@@ -279,7 +277,7 @@ impl Facts {
         self.projected()
             .and_then(|projected| projected.head.get().or(projected.claim.as_ref()))
     }
-    /// A tuple or error whose referrer names a head its own row has yet to verify.
+    /// An immutable whose referrer names a head its own row has yet to verify.
     pub fn unvouched(&self) -> bool {
         self.projected()
             .is_some_and(|projected| projected.claim.is_some())
