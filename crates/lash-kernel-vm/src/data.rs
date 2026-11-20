@@ -454,11 +454,14 @@ fn copy(
                     .ok_or(NativeError::Malformed("a timestamp was expected"))?,
             })
         }
-        Value::Function(handle) => Datum::Function(
-            arena
-                .callable(*handle)
-                .map_err(|error| CopyError::Heap(HeapFault::Malformed(error.to_string())))?,
-        ),
+        Value::Function(handle) => {
+            Datum::Function(arena.callable(*handle).map_err(|error| match error {
+                NativeError::Retry(lash_kernel_doc::Retry::Cold { object, chunk }) => {
+                    CopyError::Cold { object, chunk }
+                }
+                error => CopyError::Heap(HeapFault::Malformed(error.to_string())),
+            })?)
+        }
         Value::Handle(handle) => match arena.body(*handle)? {
             Body::Handle(handle) => Datum::Handle(handle.clone()),
             Body::Cold(_) => {

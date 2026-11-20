@@ -42,7 +42,7 @@ type HeadField = (
     fn(&mut lash_kernel_state::paged::run::objects::Head) -> bool,
 );
 
-/// Fields of scalar heads (`paged/run/objects.rs`, `Head`).
+/// Fields of non-composite heads (`paged/run/objects.rs`, `Head`).
 const HEAD_FIELDS: &[HeadField] = {
     use lash_kernel_state::paged::run::objects::Head;
     &[
@@ -217,6 +217,39 @@ const HEAD_FIELDS: &[HeadField] = {
         (
             "a handle, its content forged",
             |heap| host_handle(heap, "h".repeat(9_000)),
+            Read::Item,
+            |head| match head {
+                Head::Handle { content, .. } => {
+                    forged_key(content);
+                    true
+                }
+                _ => false,
+            },
+        ),
+        (
+            "a short handle, its kind forged",
+            |heap| host_handle(heap, "one".into()),
+            Read::Item,
+            |head| match head {
+                Head::Handle { content, .. } => {
+                    let Head::Handle {
+                        content: forged, ..
+                    } = Head::handle(&lash_kernel_doc::Handle {
+                        kind: "pipe".into(),
+                        id: "one".into(),
+                    })
+                    else {
+                        unreachable!()
+                    };
+                    *content = forged;
+                    true
+                }
+                _ => false,
+            },
+        ),
+        (
+            "a short handle, its id forged",
+            |heap| host_handle(heap, "one".into()),
             Read::Item,
             |head| match head {
                 Head::Handle { content, .. } => {
@@ -791,26 +824,26 @@ fn every_tuple_head_field_forged_alone_fails_the_first_read_under_every_holder()
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// A use of a scalar that a head alone could answer, and its answer.
-type ScalarUse = (
+/// A use of an object that a head alone could answer, and its answer.
+type ObjectUse = (
     &'static str,
-    fn(&SlotHeap, Value) -> Result<String, lash_kernel_doc::arena::native::NativeError>,
+    fn(&SlotHeap, Value, Value) -> Result<String, lash_kernel_doc::NativeError>,
 );
 
 /// What a scalar's head alone could answer: its key, the size a charge
 /// reads (a text's or bytes' length, an integer's magnitude), and the
 /// counts a native reads of a text or bytes.
-const SCALAR_USES: &[ScalarUse] = &[
-    ("its key", |heap, member| {
+const SCALAR_USES: &[ObjectUse] = &[
+    ("its key", |heap, member, _| {
         Ok(format!(
             "{:?}",
             heap.arena().semantics().normal_key(&member)?
         ))
     }),
-    ("its size", |heap, member| {
+    ("its size", |heap, member, _| {
         Ok(crate::data::size(heap.arena(), &member)?.to_string())
     }),
-    ("its counts", |heap, member| {
+    ("its counts", |heap, member, _| {
         let semantics = heap.arena().semantics();
         let args =
             lash_kernel_doc::arena::native::Args::new(&[], heap.arena().objects(), &semantics);
@@ -820,7 +853,7 @@ const SCALAR_USES: &[ScalarUse] = &[
             _ => String::new(),
         })
     }),
-    ("its magnitude", |heap, member| {
+    ("its magnitude", |heap, member, _| {
         Ok(match member {
             Value::BigInt(handle) | Value::BigTimestamp(handle) => {
                 crate::session_editor::preview::bits(heap.arena(), handle)?.to_string()
@@ -830,17 +863,79 @@ const SCALAR_USES: &[ScalarUse] = &[
     }),
 ];
 
-/// FIG-7735 K01: every field of a big integer's, timestamp's, text's or
-/// bytes' head, forged alone where its holder holds it (every holder in
-/// [`HOLDERS`], and the heap root), the scalar's own row and every other
-/// page kept, never answers a use of the scalar (its key, size, counts
-/// or magnitude): the use fails with `Store(Corrupt)` or gives the
-/// owner's answer, the same use of the scalar as built. The owner's row is the oracle, read and
-/// checked whole before any fact of the head is used. A function's and
-/// a host handle's heads are whole values, not claims, and stay with
-/// [`every_head_field_forged_alone_fails_the_first_read_in_a_chunk_and_inline`].
+const FUNCTION_USES: &[ObjectUse] = &[
+    SCALAR_USES[0],
+    ("its callable during dispatch", |heap, member, _| {
+        let handle = member.handle().expect("a function");
+        Ok(format!("{:?}", heap.arena().callable(handle)?))
+    }),
+    ("its callable in a native", |heap, member, _| {
+        let arena = heap.arena();
+        let semantics = arena.semantics();
+        let args = lash_kernel_doc::Args::new(&[], arena.objects(), &semantics);
+        Ok(format!("{:?}", args.function(&member)?))
+    }),
+    ("its equality in a native", |heap, member, peer| {
+        let arena = heap.arena();
+        let semantics = arena.semantics();
+        let args = lash_kernel_doc::Args::new(&[], arena.objects(), &semantics);
+        Ok(args.equal(&member, &peer)?.to_string())
+    }),
+    EQUALITY,
+    COPY,
+];
+
+const HANDLE_USES: &[ObjectUse] = &[
+    ("its kind and id in a native", |heap, member, _| {
+        let arena = heap.arena();
+        let semantics = arena.semantics();
+        let args = lash_kernel_doc::Args::new(&[], arena.objects(), &semantics);
+        Ok(format!("{:?}", args.host_handle(&member)?))
+    }),
+    ("its preview budget", |heap, member, peer| {
+        use lash_kernel_doc::arena::Body;
+        let arena = heap.arena();
+        let Body::Handle(owner) = arena.body(peer.handle().expect("a handle"))? else {
+            panic!("the control is a resident handle");
+        };
+        let budget = 64 + (owner.kind.len() + owner.id.len()) as u64;
+        let fits = |mut budget| {
+            crate::session_editor::preview::fits(
+                arena,
+                &member,
+                &mut budget,
+                &mut Vec::new(),
+                0,
+                64,
+            )
+        };
+        Ok(format!("{:?}", [fits(budget - 1)?, fits(budget)?]))
+    }),
+    EQUALITY,
+    COPY,
+];
+
+const EQUALITY: ObjectUse = ("its equality", |heap, member, peer| {
+    Ok(heap.arena().semantics().equal(&member, &peer)?.to_string())
+});
+
+const COPY: ObjectUse = ("its copy", |heap, member, _| {
+    use crate::data::CopyError;
+    match crate::data::copy_out(heap.arena(), usize::MAX, &member) {
+        Ok(datum) => Ok(format!("{datum:?}")),
+        Err(CopyError::Cold { object, chunk }) => {
+            Err(lash_kernel_doc::Retry::Cold { object, chunk }.into())
+        }
+        Err(error) => panic!("copying the immutable failed: {error:?}"),
+    }
+});
+
+/// FIG-7735 K01 and FIG-7745: every field of a non-composite head is
+/// forged alone under every holder and at the heap root. The object's
+/// row and every other page are kept. A use fails with `Store(Corrupt)`
+/// or gives the same answer as the object built in the heap.
 #[test]
-fn every_scalar_head_field_forged_alone_never_answers_a_use_under_every_holder() {
+fn every_non_composite_head_field_forged_alone_never_answers_a_use_under_every_holder() {
     use crate::heap::LoadError;
     use lash_kernel_state::paged::run::objects::Head;
 
@@ -850,20 +945,22 @@ fn every_scalar_head_field_forged_alone_never_answers_a_use_under_every_holder()
         let mut heap = fresh(&store);
         let built = member(&mut heap);
         let handle = built.handle().expect("an object");
-        if !matches!(
-            heap.arena().head(handle),
-            Ok(Head::BigInt { .. }
-                | Head::Timestamp { .. }
-                | Head::LongText { .. }
-                | Head::Bytes { .. })
-        ) {
-            continue;
-        }
-        let owner: Vec<_> = SCALAR_USES
+        let uses = match heap.arena().head(handle).expect("a head") {
+            Head::Function(_) => FUNCTION_USES,
+            Head::Handle { .. } => HANDLE_USES,
+            _ => SCALAR_USES,
+        };
+        let peer = member(&mut heap);
+        let owner: Vec<_> = uses
             .iter()
-            .map(|(name, used)| used(&heap, built).map_err(|error| format!("{name}: {error:?}")))
+            .map(|(name, used)| {
+                used(&heap, built, peer).map_err(|error| format!("{name}: {error:?}"))
+            })
             .collect();
         for holder in HOLDERS.iter().chain([&ROOT_HOLDER]) {
+            if holder.key && matches!(built, Value::Handle(_)) {
+                continue;
+            }
             let case = format!("{field}, in {}", holder.name);
             let store = Counting::default();
             let mut heap = fresh(&store);
@@ -881,11 +978,12 @@ fn every_scalar_head_field_forged_alone_never_answers_a_use_under_every_holder()
                     continue;
                 }
             };
-            for (scalar_use, owner) in SCALAR_USES.iter().zip(&owner) {
-                let case = format!("{case}, {}", scalar_use.0);
+            for (object_use, owner) in uses.iter().zip(&owner) {
+                let case = format!("{case}, {}", object_use.0);
                 let (mut heap, cold) = reopened(&store, &root);
+                let peer = member(&mut heap);
                 let reach = (holder.name != ROOT_HOLDER.name).then_some(holder);
-                match used(&mut heap, reach, scalar_use, cold) {
+                match used(&mut heap, reach, object_use, cold, peer) {
                     Ok(Err(LoadError::Store(lash_kernel_doc::heap::HeapFault::Corrupt {
                         ..
                     }))) => {}
@@ -904,14 +1002,15 @@ fn every_scalar_head_field_forged_alone_never_answers_a_use_under_every_holder()
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// `scalar_use` of the member `holder` holds in the cold `held`, or of
+/// `object_use` of the member `holder` holds in the cold `held`, or of
 /// `held` itself with no holder, each cold page loaded as the reads ask:
 /// the answer, or the first load's error.
 fn used(
     heap: &mut SlotHeap,
     holder: Option<&Holder>,
-    scalar_use: &ScalarUse,
+    object_use: &ObjectUse,
     held: Value,
+    peer: Value,
 ) -> Result<Result<String, crate::heap::LoadError>, String> {
     use lash_kernel_doc::arena::native::{NativeError, Retry};
     for _ in 0..64 {
@@ -922,12 +1021,12 @@ fn used(
                 }),
             None => Ok(held),
         }
-        .and_then(|member| (scalar_use.1)(heap, member));
+        .and_then(|member| (object_use.1)(heap, member, peer));
         match asked {
             Ok(answer) => return Ok(Ok(answer)),
             Err(NativeError::Retry(Retry::Cold { object, chunk })) => {
                 if let Err(error) = heap.load(object, chunk, &mut |visit| {
-                    [held].iter().for_each(&mut *visit)
+                    [held, peer].iter().for_each(&mut *visit)
                 }) {
                     return Ok(Err(error));
                 }

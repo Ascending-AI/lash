@@ -462,6 +462,7 @@ impl SlotHeap {
     /// The pending immutable whose own row must vouch for a table key.
     fn unvouched_key(&self, key: Value) -> Result<Option<ArenaHandle>, LoadError> {
         let (Value::Tuple(object)
+        | Value::Function(object)
         | Value::LongText(object)
         | Value::Bytes(object)
         | Value::BigInt(object)

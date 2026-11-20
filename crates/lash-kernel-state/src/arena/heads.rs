@@ -14,9 +14,8 @@ use super::{Arena, Facts, Head, Summary, has_cold, keys, malformed, tables};
 impl Arena {
     /// The one handle of durable immutable `entity`, which a row names
     /// with `head`: the one the run already has, whose head or pending
-    /// claim must equal `head`, else a proxy true to it. A function and
-    /// a host handle its head holds whole open resident. Any other opens
-    /// opaque until its own row vouches for the claim ([`Self::vouch`]):
+    /// claim must equal `head`, else a proxy true to it. It opens opaque
+    /// until its own row vouches for the claim ([`Self::vouch`]):
     /// no fact of the head is published before, and every read of it
     /// answers [`lash_kernel_doc::Retry::Cold`].
     ///
@@ -240,18 +239,10 @@ impl Arena {
 }
 
 /// Gives the immutable whose projection is `projected` the `head` a row
-/// names it by. Tuples and errors keep a claim until their own rows
-/// vouch for it ([`Arena::vouch`]). Other bodies check their heads when
-/// their payloads are read.
-/// A row's head for an object it opens: a claim until the object's own
-/// row vouches for it ([`Arena::vouch`]), but a function's or a host
-/// handle's, whose head is its whole value.
+/// names it by, as a claim until the object's own row vouches for it
+/// ([`Arena::vouch`]).
 fn named(projected: &mut super::Projected, head: &Head) {
-    if matches!(head, Head::Function(_) | Head::Handle { .. }) {
-        let _ = projected.head.set(head.clone());
-    } else {
-        projected.claim = Some(head.clone());
-    }
+    projected.claim = Some(head.clone());
 }
 
 pub(super) fn composite_shape(head: &Head) -> Option<Summary> {
@@ -262,9 +253,8 @@ pub(super) fn composite_shape(head: &Head) -> Option<Summary> {
 }
 
 /// The body an immutable opens with from its `head`, and its summary.
-/// Every immutable but a function and a host handle opens opaque: no
-/// fact of its head is in its body. A row load replaces this body and
-/// admits the growth relative to it.
+/// Every immutable opens opaque: no fact of its head is in its body. A
+/// row load replaces this body and admits the growth relative to it.
 #[must_use]
 pub fn opened(head: &Head) -> (Body, Summary) {
     let body = match head {
@@ -274,16 +264,8 @@ pub fn opened(head: &Head) -> (Body, Summary) {
         Head::Timestamp { .. } => Body::Cold(ColdImmutable::Timestamp),
         Head::LongText { .. } => Body::Cold(ColdImmutable::LongText),
         Head::Bytes { .. } => Body::Cold(ColdImmutable::Bytes),
-        Head::Function(callable) => Body::Function(Box::new(*callable)),
-        Head::Handle {
-            kind_len, id_len, ..
-        } => match head.resident_handle() {
-            Some(host) => Body::Handle(host),
-            None => Body::Cold(ColdImmutable::Handle {
-                kind_len: *kind_len,
-                id_len: *id_len,
-            }),
-        },
+        Head::Function(_) => Body::Cold(ColdImmutable::Function),
+        Head::Handle { .. } => Body::Cold(ColdImmutable::Handle),
     };
     (body, Summary::default())
 }

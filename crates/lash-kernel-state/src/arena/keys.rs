@@ -193,7 +193,7 @@ fn certified<'a>(
 }
 
 /// The retry a read of the cold object `object`'s payload answers.
-fn cold(object: ArenaHandle) -> NativeError {
+pub(super) fn cold(object: ArenaHandle) -> NativeError {
     Retry::Cold { object, chunk: 0 }.into()
 }
 
@@ -913,6 +913,8 @@ pub(crate) fn equal(
             }
             (V::Function(a), V::Function(b)) => match (body(objects, *a)?, body(objects, *b)?) {
                 (Body::Function(a), Body::Function(b)) => a == b,
+                (Body::Cold(_), _) => return Err(cold(*a)),
+                (_, Body::Cold(_)) => return Err(cold(*b)),
                 _ => return Err(NativeError::Malformed("function body")),
             },
             (V::Bytes(a), V::Bytes(b)) => bytes(objects, *a)? == bytes(objects, *b)?,

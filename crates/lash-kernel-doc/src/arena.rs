@@ -720,12 +720,13 @@ pub enum ColdImmutable {
     /// known, not even its length, until its row is read and checked
     /// against the head its referrers name it by.
     Tuple,
-    /// A host handle too long for its head to hold whole: its kind's and
-    /// id's lengths in bytes.
-    Handle {
-        kind_len: u64,
-        id_len: u64,
-    },
+    /// A function no row of its own has vouched for yet: not even its
+    /// callable is known until its row is read and checked against the
+    /// head its referrers name it by.
+    Function,
+    /// A host handle no row of its own has vouched for yet, as
+    /// [`Self::Function`]: neither its kind and id nor their lengths.
+    Handle,
 }
 
 // A tiny list's, tuple's or table's inline values fit beside the widest

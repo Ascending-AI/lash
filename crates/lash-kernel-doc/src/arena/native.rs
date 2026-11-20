@@ -269,6 +269,11 @@ impl<'call> Args<'call> {
         match value {
             Value::Function(handle) => match self.body(*handle)? {
                 Body::Function(callable) => Ok(Some(**callable)),
+                Body::Cold(_) => Err(Retry::Cold {
+                    object: *handle,
+                    chunk: 0,
+                }
+                .into()),
                 _ => Err(NativeError::Malformed(
                     "a function handle names another body",
                 )),

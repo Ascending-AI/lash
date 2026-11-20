@@ -149,7 +149,7 @@ fn resident(
     }
 }
 
-fn fits(
+pub(crate) fn fits(
     arena: &Arena,
     value: &Value,
     remaining: &mut u64,
@@ -186,9 +186,12 @@ fn fits(
         }
         Value::Handle(handle) => match arena.body(*handle)? {
             Body::Handle(handle) => take(remaining, (handle.kind.len() + handle.id.len()) as u64),
-            // A cold handle's head certifies its lengths.
-            Body::Cold(lash_kernel_doc::arena::ColdImmutable::Handle { kind_len, id_len }) => {
-                take(remaining, kind_len.saturating_add(*id_len))
+            Body::Cold(_) => {
+                return Err(Retry::Cold {
+                    object: *handle,
+                    chunk: 0,
+                }
+                .into());
             }
             _ => true,
         },

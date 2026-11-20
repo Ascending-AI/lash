@@ -826,6 +826,7 @@ impl Arena {
     ) -> Result<lash_kernel_value::names::CallableId, NativeError> {
         match self.body(handle)? {
             Body::Function(callable) => Ok(**callable),
+            Body::Cold(_) => Err(keys::cold(handle)),
             _ => Err(NativeError::Malformed("a function names another body")),
         }
     }
