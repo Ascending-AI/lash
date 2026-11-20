@@ -10,9 +10,11 @@ use std::sync::Arc;
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::native::NewObject;
-use lash_kernel_state::paged::run::continuation::ConstantKey;
+use lash_kernel_state::paged::identity;
+use lash_kernel_state::paged::run::continuation::{ConstantContent, ConstantKey};
 use lash_kernel_value::LinkId;
 use lash_kernel_value::names::CallableId;
+use lash_kernel_value::tokens::TokenCodec;
 
 use super::{Run, Stop, Vm, fault};
 use crate::bytecode::program::{Constant, LIB, Program, UnitId};
@@ -62,31 +64,27 @@ impl Library {
     }
 }
 
-/// The durable name of object constant `object`: its kind and content.
-/// An immediate has none: it is its value.
+/// The durable name of object constant `object`: its kind and content,
+/// as the head of the value it is placed as states them, so the open
+/// derives a saved constant's name from its value alone. An immediate has
+/// none: it is its value.
 pub(crate) fn key(object: &NewObject) -> ConstantKey {
-    let mut out = lash_kernel_value::tokens::TokenWriter::default();
     match object {
         NewObject::LongText { text, .. } => {
-            out.sum(0, 1);
-            out.text(text);
+            ConstantKey::of(ConstantContent::Text(&identity::text_key(text)))
         }
         NewObject::BigInt(int) => {
-            out.sum(1, 1);
-            out.text(&int.to_string());
+            let mut out = lash_kernel_value::tokens::TokenWriter::default();
+            out.sum(2, 1);
+            int.encode(&mut out);
+            ConstantKey::of(ConstantContent::BigInt(&identity::flat(out)))
         }
         NewObject::Bytes(bytes) => {
-            out.sum(2, 1);
-            out.bytes(bytes);
+            ConstantKey::of(ConstantContent::Bytes(&identity::bytes_key(bytes)))
         }
-        NewObject::Function(callable) => {
-            out.sum(3, 2);
-            out.bytes(callable.link.as_bytes());
-            out.bytes(callable.function.as_bytes());
-        }
+        NewObject::Function(callable) => ConstantKey::of(ConstantContent::Function(callable)),
         _ => unreachable!("a constant is text, an integer, bytes or a function"),
     }
-    ConstantKey(lash_kernel_value::tokens::logical_digest(&out.into_bytes()))
 }
 
 /// The object constant `constant` places, its function value naming
@@ -113,10 +111,10 @@ fn place<H: Heap>(
     link: LinkId,
     object: NewObject,
 ) -> Result<Value, String> {
+    // A saved constant opened as code: its value's head is its content.
     if !saved.is_empty()
         && let Some(value) = saved.remove(&(link, key(&object)))
     {
-        heap.adopt_constant(value);
         return Ok(value);
     }
     heap.constant(object).map_err(|error| error.to_string())

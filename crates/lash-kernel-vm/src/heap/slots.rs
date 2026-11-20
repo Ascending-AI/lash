@@ -119,17 +119,36 @@ impl SlotHeap {
         heap
     }
 
-    /// The heap of a sealed `root`, read from `directory` as it needs:
-    /// the root values, each object by proxy, and nothing loaded.
+    /// The heap of a sealed `root` holding no constants, read from
+    /// `directory` as it needs: [`Self::open_run`] with no code roots.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::open_run`].
+    pub(crate) fn open(
+        bound: u64,
+        root: &lash_kernel_state::paged::run::root::HeapRoot,
+        directory: lash_kernel_state::paged::run::directory::Directory,
+    ) -> Result<(Self, Vec<Value>), LoadError> {
+        Self::open_run(bound, root, directory, &std::collections::BTreeSet::new())
+    }
+
+    /// The heap of a sealed run's `root`, read from `directory` as it
+    /// needs: the root values, each object by proxy, and nothing loaded.
+    /// The roots `code` names are the run's checked object constants: code,
+    /// held at nothing (contract §2), classified before any other root is
+    /// admitted, so a constant a guest value also holds is never admitted
+    /// first and refunded after.
     ///
     /// # Errors
     ///
     /// [`LoadError::Memory`] when the bound does not admit the root
     /// proxies; [`LoadError::Store`] for a root the arena cannot hold.
-    pub(crate) fn open(
+    pub(crate) fn open_run(
         bound: u64,
         root: &lash_kernel_state::paged::run::root::HeapRoot,
         directory: lash_kernel_state::paged::run::directory::Directory,
+        code: &std::collections::BTreeSet<u32>,
     ) -> Result<(Self, Vec<Value>), LoadError> {
         let mut heap = Self::durable(
             bound,
@@ -138,12 +157,29 @@ impl SlotHeap {
                 high_water: root.high_water,
             },
         );
-        let mut values = Vec::with_capacity(root.roots.len());
-        for value_row in &root.roots {
-            let value = open::value(&mut heap.arena, value_row, &root.heads).map_err(|reason| {
-                LoadError::Store(lash_kernel_doc::heap::HeapFault::Malformed(reason))
-            })?;
+        let malformed =
+            |reason| LoadError::Store(lash_kernel_doc::heap::HeapFault::Malformed(reason));
+        let mut values = vec![Value::Absent; root.roots.len()];
+        for &at in code {
+            let value_row = root
+                .roots
+                .get(at as usize)
+                .ok_or_else(|| malformed(format!("constant value {at} is past the run's roots")))?;
+            let value = open::value(&mut heap.arena, value_row, &root.heads).map_err(malformed)?;
+            let handle = value
+                .handle()
+                .ok_or_else(|| malformed(format!("constant value {at} is no object")))?;
+            heap.place(handle, 0);
+            heap.code_slots.insert(handle.index());
+            values[at as usize] = value;
+        }
+        for (at, value_row) in root.roots.iter().enumerate() {
+            if code.contains(&(at as u32)) {
+                continue;
+            }
+            let value = open::value(&mut heap.arena, value_row, &root.heads).map_err(malformed)?;
             if let Some(handle) = value.handle()
+                && !heap.code_slots.contains(&handle.index())
                 && heap
                     .units
                     .get(handle.index() as usize)
@@ -158,7 +194,7 @@ impl SlotHeap {
                 heap.admit(units).map_err(LoadError::Memory)?;
                 heap.place(handle, units);
             }
-            values.push(value);
+            values[at] = value;
         }
         Ok((heap, values))
     }
@@ -892,19 +928,6 @@ impl Heap for SlotHeap {
             self.code_slots.insert(handle.index());
         }
         Ok(value)
-    }
-
-    fn adopt_constant(&mut self, value: Value) {
-        if let Some(handle) = value.handle() {
-            let units = self
-                .units
-                .get(handle.index() as usize)
-                .copied()
-                .unwrap_or(0);
-            self.held = self.held.saturating_sub(units);
-            self.place(handle, 0);
-            self.code_slots.insert(handle.index());
-        }
     }
 
     fn install(&mut self, built: &mut Vec<(ArenaHandle, NewObject)>) -> Result<(), NativeError> {

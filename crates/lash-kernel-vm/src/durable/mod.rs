@@ -96,9 +96,8 @@ pub(crate) fn seal(
     placed.dedup_by_key(|(link, key, _)| (*link, *key));
     let constants = placed
         .into_iter()
-        .map(|(link, key, value)| continuation::RunConstant {
+        .map(|(link, _, value)| continuation::RunConstant {
             link,
-            key,
             value: values.put(value),
         })
         .collect();

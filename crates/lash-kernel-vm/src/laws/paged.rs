@@ -758,6 +758,51 @@ fn a_parked_constant_holds_the_same_cold_as_warm() {
     assert!(matches!(end, crate::End::Finished(ref end) if end.result == int(1)));
 }
 
+/// FIG-7735 (schemasmash K05): a sealed run's constants are code from the
+/// moment it opens, never roots admitted first and refunded after. A run
+/// that placed many long literals it has not read yet parks holding less
+/// than those literals' cold proxies would cost; under a bound of exactly
+/// what it held warm, the cold open admits it and holds the same.
+#[test]
+fn a_tight_reopen_holds_its_unread_constants_as_code() {
+    let literals = (0..64)
+        .map(|at| {
+            format!(
+                "\"{}\"",
+                char::from(b'a' + at % 26)
+                    .to_string()
+                    .repeat(300 + usize::from(at))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let text = format!(
+        "main {{ let r = perform 0(0) as Any if false {{ return ({literals}) }} return 1 }}"
+    );
+    let mut warm = Embedder::new(&text);
+    assert!(matches!(warm.run(), Step::Parked(_)));
+    let held = warm.machine.meters().memory;
+    let mut run = Embedder::with(
+        &text,
+        Setup {
+            bounds: crate::Bounds {
+                memory: held,
+                ..super::embedder::ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    assert!(matches!(run.run(), Step::Parked(_)));
+    assert_eq!(
+        run.machine.meters().memory,
+        held,
+        "the warm run under its own bound"
+    );
+    run.try_reopen(true)
+        .expect("a cold open under the bound the warm run fits");
+    assert_eq!(run.machine.meters().memory, held);
+}
+
 /// `K-FORM-003` across a seal: a name of `main` no host or session binding
 /// provides stays unbound in a run reopened cold, so reading or writing it
 /// raises `unbound_variable`.

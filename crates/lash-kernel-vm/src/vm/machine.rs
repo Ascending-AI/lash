@@ -827,32 +827,45 @@ impl Machine for CoreMachine {
         }
         header.host = root.host.clone();
         header.start = record.start.clone();
-        let (mut heap, values) = SlotHeap::open(heap_bound(&bounds), &record.heap, directory)
-            .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
-        let foreign = foreign_closures(&mut heap, &values, program.link)
-            .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
-        if record
-            .constants
-            .windows(2)
-            .any(|pair| (pair[0].link, pair[0].key) >= (pair[1].link, pair[1].key))
-        {
-            return Err(malformed("the run's constants are not ascending"));
-        }
-        let saved = record
+        // Each saved constant is the object its value's head states: its
+        // key is derived from that value, never read beside it, and the
+        // constants are classified as code before any root is admitted.
+        let constants = record
             .constants
             .iter()
             .map(|constant| {
-                values
-                    .get(constant.value as usize)
-                    .map(|value| ((constant.link, constant.key), *value))
-                    .ok_or_else(|| {
-                        malformed(format!(
-                            "constant value {} is past the run's roots",
-                            constant.value
-                        ))
-                    })
+                let key = match record.heap.roots.get(constant.value as usize) {
+                    Some(lash_kernel_state::paged::run::objects::RunValue::Object(_, id)) => {
+                        record.heap.heads.get(*id)
+                    }
+                    _ => None,
+                }
+                .and_then(continuation::ConstantKey::of_head)
+                .ok_or_else(|| {
+                    malformed(format!(
+                        "constant value {} is no object constant of the run's roots",
+                        constant.value
+                    ))
+                })?;
+                Ok((constant.link, key, constant.value))
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, OpenError>>()?;
+        if constants
+            .windows(2)
+            .any(|pair| (pair[0].0, pair[0].1) >= (pair[1].0, pair[1].1))
+        {
+            return Err(malformed("the run's constants are not ascending"));
+        }
+        let code = constants.iter().map(|(_, _, value)| *value).collect();
+        let (mut heap, values) =
+            SlotHeap::open_run(heap_bound(&bounds), &record.heap, directory, &code)
+                .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
+        let foreign = foreign_closures(&mut heap, &values, program.link)
+            .map_err(|error| malformed(format!("the run's heap does not open: {error:?}")))?;
+        let saved = constants
+            .into_iter()
+            .map(|(link, key, value)| ((link, key), values[value as usize]))
+            .collect();
         let modes = record
             .reads
             .iter()

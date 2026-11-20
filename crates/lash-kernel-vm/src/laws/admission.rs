@@ -593,3 +593,35 @@ fn an_exhausted_occurrence_counter_ends_the_run_with_a_machine_fault() {
         );
     }
 }
+
+/// FIG-7735 (schemasmash K05): a saved constant binding names the value a
+/// literal reads after the open, so its role must be the value's own. A
+/// run parked after placing two long literals, with one binding saved
+/// against the other literal's value, either refuses to open as malformed
+/// or reads each literal as the document writes it. The oracle is the
+/// document's text.
+#[test]
+fn a_saved_constant_bound_to_another_value_never_reads_as_its_literal() {
+    let (first, second) = ("a".repeat(300), "b".repeat(300));
+    let text = format!("main {{ let r = perform 0(0) as Any return (\"{first}\", \"{second}\") }}");
+    let sealed = sealed(&text, main_start(), At::Park);
+    let mut record = sealed.record();
+    assert_eq!(record.constants.len(), 2, "both literals were placed");
+    let other = record.constants[1].value;
+    record.constants[0].value = other;
+    let mut machine = match sealed.open(&record) {
+        Err(OpenError::Malformed { .. }) => return,
+        Err(other) => panic!("refused as {other:?}, not as malformed"),
+        Ok(machine) => machine,
+    };
+    for request in &sealed.requests {
+        machine.deliver(wait_of(request), answer(request)).unwrap();
+    }
+    match machine.run(&mut World::default(), u64::MAX) {
+        Ok(Step::Ended(crate::End::Finished(end))) => assert_eq!(
+            end.result,
+            Datum::Tuple(vec![Datum::Text(first), Datum::Text(second)])
+        ),
+        other => panic!("{other:?}"),
+    }
+}

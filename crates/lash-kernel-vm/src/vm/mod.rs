@@ -339,11 +339,6 @@ impl<H: Heap> Vm<H> {
         let refused_memory =
             refused_code.map(|refused| refused.held.saturating_add(refused.wanted));
         let unadmitted = refused_code.map(|refused| Exceeded::run(Bound::Memory, refused.bound));
-        // A sealed run's constants are code, held at nothing, until a
-        // collection finds no value referencing one it no longer places.
-        for value in saved.values() {
-            heap.adopt_constant(*value);
-        }
         let constants =
             library::place_constants(&mut heap, &program, &mut saved, unadmitted.is_some())?;
         let frames = program

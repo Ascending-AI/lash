@@ -15,9 +15,9 @@
 //! refuses the open.
 
 use lash_kernel_doc::Datum;
-use lash_kernel_doc::heap::{HeapFault, PageRef};
+use lash_kernel_doc::heap::{HeapFault, NormalKey, PageRef};
 use lash_kernel_value::content_ids::LinkId;
-use lash_kernel_value::names::{ExportName, FunctionId, Name, OperationUse};
+use lash_kernel_value::names::{CallableId, ExportName, FunctionId, Name, OperationUse};
 use lash_kernel_value::sites::{EffectIdentity, Site, TaskIdentity, WaitCancellation};
 use lash_kernel_value::tokens::{
     TokenCodec, TokenError, TokenReader, TokenWriter, decode_body, encode_body,
@@ -27,6 +27,7 @@ use lash_kernel_value::types::Type;
 use super::super::PageKind;
 use super::super::source::grant;
 use super::super::tree::Access;
+use super::objects::Head;
 use super::root::HeapRoot;
 
 /// A struct whose fields encode in order.
@@ -159,13 +160,24 @@ record! {
 }
 
 record! {
-    /// An object constant Link `link`'s code placed: its content's key
-    /// and the value it was placed as.
+    /// An object constant Link `link`'s code placed, as the value it was
+    /// placed as. Its content is that value's own (its head's), never a
+    /// second copy beside it: the open derives the constant's
+    /// [`ConstantKey`] from the value it names.
     pub struct RunConstant {
         pub link: LinkId,
-        pub key: ConstantKey,
         pub value: u32,
     }
+}
+
+/// An object constant's kind and content, as its value's head states
+/// them: a scalar's normal key, a function's callable.
+#[derive(Clone, Copy, Debug)]
+pub enum ConstantContent<'a> {
+    Text(&'a NormalKey),
+    BigInt(&'a NormalKey),
+    Bytes(&'a NormalKey),
+    Function(&'a CallableId),
 }
 
 /// The digest of an object constant's kind and content: its durable name
@@ -173,16 +185,53 @@ record! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConstantKey(pub [u8; 32]);
 
-impl TokenCodec for ConstantKey {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.bytes(&self.0);
+impl ConstantKey {
+    /// The key of the constant `content` states.
+    #[must_use]
+    pub fn of(content: ConstantContent<'_>) -> Self {
+        let mut out = TokenWriter::new();
+        let normal = |out: &mut TokenWriter, tag, normal: &NormalKey| {
+            out.sum(tag, 1);
+            match normal {
+                NormalKey::Inline(tokens) => {
+                    out.sum(0, 1);
+                    out.bytes(tokens);
+                }
+                NormalKey::Digest(digest) => {
+                    out.sum(1, 1);
+                    out.bytes(digest);
+                }
+            }
+        };
+        match content {
+            ConstantContent::Text(key) => normal(&mut out, 0, key),
+            ConstantContent::BigInt(key) => normal(&mut out, 1, key),
+            ConstantContent::Bytes(key) => normal(&mut out, 2, key),
+            ConstantContent::Function(callable) => {
+                out.sum(3, 2);
+                out.bytes(callable.link.as_bytes());
+                out.bytes(callable.function.as_bytes());
+            }
+        }
+        Self(lash_kernel_value::tokens::logical_digest(&out.into_bytes()))
     }
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input
-            .bytes()?
-            .try_into()
-            .map(Self)
-            .map_err(|_| TokenError::Invalid("a constant key is not 32 bytes".into()))
+
+    /// The key of the object constant whose head is `head`; none for a
+    /// head of a kind no constant has.
+    #[must_use]
+    pub fn of_head(head: &Head) -> Option<Self> {
+        Some(Self::of(match head {
+            Head::LongText { normal, .. } => ConstantContent::Text(normal),
+            Head::BigInt { normal, .. } => ConstantContent::BigInt(normal),
+            Head::Bytes { normal, .. } => ConstantContent::Bytes(normal),
+            Head::Function(callable) => ConstantContent::Function(callable),
+            Head::Tuple { .. }
+            | Head::Error { .. }
+            | Head::Timestamp { .. }
+            | Head::Handle { .. } => {
+                return None;
+            }
+        }))
     }
 }
 
