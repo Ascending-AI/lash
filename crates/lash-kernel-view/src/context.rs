@@ -19,7 +19,12 @@ pub struct ViewContext {
     admitted_helpers: BTreeMap<LinkId, BTreeSet<lash_kernel_value::FunctionId>>,
     timers: std::collections::BTreeSet<(lash_kernel_value::PackageId, lash_kernel_value::Segment)>,
     pub(crate) labels: BTreeMap<CallableId, MemberDisplay>,
+    /// The operations each callable reaches, inspected once per context: a
+    /// reach is a pure function of the immutable linked content and helpers.
+    reaches: std::sync::Arc<std::sync::Mutex<BTreeMap<CallableId, Operations>>>,
 }
+
+type Operations = BTreeSet<lash_kernel_value::OperationUse>;
 impl ViewContext {
     pub fn new(
         reference: lash_kernel_doc::WorkflowReference,
@@ -43,6 +48,7 @@ impl ViewContext {
             admitted_helpers,
             labels,
             timers: Default::default(),
+            reaches: Default::default(),
         })
     }
     /// Install build-owned display facts for exact helpers in each Link's
@@ -322,33 +328,35 @@ impl ViewContext {
         &self,
         callable: CallableId,
     ) -> Option<lash_kernel_value::OperationUse> {
-        let reach = self
-            .content
-            .inspect(
-                callable.link,
-                &lash_kernel_package::ReachSelection::Callable(callable.function),
-                self.helpers.as_ref(),
-            )
-            .ok()?;
-        let mut uses = reach.operations.keys();
+        let reach = self.reached(callable);
+        let mut uses = reach.iter();
         let use_ = *uses.next()?;
         (uses.next().is_none() && self.is_timer(use_)).then_some(use_)
     }
 }
 
 impl ViewContext {
-    pub(crate) fn reached(
-        &self,
-        callable: CallableId,
-    ) -> std::collections::BTreeSet<lash_kernel_value::OperationUse> {
-        self.content
+    /// The operations `callable` reaches; none when its reach is refused.
+    pub(crate) fn reached(&self, callable: CallableId) -> Operations {
+        let reaches = || {
+            self.reaches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if let Some(operations) = reaches().get(&callable) {
+            return operations.clone();
+        }
+        let operations: Operations = self
+            .content
             .inspect(
                 callable.link,
                 &lash_kernel_package::ReachSelection::Callable(callable.function),
                 self.helpers.as_ref(),
             )
             .map(|reach| reach.operations.into_keys().collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        reaches().insert(callable, operations.clone());
+        operations
     }
 }
 
